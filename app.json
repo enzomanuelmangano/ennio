@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "bundleIdentifier": "com.reactiive.tasto"
+  },
+  "android": {
+    "package": "com.reactiive.tasto"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "tasto",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "example"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "clean": "turbo run clean",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "bun@1.2.19",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "version": "1.0.0",
+  "dependencies": {
+    "expo": "~53.0.27",
+    "react": "19.0.0",
+    "react-native": "0.79.6"
+  }
+}

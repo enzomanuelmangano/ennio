@@ -1,0 +1,11 @@
+{
+  "cxxNamespace": ["tasto"],
+  "ios": {
+    "iosModuleName": "TastoNitro"
+  },
+  "android": {
+    "androidNamespace": ["tasto"],
+    "androidCxxLibName": "TastoNitro"
+  },
+  "autolinking": {}
+}
