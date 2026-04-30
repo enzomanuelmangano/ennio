@@ -448,6 +448,7 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
         // Try to find a UITextField or UITextView in the view hierarchy
         UITextField* textField = nil;
         UITextView* textView = nil;
+        UIView* componentView = nil;  // The RCTTextInputComponentView parent
 
         // Check if it's a text input directly
         if ([targetView isKindOfClass:[UITextField class]]) {
@@ -467,17 +468,82 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
             }
         }
 
+        // Find the RCTTextInputComponentView which is the delegate
+        // It's typically the superview of the text field
+        if (textField) {
+            componentView = textField.superview;
+        } else if (textView) {
+            componentView = textView.superview;
+        }
+
+        // Log the component view hierarchy
+        if (componentView) {
+            NSLog(@"[Tasto] performTypeText: ComponentView is %@",
+                  NSStringFromClass([componentView class]));
+        }
+
         if (textField) {
             NSLog(@"[Tasto] performTypeText: Setting text on UITextField");
 
             // Make it first responder (focus)
             [textField becomeFirstResponder];
 
-            // Set the text directly
-            textField.text = textToType;
+            // Set the text using attributed text to match React Native's internal state
+            // React Native uses attributed text internally, so setting plain text may not
+            // trigger the proper state updates
+            NSDictionary* attributes = textField.defaultTextAttributes ?: @{};
+            NSAttributedString* attrStr = [[NSAttributedString alloc] initWithString:textToType
+                                                                          attributes:attributes];
+            textField.attributedText = attrStr;
 
-            // Notify delegate of the change
-            [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+            NSLog(@"[Tasto] performTypeText: Set attributed text, actual text now: '%@'", textField.text);
+
+            // Try to find and call textInputDidChange on the component view
+            // This is how React Native's Fabric TextInput handles text changes
+            SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
+            id delegate = textField.delegate;
+
+            NSLog(@"[Tasto] performTypeText: TextField delegate class: %@",
+                  delegate ? NSStringFromClass([delegate class]) : @"nil");
+
+            // The component view (superview) should be RCTTextInputComponentView
+            // which implements the textInputDidChange method
+            UIView* parentView = componentView;
+            if (parentView && [parentView respondsToSelector:textInputDidChangeSel]) {
+                NSLog(@"[Tasto] performTypeText: Calling textInputDidChange on parent view");
+
+                // First, trigger the text field's editing changed action to notify any observers
+                [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [parentView performSelector:textInputDidChangeSel];
+                #pragma clang diagnostic pop
+
+                // Allow React's async update to process
+                [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+                NSLog(@"[Tasto] performTypeText: After delay, text field text: '%@'", textField.text);
+            } else if (delegate && [delegate respondsToSelector:textInputDidChangeSel]) {
+                NSLog(@"[Tasto] performTypeText: Calling textInputDidChange on delegate");
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [delegate performSelector:textInputDidChangeSel];
+                #pragma clang diagnostic pop
+            } else {
+                NSLog(@"[Tasto] performTypeText: No textInputDidChange found, trying fallback");
+                // Fallback to sendActionsForControlEvents
+                [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+
+                // Also try calling textFieldDidChange on the delegate
+                SEL textFieldDidChangeSel = NSSelectorFromString(@"textFieldDidChange:");
+                if (delegate && [delegate respondsToSelector:textFieldDidChangeSel]) {
+                    NSLog(@"[Tasto] performTypeText: Calling textFieldDidChange on delegate");
+                    #pragma clang diagnostic push
+                    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    [delegate performSelector:textFieldDidChangeSel withObject:textField];
+                    #pragma clang diagnostic pop
+                }
+            }
 
             success = true;
         } else if (textView) {
@@ -489,9 +555,17 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
             // Set the text directly
             textView.text = textToType;
 
-            // Notify delegate of the change
-            if (textView.delegate && [textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
-                [textView.delegate textViewDidChange:textView];
+            // Try to call textInputDidChange on the delegate
+            SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
+            id delegate = textView.delegate;
+            if (delegate && [delegate respondsToSelector:textInputDidChangeSel]) {
+                NSLog(@"[Tasto] performTypeText: Calling textInputDidChange on delegate");
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [delegate performSelector:textInputDidChangeSel];
+                #pragma clang diagnostic pop
+            } else if (delegate && [delegate respondsToSelector:@selector(textViewDidChange:)]) {
+                [delegate performSelector:@selector(textViewDidChange:) withObject:textView];
             }
 
             success = true;
