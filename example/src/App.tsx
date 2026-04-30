@@ -14,6 +14,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { TastoProvider } from '@tasto/app';
 
 type Screen = 'home' | 'form' | 'list' | 'modal';
 
@@ -24,13 +25,15 @@ export default function App() {
   const goHome = () => setCurrentScreen('home');
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="auto" />
-      {currentScreen === 'home' && <HomeScreen onNavigate={navigateTo} />}
-      {currentScreen === 'form' && <FormScreen onBack={goHome} />}
-      {currentScreen === 'list' && <ListScreen onBack={goHome} />}
-      {currentScreen === 'modal' && <ModalScreen onBack={goHome} />}
-    </SafeAreaView>
+    <TastoProvider>
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="auto" />
+        {currentScreen === 'home' && <HomeScreen onNavigate={navigateTo} />}
+        {currentScreen === 'form' && <FormScreen onBack={goHome} />}
+        {currentScreen === 'list' && <ListScreen onBack={goHome} />}
+        {currentScreen === 'modal' && <ModalScreen onBack={goHome} />}
+      </SafeAreaView>
+    </TastoProvider>
   );
 }
 

@@ -18,7 +18,9 @@
     "build": "tsc",
     "clean": "rm -rf lib",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "yarn build"
+    "prepublishOnly": "yarn build",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "peerDependencies": {
     "react": "*",
@@ -43,5 +45,10 @@
     "testing",
     "fabric",
     "nitro"
-  ]
+  ],
+  "dependencies": {
+    "expo": "~53.0.27",
+    "react": "19.0.0",
+    "react-native": "0.79.6"
+  }
 }

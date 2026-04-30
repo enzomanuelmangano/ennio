@@ -103,13 +103,64 @@ private:
     static facebook::react::SharedEventEmitter getEventEmitter(ShadowNodePtr node);
 
     /**
-     * Dispatch a touch event (touchStart, touchMove, touchEnd)
+     * Dispatch a native touch event (touchStart, touchEnd, touchMove, touchCancel)
+     * These are the raw touch events that drive the responder system
      */
     static void dispatchTouchEvent(
         facebook::react::SharedEventEmitter emitter,
         const std::string& eventType,
         float x,
+        float y,
+        int32_t target,
+        double timestamp
+    );
+
+    /**
+     * Dispatch a click event (triggers onPress in Pressable)
+     */
+    static void dispatchClickEvent(
+        facebook::react::SharedEventEmitter emitter,
+        float x,
         float y
+    );
+
+    /**
+     * Dispatch a press event (pressIn, press, pressOut)
+     * These are the events used by Pressable components
+     */
+    static void dispatchPressEvent(
+        facebook::react::SharedEventEmitter emitter,
+        const std::string& eventType,
+        float x,
+        float y
+    );
+
+    /**
+     * Dispatch a responder event (responderGrant, responderRelease, etc.)
+     * These are the events that drive TouchableOpacity behavior
+     */
+    static void dispatchResponderEvent(
+        facebook::react::SharedEventEmitter emitter,
+        const std::string& eventType,
+        float x,
+        float y
+    );
+
+    /**
+     * Dispatch a scroll event for ScrollView components
+     */
+    static void dispatchScrollEvent(
+        facebook::react::SharedEventEmitter emitter,
+        float deltaX,
+        float deltaY
+    );
+
+    /**
+     * Dispatch a text change event for TextInput components
+     */
+    static void dispatchTextChangeEvent(
+        facebook::react::SharedEventEmitter emitter,
+        const std::string& text
     );
 
     /**

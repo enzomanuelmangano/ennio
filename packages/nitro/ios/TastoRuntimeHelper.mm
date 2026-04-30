@@ -1,0 +1,341 @@
+//
+// TastoRuntimeHelper.mm
+// Objective-C++ implementation for accessing React Native runtime
+//
+
+#import "TastoRuntimeHelper.h"
+#import <React/RCTSurfacePresenter.h>
+#import <React/RCTScheduler.h>
+#import <react/renderer/core/ShadowNode.h>
+#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
+#import <unistd.h>
+
+// Private UITouch methods we need to call
+@interface UITouch (TastoPrivate)
+- (void)setView:(UIView *)view;
+- (void)setWindow:(UIWindow *)window;
+- (void)setPhase:(UITouchPhase)phase;
+- (void)setTapCount:(NSUInteger)tapCount;
+- (void)_setLocationInWindow:(CGPoint)location resetPrevious:(BOOL)resetPrevious;
+- (void)setTimestamp:(NSTimeInterval)timestamp;
+- (void)_setIsFirstTouchForView:(BOOL)isFirst;
+@end
+
+// Private UIEvent methods
+@interface UIEvent (TastoPrivate)
+- (void)_addTouch:(UITouch *)touch forDelayedDelivery:(BOOL)delayed;
+- (void)_clearTouches;
+@end
+
+// Private application methods for creating touch events
+@interface UIApplication (TastoPrivate)
+- (UIEvent *)_touchesEvent;
+@end
+
+// Helper to find a view by accessibility identifier recursively
+static UIView* findViewByAccessibilityIdentifier(UIView* root, NSString* identifier) {
+    if ([root.accessibilityIdentifier isEqualToString:identifier]) {
+        return root;
+    }
+
+    for (UIView* subview in root.subviews) {
+        UIView* found = findViewByAccessibilityIdentifier(subview, identifier);
+        if (found) {
+            return found;
+        }
+    }
+
+    return nil;
+}
+
+// Helper to find the topmost window at a given point
+static UIWindow* findWindowAtPoint(CGPoint point) {
+    // Get all windows sorted by windowLevel (highest first)
+    NSMutableArray<UIWindow*>* allWindows = [NSMutableArray array];
+
+    for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            UIWindowScene* windowScene = (UIWindowScene*)scene;
+            [allWindows addObjectsFromArray:windowScene.windows];
+        }
+    }
+
+    NSLog(@"[Tasto] findWindowAtPoint: Found %lu windows total", (unsigned long)allWindows.count);
+
+    // Sort by window level (highest first) and check if point is in window
+    [allWindows sortUsingComparator:^NSComparisonResult(UIWindow* w1, UIWindow* w2) {
+        if (w1.windowLevel > w2.windowLevel) return NSOrderedAscending;
+        if (w1.windowLevel < w2.windowLevel) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+
+    for (UIWindow* window in allWindows) {
+        NSLog(@"[Tasto] findWindowAtPoint: Checking window %@ (level: %.0f, hidden: %d, alpha: %.1f)",
+              NSStringFromClass([window class]), window.windowLevel, window.isHidden, window.alpha);
+
+        if (!window.isHidden && window.alpha > 0) {
+            UIView* hitView = [window hitTest:point withEvent:nil];
+            if (hitView && hitView != window) {
+                NSLog(@"[Tasto] findWindowAtPoint: Using window with hitView %@",
+                      NSStringFromClass([hitView class]));
+                return window;
+            }
+        }
+    }
+
+    // Fallback to key window
+    for (UIWindow* window in allWindows) {
+        if (window.isKeyWindow) {
+            NSLog(@"[Tasto] findWindowAtPoint: Falling back to key window");
+            return window;
+        }
+    }
+
+    return nil;
+}
+
+// Helper to find key window (deprecated, use findWindowAtPoint)
+static UIWindow* findKeyWindow(void) {
+    for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            UIWindowScene* windowScene = (UIWindowScene*)scene;
+            for (UIWindow* window in windowScene.windows) {
+                if (window.isKeyWindow) {
+                    return window;
+                }
+            }
+        }
+    }
+    return nil;
+}
+
+namespace tasto {
+
+TastoRuntimeHelper& TastoRuntimeHelper::getInstance() {
+    static TastoRuntimeHelper instance;
+    return instance;
+}
+
+void TastoRuntimeHelper::setSurfacePresenter(void* surfacePresenter) {
+    surfacePresenter_ = surfacePresenter;
+}
+
+std::shared_ptr<facebook::react::UIManager> TastoRuntimeHelper::getUIManager() {
+    if (!surfacePresenter_) {
+        return nullptr;
+    }
+
+    RCTSurfacePresenter* presenter = (__bridge RCTSurfacePresenter*)surfacePresenter_;
+    RCTScheduler* scheduler = [presenter scheduler];
+
+    if (!scheduler) {
+        return nullptr;
+    }
+
+    return [scheduler uiManager];
+}
+
+std::shared_ptr<const facebook::react::ShadowNode> TastoRuntimeHelper::getShadowTreeRoot() {
+    auto uiManager = getUIManager();
+    if (!uiManager) {
+        return nullptr;
+    }
+
+    // Get the shadow tree registry and enumerate to find the first surface
+    auto& shadowTreeRegistry = uiManager->getShadowTreeRegistry();
+    std::shared_ptr<const facebook::react::ShadowNode> rootNode = nullptr;
+
+    shadowTreeRegistry.enumerate([&](const facebook::react::ShadowTree& shadowTree, bool& stop) {
+        // Get the root from the first surface we find
+        rootNode = shadowTree.getCurrentRevision().rootShadowNode;
+        stop = true;
+    });
+
+    return rootNode;
+}
+
+bool TastoRuntimeHelper::isInitialized() const {
+    return surfacePresenter_ != nullptr;
+}
+
+bool TastoRuntimeHelper::performTap(float x, float y) {
+    __block bool success = false;
+
+    void (^tapBlock)(void) = ^{
+        CGPoint point = CGPointMake(x, y);
+        NSLog(@"[Tasto] performTap: Tapping at (%.1f, %.1f)", x, y);
+
+        // Find the window that contains the view at this point (handles modals)
+        UIWindow* targetWindow = findWindowAtPoint(point);
+        if (!targetWindow) {
+            NSLog(@"[Tasto] performTap: No window found at point");
+            success = false;
+            return;
+        }
+
+        NSLog(@"[Tasto] performTap: Using window %@ (level %.0f)",
+              NSStringFromClass([targetWindow class]), targetWindow.windowLevel);
+
+        // Find the target view
+        UIView* targetView = [targetWindow hitTest:point withEvent:nil];
+        if (!targetView) {
+            NSLog(@"[Tasto] performTap: No view at point");
+            success = false;
+            return;
+        }
+
+        NSLog(@"[Tasto] performTap: Found view %@", NSStringFromClass([targetView class]));
+
+        // Log the view hierarchy for debugging
+        UIView* debugView = targetView;
+        int depth = 0;
+        while (debugView && depth < 10) {
+            NSLog(@"[Tasto] performTap: View hierarchy[%d]: %@ (gestureRecognizers: %lu)",
+                  depth, NSStringFromClass([debugView class]),
+                  (unsigned long)debugView.gestureRecognizers.count);
+            debugView = debugView.superview;
+            depth++;
+        }
+
+        // For non-RCT views (like Modal content), the shadow tree coordinates may not match
+        // the native view positions. Instead, just send the touch to the original hitTest target
+        // and let UIKit handle the event routing.
+        //
+        // The issue is that React Native Modal creates views with different coordinate systems
+        // between the shadow tree and native views. Don't try to find nested RCT views - just
+        // use the UIView that hitTest returned and let gesture recognizers handle it.
+        if (![NSStringFromClass([targetView class]) hasPrefix:@"RCT"]) {
+            NSLog(@"[Tasto] performTap: Hit non-RCT view %@, using direct touch", NSStringFromClass([targetView class]));
+            // Keep targetView as-is (the UIView from hitTest)
+        }
+
+        // Create synthetic UITouch
+        UITouch* touch = [[UITouch alloc] init];
+
+        // Get current timestamp
+        NSTimeInterval timestamp = [[NSProcessInfo processInfo] systemUptime];
+
+        // Set up touch properties using private APIs
+        [touch setWindow:targetWindow];
+        [touch setView:targetView];
+        [touch setPhase:UITouchPhaseBegan];
+        [touch setTapCount:1];
+        [touch _setLocationInWindow:point resetPrevious:YES];
+        [touch setTimestamp:timestamp];
+        [touch _setIsFirstTouchForView:YES];
+
+        // Get the application's touch event
+        UIApplication* app = [UIApplication sharedApplication];
+        UIEvent* event = [app _touchesEvent];
+        [event _clearTouches];
+        [event _addTouch:touch forDelayedDelivery:NO];
+
+        NSLog(@"[Tasto] performTap: Sending touchesBegan to window: %@ (level: %.0f)",
+              NSStringFromClass([targetWindow class]), targetWindow.windowLevel);
+
+        // Send touch began
+        [app sendEvent:event];
+
+        NSLog(@"[Tasto] performTap: touchesBegan sent successfully");
+
+        // Update touch for end phase after a brief delay
+        // Using usleep on main thread is acceptable for testing frameworks
+        usleep(50000); // 50ms
+
+        // Update touch for end phase
+        [touch setPhase:UITouchPhaseEnded];
+        [touch setTimestamp:[[NSProcessInfo processInfo] systemUptime]];
+        [touch _setLocationInWindow:point resetPrevious:NO];
+
+        // Clear and re-add the touch
+        [event _clearTouches];
+        [event _addTouch:touch forDelayedDelivery:NO];
+
+        NSLog(@"[Tasto] performTap: Sending touchesEnded");
+
+        // Send touch ended
+        [app sendEvent:event];
+
+        success = true;
+    };
+
+    // Execute on main queue
+    if ([NSThread isMainThread]) {
+        tapBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), tapBlock);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
+    __block bool success = false;
+    NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
+
+    void (^tapBlock)(void) = ^{
+        // Find the key window
+        UIWindow* keyWindow = nil;
+        for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene* windowScene = (UIWindowScene*)scene;
+                for (UIWindow* window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        keyWindow = window;
+                        break;
+                    }
+                }
+            }
+            if (keyWindow) break;
+        }
+
+        if (!keyWindow) {
+            NSLog(@"[Tasto] performTapByTestID: No key window found");
+            success = false;
+            return;
+        }
+
+        // Find the view by accessibilityIdentifier
+        UIView* targetView = findViewByAccessibilityIdentifier(keyWindow, identifier);
+        if (!targetView) {
+            NSLog(@"[Tasto] performTapByTestID: View with testID '%@' not found", identifier);
+            success = false;
+            return;
+        }
+
+        NSLog(@"[Tasto] performTapByTestID: Found view %@ with testID '%@'",
+              NSStringFromClass([targetView class]), identifier);
+
+        // Get the center point in window coordinates
+        CGRect frameInWindow = [targetView convertRect:targetView.bounds toView:keyWindow];
+        CGPoint centerPoint = CGPointMake(
+            CGRectGetMidX(frameInWindow),
+            CGRectGetMidY(frameInWindow)
+        );
+
+        NSLog(@"[Tasto] performTapByTestID: View frame in window: (%.1f, %.1f, %.1fx%.1f), center: (%.1f, %.1f)",
+              frameInWindow.origin.x, frameInWindow.origin.y,
+              frameInWindow.size.width, frameInWindow.size.height,
+              centerPoint.x, centerPoint.y);
+
+        // Now perform tap at this point
+        success = TastoRuntimeHelper::getInstance().performTap(centerPoint.x, centerPoint.y);
+    };
+
+    if ([NSThread isMainThread]) {
+        tapBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), tapBlock);
+    }
+
+    return success;
+}
+
+} // namespace tasto
+
+// Objective-C helper for setting the surface presenter
+extern "C" void TastoSetSurfacePresenter(RCTSurfacePresenter* presenter) {
+    tasto::TastoRuntimeHelper::getInstance().setSurfacePresenter((__bridge void*)presenter);
+}

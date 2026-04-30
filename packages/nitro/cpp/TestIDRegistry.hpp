@@ -72,8 +72,9 @@ private:
 
     /**
      * Recursively traverse and register nodes with testIDs
+     * Takes shared_ptr to properly create weak_ptr for storage
      */
-    void traverseAndRegister(const facebook::react::ShadowNode& node);
+    void traverseAndRegister(ShadowNodePtr node);
 };
 
 } // namespace tasto

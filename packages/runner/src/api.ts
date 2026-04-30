@@ -35,6 +35,20 @@ export class Element {
   // ============================================
 
   /**
+   * Check if element exists
+   */
+  async exists(): Promise<boolean> {
+    return this.client.exists(this.testID);
+  }
+
+  /**
+   * Check if element is visible
+   */
+  async isVisible(): Promise<boolean> {
+    return this.client.isVisible(this.testID);
+  }
+
+  /**
    * Get element info
    */
   async getInfo(): Promise<ElementInfo | null> {

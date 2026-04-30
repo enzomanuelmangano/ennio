@@ -17,10 +17,13 @@
       "name": "tasto-example",
       "version": "0.1.0",
       "dependencies": {
+        "@tasto/app": "*",
+        "@tasto/nitro": "*",
         "expo": "~53.0.0",
         "expo-status-bar": "~2.2.0",
         "react": "19.0.0",
         "react-native": "0.79.0",
+        "react-native-nitro-modules": "^0.35.5",
       },
       "devDependencies": {
         "@babel/core": "^7.24.0",
@@ -49,6 +52,11 @@
     "packages/nitro": {
       "name": "@tasto/nitro",
       "version": "0.1.0",
+      "dependencies": {
+        "expo": "~53.0.27",
+        "react": "19.0.0",
+        "react-native": "0.79.6",
+      },
       "devDependencies": {
         "@types/react": "^18.2.0",
         "nitrogen": "^0.35.5",

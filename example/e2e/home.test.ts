@@ -4,7 +4,7 @@ import {
   waitForVisible,
   sleep,
 } from '@tasto/runner';
-import { setup, teardown, runTest } from './setup';
+import { setup, teardown, runTest, goHome } from './setup.ts';
 
 /**
  * Home Screen E2E Tests
@@ -13,6 +13,7 @@ import { setup, teardown, runTest } from './setup';
  */
 export default async function homeTests(): Promise<void> {
   await setup();
+  await goHome();
 
   try {
     await runTest('should display home screen', async () => {
@@ -32,36 +33,31 @@ export default async function homeTests(): Promise<void> {
       await waitForVisible('form-screen');
       await element('form-title').toHaveText('Create Account');
 
-      // Navigate back
-      // Note: In real tests, you'd use navigation helpers
-      await sleep(500);
+      // Navigate back to home
+      await element('back-btn').tap();
+      await waitForVisible('home-screen');
     });
 
     await runTest('should navigate to list screen', async () => {
-      // First go back to home if needed
-      await waitForElement('home-screen', { timeout: 2000 }).catch(() => {});
-
       await element('nav-list-btn').tap();
       await waitForVisible('list-screen');
       await element('list-count').toContainText('100 items');
 
-      await sleep(500);
+      // Navigate back to home
+      await element('back-btn').tap();
+      await waitForVisible('home-screen');
     });
 
     await runTest('should navigate to modal screen', async () => {
-      // First go back to home if needed
-      await waitForElement('home-screen', { timeout: 2000 }).catch(() => {});
-
       await element('nav-modal-btn').tap();
       await waitForVisible('modal-screen');
 
-      await sleep(500);
+      // Navigate back to home
+      await element('back-btn').tap();
+      await waitForVisible('home-screen');
     });
 
     await runTest('should display info box', async () => {
-      // Go back to home
-      await waitForElement('home-screen', { timeout: 2000 }).catch(() => {});
-
       await element('info-box').toBeVisible();
       await element('info-box').toContainText('E2E testing capabilities');
     });

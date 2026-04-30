@@ -5,8 +5,23 @@
 
 #include <memory>
 #include <string>
+#include <functional>
+#include <mutex>
+
+// React Native Fabric headers
+#include <react/renderer/core/ShadowNode.h>
+#include <react/renderer/uimanager/UIManager.h>
+
+// Internal components
+#include "WebSocketServer.hpp"
+#include "TestIDRegistry.hpp"
+#include "ShadowTreeTraverser.hpp"
+#include "EventDispatcher.hpp"
 
 namespace margelo::nitro::tasto {
+
+using ShadowNodePtr = std::shared_ptr<const facebook::react::ShadowNode>;
+using RuntimeExecutor = std::function<void(std::function<void(facebook::jsi::Runtime&)>&&)>;
 
 /**
  * HybridTasto - Main Nitro HybridObject for E2E testing
@@ -54,9 +69,63 @@ public:
     bool waitForIdle(double timeoutMs) override;
     void synchronize() override;
 
+    // ============================================
+    // Initialization (called from JS)
+    // ============================================
+
+    /**
+     * Initialize with UIManager reference for shadow tree access
+     * Must be called before using query/action methods
+     */
+    void initialize(
+        std::weak_ptr<facebook::react::UIManager> uiManager,
+        facebook::react::SurfaceId surfaceId
+    );
+
+    /**
+     * Check if the module is properly initialized
+     */
+    bool isInitialized() const;
+
 private:
+    // Server state
     bool serverRunning_ = false;
     int serverPort_ = 0;
+    std::unique_ptr<::tasto::WebSocketServer> webSocketServer_;
+
+    // Shadow tree access
+    std::weak_ptr<facebook::react::UIManager> uiManager_;
+    facebook::react::SurfaceId surfaceId_ = 0;
+    mutable std::mutex mutex_;
+
+    // Screen dimensions for visibility checks
+    float screenWidth_ = 0;
+    float screenHeight_ = 0;
+
+    /**
+     * Get the current shadow tree root for the surface
+     */
+    ShadowNodePtr getShadowTreeRoot() const;
+
+    /**
+     * Find a node by testID using registry or tree traversal
+     */
+    ShadowNodePtr findNode(const std::string& testID) const;
+
+    /**
+     * Handle incoming WebSocket commands
+     */
+    ::tasto::Response handleCommand(const ::tasto::Request& request);
+
+    /**
+     * Convert internal ElementInfo to Nitro struct
+     */
+    ElementInfo convertElementInfo(const ::tasto::ElementInfo& info) const;
+
+    /**
+     * Convert internal LayoutMetrics to Nitro struct
+     */
+    LayoutMetrics convertLayoutMetrics(const ::tasto::LayoutMetrics& metrics) const;
 };
 
 } // namespace margelo::nitro::tasto

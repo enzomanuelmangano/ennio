@@ -15,10 +15,10 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => '13.0', :tvos => '13.0' }
   s.source       = { :git => package['repository']['url'], :tag => "v#{s.version}" }
 
+  # Native C++ implementation files + iOS-specific files
   s.source_files = [
     'cpp/**/*.{h,hpp,c,cpp}',
-    'nitrogen/generated/ios/**/*.{h,hpp,c,cpp,m,mm}',
-    'nitrogen/generated/shared/**/*.{h,hpp,c,cpp}'
+    'ios/**/*.{h,hpp,mm}'
   ]
 
   s.compiler_flags = folly_compiler_flags
@@ -27,6 +27,10 @@ Pod::Spec.new do |s|
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20',
     'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) FOLLY_NO_CONFIG=1',
     'HEADER_SEARCH_PATHS' => [
+      '"$(PODS_TARGET_SRCROOT)/cpp"',
+      '"$(PODS_TARGET_SRCROOT)/ios"',
+      '"$(PODS_TARGET_SRCROOT)/nitrogen/generated/shared/c++"',
+      '"$(PODS_TARGET_SRCROOT)/nitrogen/generated/ios"',
       '"$(PODS_ROOT)/boost"',
       '"$(PODS_ROOT)/RCT-Folly"',
       '"$(PODS_ROOT)/DoubleConversion"',
@@ -40,7 +44,11 @@ Pod::Spec.new do |s|
     ].join(' ')
   }
 
-  s.dependency 'NitroModules', '>= 0.18.0'
+  # CRITICAL: Force linker to load all ObjC code (needed for +load registration)
+  s.user_target_xcconfig = {
+    'OTHER_LDFLAGS' => '-ObjC'
+  }
+
   s.dependency 'React-Core'
   s.dependency 'RCT-Folly'
   s.dependency 'React-Fabric'
@@ -48,4 +56,11 @@ Pod::Spec.new do |s|
   s.dependency 'React-graphics'
 
   s.frameworks = 'Security'
+
+  # Add Nitrogen generated files (includes NitroModules dependency)
+  load 'nitrogen/generated/ios/TastoNitro+autolinking.rb'
+  add_nitrogen_files(s)
+
+  # Required for proper React Native linking
+  install_modules_dependencies(s)
 end

@@ -81,25 +81,27 @@ void TestIDRegistry::updateFromTree(ShadowNodePtr root) {
     std::lock_guard<std::mutex> lock(mutex_);
     registry_.clear();
 
-    traverseAndRegister(*root);
+    traverseAndRegister(root);
 }
 
-void TestIDRegistry::traverseAndRegister(const facebook::react::ShadowNode& node) {
+void TestIDRegistry::traverseAndRegister(ShadowNodePtr node) {
+    if (!node) {
+        return;
+    }
+
     // Try to get testID from ViewProps
     auto viewProps = std::dynamic_pointer_cast<const facebook::react::ViewProps>(
-        node.getProps()
+        node->getProps()
     );
 
     if (viewProps && !viewProps->testId.empty()) {
-        // Store as shared_ptr from the node's shared state
-        // Note: In actual implementation, we need to get the shared_ptr properly
-        // For now, we traverse and store what we can
-        registry_[viewProps->testId] = std::weak_ptr<const facebook::react::ShadowNode>();
+        // Store the shared_ptr as weak_ptr for O(1) lookup
+        registry_[viewProps->testId] = node;
     }
 
-    // Recursively traverse children
-    for (const auto& child : node.getChildren()) {
-        traverseAndRegister(*child);
+    // Recursively traverse children (getChildren() returns shared_ptr)
+    for (const auto& child : node->getChildren()) {
+        traverseAndRegister(child);
     }
 }
 

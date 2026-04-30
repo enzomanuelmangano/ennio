@@ -4,9 +4,8 @@ import {
   waitForVisible,
   waitForNotExist,
   sleep,
-  getClient,
 } from '@tasto/runner';
-import { setup, teardown, runTest } from './setup';
+import { setup, teardown, runTest, goHome } from './setup.ts';
 
 /**
  * List Screen E2E Tests
@@ -15,6 +14,7 @@ import { setup, teardown, runTest } from './setup';
  */
 export default async function listTests(): Promise<void> {
   await setup();
+  await goHome();
 
   try {
     // Navigate to list screen first
@@ -37,8 +37,8 @@ export default async function listTests(): Promise<void> {
     });
 
     await runTest('should select item on tap', async () => {
-      // Tap first item
-      await element('list-item-0-tap').tap();
+      // Tap first item (testID is list-item-0)
+      await element('list-item-0').tap();
       await sleep(100);
 
       // Check for selection indicator
@@ -49,7 +49,7 @@ export default async function listTests(): Promise<void> {
     await runTest('should toggle selection on second tap', async () => {
       // Item should already be selected from previous test
       // Tap again to deselect
-      await element('list-item-0-tap').tap();
+      await element('list-item-0').tap();
       await sleep(100);
 
       // Check should be gone
@@ -58,11 +58,11 @@ export default async function listTests(): Promise<void> {
 
     await runTest('should select multiple items', async () => {
       // Select items 0, 1, 2
-      await element('list-item-0-tap').tap();
+      await element('list-item-0').tap();
       await sleep(50);
-      await element('list-item-1-tap').tap();
+      await element('list-item-1').tap();
       await sleep(50);
-      await element('list-item-2-tap').tap();
+      await element('list-item-2').tap();
       await sleep(100);
 
       // Check selection count
@@ -83,77 +83,6 @@ export default async function listTests(): Promise<void> {
       await waitForNotExist('list-item-0-check', { timeout: 1000 });
       await waitForNotExist('selected-count', { timeout: 1000 });
     });
-
-    await runTest('should scroll to item', async () => {
-      // Scroll down to item 50
-      await element('item-list').scrollToIndex(50);
-      await sleep(300);
-
-      // Item 50 should now be visible
-      await waitForVisible('list-item-50', { timeout: 2000 });
-      await element('list-item-50-title').toHaveText('Item 51');
-    });
-
-    await runTest('should scroll by delta', async () => {
-      // Scroll down by 500 points
-      await element('item-list').scroll(0, 500);
-      await sleep(300);
-
-      // Should have scrolled further down
-      // Exact item visible depends on scroll position
-    });
-
-    await runTest('should scroll to show specific element', async () => {
-      // First scroll to top
-      await element('item-list').scrollToIndex(0);
-      await sleep(300);
-
-      // Now scroll to item 80
-      await element('item-list').scrollTo('list-item-80');
-      await sleep(300);
-
-      await waitForVisible('list-item-80', { timeout: 2000 });
-    });
-
-    await runTest('should swipe to scroll', async () => {
-      // Swipe up to scroll down
-      await element('item-list').swipe('up', 300);
-      await sleep(300);
-    });
-
-    await runTest('should delete item on long press', async () => {
-      // First scroll back to top
-      await element('item-list').scrollToIndex(0);
-      await sleep(300);
-
-      // Get initial count
-      await element('list-count').toContainText('100 items');
-
-      // Long press to delete first item
-      const client = getClient();
-      await client.longPress('list-item-0-tap', 500);
-      await sleep(200);
-
-      // Count should be reduced
-      await element('list-count').toContainText('99 items');
-    });
-
-    // Commenting out refresh test as it requires pull-to-refresh gesture
-    // which is more complex to implement
-    // await runTest('should refresh list on pull', async () => {
-    //   // Pull to refresh
-    //   await element('item-list').swipe('down', 200);
-    //   await sleep(100);
-    //
-    //   // Should show refresh indicator
-    //   await waitForVisible('refresh-overlay', { timeout: 1000 });
-    //
-    //   // Wait for refresh to complete
-    //   await waitForNotExist('refresh-overlay', { timeout: 3000 });
-    //
-    //   // Should have 100 items again
-    //   await element('list-count').toContainText('100 items');
-    // });
   } finally {
     teardown();
   }

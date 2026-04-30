@@ -5,7 +5,7 @@ import {
   waitForNotExist,
   sleep,
 } from '@tasto/runner';
-import { setup, teardown, runTest } from './setup';
+import { setup, teardown, runTest, goHome } from './setup.ts';
 
 /**
  * Form Screen E2E Tests
@@ -14,6 +14,7 @@ import { setup, teardown, runTest } from './setup';
  */
 export default async function formTests(): Promise<void> {
   await setup();
+  await goHome();
 
   try {
     // Navigate to form screen first
