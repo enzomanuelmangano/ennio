@@ -20,23 +20,52 @@ export async function setup(): Promise<void> {
 }
 
 /**
- * Navigate back to home screen if not already there
+ * Navigate to home tab
  */
 export async function goHome(): Promise<void> {
-  // Try to detect if we're already on home screen
-  const homeExists = await element('home-screen').exists();
-  if (homeExists) {
-    const isVisible = await element('home-screen').isVisible();
-    if (isVisible) {
-      return; // Already on home screen
-    }
-  }
-
-  // Try to tap back button (exists on form, list, modal screens)
-  const backExists = await element('back-btn').exists();
-  if (backExists) {
-    await element('back-btn').tap();
+  const tabHome = await element('tab-home').exists();
+  if (tabHome) {
+    await element('tab-home').tap();
     await waitForVisible('home-screen', { timeout: 3000 });
+  }
+}
+
+/**
+ * Navigate to products tab
+ */
+export async function goProducts(): Promise<void> {
+  const tabProducts = await element('tab-products').exists();
+  if (tabProducts) {
+    await element('tab-products').tap();
+    await waitForVisible('products-screen', { timeout: 3000 });
+  }
+}
+
+/**
+ * Navigate to cart tab
+ */
+export async function goCart(): Promise<void> {
+  const tabCart = await element('tab-cart').exists();
+  if (tabCart) {
+    await element('tab-cart').tap();
+    // Could be empty or with items
+    await waitForVisible('cart-screen', { timeout: 3000 }).catch(() =>
+      waitForVisible('cart-screen-empty', { timeout: 3000 })
+    );
+  }
+}
+
+/**
+ * Navigate to profile tab
+ */
+export async function goProfile(): Promise<void> {
+  const tabProfile = await element('tab-profile').exists();
+  if (tabProfile) {
+    await element('tab-profile').tap();
+    // Could be guest view or authenticated
+    await waitForVisible('profile-screen', { timeout: 3000 }).catch(() =>
+      waitForVisible('guest-view', { timeout: 3000 })
+    );
   }
 }
 

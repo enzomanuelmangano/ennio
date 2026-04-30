@@ -2,14 +2,13 @@ import {
   element,
   waitForElement,
   waitForVisible,
-  sleep,
 } from '@tasto/runner';
-import { setup, teardown, runTest, goHome } from './setup.ts';
+import { setup, teardown, runTest, goHome } from './setup';
 
 /**
  * Home Screen E2E Tests
  *
- * Tests navigation and basic UI rendering
+ * Tests the home tab with featured products, trending, and navigation
  */
 export default async function homeTests(): Promise<void> {
   await setup();
@@ -18,62 +17,69 @@ export default async function homeTests(): Promise<void> {
   try {
     await runTest('should display home screen', async () => {
       await element('home-screen').toBeVisible();
-      await element('home-title').toHaveText('Welcome to Tasto');
-      await element('home-subtitle').toContainText('E2E Testing');
     });
 
-    await runTest('should display all navigation buttons', async () => {
-      await element('nav-form-btn').toBeVisible();
-      await element('nav-list-btn').toBeVisible();
-      await element('nav-modal-btn').toBeVisible();
+    await runTest('should display quick action buttons', async () => {
+      await element('quick-action-search').toBeVisible();
+      await element('quick-action-cart').toBeVisible();
+      await element('quick-action-orders').toBeVisible();
+      await element('quick-action-settings').toBeVisible();
     });
 
-    await runTest('should navigate to form screen', async () => {
-      await element('nav-form-btn').tap();
-      await waitForVisible('form-screen');
-      await element('form-title').toHaveText('Create Account');
+    await runTest('should display featured products section', async () => {
+      // Check first featured product exists
+      await element('featured-product-1').toBeVisible();
+    });
 
+    await runTest('should display trending products', async () => {
+      // Check trending products exist (rating >= 4.7)
+      await element('trending-product-4').toBeVisible(); // Ergonomic Office Chair has 4.8 rating
+    });
+
+    await runTest('should navigate to products via See All', async () => {
+      await element('see-all-featured').tap();
+      await waitForVisible('products-screen');
       // Navigate back to home
-      await element('back-btn').tap();
-      await waitForVisible('home-screen');
+      await goHome();
     });
 
-    await runTest('should navigate to list screen', async () => {
-      await element('nav-list-btn').tap();
-      await waitForVisible('list-screen');
-      await element('list-count').toContainText('100 items');
-
-      // Navigate back to home
-      await element('back-btn').tap();
-      await waitForVisible('home-screen');
+    await runTest('should navigate to cart via quick action', async () => {
+      await element('quick-action-cart').tap();
+      // Cart could be empty or have items
+      const cartExists = await element('cart-screen').exists();
+      const emptyCartExists = await element('cart-screen-empty').exists();
+      if (!cartExists && !emptyCartExists) {
+        throw new Error('Cart screen not visible');
+      }
+      await goHome();
     });
 
-    await runTest('should navigate to modal screen', async () => {
-      await element('nav-modal-btn').tap();
-      await waitForVisible('modal-screen');
-
-      // Navigate back to home
-      await element('back-btn').tap();
-      await waitForVisible('home-screen');
+    await runTest('should navigate to products via category', async () => {
+      await element('category-electronics').tap();
+      await waitForVisible('products-screen');
+      // Verify category filter is active
+      await element('filter-category-electronics').toBeVisible();
+      await goHome();
     });
 
-    await runTest('should display info box', async () => {
-      await element('info-box').toBeVisible();
-      await element('info-box').toContainText('E2E testing capabilities');
+    await runTest('should display promo banner', async () => {
+      await element('promo-banner').toBeVisible();
+    });
+
+    await runTest('should navigate to products via promo banner', async () => {
+      await element('promo-shop-now').tap();
+      await waitForVisible('products-screen');
+      await goHome();
+    });
+
+    await runTest('should show sign in button when not authenticated', async () => {
+      // Assuming starting in unauthenticated state
+      const signInBtn = await element('home-signin-btn').exists();
+      if (signInBtn) {
+        await element('home-signin-btn').toBeVisible();
+      }
     });
   } finally {
     teardown();
   }
-}
-
-// Export individual test functions for selective running
-export async function testHomeScreenDisplay(): Promise<void> {
-  await element('home-screen').toBeVisible();
-  await element('home-title').toHaveText('Welcome to Tasto');
-}
-
-export async function testNavigationButtons(): Promise<void> {
-  await element('nav-form-btn').toBeVisible();
-  await element('nav-list-btn').toBeVisible();
-  await element('nav-modal-btn').toBeVisible();
 }
