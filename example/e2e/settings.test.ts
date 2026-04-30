@@ -4,7 +4,7 @@ import {
   waitForVisible,
   sleep,
 } from '@tasto/runner';
-import { setup, teardown, runTest, goProfile, goHome } from './setup';
+import { setup, teardown, runTest, goProfile, goHome } from './setup.ts';
 
 /**
  * Settings Screen E2E Tests

@@ -3,7 +3,7 @@ import {
   waitForElement,
   waitForVisible,
 } from '@tasto/runner';
-import { setup, teardown, runTest, goHome } from './setup';
+import { setup, teardown, runTest, goHome } from './setup.ts';
 
 /**
  * Home Screen E2E Tests

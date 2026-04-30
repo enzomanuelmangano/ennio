@@ -4,7 +4,7 @@ import {
   waitForVisible,
   sleep,
 } from '@tasto/runner';
-import { setup, teardown, runTest, goProducts, goCart, goHome } from './setup';
+import { setup, teardown, runTest, goProducts, goCart, goHome } from './setup.ts';
 
 /**
  * Cart E2E Tests
