@@ -420,6 +420,100 @@ bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
     return success;
 }
 
+bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::string& text) {
+    __block bool success = false;
+    NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
+    NSString* textToType = [NSString stringWithUTF8String:text.c_str()];
+
+    void (^typeBlock)(void) = ^{
+        // Find the key window
+        UIWindow* keyWindow = findKeyWindow();
+        if (!keyWindow) {
+            NSLog(@"[Tasto] performTypeText: No key window found");
+            success = false;
+            return;
+        }
+
+        // Find the view by accessibilityIdentifier
+        UIView* targetView = findViewByAccessibilityIdentifier(keyWindow, identifier);
+        if (!targetView) {
+            NSLog(@"[Tasto] performTypeText: View with testID '%@' not found", identifier);
+            success = false;
+            return;
+        }
+
+        NSLog(@"[Tasto] performTypeText: Found view %@ with testID '%@'",
+              NSStringFromClass([targetView class]), identifier);
+
+        // Try to find a UITextField or UITextView in the view hierarchy
+        UITextField* textField = nil;
+        UITextView* textView = nil;
+
+        // Check if it's a text input directly
+        if ([targetView isKindOfClass:[UITextField class]]) {
+            textField = (UITextField*)targetView;
+        } else if ([targetView isKindOfClass:[UITextView class]]) {
+            textView = (UITextView*)targetView;
+        } else {
+            // Search subviews for text input
+            for (UIView* subview in targetView.subviews) {
+                if ([subview isKindOfClass:[UITextField class]]) {
+                    textField = (UITextField*)subview;
+                    break;
+                } else if ([subview isKindOfClass:[UITextView class]]) {
+                    textView = (UITextView*)subview;
+                    break;
+                }
+            }
+        }
+
+        if (textField) {
+            NSLog(@"[Tasto] performTypeText: Setting text on UITextField");
+
+            // Make it first responder (focus)
+            [textField becomeFirstResponder];
+
+            // Set the text directly
+            textField.text = textToType;
+
+            // Notify delegate of the change
+            [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+
+            success = true;
+        } else if (textView) {
+            NSLog(@"[Tasto] performTypeText: Setting text on UITextView");
+
+            // Make it first responder (focus)
+            [textView becomeFirstResponder];
+
+            // Set the text directly
+            textView.text = textToType;
+
+            // Notify delegate of the change
+            if (textView.delegate && [textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
+                [textView.delegate textViewDidChange:textView];
+            }
+
+            success = true;
+        } else {
+            NSLog(@"[Tasto] performTypeText: No UITextField or UITextView found in view");
+            success = false;
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        typeBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), typeBlock);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::performClearText(const std::string& testID) {
+    return performTypeText(testID, "");
+}
+
 } // namespace tasto
 
 // Objective-C helper for setting the surface presenter

@@ -296,21 +296,43 @@ bool HybridTasto::longPress(const std::string& testID, double durationMs) {
 }
 
 bool HybridTasto::typeText(const std::string& testID, const std::string& text) {
+    TASTO_LOG_IOS("HybridTasto::typeText called for testID=%s text=%s", testID.c_str(), text.c_str());
+
+#if defined(__APPLE__)
+    // On iOS, use native text input to avoid threading issues with event dispatch
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    bool result = helper.performTypeText(testID, text);
+    TASTO_LOG_IOS("HybridTasto::typeText result=%d", result);
+    return result;
+#else
+    // On Android, use EventDispatcher through shadow tree
     auto node = findNode(testID);
     if (!node) {
         return false;
     }
 
     return ::tasto::EventDispatcher::typeText(node, text);
+#endif
 }
 
 bool HybridTasto::clearText(const std::string& testID) {
+    TASTO_LOG_IOS("HybridTasto::clearText called for testID=%s", testID.c_str());
+
+#if defined(__APPLE__)
+    // On iOS, use native text input to avoid threading issues
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    bool result = helper.performClearText(testID);
+    TASTO_LOG_IOS("HybridTasto::clearText result=%d", result);
+    return result;
+#else
+    // On Android, use EventDispatcher
     auto node = findNode(testID);
     if (!node) {
         return false;
     }
 
     return ::tasto::EventDispatcher::clearText(node);
+#endif
 }
 
 bool HybridTasto::replaceText(const std::string& testID, const std::string& text) {

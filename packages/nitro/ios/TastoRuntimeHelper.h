@@ -65,6 +65,17 @@ public:
      */
     bool performTapByTestID(const std::string& testID);
 
+    /**
+     * Type text into a text input with the given testID
+     * Uses native iOS text input APIs to properly trigger React Native's onChange
+     */
+    bool performTypeText(const std::string& testID, const std::string& text);
+
+    /**
+     * Clear text from a text input with the given testID
+     */
+    bool performClearText(const std::string& testID);
+
 private:
     TastoRuntimeHelper() = default;
     ~TastoRuntimeHelper() = default;
