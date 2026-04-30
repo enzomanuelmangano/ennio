@@ -19,6 +19,16 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
         return false;
     }
 
+#if defined(__APPLE__)
+    // On iOS, use native tap implementation which handles UIKit touch properly
+    // This avoids threading issues with event dispatch
+    auto [centerX, centerY] = getCenterPoint(node);
+    fprintf(stderr, "[Tasto] EventDispatcher::tap: using native tap at (%.1f, %.1f)\n", centerX, centerY);
+
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.performTap(centerX, centerY);
+#else
+    // Android: use event dispatch approach
     auto emitter = getEventEmitter(node);
     if (!emitter) {
         fprintf(stderr, "[Tasto] EventDispatcher::tap: emitter is null for tag=%d\n", node->getTag());
@@ -41,25 +51,14 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
     fprintf(stderr, "[Tasto] EventDispatcher::tap: tag=%d, center=(%.1f, %.1f)\n", nodeTag, centerX, centerY);
 
     // Dispatch native touch events followed by click
-    // This mimics how React Native receives real touch input:
-    // 1. touchStart - finger touches screen
-    // 2. touchEnd - finger lifts
-    // 3. click - the press action is recognized
-
-    fprintf(stderr, "[Tasto] EventDispatcher::tap: dispatching touchStart\n");
     dispatchTouchEvent(emitter, "touchStart", centerX, centerY, nodeTag, timestamp);
-
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-    fprintf(stderr, "[Tasto] EventDispatcher::tap: dispatching touchEnd\n");
     dispatchTouchEvent(emitter, "touchEnd", centerX, centerY, nodeTag, timestamp);
-
-    // Dispatch click event - this triggers onPress in Pressable components
-    fprintf(stderr, "[Tasto] EventDispatcher::tap: dispatching click\n");
     dispatchClickEvent(emitter, centerX, centerY);
 
     fprintf(stderr, "[Tasto] EventDispatcher::tap: completed\n");
     return true;
+#endif
 }
 
 bool EventDispatcher::longPress(ShadowNodePtr node, int durationMs) {

@@ -11,12 +11,11 @@
 #import <React/RCTSurfacePresenter.h>
 #endif
 
-// Store a reference to surface presenters as they're created
-static NSHashTable<id> *_surfacePresenters = nil;
-static dispatch_once_t _onceToken;
+// Flag to track if Tasto has been initialized
+static BOOL _tastoInitialized = NO;
 
 /**
- * Hook into RCTSurfacePresenter initialization to capture instances
+ * Hook into RCTHost's start method to capture the surface presenter
  */
 @interface TastoAutoInit : NSObject
 @end
@@ -25,71 +24,138 @@ static dispatch_once_t _onceToken;
 
 + (void)load {
     NSLog(@"[Tasto] TastoAutoInit +load called");
-    fprintf(stderr, "[Tasto] TastoAutoInit +load called\n");
 
-    dispatch_once(&_onceToken, ^{
-        _surfacePresenters = [NSHashTable weakObjectsHashTable];
-    });
+    // Try to swizzle RCTHost's start method
+    Class hostClass = NSClassFromString(@"RCTHost");
+    if (!hostClass) {
+        NSLog(@"[Tasto] RCTHost class not found, trying alternative...");
 
-    // Try to swizzle RCTSurfacePresenter's init method
-    Class surfacePresenterClass = NSClassFromString(@"RCTSurfacePresenter");
-    if (!surfacePresenterClass) {
-        NSLog(@"[Tasto] RCTSurfacePresenter class not found, auto-init disabled");
-        fprintf(stderr, "[Tasto] RCTSurfacePresenter class not found\n");
+        // Try RCTFabricSurface's start method as alternative
+        Class surfaceClass = NSClassFromString(@"RCTFabricSurface");
+        if (surfaceClass) {
+            [self swizzleFabricSurfaceStart:surfaceClass];
+        } else {
+            NSLog(@"[Tasto] No suitable class found for auto-init");
+        }
         return;
     }
 
-    NSLog(@"[Tasto] Found RCTSurfacePresenter class, setting up swizzling...");
+    NSLog(@"[Tasto] Found RCTHost class, setting up swizzling...");
 
-    SEL originalSelector = @selector(initWithContextContainer:runtimeExecutor:bridgelessBindingsExecutor:);
-    SEL swizzledSelector = @selector(tasto_initWithContextContainer:runtimeExecutor:bridgelessBindingsExecutor:);
+    SEL originalSelector = @selector(start);
+    SEL swizzledSelector = @selector(tasto_start);
 
-    Method originalMethod = class_getInstanceMethod(surfacePresenterClass, originalSelector);
+    Method originalMethod = class_getInstanceMethod(hostClass, originalSelector);
     Method swizzledMethod = class_getInstanceMethod(self, swizzledSelector);
 
     if (!originalMethod) {
-        NSLog(@"[Tasto] Could not find original init method, auto-init disabled");
+        NSLog(@"[Tasto] Could not find RCTHost start method");
         return;
     }
 
-    // Add swizzled method to RCTSurfacePresenter class
+    // Add swizzled method to RCTHost class
     BOOL didAddMethod = class_addMethod(
-        surfacePresenterClass,
+        hostClass,
         swizzledSelector,
         method_getImplementation(swizzledMethod),
         method_getTypeEncoding(swizzledMethod)
     );
 
     if (!didAddMethod) {
-        NSLog(@"[Tasto] Could not add swizzled method, auto-init disabled");
+        NSLog(@"[Tasto] Could not add swizzled method to RCTHost");
         return;
     }
 
-    // Get the newly added method
-    Method newSwizzledMethod = class_getInstanceMethod(surfacePresenterClass, swizzledSelector);
-
     // Exchange implementations
+    Method newSwizzledMethod = class_getInstanceMethod(hostClass, swizzledSelector);
     method_exchangeImplementations(originalMethod, newSwizzledMethod);
-    NSLog(@"[Tasto] Auto-init installed successfully");
+    NSLog(@"[Tasto] RCTHost.start swizzle installed successfully");
 }
 
-// This will be called as the original init method after swizzling
-- (instancetype)tasto_initWithContextContainer:(void *)contextContainer
-                               runtimeExecutor:(void *)runtimeExecutor
-                    bridgelessBindingsExecutor:(void *)bridgelessBindingsExecutor {
-    // Call original implementation (which is now our swizzled selector)
-    id result = [self tasto_initWithContextContainer:contextContainer
-                                     runtimeExecutor:runtimeExecutor
-                          bridgelessBindingsExecutor:bridgelessBindingsExecutor];
++ (void)swizzleFabricSurfaceStart:(Class)surfaceClass {
+    SEL originalSelector = @selector(start);
+    SEL swizzledSelector = @selector(tasto_surfaceStart);
 
-    if (result) {
-        // Store reference and initialize Tasto
-        [_surfacePresenters addObject:result];
-        TastoSetSurfacePresenter((__bridge RCTSurfacePresenter *)(__bridge void *)result);
-        NSLog(@"[Tasto] Surface presenter captured and initialized");
+    Method originalMethod = class_getInstanceMethod(surfaceClass, originalSelector);
+    Method swizzledMethod = class_getInstanceMethod(self, swizzledSelector);
+
+    if (!originalMethod) {
+        NSLog(@"[Tasto] Could not find RCTFabricSurface start method");
+        return;
     }
 
-    return result;
+    BOOL didAddMethod = class_addMethod(
+        surfaceClass,
+        swizzledSelector,
+        method_getImplementation(swizzledMethod),
+        method_getTypeEncoding(swizzledMethod)
+    );
+
+    if (didAddMethod) {
+        Method newSwizzledMethod = class_getInstanceMethod(surfaceClass, swizzledSelector);
+        method_exchangeImplementations(originalMethod, newSwizzledMethod);
+        NSLog(@"[Tasto] RCTFabricSurface.start swizzle installed successfully");
+    }
+}
+
+// Swizzled RCTHost start method
+- (void)tasto_start {
+    NSLog(@"[Tasto] RCTHost.start called");
+
+    // Call original implementation
+    [self tasto_start];
+
+    // Get surface presenter from RCTHost
+    if (!_tastoInitialized) {
+        // Use performSelector to avoid compile-time dependency
+        SEL surfacePresenterSel = @selector(surfacePresenter);
+        if ([self respondsToSelector:surfacePresenterSel]) {
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id surfacePresenter = [self performSelector:surfacePresenterSel];
+            #pragma clang diagnostic pop
+
+            if (surfacePresenter) {
+                TastoSetSurfacePresenter((__bridge RCTSurfacePresenter *)(__bridge void *)surfacePresenter);
+                _tastoInitialized = YES;
+                NSLog(@"[Tasto] Surface presenter captured from RCTHost");
+            } else {
+                NSLog(@"[Tasto] RCTHost.surfacePresenter returned nil");
+            }
+        } else {
+            NSLog(@"[Tasto] RCTHost does not respond to surfacePresenter");
+        }
+    }
+}
+
+// Swizzled RCTFabricSurface start method (alternative path)
+- (void)tasto_surfaceStart {
+    NSLog(@"[Tasto] RCTFabricSurface.start called");
+
+    // Call original implementation
+    [self tasto_surfaceStart];
+
+    // Try to get surface presenter from the surface
+    if (!_tastoInitialized) {
+        // The surface should have access to its presenter
+        // This is a fallback - not all surfaces expose this
+        NSLog(@"[Tasto] Attempting to find surface presenter from RCTFabricSurface...");
+
+        // Check if there's a presenter property
+        SEL presenterSel = @selector(surfacePresenter);
+        if ([self respondsToSelector:presenterSel]) {
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id presenter = [self performSelector:presenterSel];
+            #pragma clang diagnostic pop
+
+            if (presenter) {
+                TastoSetSurfacePresenter((__bridge RCTSurfacePresenter *)(__bridge void *)presenter);
+                _tastoInitialized = YES;
+                NSLog(@"[Tasto] Surface presenter captured from RCTFabricSurface");
+            }
+        }
+    }
 }
 
 @end

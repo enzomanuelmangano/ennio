@@ -10,6 +10,13 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <CommonCrypto/CommonDigest.h>
+// Use NSLog for iOS logging
+extern "C" void TastoLogMessage(const char* message);
+#define WS_LOG(fmt, ...) do { \
+    char buf[512]; \
+    snprintf(buf, sizeof(buf), "[Tasto WS] " fmt, ##__VA_ARGS__); \
+    TastoLogMessage(buf); \
+} while(0)
 #elif defined(__ANDROID__)
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -17,6 +24,10 @@
 #include <arpa/inet.h>
 // Android: use OpenSSL
 #include <openssl/sha.h>
+#include <android/log.h>
+#define WS_LOG(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "Tasto WS", fmt, ##__VA_ARGS__)
+#else
+#define WS_LOG(fmt, ...) fprintf(stderr, "[Tasto WS] " fmt "\n", ##__VA_ARGS__)
 #endif
 
 namespace tasto {
@@ -81,7 +92,10 @@ WebSocketServer::~WebSocketServer() {
 }
 
 bool WebSocketServer::start(int port) {
+    WS_LOG("start() called with port=%d", port);
+
     if (running_) {
+        WS_LOG("start() - already running");
         return false;
     }
 
@@ -90,6 +104,7 @@ bool WebSocketServer::start(int port) {
     // Create socket
     serverSocket_ = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket_ < 0) {
+        WS_LOG("start() - socket() failed");
         return false;
     }
 
@@ -112,13 +127,18 @@ bool WebSocketServer::start(int port) {
 
     // Listen
     if (listen(serverSocket_, 5) < 0) {
+        WS_LOG("start() - listen() failed");
         close(serverSocket_);
         serverSocket_ = -1;
         return false;
     }
 
+    WS_LOG("start() - socket bound and listening");
+
     running_ = true;
     serverThread_ = std::thread(&WebSocketServer::serverLoop, this);
+
+    WS_LOG("start() - server thread started");
 
     return true;
 }
@@ -186,6 +206,8 @@ int WebSocketServer::getClientCount() const {
 }
 
 void WebSocketServer::serverLoop() {
+    WS_LOG("serverLoop() - started, waiting for connections");
+
     while (running_) {
         struct sockaddr_in clientAddr;
         socklen_t clientLen = sizeof(clientAddr);
@@ -193,23 +215,34 @@ void WebSocketServer::serverLoop() {
         int clientSocket = accept(serverSocket_, (struct sockaddr*)&clientAddr, &clientLen);
         if (clientSocket < 0) {
             if (!running_) {
+                WS_LOG("serverLoop() - server stopped");
                 break; // Server was stopped
             }
+            WS_LOG("serverLoop() - accept error, continuing");
             continue;
         }
+
+        WS_LOG("serverLoop() - accepted connection, socket=%d", clientSocket);
 
         // Handle client in a new thread
         std::thread clientThread(&WebSocketServer::handleClient, this, clientSocket);
         clientThread.detach();
     }
+
+    WS_LOG("serverLoop() - exiting");
 }
 
 void WebSocketServer::handleClient(int clientSocket) {
+    WS_LOG("handleClient() - new client socket=%d", clientSocket);
+
     // Perform WebSocket handshake
     if (!performHandshake(clientSocket)) {
+        WS_LOG("handleClient() - handshake failed");
         close(clientSocket);
         return;
     }
+
+    WS_LOG("handleClient() - handshake successful");
 
     // Add to client list
     {
@@ -221,7 +254,10 @@ void WebSocketServer::handleClient(int clientSocket) {
     std::vector<uint8_t> buffer(4096);
     while (running_) {
         ssize_t bytesRead = recv(clientSocket, buffer.data(), buffer.size(), 0);
+        WS_LOG("handleClient() - recv returned %zd bytes", bytesRead);
+
         if (bytesRead <= 0) {
+            WS_LOG("handleClient() - connection closed or error");
             break;
         }
 
@@ -230,11 +266,15 @@ void WebSocketServer::handleClient(int clientSocket) {
         buffer.resize(4096);
 
         if (message.empty()) {
+            WS_LOG("handleClient() - empty message after parseFrame");
             continue;
         }
 
+        WS_LOG("handleClient() - received message: %.100s...", message.c_str());
+
         // Parse and handle request
         Request request = parseRequest(message);
+        WS_LOG("handleClient() - parsed request type=%s id=%s", request.type.c_str(), request.id.c_str());
 
         CommandHandler handler;
         {
@@ -243,8 +283,12 @@ void WebSocketServer::handleClient(int clientSocket) {
         }
 
         if (handler) {
+            WS_LOG("handleClient() - calling command handler");
             Response response = handler(request);
+            WS_LOG("handleClient() - handler returned success=%d", response.success);
             sendResponse(clientSocket, response);
+        } else {
+            WS_LOG("handleClient() - no command handler set!");
         }
     }
 

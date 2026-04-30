@@ -120,38 +120,125 @@ TastoRuntimeHelper& TastoRuntimeHelper::getInstance() {
 
 void TastoRuntimeHelper::setSurfacePresenter(void* surfacePresenter) {
     surfacePresenter_ = surfacePresenter;
+    NSLog(@"[Tasto] TastoRuntimeHelper::setSurfacePresenter called with %p", surfacePresenter);
+}
+
+// Helper to find surface presenter by looking through runtime objects
+static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
+    // Try to find RCTHost instances
+    Class hostClass = NSClassFromString(@"RCTHost");
+    if (hostClass) {
+        // Use runtime introspection to find instances
+        // This is a fallback - ideally the swizzling should work
+        NSLog(@"[Tasto] Searching for RCTHost instances...");
+
+        // Try to access through the app delegate's factory
+        UIApplication* app = [UIApplication sharedApplication];
+        id appDelegate = app.delegate;
+
+        // Check if app delegate has reactNativeFactory property
+        SEL factorySel = @selector(reactNativeFactory);
+        if ([appDelegate respondsToSelector:factorySel]) {
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id factory = [appDelegate performSelector:factorySel];
+            #pragma clang diagnostic pop
+
+            if (factory) {
+                NSLog(@"[Tasto] Found reactNativeFactory: %@", factory);
+
+                // Try to get host from factory
+                SEL hostSel = @selector(reactHost);
+                if ([factory respondsToSelector:hostSel]) {
+                    #pragma clang diagnostic push
+                    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    id host = [factory performSelector:hostSel];
+                    #pragma clang diagnostic pop
+
+                    if (host) {
+                        NSLog(@"[Tasto] Found RCTHost: %@", host);
+
+                        SEL presenterSel = @selector(surfacePresenter);
+                        if ([host respondsToSelector:presenterSel]) {
+                            #pragma clang diagnostic push
+                            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                            id presenter = [host performSelector:presenterSel];
+                            #pragma clang diagnostic pop
+
+                            if (presenter) {
+                                NSLog(@"[Tasto] Found surfacePresenter: %@", presenter);
+                                return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return nil;
 }
 
 std::shared_ptr<facebook::react::UIManager> TastoRuntimeHelper::getUIManager() {
+    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager called, surfacePresenter_=%p", surfacePresenter_);
+
+    // If we don't have a surface presenter, try to find one
     if (!surfacePresenter_) {
-        return nullptr;
+        NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: surfacePresenter_ is null, searching...");
+
+        RCTSurfacePresenter* found = findSurfacePresenterInRuntime();
+        if (found) {
+            surfacePresenter_ = (__bridge void*)found;
+            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: Found surface presenter via runtime search");
+        } else {
+            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: Could not find surface presenter");
+            return nullptr;
+        }
     }
 
     RCTSurfacePresenter* presenter = (__bridge RCTSurfacePresenter*)surfacePresenter_;
+    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: presenter=%@", presenter);
+
     RCTScheduler* scheduler = [presenter scheduler];
+    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: scheduler=%@", scheduler);
 
     if (!scheduler) {
+        NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: scheduler is null");
         return nullptr;
     }
 
-    return [scheduler uiManager];
+    auto uiManager = [scheduler uiManager];
+    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: uiManager=%s", uiManager ? "valid" : "null");
+
+    return uiManager;
 }
 
 std::shared_ptr<const facebook::react::ShadowNode> TastoRuntimeHelper::getShadowTreeRoot() {
+    NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot called, surfacePresenter_=%p", surfacePresenter_);
+
     auto uiManager = getUIManager();
     if (!uiManager) {
+        NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: UIManager is null");
         return nullptr;
     }
+
+    NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: UIManager available");
 
     // Get the shadow tree registry and enumerate to find the first surface
     auto& shadowTreeRegistry = uiManager->getShadowTreeRegistry();
     std::shared_ptr<const facebook::react::ShadowNode> rootNode = nullptr;
+    int surfaceCount = 0;
 
     shadowTreeRegistry.enumerate([&](const facebook::react::ShadowTree& shadowTree, bool& stop) {
+        surfaceCount++;
         // Get the root from the first surface we find
         rootNode = shadowTree.getCurrentRevision().rootShadowNode;
+        NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: Found surface %d", surfaceCount);
         stop = true;
     });
+
+    NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: Total surfaces=%d, rootNode=%s",
+          surfaceCount, rootNode ? "valid" : "null");
 
     return rootNode;
 }
@@ -338,4 +425,9 @@ bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
 // Objective-C helper for setting the surface presenter
 extern "C" void TastoSetSurfacePresenter(RCTSurfacePresenter* presenter) {
     tasto::TastoRuntimeHelper::getInstance().setSurfacePresenter((__bridge void*)presenter);
+}
+
+// Logging helper for C++ code
+extern "C" void TastoLogMessage(const char* message) {
+    NSLog(@"%s", message);
 }

@@ -14,6 +14,15 @@
 // iOS-specific helper for accessing UIManager
 #if defined(__APPLE__)
 #include "../ios/TastoRuntimeHelper.h"
+// Use the logging function defined in TastoRuntimeHelper
+extern "C" void TastoLogMessage(const char* message);
+#define TASTO_LOG_IOS(fmt, ...) do { \
+    char buf[512]; \
+    snprintf(buf, sizeof(buf), "[Tasto] " fmt, ##__VA_ARGS__); \
+    TastoLogMessage(buf); \
+} while(0)
+#else
+#define TASTO_LOG_IOS(fmt, ...) fprintf(stderr, "[Tasto] " fmt "\n", ##__VA_ARGS__)
 #endif
 
 // Logging tag for this module
@@ -102,24 +111,35 @@ ShadowNodePtr HybridTasto::getShadowTreeRoot() const {
 }
 
 ShadowNodePtr HybridTasto::findNode(const std::string& testID) const {
+    TASTO_LOG_IOS("HybridTasto::findNode called for testID=%s", testID.c_str());
+
     // First try O(1) registry lookup
     auto& registry = ::tasto::TestIDRegistry::getInstance();
     auto node = registry.findByTestID(testID);
 
     if (node) {
+        TASTO_LOG_IOS("HybridTasto::findNode: Found in registry");
         return node;
     }
+
+    TASTO_LOG_IOS("HybridTasto::findNode: Not in registry, trying tree traversal");
 
     // Fallback to tree traversal
     auto root = getShadowTreeRoot();
     if (!root) {
+        TASTO_LOG_IOS("HybridTasto::findNode: No shadow tree root!");
         return nullptr;
     }
+
+    TASTO_LOG_IOS("HybridTasto::findNode: Got shadow tree root, updating registry");
 
     // Update registry while we're at it
     registry.updateFromTree(root);
 
-    return ::tasto::ShadowTreeTraverser::findByTestID(root, testID);
+    auto found = ::tasto::ShadowTreeTraverser::findByTestID(root, testID);
+    TASTO_LOG_IOS("HybridTasto::findNode: Tree traversal result: %s", found ? "found" : "not found");
+
+    return found;
 }
 
 // ============================================
@@ -244,8 +264,17 @@ std::variant<nitro::NullType, std::string> HybridTasto::getText(const std::strin
 // ============================================
 
 bool HybridTasto::tap(const std::string& testID) {
-    // Use EventDispatcher to dispatch press events directly through the shadow tree
-    // This is cross-platform (iOS + Android) and works for modals
+    TASTO_LOG_IOS("HybridTasto::tap called for testID=%s", testID.c_str());
+
+#if defined(__APPLE__)
+    // On iOS, use performTapByTestID which looks up the actual UIView
+    // This handles coordinate translation correctly
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    bool result = helper.performTapByTestID(testID);
+    TASTO_LOG_IOS("HybridTasto::tap result=%d", result);
+    return result;
+#else
+    // On Android, use EventDispatcher through shadow tree
     auto node = findNode(testID);
     if (!node) {
         TASTO_LOG_WARN(LOG_TAG, TASTO_LOG_FMT("tap: Element not found: " << testID));
@@ -254,6 +283,7 @@ bool HybridTasto::tap(const std::string& testID) {
 
     TASTO_LOG_WARN(LOG_TAG, TASTO_LOG_FMT("tap: Dispatching press events for " << testID));
     return ::tasto::EventDispatcher::tap(node);
+#endif
 }
 
 bool HybridTasto::longPress(const std::string& testID, double durationMs) {
@@ -384,6 +414,8 @@ void HybridTasto::synchronize() {
 ::tasto::Response HybridTasto::handleCommand(const ::tasto::Request& request) {
     ::tasto::Response response;
     response.id = request.id;
+
+    TASTO_LOG_IOS("HybridTasto::handleCommand: type=%s", request.type.c_str());
 
     try {
         const std::string& type = request.type;
