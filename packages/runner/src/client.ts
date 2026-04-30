@@ -291,6 +291,45 @@ export class TastoClient {
   async synchronize(): Promise<void> {
     await this.send<void>('synchronize', {});
   }
+
+  // ============================================
+  // Alert/Modal Handling
+  // ============================================
+
+  /**
+   * Check if an alert is currently present
+   */
+  async isAlertPresent(): Promise<boolean> {
+    return await this.send<boolean>('isAlertPresent', {});
+  }
+
+  /**
+   * Get the text of the current alert (title + message)
+   */
+  async getAlertText(): Promise<string> {
+    return await this.send<string>('getAlertText', {});
+  }
+
+  /**
+   * Get the button titles of the current alert
+   */
+  async getAlertButtons(): Promise<string[]> {
+    return await this.send<string[]>('getAlertButtons', {});
+  }
+
+  /**
+   * Tap an alert button by its text
+   */
+  async tapAlertButton(buttonText: string): Promise<void> {
+    await this.send<void>('tapAlertButton', { buttonText });
+  }
+
+  /**
+   * Dismiss the current alert
+   */
+  async dismissAlert(): Promise<void> {
+    await this.send<void>('dismissAlert', {});
+  }
 }
 
 // Global client instance

@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 #include <functional>
 #include <mutex>
 
@@ -126,6 +127,35 @@ private:
      * Convert internal LayoutMetrics to Nitro struct
      */
     LayoutMetrics convertLayoutMetrics(const ::tasto::LayoutMetrics& metrics) const;
+
+    // ============================================
+    // Alert/Modal Handling (WebSocket only)
+    // ============================================
+
+    /**
+     * Check if an alert is currently present
+     */
+    bool isAlertPresent();
+
+    /**
+     * Get the text of the current alert (title + message)
+     */
+    std::string getAlertText();
+
+    /**
+     * Get the button titles of the current alert
+     */
+    std::vector<std::string> getAlertButtons();
+
+    /**
+     * Tap an alert button by its text
+     */
+    bool tapAlertButton(const std::string& buttonText);
+
+    /**
+     * Dismiss the current alert
+     */
+    bool dismissAlert();
 };
 
 } // namespace margelo::nitro::tasto

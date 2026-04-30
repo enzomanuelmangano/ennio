@@ -125,49 +125,113 @@ void TastoRuntimeHelper::setSurfacePresenter(void* surfacePresenter) {
 
 // Helper to find surface presenter by looking through runtime objects
 static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
-    // Try to find RCTHost instances
-    Class hostClass = NSClassFromString(@"RCTHost");
-    if (hostClass) {
-        // Use runtime introspection to find instances
-        // This is a fallback - ideally the swizzling should work
-        NSLog(@"[Tasto] Searching for RCTHost instances...");
+    NSLog(@"[Tasto] Searching for surface presenter...");
 
-        // Try to access through the app delegate's factory
-        UIApplication* app = [UIApplication sharedApplication];
-        id appDelegate = app.delegate;
+    // Try to access through the app delegate
+    UIApplication* app = [UIApplication sharedApplication];
+    id appDelegate = app.delegate;
 
-        // Check if app delegate has reactNativeFactory property
-        SEL factorySel = @selector(reactNativeFactory);
-        if ([appDelegate respondsToSelector:factorySel]) {
-            #pragma clang diagnostic push
-            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-            id factory = [appDelegate performSelector:factorySel];
-            #pragma clang diagnostic pop
+    NSLog(@"[Tasto] AppDelegate class: %@", NSStringFromClass([appDelegate class]));
 
-            if (factory) {
-                NSLog(@"[Tasto] Found reactNativeFactory: %@", factory);
+    // Method 1: Try reactNativeFactory -> reactHost -> surfacePresenter (newer Expo pattern)
+    SEL factorySel = NSSelectorFromString(@"reactNativeFactory");
+    if ([appDelegate respondsToSelector:factorySel]) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        id factory = [appDelegate performSelector:factorySel];
+        #pragma clang diagnostic pop
 
-                // Try to get host from factory
-                SEL hostSel = @selector(reactHost);
-                if ([factory respondsToSelector:hostSel]) {
-                    #pragma clang diagnostic push
-                    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                    id host = [factory performSelector:hostSel];
-                    #pragma clang diagnostic pop
+        if (factory) {
+            NSLog(@"[Tasto] Found reactNativeFactory: %@", NSStringFromClass([factory class]));
 
-                    if (host) {
-                        NSLog(@"[Tasto] Found RCTHost: %@", host);
+            // Try reactHost first
+            SEL hostSel = NSSelectorFromString(@"reactHost");
+            if ([factory respondsToSelector:hostSel]) {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                id host = [factory performSelector:hostSel];
+                #pragma clang diagnostic pop
 
-                        SEL presenterSel = @selector(surfacePresenter);
-                        if ([host respondsToSelector:presenterSel]) {
-                            #pragma clang diagnostic push
-                            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                            id presenter = [host performSelector:presenterSel];
-                            #pragma clang diagnostic pop
+                if (host) {
+                    NSLog(@"[Tasto] Found reactHost: %@", NSStringFromClass([host class]));
 
-                            if (presenter) {
-                                NSLog(@"[Tasto] Found surfacePresenter: %@", presenter);
-                                return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
+                    SEL presenterSel = NSSelectorFromString(@"surfacePresenter");
+                    if ([host respondsToSelector:presenterSel]) {
+                        #pragma clang diagnostic push
+                        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                        id presenter = [host performSelector:presenterSel];
+                        #pragma clang diagnostic pop
+
+                        if (presenter) {
+                            NSLog(@"[Tasto] Found surfacePresenter via host: %@", presenter);
+                            return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
+                        }
+                    }
+                }
+            }
+
+            // Try surfacePresenter directly on factory
+            SEL presenterSel = NSSelectorFromString(@"surfacePresenter");
+            if ([factory respondsToSelector:presenterSel]) {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                id presenter = [factory performSelector:presenterSel];
+                #pragma clang diagnostic pop
+
+                if (presenter) {
+                    NSLog(@"[Tasto] Found surfacePresenter on factory: %@", presenter);
+                    return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
+                }
+            }
+
+            // Log available methods on factory for debugging
+            NSLog(@"[Tasto] Factory methods:");
+            unsigned int count;
+            Method *methods = class_copyMethodList([factory class], &count);
+            for (unsigned int i = 0; i < count && i < 20; i++) {
+                NSLog(@"[Tasto]   - %@", NSStringFromSelector(method_getName(methods[i])));
+            }
+            free(methods);
+        }
+    }
+
+    // Method 2: Search windows for RCTSurfaceHostingView
+    NSLog(@"[Tasto] Searching windows for RCTSurfaceHostingView...");
+    for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            UIWindowScene* windowScene = (UIWindowScene*)scene;
+            for (UIWindow* window in windowScene.windows) {
+                UIViewController* rootVC = window.rootViewController;
+                if (rootVC && rootVC.view) {
+                    // Look for RCTRootContentView or RCTSurfaceHostingView
+                    for (UIView* subview in rootVC.view.subviews) {
+                        NSString* className = NSStringFromClass([subview class]);
+                        NSLog(@"[Tasto] Found view: %@", className);
+
+                        if ([className containsString:@"RCTSurface"] ||
+                            [className containsString:@"RCTRoot"]) {
+                            // Try to get surface from this view
+                            SEL surfaceSel = NSSelectorFromString(@"surface");
+                            if ([subview respondsToSelector:surfaceSel]) {
+                                #pragma clang diagnostic push
+                                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                                id surface = [subview performSelector:surfaceSel];
+                                #pragma clang diagnostic pop
+
+                                if (surface) {
+                                    SEL presenterSel = NSSelectorFromString(@"surfacePresenter");
+                                    if ([surface respondsToSelector:presenterSel]) {
+                                        #pragma clang diagnostic push
+                                        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                                        id presenter = [surface performSelector:presenterSel];
+                                        #pragma clang diagnostic pop
+
+                                        if (presenter) {
+                                            NSLog(@"[Tasto] Found surfacePresenter via view: %@", presenter);
+                                            return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -176,41 +240,61 @@ static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
         }
     }
 
+    NSLog(@"[Tasto] Could not find surface presenter");
     return nil;
 }
 
 std::shared_ptr<facebook::react::UIManager> TastoRuntimeHelper::getUIManager() {
-    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager called, surfacePresenter_=%p", surfacePresenter_);
+    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager called, cached=%p", surfacePresenter_);
 
-    // If we don't have a surface presenter, try to find one
-    if (!surfacePresenter_) {
-        NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: surfacePresenter_ is null, searching...");
+    __block std::shared_ptr<facebook::react::UIManager> result = nullptr;
 
-        RCTSurfacePresenter* found = findSurfacePresenterInRuntime();
-        if (found) {
-            surfacePresenter_ = (__bridge void*)found;
-            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: Found surface presenter via runtime search");
-        } else {
-            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: Could not find surface presenter");
-            return nullptr;
+    void (^getUIManagerBlock)(void) = ^{
+        @try {
+            RCTSurfacePresenter* presenter = nil;
+
+            // First try cached presenter from swizzling
+            if (surfacePresenter_) {
+                presenter = (__bridge RCTSurfacePresenter*)surfacePresenter_;
+                NSLog(@"[Tasto] Using cached surfacePresenter: %@", presenter);
+            }
+
+            // If no cached, try runtime search
+            if (!presenter) {
+                presenter = findSurfacePresenterInRuntime();
+                if (presenter) {
+                    surfacePresenter_ = (__bridge void*)presenter;
+                }
+            }
+
+            if (!presenter) {
+                NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: Could not find surface presenter");
+                return;
+            }
+
+            RCTScheduler* scheduler = [presenter scheduler];
+            if (!scheduler) {
+                NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: scheduler is null");
+                return;
+            }
+
+            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: scheduler=%@", scheduler);
+
+            result = [scheduler uiManager];
+            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: uiManager=%s", result ? "valid" : "null");
+        } @catch (NSException *exception) {
+            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: Exception: %@", exception);
         }
+    };
+
+    // Must access surface presenter and scheduler from main thread
+    if ([NSThread isMainThread]) {
+        getUIManagerBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), getUIManagerBlock);
     }
 
-    RCTSurfacePresenter* presenter = (__bridge RCTSurfacePresenter*)surfacePresenter_;
-    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: presenter=%@", presenter);
-
-    RCTScheduler* scheduler = [presenter scheduler];
-    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: scheduler=%@", scheduler);
-
-    if (!scheduler) {
-        NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: scheduler is null");
-        return nullptr;
-    }
-
-    auto uiManager = [scheduler uiManager];
-    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: uiManager=%s", uiManager ? "valid" : "null");
-
-    return uiManager;
+    return result;
 }
 
 std::shared_ptr<const facebook::react::ShadowNode> TastoRuntimeHelper::getShadowTreeRoot() {
@@ -224,27 +308,54 @@ std::shared_ptr<const facebook::react::ShadowNode> TastoRuntimeHelper::getShadow
 
     NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: UIManager available");
 
-    // Get the shadow tree registry and enumerate to find the first surface
-    auto& shadowTreeRegistry = uiManager->getShadowTreeRegistry();
-    std::shared_ptr<const facebook::react::ShadowNode> rootNode = nullptr;
-    int surfaceCount = 0;
+    // Use a pointer wrapper to capture in lambda (since __block doesn't work with lambdas)
+    auto rootNodePtr = std::make_shared<std::shared_ptr<const facebook::react::ShadowNode>>(nullptr);
 
-    shadowTreeRegistry.enumerate([&](const facebook::react::ShadowTree& shadowTree, bool& stop) {
-        surfaceCount++;
-        // Get the root from the first surface we find
-        rootNode = shadowTree.getCurrentRevision().rootShadowNode;
-        NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: Found surface %d", surfaceCount);
-        stop = true;
-    });
+    void (^getRootBlock)(void) = ^{
+        // Get the shadow tree registry and enumerate to find the first surface
+        auto& shadowTreeRegistry = uiManager->getShadowTreeRegistry();
+        int surfaceCount = 0;
 
-    NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: Total surfaces=%d, rootNode=%s",
-          surfaceCount, rootNode ? "valid" : "null");
+        shadowTreeRegistry.enumerate([&surfaceCount, rootNodePtr](const facebook::react::ShadowTree& shadowTree, bool& stop) {
+            surfaceCount++;
+            // Get the root from the first surface we find
+            *rootNodePtr = shadowTree.getCurrentRevision().rootShadowNode;
+            NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: Found surface %d", surfaceCount);
+            stop = true;
+        });
 
-    return rootNode;
+        NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: Total surfaces=%d, rootNode=%s",
+              surfaceCount, *rootNodePtr ? "valid" : "null");
+    };
+
+    // Shadow tree access should happen on main thread for safety
+    if ([NSThread isMainThread]) {
+        getRootBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), getRootBlock);
+    }
+
+    return *rootNodePtr;
 }
 
 bool TastoRuntimeHelper::isInitialized() const {
     return surfacePresenter_ != nullptr;
+}
+
+// Helper to find the RCTSurfaceTouchHandler gesture recognizer on a view hierarchy
+static UIGestureRecognizer* findSurfaceTouchHandler(UIView* view) {
+    UIView* searchView = view;
+    while (searchView) {
+        for (UIGestureRecognizer* gr in searchView.gestureRecognizers) {
+            NSString* grClass = NSStringFromClass([gr class]);
+            if ([grClass containsString:@"SurfaceTouchHandler"] ||
+                [grClass containsString:@"RCTTouchHandler"]) {
+                return gr;
+            }
+        }
+        searchView = searchView.superview;
+    }
+    return nil;
 }
 
 bool TastoRuntimeHelper::performTap(float x, float y) {
@@ -265,46 +376,135 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
         NSLog(@"[Tasto] performTap: Using window %@ (level %.0f)",
               NSStringFromClass([targetWindow class]), targetWindow.windowLevel);
 
-        // Find the target view
-        UIView* targetView = [targetWindow hitTest:point withEvent:nil];
-        if (!targetView) {
+        // Find the target view at this point
+        UIView* hitView = [targetWindow hitTest:point withEvent:nil];
+        if (!hitView) {
             NSLog(@"[Tasto] performTap: No view at point");
             success = false;
             return;
         }
 
-        NSLog(@"[Tasto] performTap: Found view %@", NSStringFromClass([targetView class]));
+        NSLog(@"[Tasto] performTap: Hit view %@", NSStringFromClass([hitView class]));
 
-        // Log the view hierarchy for debugging
-        UIView* debugView = targetView;
-        int depth = 0;
-        while (debugView && depth < 10) {
-            NSLog(@"[Tasto] performTap: View hierarchy[%d]: %@ (gestureRecognizers: %lu)",
-                  depth, NSStringFromClass([debugView class]),
-                  (unsigned long)debugView.gestureRecognizers.count);
-            debugView = debugView.superview;
-            depth++;
+        // Try Method 1: Use accessibilityActivate if available
+        // This is the most reliable way to trigger onPress in React Native
+        UIView* activatableView = hitView;
+        while (activatableView && activatableView != targetWindow) {
+            // Check if this view is accessible and can be activated
+            if (activatableView.isAccessibilityElement ||
+                activatableView.accessibilityTraits != UIAccessibilityTraitNone) {
+
+                NSLog(@"[Tasto] performTap: Found accessible view: %@ (traits: %llu, identifier: %@)",
+                      NSStringFromClass([activatableView class]),
+                      (unsigned long long)activatableView.accessibilityTraits,
+                      activatableView.accessibilityIdentifier ?: @"nil");
+
+                // Try accessibility activate
+                if ([activatableView accessibilityActivate]) {
+                    NSLog(@"[Tasto] performTap: accessibilityActivate succeeded!");
+                    success = true;
+                    return;
+                }
+            }
+            activatableView = activatableView.superview;
         }
 
-        // For non-RCT views (like Modal content), the shadow tree coordinates may not match
-        // the native view positions. Instead, just send the touch to the original hitTest target
-        // and let UIKit handle the event routing.
-        //
-        // The issue is that React Native Modal creates views with different coordinate systems
-        // between the shadow tree and native views. Don't try to find nested RCT views - just
-        // use the UIView that hitTest returned and let gesture recognizers handle it.
-        if (![NSStringFromClass([targetView class]) hasPrefix:@"RCT"]) {
-            NSLog(@"[Tasto] performTap: Hit non-RCT view %@, using direct touch", NSStringFromClass([targetView class]));
-            // Keep targetView as-is (the UIView from hitTest)
+        NSLog(@"[Tasto] performTap: accessibilityActivate didn't work, trying touch handler");
+
+        // Try Method 2: Find the RCTSurfaceTouchHandler and call its touch methods directly
+        UIGestureRecognizer* touchHandler = findSurfaceTouchHandler(hitView);
+        if (touchHandler) {
+            NSLog(@"[Tasto] performTap: Found touch handler: %@", NSStringFromClass([touchHandler class]));
+
+            // For RCTSurfaceTouchHandler, we need to simulate touches through it
+            // The touch handler expects to receive touches from the window
+            // We'll create synthetic touches and send them through the gesture recognizer
+
+            UITouch* touch = [[UITouch alloc] init];
+            NSTimeInterval timestamp = [[NSProcessInfo processInfo] systemUptime];
+
+            // Find the view that the touch handler is attached to (usually the surface view)
+            UIView* touchHandlerView = touchHandler.view;
+            if (!touchHandlerView) {
+                touchHandlerView = hitView;
+            }
+
+            // Set up touch for began phase
+            [touch setWindow:targetWindow];
+            [touch setView:touchHandlerView];  // Use the touch handler's view
+            [touch setPhase:UITouchPhaseBegan];
+            [touch setTapCount:1];
+            [touch _setLocationInWindow:point resetPrevious:YES];
+            [touch setTimestamp:timestamp];
+            [touch _setIsFirstTouchForView:YES];
+
+            // Create touch set
+            NSSet<UITouch*>* touches = [NSSet setWithObject:touch];
+
+            // Get the application's touch event
+            UIApplication* app = [UIApplication sharedApplication];
+            UIEvent* event = [app _touchesEvent];
+            [event _clearTouches];
+            [event _addTouch:touch forDelayedDelivery:NO];
+
+            NSLog(@"[Tasto] performTap: Calling touchesBegan on touch handler");
+
+            // Call touchesBegan directly on the gesture recognizer
+            [touchHandler touchesBegan:touches withEvent:event];
+
+            // Wait a bit for processing
+            usleep(60000); // 60ms
+
+            // Update touch for ended phase
+            [touch setPhase:UITouchPhaseEnded];
+            [touch setTimestamp:[[NSProcessInfo processInfo] systemUptime]];
+            [touch _setLocationInWindow:point resetPrevious:NO];
+
+            [event _clearTouches];
+            [event _addTouch:touch forDelayedDelivery:NO];
+
+            NSLog(@"[Tasto] performTap: Calling touchesEnded on touch handler");
+
+            // Call touchesEnded directly on the gesture recognizer
+            [touchHandler touchesEnded:touches withEvent:event];
+
+            success = true;
+            return;
         }
 
-        // Create synthetic UITouch
+        NSLog(@"[Tasto] performTap: No touch handler found, trying UIControl");
+
+        // Try Method 3: If it's a UIControl, send actions directly
+        UIView* controlView = hitView;
+        while (controlView && controlView != targetWindow) {
+            if ([controlView isKindOfClass:[UIControl class]]) {
+                UIControl* control = (UIControl*)controlView;
+                NSLog(@"[Tasto] performTap: Found UIControl: %@", NSStringFromClass([control class]));
+                [control sendActionsForControlEvents:UIControlEventTouchUpInside];
+                success = true;
+                return;
+            }
+            controlView = controlView.superview;
+        }
+
+        NSLog(@"[Tasto] performTap: Falling back to synthetic touch event");
+
+        // Try Method 4: Fall back to synthetic UITouch via sendEvent (original approach)
+        UIView* targetView = hitView;
+
+        // Walk up to find a view with gesture recognizers
+        UIView* searchView = hitView;
+        while (searchView && searchView != targetWindow) {
+            if (searchView.gestureRecognizers.count > 0) {
+                targetView = searchView;
+                break;
+            }
+            searchView = searchView.superview;
+        }
+
         UITouch* touch = [[UITouch alloc] init];
-
-        // Get current timestamp
         NSTimeInterval timestamp = [[NSProcessInfo processInfo] systemUptime];
 
-        // Set up touch properties using private APIs
         [touch setWindow:targetWindow];
         [touch setView:targetView];
         [touch setPhase:UITouchPhaseBegan];
@@ -313,36 +513,22 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
         [touch setTimestamp:timestamp];
         [touch _setIsFirstTouchForView:YES];
 
-        // Get the application's touch event
         UIApplication* app = [UIApplication sharedApplication];
         UIEvent* event = [app _touchesEvent];
         [event _clearTouches];
         [event _addTouch:touch forDelayedDelivery:NO];
 
-        NSLog(@"[Tasto] performTap: Sending touchesBegan to window: %@ (level: %.0f)",
-              NSStringFromClass([targetWindow class]), targetWindow.windowLevel);
-
-        // Send touch began
         [app sendEvent:event];
 
-        NSLog(@"[Tasto] performTap: touchesBegan sent successfully");
-
-        // Update touch for end phase after a brief delay
-        // Using usleep on main thread is acceptable for testing frameworks
         usleep(50000); // 50ms
 
-        // Update touch for end phase
         [touch setPhase:UITouchPhaseEnded];
         [touch setTimestamp:[[NSProcessInfo processInfo] systemUptime]];
         [touch _setLocationInWindow:point resetPrevious:NO];
 
-        // Clear and re-add the touch
         [event _clearTouches];
         [event _addTouch:touch forDelayedDelivery:NO];
 
-        NSLog(@"[Tasto] performTap: Sending touchesEnded");
-
-        // Send touch ended
         [app sendEvent:event];
 
         success = true;
@@ -586,6 +772,424 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
 
 bool TastoRuntimeHelper::performClearText(const std::string& testID) {
     return performTypeText(testID, "");
+}
+
+// ============================================
+// Scroll Handling
+// ============================================
+
+// Helper to find UIScrollView in a view's hierarchy
+static UIScrollView* findScrollViewInView(UIView* view) {
+    if ([view isKindOfClass:[UIScrollView class]]) {
+        return (UIScrollView*)view;
+    }
+
+    for (UIView* subview in view.subviews) {
+        UIScrollView* found = findScrollViewInView(subview);
+        if (found) {
+            return found;
+        }
+    }
+
+    return nil;
+}
+
+bool TastoRuntimeHelper::performScroll(const std::string& testID, float deltaX, float deltaY) {
+    __block bool success = false;
+    NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
+
+    void (^scrollBlock)(void) = ^{
+        // Find the key window
+        UIWindow* keyWindow = nil;
+        for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene* windowScene = (UIWindowScene*)scene;
+                for (UIWindow* window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        keyWindow = window;
+                        break;
+                    }
+                }
+            }
+            if (keyWindow) break;
+        }
+
+        if (!keyWindow) {
+            NSLog(@"[Tasto] performScroll: No key window found");
+            success = false;
+            return;
+        }
+
+        UIView* view = findViewByAccessibilityIdentifier(keyWindow, identifier);
+        if (!view) {
+            NSLog(@"[Tasto] performScroll: View not found for testID: %@", identifier);
+            success = false;
+            return;
+        }
+
+        // Find the UIScrollView - either the view itself or a child
+        UIScrollView* scrollView = nil;
+        if ([view isKindOfClass:[UIScrollView class]]) {
+            scrollView = (UIScrollView*)view;
+        } else {
+            scrollView = findScrollViewInView(view);
+        }
+
+        if (!scrollView) {
+            NSLog(@"[Tasto] performScroll: No UIScrollView found for testID: %@", identifier);
+            success = false;
+            return;
+        }
+
+        NSLog(@"[Tasto] performScroll: Found scroll view, current offset: (%.1f, %.1f)",
+              scrollView.contentOffset.x, scrollView.contentOffset.y);
+
+        // Calculate new offset
+        CGPoint currentOffset = scrollView.contentOffset;
+        CGPoint newOffset = CGPointMake(
+            currentOffset.x + deltaX,
+            currentOffset.y + deltaY
+        );
+
+        // Clamp to valid bounds
+        CGFloat maxX = MAX(0, scrollView.contentSize.width - scrollView.bounds.size.width);
+        CGFloat maxY = MAX(0, scrollView.contentSize.height - scrollView.bounds.size.height);
+        newOffset.x = MAX(0, MIN(newOffset.x, maxX));
+        newOffset.y = MAX(0, MIN(newOffset.y, maxY));
+
+        NSLog(@"[Tasto] performScroll: Scrolling to offset: (%.1f, %.1f)", newOffset.x, newOffset.y);
+
+        // Perform the scroll
+        [scrollView setContentOffset:newOffset animated:YES];
+
+        success = true;
+    };
+
+    if ([NSThread isMainThread]) {
+        scrollBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), scrollBlock);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::performScrollTo(const std::string& testID, float x, float y, bool animated) {
+    __block bool success = false;
+    NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
+
+    void (^scrollBlock)(void) = ^{
+        // Find the key window
+        UIWindow* keyWindow = nil;
+        for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene* windowScene = (UIWindowScene*)scene;
+                for (UIWindow* window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        keyWindow = window;
+                        break;
+                    }
+                }
+            }
+            if (keyWindow) break;
+        }
+
+        if (!keyWindow) {
+            NSLog(@"[Tasto] performScrollTo: No key window found");
+            success = false;
+            return;
+        }
+
+        UIView* view = findViewByAccessibilityIdentifier(keyWindow, identifier);
+        if (!view) {
+            NSLog(@"[Tasto] performScrollTo: View not found for testID: %@", identifier);
+            success = false;
+            return;
+        }
+
+        // Find the UIScrollView
+        UIScrollView* scrollView = nil;
+        if ([view isKindOfClass:[UIScrollView class]]) {
+            scrollView = (UIScrollView*)view;
+        } else {
+            scrollView = findScrollViewInView(view);
+        }
+
+        if (!scrollView) {
+            NSLog(@"[Tasto] performScrollTo: No UIScrollView found for testID: %@", identifier);
+            success = false;
+            return;
+        }
+
+        NSLog(@"[Tasto] performScrollTo: Scrolling to (%.1f, %.1f) animated=%d", x, y, animated);
+
+        // Clamp to valid bounds
+        CGFloat maxX = MAX(0, scrollView.contentSize.width - scrollView.bounds.size.width);
+        CGFloat maxY = MAX(0, scrollView.contentSize.height - scrollView.bounds.size.height);
+        CGPoint targetOffset = CGPointMake(
+            MAX(0, MIN(x, maxX)),
+            MAX(0, MIN(y, maxY))
+        );
+
+        [scrollView setContentOffset:targetOffset animated:animated];
+        success = true;
+    };
+
+    if ([NSThread isMainThread]) {
+        scrollBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), scrollBlock);
+    }
+
+    return success;
+}
+
+// ============================================
+// Alert/Modal Handling
+// ============================================
+
+// Helper to find the presented alert controller
+static UIAlertController* findPresentedAlertController() {
+    UIViewController* rootVC = nil;
+
+    for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            UIWindowScene* windowScene = (UIWindowScene*)scene;
+            for (UIWindow* window in windowScene.windows) {
+                if (window.isKeyWindow) {
+                    rootVC = window.rootViewController;
+                    break;
+                }
+            }
+        }
+        if (rootVC) break;
+    }
+
+    if (!rootVC) return nil;
+
+    // Walk up the presented view controller chain to find an alert
+    UIViewController* currentVC = rootVC;
+    while (currentVC.presentedViewController) {
+        currentVC = currentVC.presentedViewController;
+        if ([currentVC isKindOfClass:[UIAlertController class]]) {
+            return (UIAlertController*)currentVC;
+        }
+    }
+
+    return nil;
+}
+
+bool TastoRuntimeHelper::isAlertPresent() {
+    __block bool result = false;
+
+    void (^block)(void) = ^{
+        result = (findPresentedAlertController() != nil);
+        NSLog(@"[Tasto] isAlertPresent: %@", result ? @"YES" : @"NO");
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+
+    return result;
+}
+
+std::string TastoRuntimeHelper::getAlertText() {
+    __block std::string result;
+
+    void (^block)(void) = ^{
+        UIAlertController* alert = findPresentedAlertController();
+        if (alert) {
+            NSMutableString* text = [NSMutableString string];
+            if (alert.title) {
+                [text appendString:alert.title];
+            }
+            if (alert.message) {
+                if (text.length > 0) {
+                    [text appendString:@"\n"];
+                }
+                [text appendString:alert.message];
+            }
+            result = [text UTF8String];
+            NSLog(@"[Tasto] getAlertText: %@", text);
+        } else {
+            NSLog(@"[Tasto] getAlertText: No alert found");
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+
+    return result;
+}
+
+std::vector<std::string> TastoRuntimeHelper::getAlertButtons() {
+    __block std::vector<std::string> result;
+
+    void (^block)(void) = ^{
+        UIAlertController* alert = findPresentedAlertController();
+        if (alert) {
+            for (UIAlertAction* action in alert.actions) {
+                if (action.title) {
+                    result.push_back([action.title UTF8String]);
+                    NSLog(@"[Tasto] getAlertButtons: Found button '%@'", action.title);
+                }
+            }
+        } else {
+            NSLog(@"[Tasto] getAlertButtons: No alert found");
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+
+    return result;
+}
+
+// Helper function to find and tap a button by title (recursive)
+static void findAndTapButtonWithTitle(NSString* title, UIView* view) {
+    if ([view isKindOfClass:[UIButton class]]) {
+        UIButton* button = (UIButton*)view;
+        NSString* buttonTitle = [button titleForState:UIControlStateNormal];
+        if ([buttonTitle isEqualToString:title]) {
+            [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+            return;
+        }
+    }
+
+    for (UIView* subview in [view subviews]) {
+        findAndTapButtonWithTitle(title, subview);
+    }
+}
+
+bool TastoRuntimeHelper::tapAlertButton(const std::string& buttonText) {
+    __block bool success = false;
+    NSString* targetButtonText = [NSString stringWithUTF8String:buttonText.c_str()];
+
+    void (^block)(void) = ^{
+        UIAlertController* alert = findPresentedAlertController();
+        if (!alert) {
+            NSLog(@"[Tasto] tapAlertButton: No alert found");
+            return;
+        }
+
+        // Find the action with matching title
+        for (UIAlertAction* action in alert.actions) {
+            if ([action.title isEqualToString:targetButtonText]) {
+                NSLog(@"[Tasto] tapAlertButton: Found button '%@', triggering", targetButtonText);
+
+                // Dismiss the alert and call the action's handler
+                // We need to use a private API to get the handler since UIAlertAction doesn't expose it
+                // Instead, we'll dismiss by tapping the button's view
+
+                // Find the button in the alert's view hierarchy
+                UIView* alertView = alert.view;
+                if (alertView.superview) {
+                    alertView = alertView.superview;
+                }
+
+                // Try to find and tap the button by its title
+                for (UIView* subview in [alertView subviews]) {
+                    findAndTapButtonWithTitle(targetButtonText, subview);
+                }
+
+                // Alternative: Dismiss the alert programmatically and invoke the handler
+                // This is more reliable since it doesn't depend on finding the button view
+                [alert dismissViewControllerAnimated:NO completion:^{
+                    // The action handler should be called as part of the dismissal
+                }];
+
+                // Directly invoke the action handler using KVC if available
+                SEL handlerSel = NSSelectorFromString(@"handler");
+                if ([action respondsToSelector:handlerSel]) {
+                    #pragma clang diagnostic push
+                    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    void (^handler)(UIAlertAction*) = [action performSelector:handlerSel];
+                    #pragma clang diagnostic pop
+
+                    if (handler) {
+                        NSLog(@"[Tasto] tapAlertButton: Invoking handler for '%@'", targetButtonText);
+                        handler(action);
+                    }
+                }
+
+                success = true;
+                return;
+            }
+        }
+
+        NSLog(@"[Tasto] tapAlertButton: Button '%@' not found", targetButtonText);
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::dismissAlert() {
+    __block bool success = false;
+
+    void (^block)(void) = ^{
+        UIAlertController* alert = findPresentedAlertController();
+        if (!alert) {
+            NSLog(@"[Tasto] dismissAlert: No alert found");
+            return;
+        }
+
+        NSLog(@"[Tasto] dismissAlert: Dismissing alert");
+
+        // Find a cancel-style action, or the first action
+        UIAlertAction* targetAction = nil;
+        for (UIAlertAction* action in alert.actions) {
+            if (action.style == UIAlertActionStyleCancel) {
+                targetAction = action;
+                break;
+            }
+        }
+
+        if (!targetAction && alert.actions.count > 0) {
+            // Use the last action (often "OK" or "Cancel")
+            targetAction = alert.actions.lastObject;
+        }
+
+        if (targetAction) {
+            // Try to invoke the handler
+            SEL handlerSel = NSSelectorFromString(@"handler");
+            if ([targetAction respondsToSelector:handlerSel]) {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                void (^handler)(UIAlertAction*) = [targetAction performSelector:handlerSel];
+                #pragma clang diagnostic pop
+
+                if (handler) {
+                    handler(targetAction);
+                }
+            }
+        }
+
+        [alert dismissViewControllerAnimated:NO completion:nil];
+        success = true;
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+
+    return success;
 }
 
 } // namespace tasto

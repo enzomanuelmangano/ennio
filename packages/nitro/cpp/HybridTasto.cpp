@@ -239,8 +239,17 @@ bool HybridTasto::isVisible(const std::string& testID) {
     }
 
     // Use screen dimensions if set, otherwise use reasonable defaults
-    float width = screenWidth_ > 0 ? screenWidth_ : 414.0f;   // iPhone default
-    float height = screenHeight_ > 0 ? screenHeight_ : 896.0f;
+    float width = screenWidth_ > 0 ? screenWidth_ : 430.0f;   // iPhone 17 Pro
+    float height = screenHeight_ > 0 ? screenHeight_ : 932.0f;
+
+    // Get metrics for debugging
+    auto metrics = ::tasto::ShadowTreeTraverser::getLayoutMetrics(root, testID);
+    if (metrics) {
+        TASTO_LOG_IOS("isVisible: testID=%s screenX=%.1f screenY=%.1f w=%.1f h=%.1f (screen: %.0fx%.0f)",
+            testID.c_str(), metrics->screenX, metrics->screenY, metrics->width, metrics->height, width, height);
+    } else {
+        TASTO_LOG_IOS("isVisible: testID=%s - no metrics", testID.c_str());
+    }
 
     return ::tasto::ShadowTreeTraverser::isVisible(root, testID, width, height);
 }
@@ -266,24 +275,51 @@ std::variant<nitro::NullType, std::string> HybridTasto::getText(const std::strin
 bool HybridTasto::tap(const std::string& testID) {
     TASTO_LOG_IOS("HybridTasto::tap called for testID=%s", testID.c_str());
 
-#if defined(__APPLE__)
-    // On iOS, use performTapByTestID which looks up the actual UIView
-    // This handles coordinate translation correctly
-    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
-    bool result = helper.performTapByTestID(testID);
-    TASTO_LOG_IOS("HybridTasto::tap result=%d", result);
-    return result;
-#else
-    // On Android, use EventDispatcher through shadow tree
+    // First, find the node in shadow tree (works on all platforms)
     auto node = findNode(testID);
     if (!node) {
-        TASTO_LOG_WARN(LOG_TAG, TASTO_LOG_FMT("tap: Element not found: " << testID));
+        TASTO_LOG_IOS("HybridTasto::tap: Element not found in shadow tree: %s", testID.c_str());
+
+#if defined(__APPLE__)
+        // On iOS, try to find by accessibilityIdentifier as fallback
+        TASTO_LOG_IOS("HybridTasto::tap: Trying UIView search as fallback");
+        auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+        return helper.performTapByTestID(testID);
+#else
         return false;
+#endif
     }
 
-    TASTO_LOG_WARN(LOG_TAG, TASTO_LOG_FMT("tap: Dispatching press events for " << testID));
-    return ::tasto::EventDispatcher::tap(node);
+    TASTO_LOG_IOS("HybridTasto::tap: Found node, dispatching events");
+
+    // Try dispatching events through the event emitter (cross-platform approach)
+    // This directly triggers onPress in Pressable components
+    bool eventResult = ::tasto::EventDispatcher::tap(node);
+    TASTO_LOG_IOS("HybridTasto::tap: EventDispatcher result=%d", eventResult);
+
+    if (eventResult) {
+        return true;
+    }
+
+#if defined(__APPLE__)
+    // If event dispatch didn't work, try native tap on iOS
+    auto root = getShadowTreeRoot();
+    if (root) {
+        auto metrics = ::tasto::ShadowTreeTraverser::getLayoutMetrics(root, testID);
+        if (metrics) {
+            float centerX = metrics->screenX + (metrics->width / 2.0f);
+            float centerY = metrics->screenY + (metrics->height / 2.0f);
+            TASTO_LOG_IOS("HybridTasto::tap: Trying native tap at (%.1f, %.1f)", centerX, centerY);
+
+            auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+            bool nativeResult = helper.performTap(centerX, centerY);
+            TASTO_LOG_IOS("HybridTasto::tap: native tap result=%d", nativeResult);
+            return nativeResult;
+        }
+    }
 #endif
+
+    return eventResult;
 }
 
 bool HybridTasto::longPress(const std::string& testID, double durationMs) {
@@ -615,6 +651,44 @@ void HybridTasto::synchronize() {
             synchronize();
             response.success = true;
         }
+        // Alert/Modal handling
+        else if (type == "isAlertPresent") {
+            bool result = isAlertPresent();
+            response.success = true;
+            response.data = result ? "true" : "false";
+        }
+        else if (type == "getAlertText") {
+            std::string text = getAlertText();
+            response.success = true;
+            response.data = "\"" + text + "\"";
+        }
+        else if (type == "getAlertButtons") {
+            auto buttons = getAlertButtons();
+            std::ostringstream oss;
+            oss << "[";
+            for (size_t i = 0; i < buttons.size(); i++) {
+                if (i > 0) oss << ",";
+                oss << "\"" << buttons[i] << "\"";
+            }
+            oss << "]";
+            response.success = true;
+            response.data = oss.str();
+        }
+        else if (type == "tapAlertButton") {
+            std::string buttonText = ::tasto::json::parseString(payload, "buttonText");
+            bool result = tapAlertButton(buttonText);
+            response.success = result;
+            if (!result) {
+                response.error = "Alert button not found: " + buttonText;
+            }
+        }
+        else if (type == "dismissAlert") {
+            bool result = dismissAlert();
+            response.success = result;
+            if (!result) {
+                response.error = "No alert to dismiss";
+            }
+        }
         else {
             response.success = false;
             response.error = "Unknown command: " + type;
@@ -658,6 +732,56 @@ LayoutMetrics HybridTasto::convertLayoutMetrics(const ::tasto::LayoutMetrics& me
     result.screenX = metrics.screenX;
     result.screenY = metrics.screenY;
     return result;
+}
+
+// ============================================
+// Alert/Modal Handling
+// ============================================
+
+bool HybridTasto::isAlertPresent() {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.isAlertPresent();
+#else
+    // Android: not implemented yet
+    return false;
+#endif
+}
+
+std::string HybridTasto::getAlertText() {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.getAlertText();
+#else
+    return "";
+#endif
+}
+
+std::vector<std::string> HybridTasto::getAlertButtons() {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.getAlertButtons();
+#else
+    return {};
+#endif
+}
+
+bool HybridTasto::tapAlertButton(const std::string& buttonText) {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.tapAlertButton(buttonText);
+#else
+    return false;
+#endif
+}
+
+bool HybridTasto::dismissAlert() {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.dismissAlert();
+#else
+    return false;
+#endif
 }
 
 } // namespace margelo::nitro::tasto

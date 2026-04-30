@@ -5,6 +5,7 @@
 
 #include <react/renderer/core/LayoutableShadowNode.h>
 #include <react/renderer/components/view/ViewEventEmitter.h>
+#include <react/renderer/components/view/ViewProps.h>
 
 // iOS-specific native tap support
 #if defined(__APPLE__)
@@ -19,16 +20,8 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
         return false;
     }
 
-#if defined(__APPLE__)
-    // On iOS, use native tap implementation which handles UIKit touch properly
-    // This avoids threading issues with event dispatch
-    auto [centerX, centerY] = getCenterPoint(node);
-    fprintf(stderr, "[Tasto] EventDispatcher::tap: using native tap at (%.1f, %.1f)\n", centerX, centerY);
-
-    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
-    return helper.performTap(centerX, centerY);
-#else
-    // Android: use event dispatch approach
+    // Use event dispatch approach on all platforms
+    // This dispatches events directly through React's event system
     auto emitter = getEventEmitter(node);
     if (!emitter) {
         fprintf(stderr, "[Tasto] EventDispatcher::tap: emitter is null for tag=%d\n", node->getTag());
@@ -50,15 +43,17 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
 
     fprintf(stderr, "[Tasto] EventDispatcher::tap: tag=%d, center=(%.1f, %.1f)\n", nodeTag, centerX, centerY);
 
-    // Dispatch native touch events followed by click
+    // Dispatch touch and click events through the event emitter
+    // This directly triggers the React Native event handlers
     dispatchTouchEvent(emitter, "touchStart", centerX, centerY, nodeTag, timestamp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     dispatchTouchEvent(emitter, "touchEnd", centerX, centerY, nodeTag, timestamp);
+
+    // Dispatch click event - this is what triggers onPress in Pressable
     dispatchClickEvent(emitter, centerX, centerY);
 
     fprintf(stderr, "[Tasto] EventDispatcher::tap: completed\n");
     return true;
-#endif
 }
 
 bool EventDispatcher::longPress(ShadowNodePtr node, int durationMs) {
@@ -143,16 +138,31 @@ bool EventDispatcher::replaceText(ShadowNodePtr node, const std::string& text) {
 
 bool EventDispatcher::scroll(ShadowNodePtr node, float deltaX, float deltaY) {
     if (!node) {
+        fprintf(stderr, "[Tasto] EventDispatcher::scroll: node is null\n");
         return false;
     }
+
+#if defined(__APPLE__)
+    // On iOS, use native scroll which properly scrolls the UIScrollView
+    // Get the testID from the node's props
+    auto viewProps = std::dynamic_pointer_cast<const facebook::react::ViewProps>(node->getProps());
+    if (viewProps && !viewProps->testId.empty()) {
+        auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+        bool result = helper.performScroll(viewProps->testId, deltaX, deltaY);
+        if (result) {
+            return true;
+        }
+    }
+    // Fall through to event dispatch if native scroll fails
+#endif
 
     auto emitter = getEventEmitter(node);
     if (!emitter) {
+        fprintf(stderr, "[Tasto] EventDispatcher::scroll: emitter is null\n");
         return false;
     }
 
-    // Dispatch scroll event directly
-    // This is more reliable than simulating touch-based drag
+    // Dispatch scroll event as fallback
     dispatchScrollEvent(emitter, deltaX, deltaY);
 
     return true;

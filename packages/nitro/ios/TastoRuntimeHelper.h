@@ -12,6 +12,8 @@
 #ifdef __cplusplus
 
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace facebook {
 namespace react {
@@ -75,6 +77,52 @@ public:
      * Clear text from a text input with the given testID
      */
     bool performClearText(const std::string& testID);
+
+    // ============================================
+    // Scroll Handling
+    // ============================================
+
+    /**
+     * Scroll a ScrollView by delta values
+     * Returns true if successful
+     */
+    bool performScroll(const std::string& testID, float deltaX, float deltaY);
+
+    /**
+     * Scroll a ScrollView to a specific offset
+     * Returns true if successful
+     */
+    bool performScrollTo(const std::string& testID, float x, float y, bool animated);
+
+    // ============================================
+    // Alert/Modal Handling
+    // ============================================
+
+    /**
+     * Check if an alert is currently presented
+     */
+    bool isAlertPresent();
+
+    /**
+     * Get the text content of the current alert (title + message)
+     */
+    std::string getAlertText();
+
+    /**
+     * Get the list of button titles in the current alert
+     */
+    std::vector<std::string> getAlertButtons();
+
+    /**
+     * Tap an alert button by its text
+     * Returns true if successful
+     */
+    bool tapAlertButton(const std::string& buttonText);
+
+    /**
+     * Dismiss the current alert (taps the cancel/OK button)
+     */
+    bool dismissAlert();
 
 private:
     TastoRuntimeHelper() = default;

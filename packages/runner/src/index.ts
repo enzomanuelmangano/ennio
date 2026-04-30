@@ -15,6 +15,14 @@ export {
   waitForIdle,
   sleep,
   configure,
+  // Alert/Modal API
+  Alert,
+  isAlertPresent,
+  getAlertText,
+  getAlertButtons,
+  tapAlertButton,
+  dismissAlert,
+  waitForAlert,
 } from './api';
 
 // Launcher

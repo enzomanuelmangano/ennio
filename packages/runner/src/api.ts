@@ -338,3 +338,99 @@ export function sleep(ms: number): Promise<void> {
 export function expect(testID: string): Element {
   return element(testID);
 }
+
+// ============================================
+// Alert/Modal API
+// ============================================
+
+/**
+ * Check if an alert is currently present
+ */
+export async function isAlertPresent(): Promise<boolean> {
+  return getClient().isAlertPresent();
+}
+
+/**
+ * Get the text of the current alert (title + message)
+ */
+export async function getAlertText(): Promise<string> {
+  return getClient().getAlertText();
+}
+
+/**
+ * Get the button titles of the current alert
+ */
+export async function getAlertButtons(): Promise<string[]> {
+  return getClient().getAlertButtons();
+}
+
+/**
+ * Tap an alert button by its text
+ */
+export async function tapAlertButton(buttonText: string): Promise<void> {
+  await getClient().tapAlertButton(buttonText);
+}
+
+/**
+ * Dismiss the current alert
+ */
+export async function dismissAlert(): Promise<void> {
+  await getClient().dismissAlert();
+}
+
+/**
+ * Wait for an alert to appear
+ */
+export async function waitForAlert(options: { timeout?: number } = {}): Promise<void> {
+  await waitFor(async () => {
+    const present = await isAlertPresent();
+    return present;
+  }, options);
+}
+
+/**
+ * Alert helper class for fluent API
+ */
+export class Alert {
+  /**
+   * Check if alert is present
+   */
+  static async isPresent(): Promise<boolean> {
+    return isAlertPresent();
+  }
+
+  /**
+   * Get alert text
+   */
+  static async getText(): Promise<string> {
+    return getAlertText();
+  }
+
+  /**
+   * Get alert buttons
+   */
+  static async getButtons(): Promise<string[]> {
+    return getAlertButtons();
+  }
+
+  /**
+   * Tap a button on the alert
+   */
+  static async tap(buttonText: string): Promise<void> {
+    return tapAlertButton(buttonText);
+  }
+
+  /**
+   * Dismiss the alert
+   */
+  static async dismiss(): Promise<void> {
+    return dismissAlert();
+  }
+
+  /**
+   * Wait for alert to appear
+   */
+  static async waitFor(options?: { timeout?: number }): Promise<void> {
+    return waitForAlert(options);
+  }
+}

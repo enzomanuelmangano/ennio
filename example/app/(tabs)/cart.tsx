@@ -23,23 +23,10 @@ function CartItem({ item }: { item: ReturnType<typeof useCartStore.getState>['it
   };
 
   const handleRemove = () => {
-    Alert.alert(
-      'Remove Item',
-      `Remove "${item.product.name}" from cart?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => {
-            removeFromCart(item.product.id);
-            if (hapticEnabled) {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            }
-          },
-        },
-      ]
-    );
+    removeFromCart(item.product.id);
+    if (hapticEnabled) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
   };
 
   return (
@@ -139,14 +126,7 @@ export default function CartScreen() {
   };
 
   const handleClearCart = () => {
-    Alert.alert(
-      'Clear Cart',
-      'Are you sure you want to remove all items?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: clearCart },
-      ]
-    );
+    clearCart();
   };
 
   if (items.length === 0) {

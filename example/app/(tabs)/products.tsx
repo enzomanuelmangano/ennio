@@ -166,12 +166,48 @@ function SortDropdown({
 }
 
 export default function ProductsScreen() {
-  const products = useProductsStore(state => state.getFilteredProducts());
+  const allProducts = useProductsStore(state => state.products);
+  const selectedCategory = useProductsStore(state => state.selectedCategory);
   const searchQuery = useProductsStore(state => state.searchQuery);
   const setSearchQuery = useProductsStore(state => state.setSearchQuery);
   const sortBy = useProductsStore(state => state.sortBy);
   const setSortBy = useProductsStore(state => state.setSortBy);
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+
+  // Memoize filtered products to avoid infinite re-renders
+  const products = useMemo(() => {
+    let filtered = allProducts;
+
+    // Filter by category
+    if (selectedCategory !== 'All') {
+      filtered = filtered.filter(p => p.category === selectedCategory);
+    }
+
+    // Filter by search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        p =>
+          p.name.toLowerCase().includes(query) ||
+          p.description.toLowerCase().includes(query)
+      );
+    }
+
+    // Sort
+    return [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case 'price-asc':
+          return a.price - b.price;
+        case 'price-desc':
+          return b.price - a.price;
+        case 'name':
+          return a.name.localeCompare(b.name);
+        case 'rating':
+        default:
+          return b.rating - a.rating;
+      }
+    });
+  }, [allProducts, selectedCategory, searchQuery, sortBy]);
 
   return (
     <View style={[styles.container, darkMode && styles.containerDark]} testID="products-screen">
