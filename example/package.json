@@ -7,14 +7,12 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "test:e2e": "bun run tasto e2e/",
-    "launch:ios": "bun run tasto launch --ios"
+    "test:e2e": "npx tasto e2e/"
   },
   "dependencies": {
     "@expo/metro-runtime": "~5.0.5",
     "@hookform/resolvers": "^5.2.2",
     "@react-native-async-storage/async-storage": "2.1.2",
-    "@tasto/app": "*",
     "@tasto/nitro": "*",
     "expo": "~53.0.0",
     "expo-constants": "~17.1.8",
@@ -33,7 +31,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
-    "@tasto/runner": "*",
+    "@tasto/test": "*",
     "@types/react": "~19.0.10",
     "typescript": "~5.8.3"
   }

@@ -1054,22 +1054,6 @@ std::vector<std::string> TastoRuntimeHelper::getAlertButtons() {
     return result;
 }
 
-// Helper function to find and tap a button by title (recursive)
-static void findAndTapButtonWithTitle(NSString* title, UIView* view) {
-    if ([view isKindOfClass:[UIButton class]]) {
-        UIButton* button = (UIButton*)view;
-        NSString* buttonTitle = [button titleForState:UIControlStateNormal];
-        if ([buttonTitle isEqualToString:title]) {
-            [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-            return;
-        }
-    }
-
-    for (UIView* subview in [view subviews]) {
-        findAndTapButtonWithTitle(title, subview);
-    }
-}
-
 bool TastoRuntimeHelper::tapAlertButton(const std::string& buttonText) {
     __block bool success = false;
     NSString* targetButtonText = [NSString stringWithUTF8String:buttonText.c_str()];
@@ -1082,51 +1066,40 @@ bool TastoRuntimeHelper::tapAlertButton(const std::string& buttonText) {
         }
 
         // Find the action with matching title
+        UIAlertAction* targetAction = nil;
         for (UIAlertAction* action in alert.actions) {
             if ([action.title isEqualToString:targetButtonText]) {
-                NSLog(@"[Tasto] tapAlertButton: Found button '%@', triggering", targetButtonText);
-
-                // Dismiss the alert and call the action's handler
-                // We need to use a private API to get the handler since UIAlertAction doesn't expose it
-                // Instead, we'll dismiss by tapping the button's view
-
-                // Find the button in the alert's view hierarchy
-                UIView* alertView = alert.view;
-                if (alertView.superview) {
-                    alertView = alertView.superview;
-                }
-
-                // Try to find and tap the button by its title
-                for (UIView* subview in [alertView subviews]) {
-                    findAndTapButtonWithTitle(targetButtonText, subview);
-                }
-
-                // Alternative: Dismiss the alert programmatically and invoke the handler
-                // This is more reliable since it doesn't depend on finding the button view
-                [alert dismissViewControllerAnimated:NO completion:^{
-                    // The action handler should be called as part of the dismissal
-                }];
-
-                // Directly invoke the action handler using KVC if available
-                SEL handlerSel = NSSelectorFromString(@"handler");
-                if ([action respondsToSelector:handlerSel]) {
-                    #pragma clang diagnostic push
-                    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                    void (^handler)(UIAlertAction*) = [action performSelector:handlerSel];
-                    #pragma clang diagnostic pop
-
-                    if (handler) {
-                        NSLog(@"[Tasto] tapAlertButton: Invoking handler for '%@'", targetButtonText);
-                        handler(action);
-                    }
-                }
-
-                success = true;
-                return;
+                targetAction = action;
+                break;
             }
         }
 
-        NSLog(@"[Tasto] tapAlertButton: Button '%@' not found", targetButtonText);
+        if (!targetAction) {
+            NSLog(@"[Tasto] tapAlertButton: Button '%@' not found", targetButtonText);
+            return;
+        }
+
+        NSLog(@"[Tasto] tapAlertButton: Found button '%@', triggering", targetButtonText);
+
+        // Get the handler block using KVC (private API but reliable)
+        void (^handler)(UIAlertAction*) = nil;
+        @try {
+            handler = [targetAction valueForKey:@"handler"];
+        } @catch (NSException* e) {
+            NSLog(@"[Tasto] tapAlertButton: Could not get handler via KVC: %@", e);
+        }
+
+        // Dismiss the alert first, then call the handler
+        UIViewController* presentingVC = alert.presentingViewController;
+        [alert dismissViewControllerAnimated:NO completion:^{
+            // Call the handler after dismissal
+            if (handler) {
+                NSLog(@"[Tasto] tapAlertButton: Invoking handler for '%@'", targetButtonText);
+                handler(targetAction);
+            }
+        }];
+
+        success = true;
     };
 
     if ([NSThread isMainThread]) {
@@ -1164,22 +1137,23 @@ bool TastoRuntimeHelper::dismissAlert() {
             targetAction = alert.actions.lastObject;
         }
 
+        // Get the handler using KVC (same approach as tapAlertButton)
+        void (^handler)(UIAlertAction*) = nil;
         if (targetAction) {
-            // Try to invoke the handler
-            SEL handlerSel = NSSelectorFromString(@"handler");
-            if ([targetAction respondsToSelector:handlerSel]) {
-                #pragma clang diagnostic push
-                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                void (^handler)(UIAlertAction*) = [targetAction performSelector:handlerSel];
-                #pragma clang diagnostic pop
-
-                if (handler) {
-                    handler(targetAction);
-                }
+            @try {
+                handler = [targetAction valueForKey:@"handler"];
+            } @catch (NSException* e) {
+                NSLog(@"[Tasto] dismissAlert: Could not get handler via KVC: %@", e);
             }
         }
 
-        [alert dismissViewControllerAnimated:NO completion:nil];
+        // Dismiss the alert first, then call the handler
+        [alert dismissViewControllerAnimated:NO completion:^{
+            if (handler && targetAction) {
+                NSLog(@"[Tasto] dismissAlert: Invoking handler");
+                handler(targetAction);
+            }
+        }];
         success = true;
     };
 

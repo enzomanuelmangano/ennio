@@ -1,0 +1,17 @@
+{
+  "name": "@tasto/test",
+  "version": "0.1.0",
+  "description": "Simple E2E testing for React Native using Nitro",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@tasto/nitro": "*",
+    "react-native": ">=0.74.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

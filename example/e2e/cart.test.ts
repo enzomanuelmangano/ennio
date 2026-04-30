@@ -3,6 +3,7 @@ import {
   waitForElement,
   waitForVisible,
   sleep,
+  Alert,
 } from '@tasto/runner';
 import { setup, teardown, runTest, goProducts, goCart, goHome } from './setup.ts';
 
@@ -152,9 +153,16 @@ export default async function cartTests(): Promise<void> {
     await runTest('should require sign in for checkout', async () => {
       // When not signed in, tapping checkout should show sign-in prompt
       await element('checkout-btn').tap();
-      // An alert will appear - dismiss it by waiting and checking screen
-      await sleep(1000);
-      // Verify we're still on cart screen (alert was dismissed or is still shown)
+      await sleep(500);
+
+      // An alert may appear - dismiss it
+      const alertPresent = await Alert.isPresent();
+      if (alertPresent) {
+        await Alert.dismiss();
+        await sleep(500);
+      }
+
+      // Verify we're still on cart screen
       const cartVisible = await element('cart-screen').exists();
       if (cartVisible) {
         await element('cart-screen').toBeVisible();

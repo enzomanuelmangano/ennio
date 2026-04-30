@@ -1,13 +1,12 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { TastoProvider } from '@tasto/app';
 import { useSettingsStore } from '../store';
 
 export default function RootLayout() {
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
 
   return (
-    <TastoProvider>
+    <>
       <StatusBar style={darkMode ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
@@ -61,6 +60,6 @@ export default function RootLayout() {
           }}
         />
       </Stack>
-    </TastoProvider>
+    </>
   );
 }

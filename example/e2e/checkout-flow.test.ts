@@ -3,6 +3,7 @@ import {
   waitForElement,
   waitForVisible,
   sleep,
+  Alert,
 } from '@tasto/runner';
 import { setup, teardown, runTest, goProducts, goCart, goProfile, goHome } from './setup.ts';
 
@@ -176,7 +177,14 @@ export default async function checkoutFlowTests(): Promise<void> {
       const placeOrderBtn = await element('place-order-btn').exists();
       if (placeOrderBtn) {
         await element('place-order-btn').tap();
-        await sleep(2000);
+        await sleep(1000);
+
+        // Tap "View Orders" button on the "Order Placed!" alert
+        const alertPresent = await Alert.isPresent();
+        if (alertPresent) {
+          await Alert.tap('View Orders');
+          await sleep(500);
+        }
       }
     });
 
