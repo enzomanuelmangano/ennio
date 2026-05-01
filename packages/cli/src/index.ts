@@ -161,19 +161,25 @@ function sleep(ms) {
 function element(testID) {
   return {
     tap: function() {
-      var ok = Tasto.tap(testID);
-      if (!ok) throw new Error('Tap failed: ' + testID);
-      return sleep(50);
+      return new Promise(function(resolve, reject) {
+        var ok = Tasto.tap(testID);
+        if (!ok) reject(new Error('Tap failed: ' + testID));
+        else resolve();
+      }).then(function() { return sleep(50); });
     },
     typeText: function(text) {
-      var ok = Tasto.typeText(testID, text);
-      if (!ok) throw new Error('TypeText failed: ' + testID);
-      return sleep(50);
+      return new Promise(function(resolve, reject) {
+        var ok = Tasto.typeText(testID, text);
+        if (!ok) reject(new Error('TypeText failed: ' + testID));
+        else resolve();
+      }).then(function() { return sleep(50); });
     },
     clearText: function() {
-      var ok = Tasto.clearText(testID);
-      if (!ok) throw new Error('ClearText failed: ' + testID);
-      return sleep(50);
+      return new Promise(function(resolve, reject) {
+        var ok = Tasto.clearText(testID);
+        if (!ok) reject(new Error('ClearText failed: ' + testID));
+        else resolve();
+      }).then(function() { return sleep(50); });
     },
     exists: function() {
       return Promise.resolve(Tasto.exists(testID));
@@ -182,9 +188,11 @@ function element(testID) {
       return Promise.resolve(Tasto.isVisible(testID));
     },
     toBeVisible: function() {
-      var visible = Tasto.isVisible(testID);
-      if (!visible) throw new Error('Not visible: ' + testID);
-      return Promise.resolve();
+      return new Promise(function(resolve, reject) {
+        var visible = Tasto.isVisible(testID);
+        if (!visible) reject(new Error('Not visible: ' + testID));
+        else resolve();
+      });
     },
     getText: function() {
       return Promise.resolve(Tasto.getText(testID));
@@ -280,10 +288,10 @@ async function connectAndRun(testCode: string): Promise<{ passed: number; failed
         pending.get(msg.id)!(msg.result);
         pending.delete(msg.id);
       }
-      // Handle console messages - only show unique test results
+      // Handle console messages - show test results and errors
       if (msg.method === 'Runtime.consoleAPICalled') {
         const args = msg.params.args.map((a: { value?: unknown; description?: string }) => a.value ?? a.description).join(' ');
-        if ((args.includes('[PASS]') || args.includes('[FAIL]')) && !seenMessages.has(args)) {
+        if ((args.includes('[PASS]') || args.includes('[FAIL]') || args.includes('Error') || args.includes('error')) && !seenMessages.has(args)) {
           seenMessages.add(args);
           console.log('  ' + args);
         }
@@ -369,8 +377,23 @@ async function connectAndRun(testCode: string): Promise<{ passed: number; failed
         });
 
         // Wait for all tests to complete
-        // We need to poll for the result since awaitPromise doesn't work well here
-        await new Promise(r => setTimeout(r, 2000));
+        // Poll until all tests have completed or timeout
+        const testCount = runTestCalls.length;
+        const startTime = Date.now();
+        const timeout = 30000; // 30 seconds max
+
+        while (Date.now() - startTime < timeout) {
+          const check = await send('Runtime.evaluate', {
+            expression: '(typeof globalThis !== "undefined" ? globalThis : this).__TASTO_RESULTS__',
+            returnByValue: true,
+          }) as { result?: { value?: { passed: number; failed: number; tests: unknown[] } } };
+
+          const results = check.result?.value;
+          if (results && results.tests && results.tests.length >= testCount) {
+            break;
+          }
+          await new Promise(r => setTimeout(r, 200));
+        }
 
         // Then get the results from global
         const result = await send('Runtime.evaluate', {
