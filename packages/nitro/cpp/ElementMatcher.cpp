@@ -548,10 +548,12 @@ void ElementMatcher::extractStateProps(
         node->getProps()
     );
 
-    if (viewProps) {
+    if (viewProps && viewProps->accessibilityState.has_value()) {
         // Check accessibilityState
-        const auto& accState = viewProps->accessibilityState;
-        outChecked = accState.checked.value_or(false);
+        const auto& accState = viewProps->accessibilityState.value();
+        // checked is an inline enum: { Unchecked=0, Checked=1, Mixed=2, None=3 }
+        // Treat Checked (1) and Mixed (2) as true
+        outChecked = (accState.checked == 1 || accState.checked == 2);
         outSelected = accState.selected;
 
         // Focused state is typically tracked at runtime, not in props
