@@ -689,6 +689,135 @@ void HybridTasto::synchronize() {
                 response.error = "No alert to dismiss";
             }
         }
+        // ============================================
+        // Selector-based Commands
+        // ============================================
+        else if (type == "findBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            auto result = findBySelector(selector);
+
+            if (std::holds_alternative<nitro::NullType>(result)) {
+                response.success = true;
+                response.data = "null";
+            } else {
+                auto& info = std::get<ExtendedElementInfo>(result);
+                std::ostringstream oss;
+                oss << "{";
+                oss << "\"testID\":\"" << info.testID << "\",";
+                oss << "\"type\":\"" << info.type << "\",";
+                if (info.text.has_value()) {
+                    oss << "\"text\":\"" << info.text.value() << "\",";
+                } else {
+                    oss << "\"text\":null,";
+                }
+                oss << "\"accessible\":" << (info.accessible ? "true" : "false") << ",";
+                oss << "\"enabled\":" << (info.enabled ? "true" : "false") << ",";
+                oss << "\"checked\":" << (info.checked ? "true" : "false") << ",";
+                oss << "\"focused\":" << (info.focused ? "true" : "false") << ",";
+                oss << "\"selected\":" << (info.selected ? "true" : "false") << ",";
+                oss << "\"layout\":{";
+                oss << "\"x\":" << info.layout.x << ",";
+                oss << "\"y\":" << info.layout.y << ",";
+                oss << "\"width\":" << info.layout.width << ",";
+                oss << "\"height\":" << info.layout.height << ",";
+                oss << "\"screenX\":" << info.layout.screenX << ",";
+                oss << "\"screenY\":" << info.layout.screenY;
+                oss << "}}";
+                response.success = true;
+                response.data = oss.str();
+            }
+        }
+        else if (type == "findAllBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            auto results = findAllBySelector(selector);
+
+            std::ostringstream oss;
+            oss << "[";
+            for (size_t i = 0; i < results.size(); i++) {
+                if (i > 0) oss << ",";
+                auto& info = results[i];
+                oss << "{";
+                oss << "\"testID\":\"" << info.testID << "\",";
+                oss << "\"type\":\"" << info.type << "\",";
+                if (info.text.has_value()) {
+                    oss << "\"text\":\"" << info.text.value() << "\",";
+                } else {
+                    oss << "\"text\":null,";
+                }
+                oss << "\"accessible\":" << (info.accessible ? "true" : "false") << ",";
+                oss << "\"enabled\":" << (info.enabled ? "true" : "false") << ",";
+                oss << "\"checked\":" << (info.checked ? "true" : "false") << ",";
+                oss << "\"focused\":" << (info.focused ? "true" : "false") << ",";
+                oss << "\"selected\":" << (info.selected ? "true" : "false") << ",";
+                oss << "\"layout\":{";
+                oss << "\"x\":" << info.layout.x << ",";
+                oss << "\"y\":" << info.layout.y << ",";
+                oss << "\"width\":" << info.layout.width << ",";
+                oss << "\"height\":" << info.layout.height << ",";
+                oss << "\"screenX\":" << info.layout.screenX << ",";
+                oss << "\"screenY\":" << info.layout.screenY;
+                oss << "}}";
+            }
+            oss << "]";
+            response.success = true;
+            response.data = oss.str();
+        }
+        else if (type == "existsBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            bool result = existsBySelector(selector);
+            response.success = true;
+            response.data = result ? "true" : "false";
+        }
+        else if (type == "tapBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            bool result = tapBySelector(selector);
+            response.success = result;
+            if (!result) {
+                response.error = "Element not found for selector";
+            }
+        }
+        else if (type == "typeTextBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            std::string text = ::tasto::json::parseString(payload, "text");
+            bool result = typeTextBySelector(selector, text);
+            response.success = result;
+            if (!result) {
+                response.error = "Element not found for selector";
+            }
+        }
+        else if (type == "clearTextBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            bool result = clearTextBySelector(selector);
+            response.success = result;
+            if (!result) {
+                response.error = "Element not found for selector";
+            }
+        }
+        else if (type == "longPressBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            double duration = ::tasto::json::parseDouble(payload, "duration");
+            bool result = longPressBySelector(selector, duration);
+            response.success = result;
+            if (!result) {
+                response.error = "Element not found for selector";
+            }
+        }
+        else if (type == "getTextBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            auto result = getTextBySelector(selector);
+            response.success = true;
+            if (std::holds_alternative<nitro::NullType>(result)) {
+                response.data = "null";
+            } else {
+                response.data = "\"" + std::get<std::string>(result) + "\"";
+            }
+        }
+        else if (type == "isVisibleBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            bool result = isVisibleBySelector(selector);
+            response.success = true;
+            response.data = result ? "true" : "false";
+        }
         else {
             response.success = false;
             response.error = "Unknown command: " + type;
@@ -782,6 +911,254 @@ bool HybridTasto::dismissAlert() {
 #else
     return false;
 #endif
+}
+
+// ============================================
+// Selector-based Methods (Full Maestro Parity)
+// ============================================
+
+ShadowNodePtr HybridTasto::findNodeBySelector(const ::tasto::SelectorCriteria& criteria) const {
+    auto root = getShadowTreeRoot();
+    if (!root) {
+        return nullptr;
+    }
+
+    return ::tasto::ElementMatcher::findFirst(root, criteria);
+}
+
+ExtendedElementInfo HybridTasto::convertExtendedElementInfo(const ::tasto::ExtendedElementInfo& info) const {
+    ExtendedElementInfo result;
+    result.testID = info.testID;
+    result.type = info.type;
+    result.text = info.text;
+    result.accessible = info.accessible;
+    result.enabled = info.enabled;
+    result.checked = info.checked;
+    result.focused = info.focused;
+    result.selected = info.selected;
+
+    result.layout.x = info.layout.x;
+    result.layout.y = info.layout.y;
+    result.layout.width = info.layout.width;
+    result.layout.height = info.layout.height;
+    result.layout.screenX = info.layout.screenX;
+    result.layout.screenY = info.layout.screenY;
+
+    return result;
+}
+
+std::variant<nitro::NullType, ExtendedElementInfo> HybridTasto::findBySelector(const std::string& selectorJson) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto root = getShadowTreeRoot();
+        if (!root) {
+            return nitro::NullType();
+        }
+
+        auto node = ::tasto::ElementMatcher::findFirst(root, criteria);
+        if (!node) {
+            return nitro::NullType();
+        }
+
+        auto infoOpt = ::tasto::ElementMatcher::getExtendedElementInfo(root, node);
+        if (!infoOpt) {
+            return nitro::NullType();
+        }
+
+        return convertExtendedElementInfo(*infoOpt);
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("findBySelector", "Parse error: " << e.what());
+        return nitro::NullType();
+    }
+}
+
+std::vector<ExtendedElementInfo> HybridTasto::findAllBySelector(const std::string& selectorJson) {
+    std::vector<ExtendedElementInfo> results;
+
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto root = getShadowTreeRoot();
+        if (!root) {
+            return results;
+        }
+
+        auto nodes = ::tasto::ElementMatcher::findAll(root, criteria);
+        for (const auto& node : nodes) {
+            auto infoOpt = ::tasto::ElementMatcher::getExtendedElementInfo(root, node);
+            if (infoOpt) {
+                results.push_back(convertExtendedElementInfo(*infoOpt));
+            }
+        }
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("findAllBySelector", "Parse error: " << e.what());
+    }
+
+    return results;
+}
+
+bool HybridTasto::existsBySelector(const std::string& selectorJson) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto root = getShadowTreeRoot();
+        if (!root) {
+            return false;
+        }
+
+        auto node = ::tasto::ElementMatcher::findFirst(root, criteria);
+        return node != nullptr;
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("existsBySelector", "Parse error: " << e.what());
+        return false;
+    }
+}
+
+bool HybridTasto::tapBySelector(const std::string& selectorJson) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto node = findNodeBySelector(criteria);
+        if (!node) {
+            TASTO_LOG_WARN("tapBySelector", "No element found for selector");
+            return false;
+        }
+
+        // Get testID for existing tap implementation
+        auto testID = ::tasto::ShadowTreeTraverser::getTestID(*node);
+        if (testID) {
+            return tap(*testID);
+        }
+
+        // Fallback: direct event dispatch
+        return ::tasto::EventDispatcher::tap(node);
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("tapBySelector", "Error: " << e.what());
+        return false;
+    }
+}
+
+bool HybridTasto::typeTextBySelector(const std::string& selectorJson, const std::string& text) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto node = findNodeBySelector(criteria);
+        if (!node) {
+            TASTO_LOG_WARN("typeTextBySelector", "No element found for selector");
+            return false;
+        }
+
+        auto testID = ::tasto::ShadowTreeTraverser::getTestID(*node);
+        if (testID) {
+            return typeText(*testID, text);
+        }
+
+        return ::tasto::EventDispatcher::typeText(node, text);
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("typeTextBySelector", "Error: " << e.what());
+        return false;
+    }
+}
+
+bool HybridTasto::clearTextBySelector(const std::string& selectorJson) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto node = findNodeBySelector(criteria);
+        if (!node) {
+            TASTO_LOG_WARN("clearTextBySelector", "No element found for selector");
+            return false;
+        }
+
+        auto testID = ::tasto::ShadowTreeTraverser::getTestID(*node);
+        if (testID) {
+            return clearText(*testID);
+        }
+
+        return ::tasto::EventDispatcher::clearText(node);
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("clearTextBySelector", "Error: " << e.what());
+        return false;
+    }
+}
+
+bool HybridTasto::longPressBySelector(const std::string& selectorJson, double durationMs) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto node = findNodeBySelector(criteria);
+        if (!node) {
+            TASTO_LOG_WARN("longPressBySelector", "No element found for selector");
+            return false;
+        }
+
+        auto testID = ::tasto::ShadowTreeTraverser::getTestID(*node);
+        if (testID) {
+            return longPress(*testID, durationMs);
+        }
+
+        return ::tasto::EventDispatcher::longPress(node, static_cast<int>(durationMs));
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("longPressBySelector", "Error: " << e.what());
+        return false;
+    }
+}
+
+std::variant<nitro::NullType, std::string> HybridTasto::getTextBySelector(const std::string& selectorJson) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto node = findNodeBySelector(criteria);
+        if (!node) {
+            return nitro::NullType();
+        }
+
+        auto text = ::tasto::ShadowTreeTraverser::getText(node);
+        if (!text) {
+            return nitro::NullType();
+        }
+
+        return *text;
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("getTextBySelector", "Error: " << e.what());
+        return nitro::NullType();
+    }
+}
+
+bool HybridTasto::isVisibleBySelector(const std::string& selectorJson) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto node = findNodeBySelector(criteria);
+        if (!node) {
+            return false;
+        }
+
+        auto testID = ::tasto::ShadowTreeTraverser::getTestID(*node);
+        if (testID) {
+            return isVisible(*testID);
+        }
+
+        // Fallback: check metrics directly
+        auto root = getShadowTreeRoot();
+        if (!root) {
+            return false;
+        }
+
+        // Use screen dimensions if set, otherwise use reasonable defaults
+        float width = screenWidth_ > 0 ? screenWidth_ : 430.0f;
+        float height = screenHeight_ > 0 ? screenHeight_ : 932.0f;
+
+        auto layoutable = dynamic_cast<const facebook::react::LayoutableShadowNode*>(node.get());
+        if (!layoutable) {
+            return false;
+        }
+
+        auto metrics = layoutable->getLayoutMetrics();
+        if (metrics.frame.origin.x + metrics.frame.size.width < 0 ||
+            metrics.frame.origin.y + metrics.frame.size.height < 0 ||
+            metrics.frame.origin.x > width ||
+            metrics.frame.origin.y > height) {
+            return false;
+        }
+
+        return metrics.frame.size.width > 0 && metrics.frame.size.height > 0;
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("isVisibleBySelector", "Error: " << e.what());
+        return false;
+    }
 }
 
 } // namespace margelo::nitro::tasto

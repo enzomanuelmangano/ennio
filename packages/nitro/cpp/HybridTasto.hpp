@@ -18,6 +18,9 @@
 #include "TestIDRegistry.hpp"
 #include "ShadowTreeTraverser.hpp"
 #include "EventDispatcher.hpp"
+#include "SelectorCriteria.hpp"
+#include "SelectorParser.hpp"
+#include "ElementMatcher.hpp"
 
 namespace margelo::nitro::tasto {
 
@@ -69,6 +72,19 @@ public:
     // ============================================
     bool waitForIdle(double timeoutMs) override;
     void synchronize() override;
+
+    // ============================================
+    // Selector-based Queries (Full Maestro Parity)
+    // ============================================
+    std::variant<nitro::NullType, ExtendedElementInfo> findBySelector(const std::string& selectorJson) override;
+    std::vector<ExtendedElementInfo> findAllBySelector(const std::string& selectorJson) override;
+    bool existsBySelector(const std::string& selectorJson) override;
+    bool tapBySelector(const std::string& selectorJson) override;
+    bool typeTextBySelector(const std::string& selectorJson, const std::string& text) override;
+    bool clearTextBySelector(const std::string& selectorJson) override;
+    bool longPressBySelector(const std::string& selectorJson, double durationMs) override;
+    std::variant<nitro::NullType, std::string> getTextBySelector(const std::string& selectorJson) override;
+    bool isVisibleBySelector(const std::string& selectorJson) override;
 
     // ============================================
     // Initialization (called from JS)
@@ -127,6 +143,16 @@ private:
      * Convert internal LayoutMetrics to Nitro struct
      */
     LayoutMetrics convertLayoutMetrics(const ::tasto::LayoutMetrics& metrics) const;
+
+    /**
+     * Convert internal ExtendedElementInfo to Nitro struct
+     */
+    ExtendedElementInfo convertExtendedElementInfo(const ::tasto::ExtendedElementInfo& info) const;
+
+    /**
+     * Find a node by selector criteria
+     */
+    ShadowNodePtr findNodeBySelector(const ::tasto::SelectorCriteria& criteria) const;
 
     // ============================================
     // Alert/Modal Handling (WebSocket only)

@@ -3,6 +3,8 @@
  *
  * Connects directly to the native Tasto WebSocket server
  * running in the app. Works in both debug and release builds.
+ *
+ * Supports full Maestro selector parity.
  */
 
 const DEFAULT_PORT = 9876;
@@ -18,6 +20,96 @@ interface TastoResponse {
   success: boolean;
   data?: unknown;
   error?: string;
+}
+
+/**
+ * Layout metrics for a UI element
+ */
+export interface LayoutMetrics {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  screenX: number;
+  screenY: number;
+}
+
+/**
+ * Extended element info with state properties
+ */
+export interface ExtendedElementInfo {
+  testID: string;
+  type: string;
+  text?: string;
+  accessible: boolean;
+  enabled: boolean;
+  checked: boolean;
+  focused: boolean;
+  selected: boolean;
+  layout: LayoutMetrics;
+}
+
+/**
+ * Text matching mode for text selectors
+ */
+export type TextMatchMode = 'exact' | 'contains' | 'regex' | 'startsWith' | 'endsWith';
+
+/**
+ * Text matcher configuration
+ */
+export interface TextMatcher {
+  pattern: string;
+  mode?: TextMatchMode;
+}
+
+/**
+ * Point for coordinate-based selection
+ */
+export interface Point {
+  x: number;
+  y: number;
+  isPercentage?: boolean;
+}
+
+/**
+ * Trait types for trait-based selection
+ */
+export type Trait = 'text' | 'long-text' | 'square';
+
+/**
+ * Selector - Full Maestro selector parity
+ */
+export interface Selector {
+  // Primary
+  id?: string;
+  text?: string | TextMatcher;
+  index?: number;
+  point?: Point | string;
+
+  // State
+  enabled?: boolean;
+  checked?: boolean;
+  focused?: boolean;
+  selected?: boolean;
+
+  // Spatial
+  below?: Selector;
+  above?: Selector;
+  leftOf?: Selector;
+  rightOf?: Selector;
+
+  // Hierarchical
+  containsChild?: Selector;
+  childOf?: Selector;
+  containsDescendants?: Selector[];
+
+  // Dimensions
+  width?: number;
+  height?: number;
+  tolerance?: number;
+
+  // Traits
+  traits?: Trait[];
 }
 
 export class TastoClient {
@@ -159,5 +251,175 @@ export class TastoClient {
   async dismissAlert(): Promise<boolean> {
     const response = await this.send('dismissAlert', {});
     return response.success;
+  }
+
+  // ============================================
+  // Selector-based Methods (Full Maestro Parity)
+  // ============================================
+
+  /**
+   * Convert selector to JSON string for native layer
+   */
+  private selectorToJson(selector: Selector): string {
+    const normalized: Record<string, unknown> = {};
+
+    if (selector.id !== undefined) normalized.id = selector.id;
+
+    if (selector.text !== undefined) {
+      if (typeof selector.text === 'string') {
+        normalized.text = selector.text;
+      } else {
+        normalized.text = selector.text.pattern;
+        if (selector.text.mode && selector.text.mode !== 'exact') {
+          normalized.textMatchMode = selector.text.mode;
+        }
+      }
+    }
+
+    if (selector.index !== undefined) normalized.index = selector.index;
+    if (selector.point !== undefined) {
+      normalized.point = typeof selector.point === 'string'
+        ? selector.point
+        : { x: selector.point.x, y: selector.point.y };
+    }
+
+    // State
+    if (selector.enabled !== undefined) normalized.enabled = selector.enabled;
+    if (selector.checked !== undefined) normalized.checked = selector.checked;
+    if (selector.focused !== undefined) normalized.focused = selector.focused;
+    if (selector.selected !== undefined) normalized.selected = selector.selected;
+
+    // Spatial (recursive)
+    if (selector.below) normalized.below = JSON.parse(this.selectorToJson(selector.below));
+    if (selector.above) normalized.above = JSON.parse(this.selectorToJson(selector.above));
+    if (selector.leftOf) normalized.leftOf = JSON.parse(this.selectorToJson(selector.leftOf));
+    if (selector.rightOf) normalized.rightOf = JSON.parse(this.selectorToJson(selector.rightOf));
+
+    // Hierarchical
+    if (selector.containsChild) {
+      normalized.containsChild = JSON.parse(this.selectorToJson(selector.containsChild));
+    }
+    if (selector.childOf) {
+      normalized.childOf = JSON.parse(this.selectorToJson(selector.childOf));
+    }
+    if (selector.containsDescendants) {
+      normalized.containsDescendants = selector.containsDescendants.map(
+        (s) => JSON.parse(this.selectorToJson(s))
+      );
+    }
+
+    // Dimensions
+    if (selector.width !== undefined) normalized.width = selector.width;
+    if (selector.height !== undefined) normalized.height = selector.height;
+    if (selector.tolerance !== undefined) normalized.tolerance = selector.tolerance;
+
+    // Traits
+    if (selector.traits) normalized.traits = selector.traits;
+
+    return JSON.stringify(normalized);
+  }
+
+  /**
+   * Find element by selector
+   */
+  async findBySelector(selector: Selector): Promise<ExtendedElementInfo | null> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('findBySelector', { selector: selectorJson });
+
+    if (!response.success || response.data === null || response.data === 'null') {
+      return null;
+    }
+
+    if (typeof response.data === 'string') {
+      return JSON.parse(response.data);
+    }
+
+    return response.data as ExtendedElementInfo;
+  }
+
+  /**
+   * Find all elements by selector
+   */
+  async findAllBySelector(selector: Selector): Promise<ExtendedElementInfo[]> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('findAllBySelector', { selector: selectorJson });
+
+    if (!response.success || !response.data) {
+      return [];
+    }
+
+    if (typeof response.data === 'string') {
+      return JSON.parse(response.data);
+    }
+
+    return response.data as ExtendedElementInfo[];
+  }
+
+  /**
+   * Check if element exists by selector
+   */
+  async existsBySelector(selector: Selector): Promise<boolean> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('existsBySelector', { selector: selectorJson });
+    return response.data === true || response.data === 'true';
+  }
+
+  /**
+   * Tap element by selector
+   */
+  async tapBySelector(selector: Selector): Promise<boolean> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('tapBySelector', { selector: selectorJson });
+    return response.success;
+  }
+
+  /**
+   * Type text into element by selector
+   */
+  async typeTextBySelector(selector: Selector, text: string): Promise<boolean> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('typeTextBySelector', { selector: selectorJson, text });
+    return response.success;
+  }
+
+  /**
+   * Clear text from element by selector
+   */
+  async clearTextBySelector(selector: Selector): Promise<boolean> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('clearTextBySelector', { selector: selectorJson });
+    return response.success;
+  }
+
+  /**
+   * Long press element by selector
+   */
+  async longPressBySelector(selector: Selector, duration: number = 500): Promise<boolean> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('longPressBySelector', { selector: selectorJson, duration });
+    return response.success;
+  }
+
+  /**
+   * Get text from element by selector
+   */
+  async getTextBySelector(selector: Selector): Promise<string | null> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('getTextBySelector', { selector: selectorJson });
+
+    if (response.data === null || response.data === 'null') {
+      return null;
+    }
+
+    return typeof response.data === 'string' ? response.data.replace(/^"|"$/g, '') : null;
+  }
+
+  /**
+   * Check if element is visible by selector
+   */
+  async isVisibleBySelector(selector: Selector): Promise<boolean> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('isVisibleBySelector', { selector: selectorJson });
+    return response.data === true || response.data === 'true';
   }
 }

@@ -1,7 +1,29 @@
 import { NitroModules } from 'react-native-nitro-modules';
-import type { Tasto, ElementInfo, LayoutMetrics, ScrollDirection } from './Tasto.nitro';
+import type {
+  Tasto,
+  ElementInfo,
+  ExtendedElementInfo,
+  LayoutMetrics,
+  ScrollDirection,
+  Selector,
+  TextMatcher,
+  TextMatchMode,
+  Point,
+  Trait,
+} from './Tasto.nitro';
 
-export type { Tasto, ElementInfo, LayoutMetrics, ScrollDirection };
+export type {
+  Tasto,
+  ElementInfo,
+  ExtendedElementInfo,
+  LayoutMetrics,
+  ScrollDirection,
+  Selector,
+  TextMatcher,
+  TextMatchMode,
+  Point,
+  Trait,
+};
 
 /**
  * Default WebSocket server port

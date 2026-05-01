@@ -5,7 +5,7 @@
  */
 
 // Element API
-export { Element, element } from './element';
+export { Element, element, elements } from './element';
 
 // Utilities
 export {
@@ -18,7 +18,16 @@ export {
 } from './utils';
 
 // Re-export types from nitro
-export type { ElementInfo, LayoutMetrics } from '@tasto/nitro';
+export type {
+  ElementInfo,
+  ExtendedElementInfo,
+  LayoutMetrics,
+  Selector,
+  TextMatcher,
+  TextMatchMode,
+  Point,
+  Trait,
+} from '@tasto/nitro';
 
 /**
  * Test results tracker
