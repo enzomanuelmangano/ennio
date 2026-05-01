@@ -1,7 +1,7 @@
 {
   "name": "@tasto/cli",
   "version": "0.1.0",
-  "description": "CLI for running Tasto tests via Hermes CDP",
+  "description": "CLI for running Tasto E2E tests",
   "bin": {
     "tasto": "./src/index.ts"
   },

@@ -2,7 +2,10 @@
 /**
  * Tasto CLI
  *
- * Runs E2E tests in a React Native app via Hermes CDP.
+ * Runs E2E tests by connecting to the app.
+ * Supports two connection modes:
+ * 1. WebSocket (preferred) - connects to app's Tasto server on port 9876
+ * 2. CDP (fallback) - connects to Metro's debugger on port 8081
  *
  * Usage:
  *   npx tasto e2e/test.ts
@@ -12,8 +15,11 @@
 import { existsSync, statSync } from 'fs';
 import { resolve, basename, join } from 'path';
 import { glob } from 'glob';
-import { bundleTestFile, extractTestNames } from './bundler';
-import { executeTests } from './cdp';
+import { TastoClient } from './client';
+import { runTests } from './runner';
+
+const DEFAULT_WS_PORT = 9876;
+const METRO_PORT = 8081;
 
 interface TestFileResult {
   file: string;
@@ -21,31 +27,37 @@ interface TestFileResult {
   failed: number;
 }
 
-async function runTestFile(filePath: string, debug: boolean): Promise<TestFileResult> {
+type ConnectionMode = 'websocket' | 'cdp';
+
+/**
+ * Try to connect via WebSocket to Tasto server
+ */
+async function tryWebSocketConnection(port: number): Promise<TastoClient | null> {
+  const client = new TastoClient(port);
+  try {
+    await Promise.race([
+      client.connect(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+    ]);
+    return client;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run a test file
+ */
+async function runTestFile(
+  client: TastoClient,
+  filePath: string
+): Promise<TestFileResult> {
   const fileName = basename(filePath);
   console.log(`▸ ${fileName}`);
 
   try {
-    // Bundle the test file with the runtime
-    const bundledCode = await bundleTestFile(filePath);
+    const results = await runTests(client, filePath);
 
-    if (debug) {
-      console.log('--- Bundled Code ---');
-      console.log(bundledCode.slice(0, 2000) + (bundledCode.length > 2000 ? '\n... truncated' : ''));
-      console.log('------------');
-    }
-
-    // Extract test names for progress tracking
-    const testNames = extractTestNames(bundledCode);
-
-    if (debug) {
-      console.log(`  Found ${testNames.length} tests: ${testNames.join(', ')}`);
-    }
-
-    // Execute tests via CDP
-    const results = await executeTests(bundledCode, testNames.length);
-
-    // Print results
     for (const test of results.tests) {
       if (test.passed) {
         console.log(`  [PASS] ${test.name}`);
@@ -73,10 +85,11 @@ async function runTestFile(filePath: string, debug: boolean): Promise<TestFileRe
 
 async function main() {
   const args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const debug = process.argv.includes('--debug');
+  const portArg = process.argv.find((a) => a.startsWith('--port='));
+  const port = portArg ? parseInt(portArg.split('=')[1], 10) : DEFAULT_WS_PORT;
 
   if (args.length === 0) {
-    console.log('Usage: tasto <test-file.ts> [--debug]');
+    console.log('Usage: tasto <test-file.ts> [--port=9876]');
     console.log('       tasto e2e/           # Runs all *.test.ts files');
     process.exit(0);
   }
@@ -86,7 +99,6 @@ async function main() {
   for (let pattern of args) {
     const resolved = resolve(pattern);
 
-    // If pattern is a directory, look for test files inside
     if (existsSync(resolved) && statSync(resolved).isDirectory()) {
       pattern = join(pattern, '**/*.test.ts');
     }
@@ -105,13 +117,61 @@ async function main() {
 
   console.log('\n🧪 Tasto\n');
 
+  // Try to connect via WebSocket first
+  let client = await tryWebSocketConnection(port);
+  let mode: ConnectionMode = 'websocket';
+
+  if (!client) {
+    console.log(`(WebSocket server not available, using CDP fallback)\n`);
+    // Fall back to CDP mode - import dynamically to avoid loading if not needed
+    const { runTestsViaCDP } = await import('./cdp-runner');
+
+    let totalPassed = 0;
+    let totalFailed = 0;
+
+    for (const file of files) {
+      const fileName = basename(file);
+      console.log(`▸ ${fileName}`);
+
+      try {
+        const results = await runTestsViaCDP(file);
+
+        for (const test of results.tests) {
+          if (test.passed) {
+            console.log(`  [PASS] ${test.name}`);
+          } else {
+            console.log(`  [FAIL] ${test.name}: ${test.error || 'unknown error'}`);
+          }
+        }
+
+        console.log(`  ${results.passed} passed, ${results.failed} failed\n`);
+        totalPassed += results.passed;
+        totalFailed += results.failed;
+      } catch (err) {
+        console.error(`  Error: ${err}\n`);
+        totalFailed++;
+      }
+    }
+
+    console.log('─'.repeat(40));
+    console.log(`Total: ${totalPassed} passed, ${totalFailed} failed`);
+    process.exit(totalFailed > 0 ? 1 : 0);
+    return;
+  }
+
+  console.log(`(Connected via WebSocket on port ${port})\n`);
+
   let totalPassed = 0;
   let totalFailed = 0;
 
-  for (const file of files) {
-    const result = await runTestFile(file, debug);
-    totalPassed += result.passed;
-    totalFailed += result.failed;
+  try {
+    for (const file of files) {
+      const result = await runTestFile(client, file);
+      totalPassed += result.passed;
+      totalFailed += result.failed;
+    }
+  } finally {
+    client.disconnect();
   }
 
   console.log('─'.repeat(40));

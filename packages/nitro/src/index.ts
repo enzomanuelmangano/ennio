@@ -80,12 +80,16 @@ export const TastoModule = {
   get isServerRunning() { return isServerRunning; },
 };
 
-// Expose globally for CLI access via CDP
+// Expose globally and auto-start server for CLI access
 const _globalThis = globalThis as { __TASTO_MODULE__?: Tasto };
 const _module = getTastoModule();
 if (_module) {
   _globalThis.__TASTO_MODULE__ = _module;
-  if (__DEV__) {
-    console.log('[Tasto] Module initialized and exposed globally');
+
+  // Auto-start the WebSocket server for CLI access
+  // Works in both debug and release builds
+  if (!_module.isServerRunning()) {
+    _module.startServer(DEFAULT_PORT);
+    console.log(`[Tasto] WebSocket server started on port ${DEFAULT_PORT}`);
   }
 }
