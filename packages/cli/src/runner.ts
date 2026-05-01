@@ -91,6 +91,7 @@ export async function runTests(
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const testFn = new AsyncFunction(
       'element',
+      'elements',
       'sleep',
       'runTest',
       'waitForElement',
@@ -101,6 +102,7 @@ export async function runTests(
 
     await testFn(
       context.element,
+      context.elements,
       context.sleep,
       context.runTest,
       context.waitForElement,
@@ -115,52 +117,143 @@ export async function runTests(
 }
 
 /**
+ * Check if selector is id-only
+ */
+function isIdOnlySelector(selector: unknown): boolean {
+  if (typeof selector !== 'object' || selector === null) return false;
+  const keys = Object.keys(selector);
+  return keys.length === 1 && keys[0] === 'id';
+}
+
+/**
+ * Get selector description for error messages
+ */
+function getSelectorDescription(selector: string | Record<string, unknown>): string {
+  if (typeof selector === 'string') {
+    return selector;
+  }
+  if (isIdOnlySelector(selector)) {
+    return `testID: ${(selector as { id: string }).id}`;
+  }
+  return `selector: ${JSON.stringify(selector)}`;
+}
+
+/**
  * Create the test context with API functions bound to the client
  */
 function createTestContext(client: TastoClient, results: RunResults) {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  const element = (testID: string) => ({
-    async tap() {
-      const ok = await client.tap(testID);
-      if (!ok) throw new Error(`Tap failed: ${testID}`);
-      await sleep(50);
-    },
+  /**
+   * Element function supporting both string testID and Selector objects
+   */
+  const element = (selector: string | Record<string, unknown>) => {
+    // Normalize string to id selector for internal use
+    const isString = typeof selector === 'string';
+    const selectorObj = isString ? { id: selector } : selector;
+    const testID = isString ? selector : (isIdOnlySelector(selector) ? (selector as { id: string }).id : null);
 
-    async typeText(text: string) {
-      const ok = await client.typeText(testID, text);
-      if (!ok) throw new Error(`TypeText failed: ${testID}`);
-      await sleep(50);
-    },
+    return {
+      async tap() {
+        let ok: boolean;
+        if (testID) {
+          ok = await client.tap(testID);
+        } else {
+          ok = await client.tapBySelector(selectorObj);
+        }
+        if (!ok) throw new Error(`Tap failed: ${getSelectorDescription(selector)}`);
+        await sleep(50);
+      },
 
-    async clearText() {
-      const ok = await client.clearText(testID);
-      if (!ok) throw new Error(`ClearText failed: ${testID}`);
-      await sleep(50);
-    },
+      async typeText(text: string) {
+        let ok: boolean;
+        if (testID) {
+          ok = await client.typeText(testID, text);
+        } else {
+          ok = await client.typeTextBySelector(selectorObj, text);
+        }
+        if (!ok) throw new Error(`TypeText failed: ${getSelectorDescription(selector)}`);
+        await sleep(50);
+      },
 
-    async exists() {
-      return client.exists(testID);
-    },
+      async clearText() {
+        let ok: boolean;
+        if (testID) {
+          ok = await client.clearText(testID);
+        } else {
+          ok = await client.clearTextBySelector(selectorObj);
+        }
+        if (!ok) throw new Error(`ClearText failed: ${getSelectorDescription(selector)}`);
+        await sleep(50);
+      },
 
-    async isVisible() {
-      return client.isVisible(testID);
-    },
+      async exists() {
+        if (testID) {
+          return client.exists(testID);
+        }
+        return client.existsBySelector(selectorObj);
+      },
 
-    async toBeVisible() {
-      const visible = await client.isVisible(testID);
-      if (!visible) throw new Error(`Not visible: ${testID}`);
-    },
+      async isVisible() {
+        if (testID) {
+          return client.isVisible(testID);
+        }
+        return client.isVisibleBySelector(selectorObj);
+      },
 
-    async getText() {
-      return client.getText(testID);
-    },
+      async toBeVisible() {
+        let visible: boolean;
+        if (testID) {
+          visible = await client.isVisible(testID);
+        } else {
+          visible = await client.isVisibleBySelector(selectorObj);
+        }
+        if (!visible) throw new Error(`Not visible: ${getSelectorDescription(selector)}`);
+      },
 
-    async scroll(direction: string, amount = 200) {
-      await client.scroll(testID, direction, amount);
-      await sleep(100);
-    },
-  });
+      async getText() {
+        if (testID) {
+          return client.getText(testID);
+        }
+        return client.getTextBySelector(selectorObj);
+      },
+
+      async scroll(direction: string, amount = 200) {
+        if (testID) {
+          await client.scroll(testID, direction, amount);
+        } else {
+          // For complex selectors, need to get info first to find testID
+          const info = await client.findBySelector(selectorObj);
+          if (info?.testID) {
+            await client.scroll(info.testID, direction, amount);
+          } else {
+            throw new Error(`Cannot scroll element without testID: ${getSelectorDescription(selector)}`);
+          }
+        }
+        await sleep(100);
+      },
+
+      async getInfo() {
+        if (testID) {
+          return client.getElementInfo(testID);
+        }
+        return client.findBySelector(selectorObj);
+      },
+
+      async toExist() {
+        const exists = testID ? await client.exists(testID) : await client.existsBySelector(selectorObj);
+        if (!exists) throw new Error(`Element does not exist: ${getSelectorDescription(selector)}`);
+      },
+    };
+  };
+
+  /**
+   * Find all elements matching a selector
+   */
+  const elements = async (selector: string | Record<string, unknown>) => {
+    const selectorObj = typeof selector === 'string' ? { id: selector } : selector;
+    return client.findAllBySelector(selectorObj);
+  };
 
   const waitForElement = async (testID: string, opts: { timeout?: number } = {}) => {
     const timeout = opts.timeout || 5000;
@@ -217,5 +310,5 @@ function createTestContext(client: TastoClient, results: RunResults) {
     }
   };
 
-  return { element, sleep, runTest, waitForElement, waitForVisible, Alert };
+  return { element, elements, sleep, runTest, waitForElement, waitForVisible, Alert };
 }
