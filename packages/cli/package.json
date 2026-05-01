@@ -6,6 +6,7 @@
     "tasto": "./src/index.ts"
   },
   "dependencies": {
+    "esbuild": "^0.21.0",
     "glob": "^10.0.0"
   }
 }
