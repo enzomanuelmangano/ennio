@@ -1,0 +1,11 @@
+{
+  "name": "@tasto/cli",
+  "version": "0.1.0",
+  "description": "CLI for running Tasto tests via Hermes CDP",
+  "bin": {
+    "tasto": "./src/index.ts"
+  },
+  "dependencies": {
+    "glob": "^10.0.0"
+  }
+}

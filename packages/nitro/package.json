@@ -12,15 +12,14 @@
     "ios/",
     "nitrogen/generated/",
     "nitro.json",
-    "TastoNitro.podspec"
+    "TastoNitro.podspec",
+    "react-native.config.js"
   ],
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf lib",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "yarn build",
-    "android": "expo run:android",
-    "ios": "expo run:ios"
+    "prepublishOnly": "yarn build"
   },
   "peerDependencies": {
     "react": "*",
@@ -46,9 +45,5 @@
     "fabric",
     "nitro"
   ],
-  "dependencies": {
-    "expo": "~53.0.27",
-    "react": "19.0.0",
-    "react-native": "0.79.6"
-  }
+  "dependencies": {}
 }

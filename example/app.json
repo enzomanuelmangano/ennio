@@ -24,7 +24,8 @@
       "package": "com.tasto.example"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "@tasto/expo-plugin"
     ],
     "experiments": {
       "typedRoutes": true

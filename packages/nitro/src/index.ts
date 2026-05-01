@@ -79,3 +79,13 @@ export const TastoModule = {
   get stopServer() { return stopServer; },
   get isServerRunning() { return isServerRunning; },
 };
+
+// Expose globally for CLI access via CDP
+const _globalThis = globalThis as { __TASTO_MODULE__?: Tasto };
+const _module = getTastoModule();
+if (_module) {
+  _globalThis.__TASTO_MODULE__ = _module;
+  if (__DEV__) {
+    console.log('[Tasto] Module initialized and exposed globally');
+  }
+}

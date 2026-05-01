@@ -14,6 +14,7 @@
     "@hookform/resolvers": "^5.2.2",
     "@react-native-async-storage/async-storage": "2.1.2",
     "@tasto/nitro": "*",
+    "@tasto/expo-plugin": "*",
     "expo": "~53.0.0",
     "expo-constants": "~17.1.8",
     "expo-haptics": "~14.1.4",
@@ -31,7 +32,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
-    "@tasto/test": "*",
+    "@tasto/cli": "*",
     "@types/react": "~19.0.10",
     "typescript": "~5.8.3"
   }
