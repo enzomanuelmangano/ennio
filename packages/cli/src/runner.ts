@@ -500,6 +500,9 @@ function createTestContext(client: TastoClient, results: RunResults) {
     async getText() {
       return client.getAlertText();
     },
+    async getButtons() {
+      return client.getAlertButtons();
+    },
     async tap(buttonText: string) {
       const ok = await client.tapAlertButton(buttonText);
       if (!ok) throw new Error(`Alert tap failed: ${buttonText}`);

@@ -264,6 +264,17 @@ export class TastoClient {
     return response.success;
   }
 
+  async getAlertButtons(): Promise<string[]> {
+    const response = await this.send('getAlertButtons', {});
+    if (!response.success || !response.data) return [];
+    try {
+      const buttons = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+      return Array.isArray(buttons) ? buttons : [];
+    } catch {
+      return [];
+    }
+  }
+
   // ============================================
   // Selector-based Methods (Full Maestro Parity)
   // ============================================

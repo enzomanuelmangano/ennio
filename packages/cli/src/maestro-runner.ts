@@ -133,9 +133,27 @@ class MaestroExecutor {
 
   /**
    * Check if selector matches any element
+   * Also checks native alerts for text-based selectors
    */
   private async selectorExists(selector: MaestroSelector): Promise<boolean> {
     const tastoSelector = toTastoSelector(selector);
+
+    // Check native alert for text-based selectors
+    if (selector.text && !selector.id) {
+      const alertPresent = await this.client.isAlertPresent();
+      if (alertPresent) {
+        // Check if text matches alert content or buttons
+        const alertText = await this.client.getAlertText();
+        if (alertText.includes(selector.text)) {
+          return true;
+        }
+        const buttons = await this.client.getAlertButtons();
+        if (buttons.includes(selector.text)) {
+          return true;
+        }
+      }
+    }
+
     if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
       return this.client.exists(tastoSelector.id as string);
     }
@@ -144,9 +162,27 @@ class MaestroExecutor {
 
   /**
    * Check if selector is visible
+   * Also checks native alerts for text-based selectors
    */
   private async selectorVisible(selector: MaestroSelector): Promise<boolean> {
     const tastoSelector = toTastoSelector(selector);
+
+    // Check native alert for text-based selectors
+    if (selector.text && !selector.id) {
+      const alertPresent = await this.client.isAlertPresent();
+      if (alertPresent) {
+        // Check if text matches alert content or buttons
+        const alertText = await this.client.getAlertText();
+        if (alertText.includes(selector.text)) {
+          return true;
+        }
+        const buttons = await this.client.getAlertButtons();
+        if (buttons.includes(selector.text)) {
+          return true;
+        }
+      }
+    }
+
     if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
       return this.client.isVisible(tastoSelector.id as string);
     }
@@ -155,9 +191,27 @@ class MaestroExecutor {
 
   /**
    * Tap on element
+   * Also handles tapping native alert buttons for text-based selectors
    */
   private async tap(selector: MaestroSelector): Promise<void> {
     const tastoSelector = toTastoSelector(selector);
+
+    // Check if this is an alert button tap (text-only selector)
+    if (selector.text && !selector.id) {
+      const alertPresent = await this.client.isAlertPresent();
+      if (alertPresent) {
+        const buttons = await this.client.getAlertButtons();
+        if (buttons.includes(selector.text)) {
+          this.log(`(tapping alert button: "${selector.text}")`);
+          const ok = await this.client.tapAlertButton(selector.text);
+          if (!ok) {
+            throw new Error(`Alert button tap failed: ${selector.text}`);
+          }
+          await this.sleep(100);
+          return;
+        }
+      }
+    }
 
     // Wait for element to exist
     await this.waitFor(
