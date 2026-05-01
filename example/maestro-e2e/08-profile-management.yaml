@@ -1,0 +1,268 @@
+# Test: Profile Management Flow
+# Tests profile view, edit, menu navigation
+
+appId: com.tasto.example
+name: "Profile Management"
+tags:
+  - profile
+  - auth-required
+
+---
+
+# ============================================
+# SETUP
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# ============================================
+# TEST: Guest profile view
+# ============================================
+
+- tapOn:
+    id: "tab-profile"
+
+# Should show guest view initially (if not logged in)
+- runFlow:
+    when:
+      visible:
+        id: "guest-view"
+    commands:
+      - assertVisible:
+          text: "Sign In"
+      - assertVisible:
+          id: "guest-signin-btn"
+      - assertVisible:
+          id: "guest-register-btn"
+
+# ============================================
+# TEST: Login from guest profile
+# ============================================
+
+- runFlow:
+    when:
+      visible:
+        id: "guest-signin-btn"
+    commands:
+      - tapOn:
+          id: "guest-signin-btn"
+      - assertVisible:
+          id: "login-screen"
+          timeout: 3000
+      - tapOn:
+          id: "demo-login-btn"
+      - assertVisible:
+          id: "home-screen"
+          timeout: 5000
+
+# Navigate back to profile
+- tapOn:
+    id: "tab-profile"
+
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+# ============================================
+# TEST: Authenticated profile header
+# ============================================
+
+- assertVisible:
+    id: "profile-header"
+
+- assertVisible:
+    text: "John"
+
+# Edit profile button
+- assertVisible:
+    id: "edit-profile-btn"
+
+# ============================================
+# TEST: Profile stats card
+# ============================================
+
+- assertVisible:
+    id: "stats-card"
+
+# Stats should show orders, items, spent
+- assertVisible:
+    text: "Orders"
+- assertVisible:
+    text: "Items"
+- assertVisible:
+    text: "Spent"
+
+# ============================================
+# TEST: Profile menu items
+# ============================================
+
+# Account section
+- assertVisible:
+    id: "menu-orders"
+- assertVisible:
+    id: "menu-payment"
+- assertVisible:
+    id: "menu-addresses"
+
+# Preferences section
+- scroll:
+    direction: DOWN
+    amount: 200
+
+- assertVisible:
+    id: "menu-settings"
+- assertVisible:
+    id: "menu-notifications"
+- assertVisible:
+    id: "menu-appearance"
+
+# Support section
+- scroll:
+    direction: DOWN
+    amount: 200
+
+- assertVisible:
+    id: "menu-help"
+- assertVisible:
+    id: "menu-contact"
+- assertVisible:
+    id: "menu-terms"
+
+# Logout
+- assertVisible:
+    id: "menu-logout"
+
+# ============================================
+# TEST: Navigate to orders from profile
+# ============================================
+
+- scroll:
+    direction: UP
+    amount: 400
+
+- tapOn:
+    id: "menu-orders"
+
+- assertVisible:
+    anyOf:
+      - id: "orders-screen"
+      - id: "empty-orders"
+    timeout: 3000
+
+# Go back to profile
+- back
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+# ============================================
+# TEST: Navigate to settings from profile
+# ============================================
+
+- tapOn:
+    id: "menu-settings"
+
+- assertVisible:
+    id: "settings-screen"
+    timeout: 3000
+
+# Go back
+- back
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+# ============================================
+# TEST: Navigate to appearance from profile
+# ============================================
+
+- tapOn:
+    id: "menu-appearance"
+
+# Should go to settings (appearance section)
+- assertVisible:
+    id: "settings-screen"
+    timeout: 3000
+
+- back
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+# ============================================
+# TEST: Navigate to help from profile
+# ============================================
+
+- scroll:
+    direction: DOWN
+    amount: 300
+
+- tapOn:
+    id: "menu-help"
+
+# Help screen or modal
+- assertVisible:
+    anyOf:
+      - text: "Help"
+      - text: "Support"
+    timeout: 3000
+
+- back
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+# ============================================
+# TEST: Navigate to terms from profile
+# ============================================
+
+- tapOn:
+    id: "menu-terms"
+
+- assertVisible:
+    anyOf:
+      - text: "Terms"
+      - text: "Privacy"
+    timeout: 3000
+
+- back
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+# ============================================
+# TEST: Logout confirmation
+# ============================================
+
+- tapOn:
+    id: "menu-logout"
+
+# Confirmation dialog
+- assertVisible:
+    text: "Sign Out"
+    timeout: 2000
+
+# Cancel logout
+- tapOn:
+    text: "Cancel"
+
+# Should still be on profile
+- assertVisible:
+    id: "profile-screen"
+    timeout: 2000
+
+# ============================================
+# TEST: Complete logout
+# ============================================
+
+- tapOn:
+    id: "menu-logout"
+
+- tapOn:
+    text: "Sign Out"
+
+# Should show guest view
+- assertVisible:
+    id: "guest-view"
+    timeout: 3000

@@ -1,0 +1,255 @@
+# Test: Settings Flow
+# Tests all settings toggles and configurations
+
+appId: com.tasto.example
+name: "Settings Flow"
+tags:
+  - settings
+
+---
+
+# ============================================
+# SETUP
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# ============================================
+# TEST: Navigate to settings via quick action
+# ============================================
+
+- tapOn:
+    id: "quick-action-settings"
+
+- assertVisible:
+    id: "settings-screen"
+    timeout: 3000
+
+# ============================================
+# TEST: Appearance settings
+# ============================================
+
+# Dark mode toggle
+- assertVisible:
+    id: "toggle-dark-mode"
+
+- tapOn:
+    id: "toggle-dark-mode"
+
+# UI should update to dark mode
+# Toggle back
+- tapOn:
+    id: "toggle-dark-mode"
+
+# Haptic feedback toggle
+- assertVisible:
+    id: "toggle-haptic"
+- tapOn:
+    id: "toggle-haptic"
+- tapOn:
+    id: "toggle-haptic"
+
+# Notification badges toggle
+- assertVisible:
+    id: "toggle-badges"
+- tapOn:
+    id: "toggle-badges"
+- tapOn:
+    id: "toggle-badges"
+
+# ============================================
+# TEST: Notification settings
+# ============================================
+
+- scroll:
+    direction: DOWN
+    amount: 200
+
+# Order updates
+- assertVisible:
+    id: "toggle-order-updates"
+- tapOn:
+    id: "toggle-order-updates"
+- tapOn:
+    id: "toggle-order-updates"
+
+# Promotions
+- assertVisible:
+    id: "toggle-promotions"
+- tapOn:
+    id: "toggle-promotions"
+
+# New arrivals
+- assertVisible:
+    id: "toggle-new-arrivals"
+- tapOn:
+    id: "toggle-new-arrivals"
+- tapOn:
+    id: "toggle-new-arrivals"
+
+# Price drops
+- assertVisible:
+    id: "toggle-price-drops"
+- tapOn:
+    id: "toggle-price-drops"
+- tapOn:
+    id: "toggle-price-drops"
+
+# ============================================
+# TEST: Privacy settings
+# ============================================
+
+- scroll:
+    direction: DOWN
+    amount: 200
+
+# Analytics
+- assertVisible:
+    id: "toggle-analytics"
+- tapOn:
+    id: "toggle-analytics"
+
+# Personalized ads
+- assertVisible:
+    id: "toggle-personalized-ads"
+- tapOn:
+    id: "toggle-personalized-ads"
+- tapOn:
+    id: "toggle-personalized-ads"
+
+# Location services
+- assertVisible:
+    id: "toggle-location"
+- tapOn:
+    id: "toggle-location"
+- tapOn:
+    id: "toggle-location"
+
+# ============================================
+# TEST: Account settings (when logged in)
+# ============================================
+
+# Login first
+- runFlow:
+    file: subflows/navigate-home.yaml
+- runFlow:
+    when:
+      visible:
+        id: "home-signin-btn"
+    commands:
+      - tapOn:
+          id: "home-signin-btn"
+      - tapOn:
+          id: "demo-login-btn"
+
+- tapOn:
+    id: "quick-action-settings"
+
+- scroll:
+    direction: DOWN
+    amount: 300
+
+# Edit profile button
+- assertVisible:
+    id: "edit-profile"
+
+# Change password button
+- assertVisible:
+    id: "change-password"
+
+# Sign out button
+- assertVisible:
+    id: "sign-out"
+
+# ============================================
+# TEST: App info and legal
+# ============================================
+
+- scroll:
+    direction: DOWN
+    amount: 300
+
+# App version
+- assertVisible:
+    id: "app-version"
+
+# Terms of service
+- assertVisible:
+    id: "terms"
+
+# Privacy policy
+- assertVisible:
+    id: "privacy-policy"
+
+# Help & support
+- assertVisible:
+    id: "help"
+
+# ============================================
+# TEST: Danger zone actions
+# ============================================
+
+# Clear cart & orders
+- assertVisible:
+    id: "clear-data"
+
+# Reset all settings
+- assertVisible:
+    id: "reset-settings"
+
+# Test reset settings with confirmation
+- tapOn:
+    id: "reset-settings"
+
+- assertVisible:
+    text: "Reset Settings"
+    timeout: 2000
+
+# Cancel the reset
+- tapOn:
+    text: "Cancel"
+
+# Settings should still be visible
+- assertVisible:
+    id: "settings-screen"
+
+# ============================================
+# TEST: Navigate via profile menu
+# ============================================
+
+- tapOn:
+    id: "tab-profile"
+
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+- tapOn:
+    id: "menu-settings"
+
+- assertVisible:
+    id: "settings-screen"
+    timeout: 3000
+
+# ============================================
+# TEST: Dark mode persists across screens
+# ============================================
+
+- scroll:
+    direction: UP
+    amount: 500
+
+- tapOn:
+    id: "toggle-dark-mode"
+
+# Navigate to other screens and verify dark mode
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# Navigate back and toggle off
+- tapOn:
+    id: "quick-action-settings"
+
+- tapOn:
+    id: "toggle-dark-mode"

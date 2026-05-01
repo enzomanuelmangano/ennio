@@ -1,0 +1,12 @@
+# Subflow: Navigate to home screen
+# Ensures we're on the home screen regardless of current state
+
+appId: com.tasto.example
+
+---
+
+- tapOn:
+    id: "tab-home"
+- assertVisible:
+    id: "home-screen"
+    timeout: 3000

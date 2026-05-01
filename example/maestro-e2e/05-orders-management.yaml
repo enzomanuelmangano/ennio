@@ -1,0 +1,203 @@
+# Test: Orders Management Flow
+# Tests order history, order details, tracking
+
+appId: com.tasto.example
+name: "Orders Management"
+tags:
+  - orders
+  - auth-required
+
+---
+
+# ============================================
+# SETUP: Login with demo account
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- runFlow:
+    when:
+      visible:
+        id: "home-signin-btn"
+    commands:
+      - tapOn:
+          id: "home-signin-btn"
+      - tapOn:
+          id: "demo-login-btn"
+      - assertVisible:
+          id: "home-screen"
+          timeout: 5000
+
+# ============================================
+# TEST: Navigate to orders via quick action
+# ============================================
+
+- tapOn:
+    id: "quick-action-orders"
+
+- assertVisible:
+    anyOf:
+      - id: "orders-screen"
+      - id: "empty-orders"
+    timeout: 3000
+
+# ============================================
+# TEST: Orders list or empty state
+# ============================================
+
+- runFlow:
+    when:
+      visible:
+        id: "empty-orders"
+    commands:
+      - assertVisible:
+          text: "No orders yet"
+      - assertVisible:
+          id: "browse-products"
+
+- runFlow:
+    when:
+      visible:
+        id: "orders-list"
+    commands:
+      - assertVisible:
+          id: "orders-screen"
+
+# ============================================
+# TEST: Navigate to orders via profile menu
+# ============================================
+
+- tapOn:
+    id: "tab-profile"
+
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+- tapOn:
+    id: "menu-orders"
+
+- assertVisible:
+    anyOf:
+      - id: "orders-screen"
+      - id: "empty-orders"
+    timeout: 3000
+
+# ============================================
+# TEST: Create an order for testing (if needed)
+# ============================================
+
+- runFlow:
+    when:
+      visible:
+        id: "empty-orders"
+    file: subflows/create-test-order.yaml
+
+# ============================================
+# TEST: Order card displays correctly
+# ============================================
+
+- runFlow:
+    when:
+      visible:
+        id: "orders-list"
+    commands:
+      # First order should be visible
+      - scroll:
+          direction: UP
+          amount: 500
+
+      # Order cards should show status
+      - assertVisible:
+          anyOf:
+            - text: "Processing"
+            - text: "Shipped"
+            - text: "Delivered"
+
+# ============================================
+# TEST: View order details
+# ============================================
+
+- runFlow:
+    when:
+      visible:
+        id: "orders-list"
+    commands:
+      # Tap first order
+      - tapOn:
+          below:
+            text: "Order"
+          index: 0
+
+      # Order details modal should open
+      - assertVisible:
+          id: "order-details"
+          timeout: 3000
+
+      # Details should show shipping address
+      - assertVisible:
+          text: "Shipping"
+
+      # Close details
+      - tapOn:
+          id: "close-details"
+
+      - assertVisible:
+          id: "orders-screen"
+          timeout: 2000
+
+# ============================================
+# TEST: Guest user orders view
+# ============================================
+
+# Logout first
+- tapOn:
+    id: "tab-profile"
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+- tapOn:
+    id: "menu-logout"
+- tapOn:
+    text: "Sign Out"
+
+# Try to access orders
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- tapOn:
+    id: "quick-action-orders"
+
+# Should show guest view
+- assertVisible:
+    id: "orders-guest"
+    timeout: 3000
+
+- assertVisible:
+    text: "Sign in to view orders"
+
+- assertVisible:
+    id: "sign-in-btn"
+
+# ============================================
+# TEST: Sign in from orders guest view
+# ============================================
+
+- tapOn:
+    id: "sign-in-btn"
+
+- assertVisible:
+    id: "login-screen"
+    timeout: 3000
+
+# Login with demo
+- tapOn:
+    id: "demo-login-btn"
+
+# Should return to orders
+- assertVisible:
+    anyOf:
+      - id: "orders-screen"
+      - id: "empty-orders"
+    timeout: 5000

@@ -1,0 +1,11 @@
+# Subflow: Navigate to products screen
+
+appId: com.tasto.example
+
+---
+
+- tapOn:
+    id: "tab-products"
+- assertVisible:
+    id: "products-screen"
+    timeout: 3000

@@ -1,0 +1,13 @@
+# Subflow: Navigate to cart screen
+
+appId: com.tasto.example
+
+---
+
+- tapOn:
+    id: "tab-cart"
+- assertVisible:
+    anyOf:
+      - id: "cart-screen"
+      - id: "cart-screen-empty"
+    timeout: 3000

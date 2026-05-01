@@ -222,6 +222,17 @@ export class TastoClient {
     return response.success;
   }
 
+  async longPress(testID: string, duration: number = 500): Promise<boolean> {
+    const response = await this.send('longPress', { testID, duration });
+    return response.success;
+  }
+
+  async getElementInfo(testID: string): Promise<ExtendedElementInfo | null> {
+    const response = await this.send('getElementInfo', { testID });
+    if (!response.success || !response.data) return null;
+    return (typeof response.data === 'string' ? JSON.parse(response.data) : response.data) as ExtendedElementInfo;
+  }
+
   // Synchronization
   async waitForIdle(timeout: number = 5000): Promise<boolean> {
     const response = await this.send('waitForIdle', { timeout });
