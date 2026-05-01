@@ -11,7 +11,7 @@
  *   npx tasto e2e/test.ts
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import { resolve, basename, dirname, join } from 'path';
 import { glob } from 'glob';
 
@@ -414,9 +414,19 @@ async function main() {
 
   // Find test files
   const files: string[] = [];
-  for (const pattern of args) {
+  for (let pattern of args) {
+    // If pattern is a directory, look for test files inside
+    const resolved = resolve(pattern);
+    if (existsSync(resolved) && statSync(resolved).isDirectory()) {
+      pattern = join(pattern, '**/*.test.ts');
+    }
+
     const matches = await glob(pattern);
-    files.push(...matches.map(f => resolve(f)));
+    // Filter to only .test.ts files and exclude shared.ts
+    const testFiles = matches
+      .filter(f => f.endsWith('.test.ts'))
+      .map(f => resolve(f));
+    files.push(...testFiles);
   }
 
   if (files.length === 0) {
