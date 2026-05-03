@@ -438,6 +438,28 @@ class MaestroExecutor {
     }
   }
 
+  /**
+   * Poll the iOS accessibility tree until the "Downloading 100%…" overlay
+   * (predictive-text dictionary fetch shown after a clearState reinstall)
+   * disappears, so the next assertVisible doesn't race it.
+   */
+  private async waitForKeyboardOverlay(udid: string, maxWaitMs: number = 6000): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const desc = execSync(`argent run describe --udid ${udid}`, {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 3000,
+        });
+        if (!desc.includes('Downloading')) return;
+      } catch {
+        return;
+      }
+      await this.sleep(200);
+    }
+  }
+
   private cachedScreenSize: { width: number; height: number } | null = null;
   private async getScreenSize(_udid: string): Promise<{ width: number; height: number }> {
     if (this.cachedScreenSize) return this.cachedScreenSize;
@@ -577,7 +599,11 @@ class MaestroExecutor {
           stdio: ['ignore', 'pipe', 'ignore'],
           timeout: 8000,
         });
-        await this.sleep(80);
+        // iOS shows a "Downloading 100%…" overlay the first time a TextInput
+        // is used after a fresh install (predictive-text dictionary fetch).
+        // Wait it out so the next assertVisible doesn't race the overlay.
+        await this.waitForKeyboardOverlay(udid);
+        await this.sleep(120);
         return;
       } catch (e) {
         this.log(`typeText (HID) error: ${(e as Error).message}`);
@@ -993,12 +1019,16 @@ class MaestroExecutor {
         terminateApp(deviceId, targetAppId);
       }
 
-      // Launch immediately. simctl launch is synchronous-ish; the app is
-      // running by the time it returns. No fixed pre-sleep needed.
+      // Brief settle so the simulator finishes wiping data containers
+      // before we launch the next instance. Skipping this on iOS 26 sim
+      // can produce a Hermes BCProvider SIGSEGV when the new process
+      // races the previous one's teardown.
+      await this.sleep(800);
+
       launchAppOnSimulator(deviceId, targetAppId);
 
-      // Tight reconnect loop. Native auto-init binds WS once the JS bundle
-      // boots and RCTHost.start fires. With a warm Metro this is ~1-2s.
+      // Reconnect with patience. App needs to: cold-start, load JS bundle
+      // (Metro served), fire RCTHost.start, then bind WS server.
       let connected = false;
       const startTime = Date.now();
       while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
@@ -1006,7 +1036,7 @@ class MaestroExecutor {
           this.client = await this.reconnectClient();
           connected = true;
         } catch {
-          await this.sleep(100);
+          await this.sleep(200);
         }
       }
 
@@ -1014,7 +1044,9 @@ class MaestroExecutor {
         throw new Error('launchApp: Failed to reconnect to app after restart');
       }
 
-      // Settle: wait for shadow tree to commit at least once.
+      // Wait for first shadow tree commit so the next assertVisible has
+      // something to query.
+      await this.sleep(400);
       try {
         await this.client.waitForIdle(3000);
       } catch {

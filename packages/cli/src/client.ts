@@ -160,16 +160,58 @@ export class EnnioClient {
     }
   }
 
+  /**
+   * Try to re-establish the WebSocket connection. Used after a transient
+   * drop (RN bundle reload, sim hiccup). Polls until the app rebinds the
+   * WS server, up to ~6s.
+   */
+  async reconnect(maxWaitMs: number = 6000): Promise<boolean> {
+    this.disconnect();
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        await this.connect();
+        return true;
+      } catch {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    }
+    return false;
+  }
+
   private async send(type: string, payload: Record<string, unknown> = {}): Promise<EnnioResponse> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('Not connected to Ennio server');
+      // Best-effort transparent reconnect on cold/dropped socket. If the
+      // app is up but rebound after a JS reload, this picks the connection
+      // back up without forcing the runner to fail mid-flow.
+      const ok = await this.reconnect(6000);
+      if (!ok) throw new Error('Not connected to Ennio server');
     }
 
     const id = String(++this.messageId);
     const request: EnnioRequest = { id, type, payload };
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      // Retry once on transient WS close: the JS bundle reload during
+      // normal RN dev cycles or simulator hiccups can drop the socket
+      // mid-request. Reconnect and re-send before bubbling the error.
+      const wrappedReject = async (e: Error) => {
+        if (e.message === 'Connection closed') {
+          const ok = await this.reconnect(6000);
+          if (ok) {
+            try {
+              const res = await this.send(type, payload);
+              resolve(res);
+              return;
+            } catch (e2) {
+              reject(e2 as Error);
+              return;
+            }
+          }
+        }
+        reject(e);
+      };
+      this.pending.set(id, { resolve, reject: wrappedReject });
       this.ws!.send(JSON.stringify(request));
 
       // Timeout after 30 seconds

@@ -365,13 +365,30 @@ std::shared_ptr<facebook::react::UIManager> EnnioRuntimeHelper::getUIManager() {
         @try {
             RCTSurfacePresenter* presenter = nil;
 
-            // First try cached presenter from swizzling
+            // Probe cached presenter, but verify it's still alive. After
+            // launchApp:clearState the app process restarts but our singleton
+            // can still hold a void* to the previous presenter; touching that
+            // dangling pointer is a SIGSEGV in objc_retain. Re-find from
+            // runtime if the cached one looks dead.
             if (surfacePresenter_) {
-                presenter = (__bridge RCTSurfacePresenter*)surfacePresenter_;
-                NSLog(@"[Ennio] Using cached surfacePresenter: %@", presenter);
+                @try {
+                    presenter = (__bridge RCTSurfacePresenter*)surfacePresenter_;
+                    // Force a method dispatch to surface deallocation as a
+                    // catchable exception rather than a SIGSEGV.
+                    if (![presenter respondsToSelector:@selector(scheduler)]) {
+                        presenter = nil;
+                        surfacePresenter_ = nullptr;
+                    }
+                } @catch (...) {
+                    presenter = nil;
+                    surfacePresenter_ = nullptr;
+                }
+                if (presenter) {
+                    NSLog(@"[Ennio] Using cached surfacePresenter: %@", presenter);
+                }
             }
 
-            // If no cached, try runtime search
+            // If no cached (or cached looked stale), search runtime fresh.
             if (!presenter) {
                 presenter = findSurfacePresenterInRuntime();
                 if (presenter) {
