@@ -50,6 +50,96 @@ static UIView* findViewByAccessibilityIdentifier(UIView* root, NSString* identif
     return nil;
 }
 
+// Helper to find a view by accessibility label (text) recursively
+// This is used for native iOS elements like tab bars that aren't in shadow tree
+static UIView* findViewByAccessibilityLabel(UIView* root, NSString* label) {
+    // Skip debugging overlays
+    NSString* className = NSStringFromClass([root class]);
+    if ([className containsString:@"DebuggingOverlay"] ||
+        [className containsString:@"DebugOverlay"] ||
+        [className containsString:@"DevMenu"]) {
+        return nil;
+    }
+
+    // Check this view's accessibilityLabel
+    if (root.accessibilityLabel && [root.accessibilityLabel isEqualToString:label]) {
+        // Prefer buttons/tappable elements
+        if ([root isKindOfClass:[UIButton class]] ||
+            [root isKindOfClass:[UIControl class]] ||
+            (root.accessibilityTraits & UIAccessibilityTraitButton) != 0) {
+            NSLog(@"[Tasto] findViewByAccessibilityLabel: Found button/control '%@' class=%@",
+                  label, className);
+            return root;
+        }
+    }
+
+    // Check children first (depth-first)
+    for (UIView* subview in root.subviews) {
+        UIView* found = findViewByAccessibilityLabel(subview, label);
+        if (found) {
+            return found;
+        }
+    }
+
+    // If no button found in children, accept any matching accessible element
+    if (root.accessibilityLabel && [root.accessibilityLabel isEqualToString:label]) {
+        if (root.isAccessibilityElement) {
+            NSLog(@"[Tasto] findViewByAccessibilityLabel: Found accessible '%@' class=%@",
+                  label, className);
+            return root;
+        }
+    }
+
+    return nil;
+}
+
+// Find ALL views with matching accessibility label (for debugging)
+static void findAllViewsByAccessibilityLabel(UIView* root, NSString* label, NSMutableArray<UIView*>* results) {
+    NSString* className = NSStringFromClass([root class]);
+    if ([className containsString:@"DebuggingOverlay"]) {
+        return;
+    }
+
+    if (root.accessibilityLabel && [root.accessibilityLabel isEqualToString:label]) {
+        [results addObject:root];
+    }
+
+    for (UIView* subview in root.subviews) {
+        findAllViewsByAccessibilityLabel(subview, label, results);
+    }
+}
+
+// Timeout for main thread dispatch (5 seconds)
+static const int64_t MAIN_THREAD_TIMEOUT_NS = 5 * NSEC_PER_SEC;
+
+/**
+ * Dispatch a block to the main thread with timeout.
+ * Returns YES if completed, NO if timed out.
+ * If already on main thread, executes immediately.
+ */
+static BOOL dispatchSyncMainWithTimeout(void (^block)(void)) {
+    if ([NSThread isMainThread]) {
+        block();
+        return YES;
+    }
+
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        block();
+        dispatch_semaphore_signal(semaphore);
+    });
+
+    long result = dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MAIN_THREAD_TIMEOUT_NS));
+
+    if (result != 0) {
+        NSLog(@"[Tasto] WARNING: Main thread dispatch timed out after 5 seconds");
+        return NO;
+    }
+
+    return YES;
+}
+
 // Helper to find the topmost window at a given point
 static UIWindow* findWindowAtPoint(CGPoint point) {
     // Get all windows sorted by windowLevel (highest first)
@@ -291,7 +381,7 @@ std::shared_ptr<facebook::react::UIManager> TastoRuntimeHelper::getUIManager() {
     if ([NSThread isMainThread]) {
         getUIManagerBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), getUIManagerBlock);
+        dispatchSyncMainWithTimeout(getUIManagerBlock);
     }
 
     return result;
@@ -332,7 +422,7 @@ std::shared_ptr<const facebook::react::ShadowNode> TastoRuntimeHelper::getShadow
     if ([NSThread isMainThread]) {
         getRootBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), getRootBlock);
+        dispatchSyncMainWithTimeout(getRootBlock);
     }
 
     return *rootNodePtr;
@@ -358,6 +448,53 @@ static UIGestureRecognizer* findSurfaceTouchHandler(UIView* view) {
     return nil;
 }
 
+// Helper to check if a view is a debugging overlay that should be skipped
+static BOOL isDebuggingOverlay(UIView* view) {
+    NSString* className = NSStringFromClass([view class]);
+    return [className containsString:@"DebuggingOverlay"] ||
+           [className containsString:@"DebugOverlay"] ||
+           [className containsString:@"DevMenu"];
+}
+
+// Helper to find the actual tappable view, skipping debugging overlays
+static UIView* findTappableViewAtPoint(UIWindow* window, CGPoint point) {
+    // First, do a normal hit test
+    UIView* hitView = [window hitTest:point withEvent:nil];
+    if (!hitView) return nil;
+
+    // If we hit a debugging overlay, search for the actual content beneath it
+    if (isDebuggingOverlay(hitView) || isDebuggingOverlay(hitView.superview)) {
+        NSLog(@"[Tasto] findTappableViewAtPoint: Skipping debugging overlay %@",
+              NSStringFromClass([hitView class]));
+
+        // Walk up to find the parent that contains non-debugging children
+        UIView* container = hitView.superview;
+        while (container && container != window) {
+            // Look at siblings of the debugging overlay
+            NSArray* siblings = container.subviews;
+            for (UIView* sibling in [siblings reverseObjectEnumerator]) {
+                if (!isDebuggingOverlay(sibling) && sibling != hitView) {
+                    // Try hit test on this sibling
+                    CGPoint siblingPoint = [container convertPoint:point toView:sibling];
+                    UIView* siblingHit = [sibling hitTest:siblingPoint withEvent:nil];
+                    if (siblingHit && !isDebuggingOverlay(siblingHit)) {
+                        NSLog(@"[Tasto] findTappableViewAtPoint: Found sibling hit: %@",
+                              NSStringFromClass([siblingHit class]));
+                        return siblingHit;
+                    }
+                }
+            }
+            container = container.superview;
+        }
+
+        // Couldn't find non-debugging view, return nil
+        NSLog(@"[Tasto] findTappableViewAtPoint: No non-debugging view found");
+        return nil;
+    }
+
+    return hitView;
+}
+
 bool TastoRuntimeHelper::performTap(float x, float y) {
     __block bool success = false;
 
@@ -376,10 +513,10 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
         NSLog(@"[Tasto] performTap: Using window %@ (level %.0f)",
               NSStringFromClass([targetWindow class]), targetWindow.windowLevel);
 
-        // Find the target view at this point
-        UIView* hitView = [targetWindow hitTest:point withEvent:nil];
+        // Find the target view at this point, skipping debugging overlays
+        UIView* hitView = findTappableViewAtPoint(targetWindow, point);
         if (!hitView) {
-            NSLog(@"[Tasto] performTap: No view at point");
+            NSLog(@"[Tasto] performTap: No view at point (after skipping debugging overlays)");
             success = false;
             return;
         }
@@ -409,9 +546,25 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
             activatableView = activatableView.superview;
         }
 
-        NSLog(@"[Tasto] performTap: accessibilityActivate didn't work, trying touch handler");
+        NSLog(@"[Tasto] performTap: accessibilityActivate didn't work, trying UIControl");
 
-        // Try Method 2: Find the RCTSurfaceTouchHandler and call its touch methods directly
+        // Try Method 2: For native UIControl (buttons, tab bar items), send control event
+        UIView* controlView = hitView;
+        while (controlView && controlView != targetWindow) {
+            if ([controlView isKindOfClass:[UIControl class]]) {
+                UIControl* control = (UIControl*)controlView;
+                NSLog(@"[Tasto] performTap: Found UIControl: %@, sending touch event",
+                      NSStringFromClass([control class]));
+                [control sendActionsForControlEvents:UIControlEventTouchUpInside];
+                success = true;
+                return;
+            }
+            controlView = controlView.superview;
+        }
+
+        NSLog(@"[Tasto] performTap: No UIControl found, trying touch handler");
+
+        // Try Method 3: Find the RCTSurfaceTouchHandler and call its touch methods directly
         UIGestureRecognizer* touchHandler = findSurfaceTouchHandler(hitView);
         if (touchHandler) {
             NSLog(@"[Tasto] performTap: Found touch handler: %@", NSStringFromClass([touchHandler class]));
@@ -472,22 +625,7 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
             return;
         }
 
-        NSLog(@"[Tasto] performTap: No touch handler found, trying UIControl");
-
-        // Try Method 3: If it's a UIControl, send actions directly
-        UIView* controlView = hitView;
-        while (controlView && controlView != targetWindow) {
-            if ([controlView isKindOfClass:[UIControl class]]) {
-                UIControl* control = (UIControl*)controlView;
-                NSLog(@"[Tasto] performTap: Found UIControl: %@", NSStringFromClass([control class]));
-                [control sendActionsForControlEvents:UIControlEventTouchUpInside];
-                success = true;
-                return;
-            }
-            controlView = controlView.superview;
-        }
-
-        NSLog(@"[Tasto] performTap: Falling back to synthetic touch event");
+        NSLog(@"[Tasto] performTap: No touch handler found, falling back to synthetic touch event");
 
         // Try Method 4: Fall back to synthetic UITouch via sendEvent (original approach)
         UIView* targetView = hitView;
@@ -538,7 +676,7 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
     if ([NSThread isMainThread]) {
         tapBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), tapBlock);
+        dispatchSyncMainWithTimeout(tapBlock);
     }
 
     return success;
@@ -600,10 +738,142 @@ bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
     if ([NSThread isMainThread]) {
         tapBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), tapBlock);
+        dispatchSyncMainWithTimeout(tapBlock);
     }
 
     return success;
+}
+
+bool TastoRuntimeHelper::performTapByLabel(const std::string& label) {
+    __block bool success = false;
+    NSString* labelStr = [NSString stringWithUTF8String:label.c_str()];
+
+    void (^tapBlock)(void) = ^{
+        NSLog(@"[Tasto] performTapByLabel: Looking for element with label '%@'", labelStr);
+
+        // Collect ALL windows
+        NSMutableArray<UIWindow*>* allWindows = [NSMutableArray array];
+        for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene* windowScene = (UIWindowScene*)scene;
+                [allWindows addObjectsFromArray:windowScene.windows];
+            }
+        }
+
+        // Sort by window level (highest first) to search modals first
+        [allWindows sortUsingComparator:^NSComparisonResult(UIWindow* w1, UIWindow* w2) {
+            if (w1.windowLevel > w2.windowLevel) return NSOrderedAscending;
+            if (w1.windowLevel < w2.windowLevel) return NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+
+        NSLog(@"[Tasto] performTapByLabel: Searching %lu windows", (unsigned long)allWindows.count);
+
+        // Find view by accessibility label in all windows
+        UIView* targetView = nil;
+        UIWindow* targetWindow = nil;
+
+        for (UIWindow* window in allWindows) {
+            if (!window.isHidden) {
+                // First pass: find all matching views for debugging
+                NSMutableArray<UIView*>* allMatches = [NSMutableArray array];
+                findAllViewsByAccessibilityLabel(window, labelStr, allMatches);
+                if (allMatches.count > 0) {
+                    NSLog(@"[Tasto] performTapByLabel: Found %lu matches in window %@",
+                          (unsigned long)allMatches.count, NSStringFromClass([window class]));
+                    for (UIView* match in allMatches) {
+                        CGRect frame = [match convertRect:match.bounds toView:window];
+                        NSLog(@"[Tasto]   - %@ at (%.1f, %.1f, %.1fx%.1f) traits=%llu",
+                              NSStringFromClass([match class]),
+                              frame.origin.x, frame.origin.y,
+                              frame.size.width, frame.size.height,
+                              (unsigned long long)match.accessibilityTraits);
+                    }
+                }
+
+                // Find best match (prefers buttons)
+                UIView* found = findViewByAccessibilityLabel(window, labelStr);
+                if (found) {
+                    targetView = found;
+                    targetWindow = window;
+                    break;
+                }
+            }
+        }
+
+        if (!targetView || !targetWindow) {
+            NSLog(@"[Tasto] performTapByLabel: No view with label '%@' found", labelStr);
+            success = false;
+            return;
+        }
+
+        NSLog(@"[Tasto] performTapByLabel: Found view %@ with label '%@' in window %@",
+              NSStringFromClass([targetView class]), labelStr, NSStringFromClass([targetWindow class]));
+
+        // Get the center point in window coordinates
+        CGRect frameInWindow = [targetView convertRect:targetView.bounds toView:targetWindow];
+        CGPoint centerPoint = CGPointMake(
+            CGRectGetMidX(frameInWindow),
+            CGRectGetMidY(frameInWindow)
+        );
+
+        NSLog(@"[Tasto] performTapByLabel: View frame: (%.1f, %.1f, %.1fx%.1f), center: (%.1f, %.1f)",
+              frameInWindow.origin.x, frameInWindow.origin.y,
+              frameInWindow.size.width, frameInWindow.size.height,
+              centerPoint.x, centerPoint.y);
+
+        // Perform tap at this point
+        success = TastoRuntimeHelper::getInstance().performTap(centerPoint.x, centerPoint.y);
+
+        if (success) {
+            NSLog(@"[Tasto] performTapByLabel: Successfully tapped '%@'", labelStr);
+        } else {
+            NSLog(@"[Tasto] performTapByLabel: Failed to tap '%@'", labelStr);
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        tapBlock();
+    } else {
+        dispatchSyncMainWithTimeout(tapBlock);
+    }
+
+    return success;
+}
+
+// Helper to find view by accessibilityIdentifier in ALL windows
+static UIView* findViewByAccessibilityIdentifierInAllWindows(NSString* identifier) {
+    NSMutableArray<UIWindow*>* allWindows = [NSMutableArray array];
+
+    for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            UIWindowScene* windowScene = (UIWindowScene*)scene;
+            [allWindows addObjectsFromArray:windowScene.windows];
+        }
+    }
+
+    NSLog(@"[Tasto] findViewByAccessibilityIdentifierInAllWindows: Searching %lu windows for '%@'",
+          (unsigned long)allWindows.count, identifier);
+
+    // Sort by window level (highest first) to find views in modals first
+    [allWindows sortUsingComparator:^NSComparisonResult(UIWindow* w1, UIWindow* w2) {
+        if (w1.windowLevel > w2.windowLevel) return NSOrderedAscending;
+        if (w1.windowLevel < w2.windowLevel) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+
+    for (UIWindow* window in allWindows) {
+        if (!window.isHidden && window.alpha > 0) {
+            UIView* found = findViewByAccessibilityIdentifier(window, identifier);
+            if (found) {
+                NSLog(@"[Tasto] findViewByAccessibilityIdentifierInAllWindows: Found '%@' in window %@ (level: %.0f)",
+                      identifier, NSStringFromClass([window class]), window.windowLevel);
+                return found;
+            }
+        }
+    }
+
+    return nil;
 }
 
 bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::string& text) {
@@ -612,18 +882,10 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
     NSString* textToType = [NSString stringWithUTF8String:text.c_str()];
 
     void (^typeBlock)(void) = ^{
-        // Find the key window
-        UIWindow* keyWindow = findKeyWindow();
-        if (!keyWindow) {
-            NSLog(@"[Tasto] performTypeText: No key window found");
-            success = false;
-            return;
-        }
-
-        // Find the view by accessibilityIdentifier
-        UIView* targetView = findViewByAccessibilityIdentifier(keyWindow, identifier);
+        // Search ALL windows for the view by accessibilityIdentifier
+        UIView* targetView = findViewByAccessibilityIdentifierInAllWindows(identifier);
         if (!targetView) {
-            NSLog(@"[Tasto] performTypeText: View with testID '%@' not found", identifier);
+            NSLog(@"[Tasto] performTypeText: View with testID '%@' not found in any window", identifier);
             success = false;
             return;
         }
@@ -764,7 +1026,7 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
     if ([NSThread isMainThread]) {
         typeBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), typeBlock);
+        dispatchSyncMainWithTimeout(typeBlock);
     }
 
     return success;
@@ -772,6 +1034,196 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
 
 bool TastoRuntimeHelper::performClearText(const std::string& testID) {
     return performTypeText(testID, "");
+}
+
+// Helper to find UITextField or UITextView in a view hierarchy (searching up and down)
+static UIView* findTextInputInHierarchy(UIView* startView) {
+    // First check if startView itself is a text input
+    if ([startView isKindOfClass:[UITextField class]] ||
+        [startView isKindOfClass:[UITextView class]]) {
+        return startView;
+    }
+
+    // Search subviews (descendants)
+    for (UIView* subview in startView.subviews) {
+        UIView* found = findTextInputInHierarchy(subview);
+        if (found) {
+            return found;
+        }
+    }
+
+    // Search parent hierarchy (ancestors)
+    UIView* parent = startView.superview;
+    while (parent) {
+        if ([parent isKindOfClass:[UITextField class]] ||
+            [parent isKindOfClass:[UITextView class]]) {
+            return parent;
+        }
+        // Also check siblings of ancestors
+        for (UIView* sibling in parent.subviews) {
+            if (sibling != startView &&
+                ([sibling isKindOfClass:[UITextField class]] ||
+                 [sibling isKindOfClass:[UITextView class]])) {
+                return sibling;
+            }
+        }
+        parent = parent.superview;
+    }
+
+    return nil;
+}
+
+// Helper to find the current first responder (focused view)
+static UIView* findFirstResponder(UIView* view) {
+    if ([view isFirstResponder]) {
+        return view;
+    }
+    for (UIView* subview in view.subviews) {
+        UIView* found = findFirstResponder(subview);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+// Helper to find first responder across all windows
+static UIView* findFirstResponderInAllWindows() {
+    for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            UIWindowScene* windowScene = (UIWindowScene*)scene;
+            for (UIWindow* window in windowScene.windows) {
+                UIView* responder = findFirstResponder(window);
+                if (responder) {
+                    return responder;
+                }
+            }
+        }
+    }
+    return nil;
+}
+
+bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::string& text) {
+    __block bool success = false;
+    NSString* textToType = [NSString stringWithUTF8String:text.c_str()];
+    CGPoint point = CGPointMake(x, y);
+
+    void (^typeBlock)(void) = ^{
+        NSLog(@"[Tasto] performTypeTextAtPoint: point=(%.1f, %.1f) text='%@'", x, y, textToType);
+
+        UIView* textInputView = nil;
+
+        // FIRST: Try to find the currently focused text input (first responder)
+        // This works when tap was already performed to focus the input
+        UIView* focusedResponder = findFirstResponderInAllWindows();
+        if (focusedResponder) {
+            NSLog(@"[Tasto] performTypeTextAtPoint: Found first responder: %@ (id: %@)",
+                  NSStringFromClass([focusedResponder class]),
+                  focusedResponder.accessibilityIdentifier ?: @"nil");
+            textInputView = findTextInputInHierarchy(focusedResponder);
+            if (textInputView) {
+                NSLog(@"[Tasto] performTypeTextAtPoint: Using focused text input");
+            }
+        }
+
+        // If no focused text input, fall back to hitTest at coordinates
+        if (!textInputView) {
+            NSLog(@"[Tasto] performTypeTextAtPoint: No focused text input, trying hitTest");
+            UIWindow* targetWindow = findWindowAtPoint(point);
+            if (targetWindow) {
+                UIView* hitView = [targetWindow hitTest:point withEvent:nil];
+                if (hitView) {
+                    NSLog(@"[Tasto] performTypeTextAtPoint: Hit view %@ (accessibilityIdentifier: %@)",
+                          NSStringFromClass([hitView class]),
+                          hitView.accessibilityIdentifier ?: @"nil");
+                    textInputView = findTextInputInHierarchy(hitView);
+                }
+            }
+        }
+
+        if (!textInputView) {
+            NSLog(@"[Tasto] performTypeTextAtPoint: No text input found via first responder or hitTest");
+            success = false;
+            return;
+        }
+
+        UITextField* textField = nil;
+        UITextView* textView = nil;
+        UIView* componentView = nil;
+
+        if ([textInputView isKindOfClass:[UITextField class]]) {
+            textField = (UITextField*)textInputView;
+            componentView = textField.superview;
+        } else if ([textInputView isKindOfClass:[UITextView class]]) {
+            textView = (UITextView*)textInputView;
+            componentView = textView.superview;
+        }
+
+        if (textField) {
+            NSLog(@"[Tasto] performTypeTextAtPoint: Found UITextField");
+
+            // Make it first responder (focus)
+            [textField becomeFirstResponder];
+
+            // Set the text using attributed text
+            NSDictionary* attributes = textField.defaultTextAttributes ?: @{};
+            NSAttributedString* attrStr = [[NSAttributedString alloc] initWithString:textToType
+                                                                          attributes:attributes];
+            textField.attributedText = attrStr;
+
+            NSLog(@"[Tasto] performTypeTextAtPoint: Set text, actual text now: '%@'", textField.text);
+
+            // Trigger text change notification
+            SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
+            UIView* parentView = componentView;
+            if (parentView && [parentView respondsToSelector:textInputDidChangeSel]) {
+                NSLog(@"[Tasto] performTypeTextAtPoint: Calling textInputDidChange on parent view");
+                [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [parentView performSelector:textInputDidChangeSel];
+                #pragma clang diagnostic pop
+                [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+            } else {
+                [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+            }
+
+            success = true;
+        } else if (textView) {
+            NSLog(@"[Tasto] performTypeTextAtPoint: Found UITextView");
+
+            [textView becomeFirstResponder];
+            textView.text = textToType;
+
+            SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
+            id delegate = textView.delegate;
+            if (delegate && [delegate respondsToSelector:textInputDidChangeSel]) {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [delegate performSelector:textInputDidChangeSel];
+                #pragma clang diagnostic pop
+            } else if (delegate && [delegate respondsToSelector:@selector(textViewDidChange:)]) {
+                [delegate performSelector:@selector(textViewDidChange:) withObject:textView];
+            }
+
+            success = true;
+        } else {
+            NSLog(@"[Tasto] performTypeTextAtPoint: No UITextField or UITextView found in hierarchy");
+            success = false;
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        typeBlock();
+    } else {
+        dispatchSyncMainWithTimeout(typeBlock);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::performClearTextAtPoint(float x, float y) {
+    return performTypeTextAtPoint(x, y, "");
 }
 
 // ============================================
@@ -799,28 +1251,8 @@ bool TastoRuntimeHelper::performScroll(const std::string& testID, float deltaX, 
     NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
 
     void (^scrollBlock)(void) = ^{
-        // Find the key window
-        UIWindow* keyWindow = nil;
-        for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
-            if ([scene isKindOfClass:[UIWindowScene class]]) {
-                UIWindowScene* windowScene = (UIWindowScene*)scene;
-                for (UIWindow* window in windowScene.windows) {
-                    if (window.isKeyWindow) {
-                        keyWindow = window;
-                        break;
-                    }
-                }
-            }
-            if (keyWindow) break;
-        }
-
-        if (!keyWindow) {
-            NSLog(@"[Tasto] performScroll: No key window found");
-            success = false;
-            return;
-        }
-
-        UIView* view = findViewByAccessibilityIdentifier(keyWindow, identifier);
+        // Search ALL windows for the view
+        UIView* view = findViewByAccessibilityIdentifierInAllWindows(identifier);
         if (!view) {
             NSLog(@"[Tasto] performScroll: View not found for testID: %@", identifier);
             success = false;
@@ -868,7 +1300,7 @@ bool TastoRuntimeHelper::performScroll(const std::string& testID, float deltaX, 
     if ([NSThread isMainThread]) {
         scrollBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), scrollBlock);
+        dispatchSyncMainWithTimeout(scrollBlock);
     }
 
     return success;
@@ -879,28 +1311,8 @@ bool TastoRuntimeHelper::performScrollTo(const std::string& testID, float x, flo
     NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
 
     void (^scrollBlock)(void) = ^{
-        // Find the key window
-        UIWindow* keyWindow = nil;
-        for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
-            if ([scene isKindOfClass:[UIWindowScene class]]) {
-                UIWindowScene* windowScene = (UIWindowScene*)scene;
-                for (UIWindow* window in windowScene.windows) {
-                    if (window.isKeyWindow) {
-                        keyWindow = window;
-                        break;
-                    }
-                }
-            }
-            if (keyWindow) break;
-        }
-
-        if (!keyWindow) {
-            NSLog(@"[Tasto] performScrollTo: No key window found");
-            success = false;
-            return;
-        }
-
-        UIView* view = findViewByAccessibilityIdentifier(keyWindow, identifier);
+        // Search ALL windows for the view
+        UIView* view = findViewByAccessibilityIdentifierInAllWindows(identifier);
         if (!view) {
             NSLog(@"[Tasto] performScrollTo: View not found for testID: %@", identifier);
             success = false;
@@ -938,7 +1350,7 @@ bool TastoRuntimeHelper::performScrollTo(const std::string& testID, float x, flo
     if ([NSThread isMainThread]) {
         scrollBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), scrollBlock);
+        dispatchSyncMainWithTimeout(scrollBlock);
     }
 
     return success;
@@ -990,7 +1402,7 @@ bool TastoRuntimeHelper::isAlertPresent() {
     if ([NSThread isMainThread]) {
         block();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), block);
+        dispatchSyncMainWithTimeout(block);
     }
 
     return result;
@@ -1022,7 +1434,7 @@ std::string TastoRuntimeHelper::getAlertText() {
     if ([NSThread isMainThread]) {
         block();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), block);
+        dispatchSyncMainWithTimeout(block);
     }
 
     return result;
@@ -1048,7 +1460,7 @@ std::vector<std::string> TastoRuntimeHelper::getAlertButtons() {
     if ([NSThread isMainThread]) {
         block();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), block);
+        dispatchSyncMainWithTimeout(block);
     }
 
     return result;
@@ -1105,7 +1517,7 @@ bool TastoRuntimeHelper::tapAlertButton(const std::string& buttonText) {
     if ([NSThread isMainThread]) {
         block();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), block);
+        dispatchSyncMainWithTimeout(block);
     }
 
     return success;
@@ -1160,7 +1572,7 @@ bool TastoRuntimeHelper::dismissAlert() {
     if ([NSThread isMainThread]) {
         block();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), block);
+        dispatchSyncMainWithTimeout(block);
     }
 
     return success;

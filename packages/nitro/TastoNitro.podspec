@@ -32,15 +32,8 @@ Pod::Spec.new do |s|
       '"$(PODS_TARGET_SRCROOT)/nitrogen/generated/shared/c++"',
       '"$(PODS_TARGET_SRCROOT)/nitrogen/generated/ios"',
       '"$(PODS_ROOT)/boost"',
-      '"$(PODS_ROOT)/RCT-Folly"',
-      '"$(PODS_ROOT)/DoubleConversion"',
       '"$(PODS_ROOT)/Headers/Private/React-Core"',
       '"$(PODS_ROOT)/Headers/Public/React-Core"',
-      '"$(PODS_ROOT)/Headers/Private/React-Fabric"',
-      '"$(PODS_ROOT)/Headers/Public/React-Fabric"',
-      '"$(PODS_ROOT)/Headers/Private/React-graphics"',
-      '"$(PODS_ROOT)/Headers/Public/React-graphics"',
-      '"$(PODS_ROOT)/Headers/Private/Yoga"',
     ].join(' ')
   }
 
@@ -49,11 +42,8 @@ Pod::Spec.new do |s|
     'OTHER_LDFLAGS' => '-ObjC'
   }
 
+  # Core React Native dependencies - others handled by install_modules_dependencies
   s.dependency 'React-Core'
-  s.dependency 'RCT-Folly'
-  s.dependency 'React-Fabric'
-  s.dependency 'React-RCTFabric'
-  s.dependency 'React-graphics'
 
   s.frameworks = 'Security'
 

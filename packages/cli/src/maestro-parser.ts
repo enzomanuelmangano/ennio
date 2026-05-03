@@ -50,7 +50,9 @@ export type MaestroCommand =
   | { back: true }
   | { runFlow: RunFlowCommand }
   | { waitFor: MaestroSelector & { timeout?: number } }
-  | { assertAnyVisible: { anyOf: MaestroSelector[] } };
+  | { assertAnyVisible: { anyOf: MaestroSelector[] } }
+  | { launchApp: true | { clearState?: boolean; appId?: string } }
+  | { clearState: true | { appId?: string } };
 
 export interface RunFlowCommand {
   file?: string;

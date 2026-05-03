@@ -1,0 +1,5 @@
+appId: com.tasto.example
+name: "Nav Test"
+---
+- tapOn:
+    text: "Products"

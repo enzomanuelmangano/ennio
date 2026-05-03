@@ -1,0 +1,97 @@
+appId: com.tasto.example
+name: "Debug Test"
+---
+# Step 1
+- tapOn:
+    text: "Home"
+# Step 2
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000
+# Step 3
+- tapOn:
+    text: "Profile"
+# Step 4 - Conditional
+- runFlow:
+    when:
+      visible:
+        id: "profile-header"
+    commands:
+      - scroll:
+          direction: DOWN
+          amount: 500
+      - tapOn:
+          id: "menu-logout"
+      - assertVisible:
+          text: "Sign Out"
+          timeout: 2000
+      - tapOn:
+          text: "Sign Out"
+      - assertVisible:
+          id: "guest-view"
+          timeout: 3000
+
+# Back to home
+- tapOn:
+    text: "Home"
+- assertVisible:
+    id: "home-screen"
+    timeout: 3000
+
+# Verify home screen elements
+- assertVisible:
+    id: "home-screen"
+- assertVisible:
+    id: "quick-action-search"
+- assertVisible:
+    id: "quick-action-cart"
+- assertVisible:
+    id: "quick-action-orders"
+- assertVisible:
+    id: "quick-action-settings"
+
+# Featured products
+- assertVisible:
+    text: "Featured Products"
+    timeout: 3000
+
+# Sign in button
+- assertVisible:
+    id: "home-signin-btn"
+    timeout: 3000
+
+# Login flow
+- tapOn:
+    id: "home-signin-btn"
+- assertVisible:
+    id: "login-screen"
+    timeout: 3000
+
+# Use demo login
+- tapOn:
+    id: "demo-login-btn"
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000
+
+# Verify logged in
+- assertVisible:
+    text: "Hello"
+    timeout: 3000
+
+# Navigate to products
+- tapOn:
+    text: "Products"
+- assertVisible:
+    id: "products-screen"
+    timeout: 3000
+
+# Test search
+- tapOn:
+    id: "search-input"
+- inputText: "Wireless"
+- assertVisible:
+    text: "Wireless"
+    timeout: 3000
+
+# Nothing after

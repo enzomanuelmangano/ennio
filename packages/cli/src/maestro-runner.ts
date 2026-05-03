@@ -8,6 +8,7 @@
 import { TastoClient } from './client';
 import { dirname, basename, resolve } from 'path';
 import { existsSync, readFileSync } from 'fs';
+import { execSync, spawn } from 'child_process';
 import { load as parseYaml, loadAll as parseYamlAll } from 'js-yaml';
 import {
   MaestroFlow,
@@ -25,9 +26,84 @@ import {
 // Configuration
 // ============================================
 
-const DEFAULT_TIMEOUT = 5000;
-const DEFAULT_VISIBLE_TIMEOUT = 10000;
-const DEFAULT_RETRY_INTERVAL = 100;
+const DEFAULT_TIMEOUT = 3000;
+const DEFAULT_VISIBLE_TIMEOUT = 5000;
+const DEFAULT_RETRY_INTERVAL = 30;
+const DEFAULT_RECONNECT_TIMEOUT = 10000;
+const DEFAULT_WS_PORT = 9876;
+
+// ============================================
+// Simulator Helpers
+// ============================================
+
+/**
+ * Get the booted iOS simulator device ID
+ */
+function getBootedSimulatorId(): string | null {
+  try {
+    const output = execSync('xcrun simctl list devices booted -j', { encoding: 'utf-8' });
+    const data = JSON.parse(output);
+    for (const runtime of Object.values(data.devices) as Array<Array<{ udid: string; state: string }>>) {
+      for (const device of runtime) {
+        if (device.state === 'Booted') {
+          return device.udid;
+        }
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Terminate an app on simulator
+ */
+function terminateApp(deviceId: string, appId: string): void {
+  try {
+    execSync(`xcrun simctl terminate ${deviceId} ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
+  } catch {
+    // App may not be running - that's OK
+  }
+}
+
+/**
+ * Launch an app on simulator
+ */
+function launchAppOnSimulator(deviceId: string, appId: string): void {
+  execSync(`xcrun simctl launch ${deviceId} ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
+}
+
+/**
+ * Clear app state on simulator
+ * This terminates the app and clears its data container (Library, Documents, tmp)
+ */
+function clearAppState(deviceId: string, appId: string): void {
+  try {
+    // Terminate first
+    terminateApp(deviceId, appId);
+
+    // Get app data container path
+    const dataContainer = execSync(
+      `xcrun simctl get_app_container ${deviceId} ${appId} data`,
+      { encoding: 'utf-8', stdio: 'pipe' }
+    ).trim();
+
+    if (dataContainer) {
+      // Clear Library (AsyncStorage, UserDefaults, etc.)
+      execSync(`rm -rf "${dataContainer}/Library"/*`, { encoding: 'utf-8', stdio: 'pipe', shell: '/bin/bash' });
+      // Clear Documents
+      execSync(`rm -rf "${dataContainer}/Documents"/*`, { encoding: 'utf-8', stdio: 'pipe', shell: '/bin/bash' });
+      // Clear tmp
+      execSync(`rm -rf "${dataContainer}/tmp"/*`, { encoding: 'utf-8', stdio: 'pipe', shell: '/bin/bash' });
+    }
+
+    // Also reset privacy permissions
+    execSync(`xcrun simctl privacy ${deviceId} reset all ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
+  } catch {
+    // Continue even if some commands fail
+  }
+}
 
 // ============================================
 // Types
@@ -50,19 +126,37 @@ interface RunResults {
 // Runner
 // ============================================
 
+interface MaestroTestsResult extends RunResults {
+  client: TastoClient; // Return potentially updated client
+}
+
 /**
  * Run a Maestro YAML test file
  */
 export async function runMaestroTests(
   client: TastoClient,
   testFilePath: string,
-  options: { verbose?: boolean } = {}
-): Promise<RunResults> {
-  const results: RunResults = { passed: 0, failed: 0, tests: [] };
+  options: { verbose?: boolean; port?: number } = {}
+): Promise<MaestroTestsResult> {
+  const results: MaestroTestsResult = { passed: 0, failed: 0, tests: [], client };
   const flow = parseMaestroFile(testFilePath);
   const flowName = flow.name || basename(testFilePath, '.yaml');
 
-  const executor = new MaestroExecutor(client, testFilePath, options.verbose);
+  const port = options.port ?? DEFAULT_WS_PORT;
+
+  // Create reconnect function for launchApp/clearState
+  const reconnectClient = async (): Promise<TastoClient> => {
+    const newClient = new TastoClient(port);
+    await newClient.connect();
+    return newClient;
+  };
+
+  const executor = new MaestroExecutor(client, testFilePath, {
+    verbose: options.verbose,
+    appId: flow.appId,
+    port,
+    reconnectClient,
+  });
 
   const start = Date.now();
   try {
@@ -83,6 +177,8 @@ export async function runMaestroTests(
     });
   }
 
+  // Return potentially updated client (may have been replaced by launchApp/clearState)
+  results.client = executor.getClient();
   return results;
 }
 
@@ -95,17 +191,39 @@ class MaestroExecutor {
   private executedFlows = new Set<string>();
   private lastTappedSelector: MaestroSelector | null = null;
   private verbose: boolean;
+  private appId: string | null;
+  private port: number;
+  private reconnectClient: () => Promise<TastoClient>;
 
-  constructor(client: TastoClient, flowPath: string, verbose = false) {
+  constructor(
+    client: TastoClient,
+    flowPath: string,
+    options: {
+      verbose?: boolean;
+      appId?: string;
+      port?: number;
+      reconnectClient?: () => Promise<TastoClient>;
+    } = {}
+  ) {
     this.client = client;
     this.currentFlowPath = flowPath;
-    this.verbose = verbose;
+    this.verbose = options.verbose ?? false;
+    this.appId = options.appId ?? null;
+    this.port = options.port ?? DEFAULT_WS_PORT;
+    this.reconnectClient = options.reconnectClient ?? (async () => this.client);
   }
 
   private log(msg: string): void {
     if (this.verbose) {
       console.log(`    ${msg}`);
     }
+  }
+
+  /**
+   * Get current client (may have been replaced by launchApp/clearState)
+   */
+  getClient(): TastoClient {
+    return this.client;
   }
 
   /**
@@ -233,7 +351,6 @@ class MaestroExecutor {
 
     // Track last tapped element for inputText
     this.lastTappedSelector = selector;
-    await this.sleep(50);
   }
 
   /**
@@ -273,7 +390,6 @@ class MaestroExecutor {
         throw new Error('inputText: no selector provided and no focused element found');
       }
     }
-    await this.sleep(50);
   }
 
   /**
@@ -298,7 +414,6 @@ class MaestroExecutor {
     if (!ok) {
       throw new Error(`ClearText failed: ${JSON.stringify(selector)}`);
     }
-    await this.sleep(50);
   }
 
   /**
@@ -323,7 +438,6 @@ class MaestroExecutor {
     if (!ok) {
       throw new Error(`LongPress failed: ${JSON.stringify(selector)}`);
     }
-    await this.sleep(50);
   }
 
   /**
@@ -523,6 +637,120 @@ class MaestroExecutor {
         timeout,
         `Element not found: ${JSON.stringify(selector)}`
       );
+      return;
+    }
+
+    // launchApp - restart the app
+    if ('launchApp' in cmd) {
+      const launchCmd = cmd.launchApp;
+      const shouldClearState = typeof launchCmd === 'object' && launchCmd.clearState === true;
+      const targetAppId = (typeof launchCmd === 'object' && launchCmd.appId) || this.appId;
+
+      if (!targetAppId) {
+        throw new Error('launchApp: No appId specified in command or flow metadata');
+      }
+
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('launchApp: No booted iOS simulator found');
+      }
+
+      this.log(`launchApp: ${targetAppId}${shouldClearState ? ' (clearState)' : ''}`);
+
+      // Disconnect current WebSocket
+      this.client.disconnect();
+
+      // Clear state if requested
+      if (shouldClearState) {
+        clearAppState(deviceId, targetAppId);
+      }
+
+      // Terminate and relaunch
+      terminateApp(deviceId, targetAppId);
+      await this.sleep(500);
+      launchAppOnSimulator(deviceId, targetAppId);
+
+      // Wait for app to boot and reconnect
+      await this.sleep(2000);
+      let connected = false;
+      const startTime = Date.now();
+      while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
+        try {
+          this.client = await this.reconnectClient();
+          connected = true;
+        } catch {
+          await this.sleep(500);
+        }
+      }
+
+      if (!connected) {
+        throw new Error('launchApp: Failed to reconnect to app after restart');
+      }
+
+      // Wait for UI to stabilize after app launch
+      await this.sleep(1000);
+      try {
+        await this.client.waitForIdle(3000);
+      } catch {
+        // Continue even if waitForIdle times out
+      }
+
+      this.log('launchApp: Reconnected');
+      return;
+    }
+
+    // clearState - clear app data without full restart
+    if ('clearState' in cmd) {
+      const clearCmd = cmd.clearState;
+      const targetAppId = (typeof clearCmd === 'object' && clearCmd.appId) || this.appId;
+
+      if (!targetAppId) {
+        throw new Error('clearState: No appId specified in command or flow metadata');
+      }
+
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('clearState: No booted iOS simulator found');
+      }
+
+      this.log(`clearState: ${targetAppId}`);
+
+      // Disconnect current WebSocket
+      this.client.disconnect();
+
+      // Clear state (terminates app and resets privacy)
+      clearAppState(deviceId, targetAppId);
+
+      // Relaunch
+      await this.sleep(500);
+      launchAppOnSimulator(deviceId, targetAppId);
+
+      // Wait for app to boot and reconnect
+      await this.sleep(2000);
+      let connected = false;
+      const startTime = Date.now();
+      while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
+        try {
+          this.client = await this.reconnectClient();
+          connected = true;
+        } catch {
+          await this.sleep(500);
+        }
+      }
+
+      if (!connected) {
+        throw new Error('clearState: Failed to reconnect to app after restart');
+      }
+
+      // Wait for UI to stabilize after app launch
+      await this.sleep(1000);
+      try {
+        await this.client.waitForIdle(3000);
+      } catch {
+        // Continue even if waitForIdle times out
+      }
+
+      this.log('clearState: App restarted with fresh state');
       return;
     }
 

@@ -89,31 +89,14 @@ bool EventDispatcher::typeText(ShadowNodePtr node, const std::string& text) {
         return false;
     }
 
-    auto emitter = getEventEmitter(node);
-    if (!emitter) {
-        return false;
-    }
+    // Note: We avoid using event dispatch from background threads as it can cause
+    // race conditions with React Native's UIManagerBinding.
+    // typeText should use native iOS APIs instead.
+    // This is kept as a stub for cross-platform fallback.
+    fprintf(stderr, "[Tasto] EventDispatcher::typeText: WARNING - called but not dispatching events (use native approach)\n");
 
-    // First, tap to focus the input
-    auto [centerX, centerY] = getCenterPoint(node);
-    int32_t nodeTag = node->getTag();
-
-    auto now = std::chrono::system_clock::now();
-    double timestamp = static_cast<double>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()
-        ).count()
-    );
-
-    dispatchTouchEvent(emitter, "touchStart", centerX, centerY, nodeTag, timestamp);
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    dispatchTouchEvent(emitter, "touchEnd", centerX, centerY, nodeTag, timestamp);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-    // Dispatch changeText event with the text
-    dispatchTextChangeEvent(emitter, text);
-
-    return true;
+    // Return true since the native approach should handle this
+    return false;
 }
 
 bool EventDispatcher::clearText(ShadowNodePtr node) {

@@ -16,13 +16,14 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// Force resolution of react-native from project node_modules
+// Force resolution of packages from workspace node_modules
 config.resolver.extraNodeModules = {
-  'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
-  'react': path.resolve(projectRoot, 'node_modules/react'),
+  'react-native': path.resolve(workspaceRoot, 'node_modules/react-native'),
+  'react': path.resolve(workspaceRoot, 'node_modules/react'),
+  'expo-router': path.resolve(workspaceRoot, 'node_modules/expo-router'),
 };
 
-// Ensure symlinked packages work correctly
-config.resolver.disableHierarchicalLookup = true;
+// Allow hierarchical lookup for proper monorepo resolution
+config.resolver.disableHierarchicalLookup = false;
 
 module.exports = config;

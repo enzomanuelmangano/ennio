@@ -96,15 +96,18 @@ SelectorCriteria SelectorParser::parse(const std::string& json) {
 
 SelectorCriteria SelectorParser::parseObject(const std::string& json) {
     SelectorCriteria criteria;
+    fprintf(stderr, "[Tasto SP] parseObject: json=%s\n", json.c_str());
 
     // Parse id
     if (hasKey(json, "id")) {
         criteria.id = extractString(json, "id");
+        fprintf(stderr, "[Tasto SP] parseObject: id=%s\n", criteria.id->c_str());
     }
 
     // Parse text (can be string or object with pattern/mode)
     if (hasKey(json, "text")) {
         std::string textValue = extractString(json, "text");
+        fprintf(stderr, "[Tasto SP] parseObject: textValue=%s (len=%zu)\n", textValue.c_str(), textValue.length());
         TextMatchMode mode = TextMatchMode::Exact;
 
         // Check for textMatchMode
@@ -113,6 +116,8 @@ SelectorCriteria SelectorParser::parseObject(const std::string& json) {
         }
 
         criteria.text = TextMatcher{textValue, mode};
+    } else {
+        fprintf(stderr, "[Tasto SP] parseObject: no 'text' key found\n");
     }
 
     // Parse index
@@ -224,16 +229,33 @@ std::string SelectorParser::extractString(const std::string& json, const std::st
         return "";
     }
 
-    // If it's a string value
+    // If it's a string value, parse with proper escape handling
     if (json[valueStart] == '"') {
-        size_t valueEnd = valueStart + 1;
-        while (valueEnd < json.size()) {
-            if (json[valueEnd] == '"' && json[valueEnd - 1] != '\\') {
+        std::string result;
+        bool escaped = false;
+        for (size_t i = valueStart + 1; i < json.size(); i++) {
+            char c = json[i];
+            if (escaped) {
+                // Handle escape sequences
+                switch (c) {
+                    case '"': result += '"'; break;
+                    case '\\': result += '\\'; break;
+                    case 'n': result += '\n'; break;
+                    case 'r': result += '\r'; break;
+                    case 't': result += '\t'; break;
+                    default: result += c; break;
+                }
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                // End of string
                 break;
+            } else {
+                result += c;
             }
-            valueEnd++;
         }
-        return json.substr(valueStart + 1, valueEnd - valueStart - 1);
+        return result;
     }
 
     return "";

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   Pressable,
   TextInput,
   Image,
+  ActionSheetIOS,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../store';
@@ -111,8 +113,8 @@ function SortDropdown({
   value: SortOption;
   onChange: (value: SortOption) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
 
   const options: { value: SortOption; label: string }[] = [
     { value: 'rating', label: 'Top Rated' },
@@ -123,45 +125,40 @@ function SortDropdown({
 
   const selectedLabel = options.find(o => o.value === value)?.label || 'Sort By';
 
+  const showActionSheet = () => {
+    if (hapticEnabled) {
+      Haptics.selectionAsync();
+    }
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [...options.map(o => o.label), 'Cancel'],
+          cancelButtonIndex: options.length,
+          title: 'Sort Products',
+          userInterfaceStyle: darkMode ? 'dark' : 'light',
+        },
+        (buttonIndex) => {
+          if (buttonIndex < options.length) {
+            onChange(options[buttonIndex].value);
+            if (hapticEnabled) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }
+          }
+        }
+      );
+    }
+  };
+
   return (
-    <View style={styles.sortContainer}>
-      <Pressable
-        style={[styles.sortButton, darkMode && styles.sortButtonDark]}
-        onPress={() => setIsOpen(!isOpen)}
-        testID="sort-dropdown"
-      >
-        <Text style={[styles.sortButtonText, darkMode && styles.textLight]}>{selectedLabel}</Text>
-        <Text style={styles.sortArrow}>{isOpen ? '▲' : '▼'}</Text>
-      </Pressable>
-      {isOpen && (
-        <View style={[styles.sortDropdown, darkMode && styles.cardDark]} testID="sort-options">
-          {options.map(option => (
-            <Pressable
-              key={option.value}
-              style={[
-                styles.sortOption,
-                value === option.value && styles.sortOptionActive,
-              ]}
-              onPress={() => {
-                onChange(option.value);
-                setIsOpen(false);
-              }}
-              testID={`sort-option-${option.value}`}
-            >
-              <Text
-                style={[
-                  styles.sortOptionText,
-                  darkMode && styles.textLight,
-                  value === option.value && styles.sortOptionTextActive,
-                ]}
-              >
-                {option.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
-    </View>
+    <Pressable
+      style={[styles.sortButton, darkMode && styles.sortButtonDark]}
+      onPress={showActionSheet}
+      testID="sort-dropdown"
+    >
+      <Text style={[styles.sortButtonText, darkMode && styles.textLight]}>{selectedLabel}</Text>
+      <Text style={styles.sortArrow}>▼</Text>
+    </Pressable>
   );
 }
 
@@ -366,10 +363,6 @@ const styles = StyleSheet.create({
   textLight: {
     color: '#fff',
   },
-  sortContainer: {
-    position: 'relative',
-    zIndex: 10,
-  },
   sortButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -389,37 +382,6 @@ const styles = StyleSheet.create({
   sortArrow: {
     fontSize: 10,
     color: '#666',
-  },
-  sortDropdown: {
-    position: 'absolute',
-    top: '100%',
-    right: 0,
-    marginTop: 4,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
-    minWidth: 180,
-  },
-  sortOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  sortOptionActive: {
-    backgroundColor: '#f0f8ff',
-  },
-  sortOptionText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  sortOptionTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
   },
   productsList: {
     padding: 10,

@@ -64,14 +64,18 @@ function isTestTsFile(filePath: string): boolean {
   return filePath.endsWith('.test.ts');
 }
 
+interface TestFileResultWithClient extends TestFileResult {
+  client?: TastoClient;  // Potentially updated client from launchApp/clearState
+}
+
 /**
  * Run a test file (TypeScript or Maestro YAML)
  */
 async function runTestFile(
   client: TastoClient,
   filePath: string,
-  options: { verbose?: boolean } = {}
-): Promise<TestFileResult> {
+  options: { verbose?: boolean; port?: number } = {}
+): Promise<TestFileResultWithClient> {
   const fileName = basename(filePath);
   const isMaestro = isMaestroFile(filePath);
 
@@ -79,7 +83,7 @@ async function runTestFile(
 
   try {
     const results = isMaestro
-      ? await runMaestroTests(client, filePath, { verbose: options.verbose })
+      ? await runMaestroTests(client, filePath, { verbose: options.verbose, port: options.port })
       : await runTests(client, filePath);
 
     for (const test of results.tests) {
@@ -96,6 +100,7 @@ async function runTestFile(
       file: fileName,
       passed: results.passed,
       failed: results.failed,
+      client: 'client' in results ? results.client : undefined,
     };
   } catch (err) {
     console.error(`  Error: ${err}\n`);
@@ -223,15 +228,20 @@ async function main() {
 
   let totalPassed = 0;
   let totalFailed = 0;
+  let currentClient = client;
 
   try {
     for (const file of files) {
-      const result = await runTestFile(client, file, { verbose });
+      const result = await runTestFile(currentClient, file, { verbose, port });
       totalPassed += result.passed;
       totalFailed += result.failed;
+      // Update client if it was replaced by launchApp/clearState
+      if (result.client) {
+        currentClient = result.client;
+      }
     }
   } finally {
-    client.disconnect();
+    currentClient.disconnect();
   }
 
   console.log('─'.repeat(40));

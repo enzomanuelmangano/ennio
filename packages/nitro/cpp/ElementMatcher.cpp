@@ -5,40 +5,101 @@
 
 #include <cmath>
 
+// Logging for ElementMatcher
+#ifdef __APPLE__
+extern "C" void TastoLogMessage(const char* message);
+#define EM_LOG(fmt, ...) do { char buf[512]; snprintf(buf, sizeof(buf), "[Tasto EM] " fmt, ##__VA_ARGS__); TastoLogMessage(buf); } while(0)
+#else
+#define EM_LOG(fmt, ...) ((void)0)
+#endif
+
 namespace tasto {
+
+// Helper to check if a node is likely a button (interactive element)
+static bool isLikelyButton(const ShadowTreeTraverser::ShadowNodePtr& node) {
+    if (!node) return false;
+
+    // Check ViewProps for accessibility traits
+    auto viewProps = std::dynamic_pointer_cast<const facebook::react::ViewProps>(
+        node->getProps()
+    );
+
+    if (viewProps) {
+        // Check accessibility role
+        auto role = viewProps->accessibilityRole;
+        if (role == "button" || role == "link" || role == "tab") {
+            return true;
+        }
+
+        // Check if accessible (buttons are usually accessible)
+        if (viewProps->accessible) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 ShadowTreeTraverser::ShadowNodePtr ElementMatcher::findFirst(
     ShadowNodePtr root,
     const SelectorCriteria& criteria
 ) {
+    EM_LOG("findFirst: START");
     if (!root) {
+        EM_LOG("findFirst: no root");
         return nullptr;
     }
 
     // Fast path: id-only selector -> O(1) registry lookup
     if (criteria.isIdOnly() && criteria.id) {
+        EM_LOG("findFirst: id-only fast path, id=%s", criteria.id->c_str());
         auto& registry = TestIDRegistry::getInstance();
         auto node = registry.findByTestID(*criteria.id);
         if (node) {
+            EM_LOG("findFirst: found in registry");
             return node;
         }
         // Fallback to tree search
+        EM_LOG("findFirst: fallback to tree search");
         return ShadowTreeTraverser::findByTestID(root, *criteria.id);
     }
 
     // Complex selector: tree traversal with matching
+    EM_LOG("findFirst: complex selector, calling findAll");
     auto results = findAll(root, criteria);
+    EM_LOG("findFirst: findAll returned %zu results", results.size());
 
     // Apply index if specified
     if (criteria.index) {
         int idx = *criteria.index;
         if (idx >= 0 && idx < static_cast<int>(results.size())) {
+            EM_LOG("findFirst: returning indexed result");
             return results[idx];
         }
+        EM_LOG("findFirst: index out of bounds");
         return nullptr;
     }
 
-    return results.empty() ? nullptr : results[0];
+    if (results.empty()) {
+        EM_LOG("findFirst: END returning null");
+        return nullptr;
+    }
+
+    // For text selectors with multiple matches, prefer interactive elements (buttons)
+    if (criteria.text && results.size() > 1) {
+        EM_LOG("findFirst: text selector with %zu matches, looking for buttons", results.size());
+        for (const auto& node : results) {
+            if (isLikelyButton(node)) {
+                EM_LOG("findFirst: found button match");
+                return node;
+            }
+        }
+        // No button found, fall back to first match
+        EM_LOG("findFirst: no button found, using first match");
+    }
+
+    EM_LOG("findFirst: END returning first result");
+    return results[0];
 }
 
 std::vector<ShadowTreeTraverser::ShadowNodePtr> ElementMatcher::findAll(
@@ -208,6 +269,9 @@ bool ElementMatcher::matchesPrimary(
         if (!matchesText(*nodeText, *criteria.text)) {
             return false;
         }
+        // Debug: log matched text
+        EM_LOG("matchesPrimary: text match! pattern='%s' nodeText='%.50s'",
+            criteria.text->pattern.c_str(), nodeText->c_str());
     }
 
     // Point matching is handled separately (coordinate-based selection)
@@ -574,6 +638,15 @@ void ElementMatcher::collectMatches(
     // Check if this node matches
     if (matches(node, criteria, ctx)) {
         results.push_back(node);
+        // Debug log first 5 matches
+        if (results.size() <= 5 && criteria.text) {
+            auto nodeText = ShadowTreeTraverser::getText(node);
+            auto testID = ShadowTreeTraverser::getTestID(*node);
+            EM_LOG("collectMatches: MATCH #%zu testID=%s text='%.30s...'",
+                results.size(),
+                testID ? testID->c_str() : "none",
+                nodeText ? nodeText->c_str() : "null");
+        }
     }
 
     // Track parent chain for hierarchical queries

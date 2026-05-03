@@ -68,15 +68,32 @@ public:
     bool performTapByTestID(const std::string& testID);
 
     /**
+     * Perform a native tap by finding the view with the given accessibility label (text)
+     * This is used for native iOS elements like tab bars that aren't in the React Native shadow tree
+     */
+    bool performTapByLabel(const std::string& label);
+
+    /**
      * Type text into a text input with the given testID
      * Uses native iOS text input APIs to properly trigger React Native's onChange
      */
     bool performTypeText(const std::string& testID, const std::string& text);
 
     /**
+     * Type text into a text input at the given screen coordinates
+     * Uses hitTest to find the text input at that position
+     */
+    bool performTypeTextAtPoint(float x, float y, const std::string& text);
+
+    /**
      * Clear text from a text input with the given testID
      */
     bool performClearText(const std::string& testID);
+
+    /**
+     * Clear text from a text input at the given screen coordinates
+     */
+    bool performClearTextAtPoint(float x, float y);
 
     // ============================================
     // Scroll Handling

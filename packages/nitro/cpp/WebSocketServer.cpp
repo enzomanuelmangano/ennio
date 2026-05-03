@@ -3,6 +3,7 @@
 #include <cstring>
 #include <sstream>
 #include <iomanip>
+#include <cerrno>
 
 #ifdef __APPLE__
 #include <sys/socket.h>
@@ -244,6 +245,12 @@ void WebSocketServer::handleClient(int clientSocket) {
 
     WS_LOG("handleClient() - handshake successful");
 
+    // Set socket receive timeout (30 seconds)
+    struct timeval tv;
+    tv.tv_sec = 30;
+    tv.tv_usec = 0;
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     // Add to client list
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -254,12 +261,24 @@ void WebSocketServer::handleClient(int clientSocket) {
     std::vector<uint8_t> buffer(4096);
     while (running_) {
         ssize_t bytesRead = recv(clientSocket, buffer.data(), buffer.size(), 0);
-        WS_LOG("handleClient() - recv returned %zd bytes", bytesRead);
 
-        if (bytesRead <= 0) {
-            WS_LOG("handleClient() - connection closed or error");
+        if (bytesRead < 0) {
+            // Check if it's a timeout (EAGAIN/EWOULDBLOCK)
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                WS_LOG("handleClient() - recv timeout, sending ping");
+                // Could send WebSocket ping here, for now just continue
+                continue;
+            }
+            WS_LOG("handleClient() - recv error: %d", errno);
             break;
         }
+
+        if (bytesRead == 0) {
+            WS_LOG("handleClient() - connection closed by client");
+            break;
+        }
+
+        WS_LOG("handleClient() - recv returned %zd bytes", bytesRead);
 
         buffer.resize(bytesRead);
         std::string message = parseFrame(buffer);
@@ -284,9 +303,26 @@ void WebSocketServer::handleClient(int clientSocket) {
 
         if (handler) {
             WS_LOG("handleClient() - calling command handler");
-            Response response = handler(request);
-            WS_LOG("handleClient() - handler returned success=%d", response.success);
-            sendResponse(clientSocket, response);
+            try {
+                Response response = handler(request);
+                WS_LOG("handleClient() - handler returned success=%d", response.success);
+                sendResponse(clientSocket, response);
+                WS_LOG("handleClient() - response sent");
+            } catch (const std::exception& e) {
+                WS_LOG("handleClient() - EXCEPTION in handler: %s", e.what());
+                Response errorResponse;
+                errorResponse.id = request.id;
+                errorResponse.success = false;
+                errorResponse.error = std::string("Internal error: ") + e.what();
+                sendResponse(clientSocket, errorResponse);
+            } catch (...) {
+                WS_LOG("handleClient() - UNKNOWN EXCEPTION in handler");
+                Response errorResponse;
+                errorResponse.id = request.id;
+                errorResponse.success = false;
+                errorResponse.error = "Internal error: unknown exception";
+                sendResponse(clientSocket, errorResponse);
+            }
         } else {
             WS_LOG("handleClient() - no command handler set!");
         }
@@ -481,11 +517,33 @@ std::string parseString(const std::string& json, const std::string& key) {
         return "";
     }
     pos += search.length();
-    size_t end = json.find("\"", pos);
-    if (end == std::string::npos) {
-        return "";
+
+    // Find the closing quote, handling escaped quotes
+    std::string result;
+    bool escaped = false;
+    for (size_t i = pos; i < json.size(); i++) {
+        char c = json[i];
+        if (escaped) {
+            // Handle escape sequences
+            switch (c) {
+                case '"': result += '"'; break;
+                case '\\': result += '\\'; break;
+                case 'n': result += '\n'; break;
+                case 'r': result += '\r'; break;
+                case 't': result += '\t'; break;
+                default: result += c; break;
+            }
+            escaped = false;
+        } else if (c == '\\') {
+            escaped = true;
+        } else if (c == '"') {
+            // End of string
+            break;
+        } else {
+            result += c;
+        }
     }
-    return json.substr(pos, end - pos);
+    return result;
 }
 
 bool parseBool(const std::string& json, const std::string& key) {
