@@ -1,22 +1,22 @@
 {
   "$schema": "https://nitro.margelo.com/nitro.schema.json",
-  "cxxNamespace": ["tasto"],
+  "cxxNamespace": ["ennio"],
   "ios": {
-    "iosModuleName": "TastoNitro"
+    "iosModuleName": "EnnioCore"
   },
   "android": {
-    "androidNamespace": ["tasto"],
-    "androidCxxLibName": "TastoNitro"
+    "androidNamespace": ["ennio"],
+    "androidCxxLibName": "EnnioCore"
   },
   "autolinking": {
-    "Tasto": {
+    "Ennio": {
       "ios": {
         "language": "c++",
-        "implementationClassName": "HybridTasto"
+        "implementationClassName": "HybridEnnio"
       },
       "android": {
         "language": "c++",
-        "implementationClassName": "HybridTasto"
+        "implementationClassName": "HybridEnnio"
       }
     }
   },

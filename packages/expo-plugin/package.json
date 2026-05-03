@@ -1,12 +1,12 @@
 {
-  "name": "@tasto/expo-plugin",
+  "name": "@ennio/expo-plugin",
   "version": "0.1.0",
-  "description": "Expo config plugin for Tasto E2E testing",
+  "description": "Expo config plugin for Ennio E2E testing",
   "main": "src/index.js",
   "dependencies": {
     "@expo/config-plugins": "^9.0.0"
   },
   "peerDependencies": {
-    "@tasto/nitro": "*"
+    "@ennio/core": "*"
   }
 }

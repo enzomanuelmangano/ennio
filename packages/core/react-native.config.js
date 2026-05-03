@@ -1,7 +1,7 @@
 /**
- * Disable React Native autolinking for @tasto/nitro
+ * Disable React Native autolinking for @ennio/core
  *
- * The @tasto/expo-plugin controls whether native code is included.
+ * The @ennio/expo-plugin controls whether native code is included.
  * This allows conditional inclusion based on build type (dev/production).
  */
 module.exports = {

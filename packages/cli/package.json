@@ -1,9 +1,9 @@
 {
-  "name": "@tasto/cli",
+  "name": "@ennio/cli",
   "version": "0.1.0",
-  "description": "CLI for running Tasto E2E tests",
+  "description": "CLI for running Ennio E2E tests",
   "bin": {
-    "tasto": "./src/index.ts"
+    "ennio": "./src/index.ts"
   },
   "dependencies": {
     "esbuild": "^0.21.0",

@@ -1,5 +1,5 @@
 {
-  "name": "@tasto/nitro",
+  "name": "@ennio/core",
   "version": "0.1.0",
   "description": "Fast React Native E2E testing via direct Fabric shadow tree access",
   "main": "lib/index.js",
@@ -12,7 +12,7 @@
     "ios/",
     "nitrogen/generated/",
     "nitro.json",
-    "TastoNitro.podspec",
+    "EnnioCore.podspec",
     "react-native.config.js"
   ],
   "scripts": {
@@ -34,8 +34,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/user/tasto.git",
-    "directory": "packages/nitro"
+    "url": "https://github.com/user/ennio.git",
+    "directory": "packages/core"
   },
   "license": "MIT",
   "keywords": [

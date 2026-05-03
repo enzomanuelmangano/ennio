@@ -1,5 +1,5 @@
 {
-  "name": "@tasto/test",
+  "name": "@ennio/test",
   "version": "0.1.0",
   "description": "Simple E2E testing for React Native using Nitro",
   "main": "src/index.ts",
@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@tasto/nitro": "*",
+    "@ennio/core": "*",
     "react-native": ">=0.74.0"
   },
   "devDependencies": {

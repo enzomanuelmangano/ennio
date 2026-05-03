@@ -6,12 +6,12 @@ nitro = JSON.parse(File.read(File.join(__dir__, 'nitro.json')))
 folly_compiler_flags = '-DFOLLY_NO_CONFIG -DFOLLY_MOBILE=1 -DFOLLY_USE_LIBCPP=1 -DFOLLY_CFG_NO_COROUTINES=1 -DFOLLY_HAVE_CLOCK_GETTIME=1'
 
 Pod::Spec.new do |s|
-  s.name         = 'TastoNitro'
+  s.name         = 'EnnioCore'
   s.version      = package['version']
   s.summary      = package['description']
   s.homepage     = package['repository']['url']
   s.license      = package['license']
-  s.authors      = { 'Tasto' => 'hello@tasto.dev' }
+  s.authors      = { 'Ennio' => 'hello@ennio.dev' }
   s.platforms    = { :ios => '13.0', :tvos => '13.0' }
   s.source       = { :git => package['repository']['url'], :tag => "v#{s.version}" }
 
@@ -48,7 +48,7 @@ Pod::Spec.new do |s|
   s.frameworks = 'Security'
 
   # Add Nitrogen generated files (includes NitroModules dependency)
-  load 'nitrogen/generated/ios/TastoNitro+autolinking.rb'
+  load 'nitrogen/generated/ios/EnnioCore+autolinking.rb'
   add_nitrogen_files(s)
 
   # Required for proper React Native linking
