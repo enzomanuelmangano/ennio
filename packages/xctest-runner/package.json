@@ -1,0 +1,9 @@
+{
+  "name": "@ennio/xctest-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "XCUITest helper that drives iOS HID input on behalf of the Ennio CLI. Listens on TCP 127.0.0.1:9877 for JSON-line commands.",
+  "files": [
+    "EnnioXCTestRunner/"
+  ]
+}
