@@ -6,12 +6,11 @@
  */
 
 import { EnnioClient } from './client';
-import { dirname, basename, resolve } from 'path';
-import { existsSync, readFileSync } from 'fs';
+import { XCTestClient, type ScreenSize } from './xctest-client';
+import { basename } from 'path';
+import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
-import { load as parseYaml, loadAll as parseYamlAll } from 'js-yaml';
 import {
-  MaestroFlow,
   MaestroCommand,
   MaestroSelector,
   MaestroCondition,
@@ -28,56 +27,6 @@ import {
   evalScript as jsEvalScript,
   runScript as jsRunScript,
 } from './js-evaluator';
-
-// ============================================
-// Accessibility-tree search helpers
-// ============================================
-
-interface AxNode {
-  role?: string;
-  label?: string;
-  value?: string;
-  identifier?: string;
-  frame: { x: number; y: number; width: number; height: number };
-  children?: AxNode[];
-}
-
-/**
- * Walk the iOS accessibility tree (as returned by `argent run describe`)
- * and return the first node matching the Maestro selector. Match priority:
- * exact label/identifier first, then substring (Maestro semantics).
- */
-function findInAxTree(root: AxNode, selector: MaestroSelector): AxNode | null {
-  if (!root) return null;
-  const wantId = selector.id?.trim();
-  const wantText = selector.text?.trim();
-  const exactPasses: AxNode[] = [];
-  const substrPasses: AxNode[] = [];
-  const walk = (node: AxNode) => {
-    if (!node) return;
-    const id = node.identifier ?? '';
-    const lbl = node.label ?? node.value ?? '';
-    let matched = false;
-    if (wantId) {
-      if (id === wantId) {
-        exactPasses.push(node);
-        matched = true;
-      }
-    } else if (wantText) {
-      if (lbl === wantText) {
-        exactPasses.push(node);
-        matched = true;
-      } else if (lbl.includes(wantText)) {
-        substrPasses.push(node);
-        matched = true;
-      }
-    }
-    void matched;
-    if (node.children) for (const c of node.children) walk(c);
-  };
-  walk(root);
-  return exactPasses[0] ?? substrPasses[0] ?? null;
-}
 
 // ============================================
 // Configuration
@@ -195,6 +144,7 @@ interface MaestroTestsResult extends RunResults {
  */
 export async function runMaestroTests(
   client: EnnioClient,
+  xctest: XCTestClient,
   testFilePath: string,
   options: { verbose?: boolean; trace?: boolean; port?: number } = {}
 ): Promise<MaestroTestsResult> {
@@ -211,7 +161,7 @@ export async function runMaestroTests(
     return newClient;
   };
 
-  const executor = new MaestroExecutor(client, testFilePath, {
+  const executor = new MaestroExecutor(client, xctest, testFilePath, {
     verbose: options.verbose,
     trace: options.trace,
     appId: flow.appId,
@@ -229,6 +179,18 @@ export async function runMaestroTests(
       ms: Date.now() - start,
     });
   } catch (err) {
+    // Snap before xcodebuild cleanup tears down the user app.
+    const udid = getBootedSimulatorId();
+    if (udid) {
+      const shotPath = `/tmp/ennio-shots/${basename(testFilePath, '.yaml')}-fail.png`;
+      try {
+        execSync(`mkdir -p /tmp/ennio-shots && xcrun simctl io ${udid} screenshot "${shotPath}"`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        });
+        console.log(`  (saved screenshot: ${shotPath})`);
+      } catch { /* noop */ }
+    }
     results.failed = 1;
     results.tests.push({
       name: flowName,
@@ -248,18 +210,20 @@ export async function runMaestroTests(
  */
 class MaestroExecutor {
   private client: EnnioClient;
+  private xctest: XCTestClient;
   private currentFlowPath: string;
   private executedFlows = new Set<string>();
   private lastTappedSelector: MaestroSelector | null = null;
   private verbose: boolean;
   private trace: boolean;
   private appId: string | null;
-  private port: number;
   private reconnectClient: () => Promise<EnnioClient>;
   private jsContext: JsContext;
+  private cachedScreenSize: ScreenSize | null = null;
 
   constructor(
     client: EnnioClient,
+    xctest: XCTestClient,
     flowPath: string,
     options: {
       verbose?: boolean;
@@ -270,11 +234,11 @@ class MaestroExecutor {
     } = {}
   ) {
     this.client = client;
+    this.xctest = xctest;
     this.currentFlowPath = flowPath;
     this.verbose = options.verbose ?? false;
     this.trace = options.trace ?? false;
     this.appId = options.appId ?? null;
-    this.port = options.port ?? DEFAULT_WS_PORT;
     this.reconnectClient = options.reconnectClient ?? (async () => this.client);
     this.jsContext = createContext({
       platform: 'ios',
@@ -326,20 +290,20 @@ class MaestroExecutor {
   private async selectorExists(selector: MaestroSelector): Promise<boolean> {
     const ennioSelector = toEnnioSelector(selector);
 
-    // Check native alert for text-based selectors
     if (selector.text && !selector.id) {
       const alertPresent = await this.client.isAlertPresent();
       if (alertPresent) {
-        // Check if text matches alert content or buttons
         const alertText = await this.client.getAlertText();
-        if (alertText.includes(selector.text)) {
-          return true;
-        }
+        if (alertText.includes(selector.text)) return true;
         const buttons = await this.client.getAlertButtons();
-        if (buttons.includes(selector.text)) {
-          return true;
-        }
+        if (buttons.includes(selector.text)) return true;
       }
+      // Native UI elements outside the React shadow tree (UITabBar items,
+      // alert buttons, system date pickers, etc.) won't be visible to
+      // Fabric. Probe XCUI as a fallback so text-only selectors covering
+      // those elements still resolve.
+      const xcuiHit = await this.xctest.findByLabel(selector.text);
+      if (xcuiHit.found) return true;
     }
 
     if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
@@ -355,20 +319,17 @@ class MaestroExecutor {
   private async selectorVisible(selector: MaestroSelector): Promise<boolean> {
     const ennioSelector = toEnnioSelector(selector);
 
-    // Check native alert for text-based selectors
     if (selector.text && !selector.id) {
       const alertPresent = await this.client.isAlertPresent();
       if (alertPresent) {
-        // Check if text matches alert content or buttons
         const alertText = await this.client.getAlertText();
-        if (alertText.includes(selector.text)) {
-          return true;
-        }
+        if (alertText.includes(selector.text)) return true;
         const buttons = await this.client.getAlertButtons();
-        if (buttons.includes(selector.text)) {
-          return true;
-        }
+        if (buttons.includes(selector.text)) return true;
       }
+      // Same fallback as selectorExists: native UI not visible to Fabric.
+      const xcuiHit = await this.xctest.findByLabel(selector.text);
+      if (xcuiHit.found) return true;
     }
 
     if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
@@ -378,101 +339,119 @@ class MaestroExecutor {
   }
 
   /**
-   * Tap on element
-   * Also handles tapping native alert buttons for text-based selectors
+   * Lazy-cache the simulator screen size (logical points). Asked once via
+   * the XCTest helper and reused for normalizing every Fabric layout frame.
    */
-  /**
-   * Tap a selector via simulator HID input (argent gesture-tap). Resolves
-   * the element through the iOS accessibility tree so we get the exact
-   * frame the user sees, then taps the center in normalized coords.
-   *
-   * iOS-only. Returns true on tap, false if element wasn't found in the a11y
-   * tree (caller falls back to event-emitter dispatch).
-   */
-  private async tapViaSimulatorHid(selector: MaestroSelector): Promise<boolean> {
-    const udid = getBootedSimulatorId();
-    if (!udid) return false;
-    try {
-      // For id-based selectors, get the React layout from Ennio and convert
-      // to normalized screen coords (Ennio's screenX/screenY are React surface
-      // relative; add safe-area top inset). For text selectors use argent's
-      // accessibility tree (already returns absolute normalized frames).
-      let cx: number; let cy: number;
-      if (selector.id && !selector.text) {
-        const layout = await this.getLayoutMetrics(selector.id);
-        if (!layout) return false;
-        const screenSize = await this.getScreenSize(udid);
-        const TOP_INSET = 59;  // iPhone 17 Pro Dynamic Island
-        const absX = layout.screenX + layout.width / 2;
-        const absY = layout.screenY + layout.height / 2 + TOP_INSET;
-        cx = absX / screenSize.width;
-        cy = absY / screenSize.height;
-      } else {
-        const desc = execSync(`argent run describe --udid ${udid}`, {
-          encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-          timeout: 4000,
-        });
-        const tree = JSON.parse(desc);
-        const target = findInAxTree(tree.tree ?? tree, selector);
-        if (!target) return false;
-        cx = target.frame.x + target.frame.width / 2;
-        cy = target.frame.y + target.frame.height / 2;
-      }
-      if (cx < 0 || cy < 0 || cx > 1 || cy > 1) {
-        this.log(`tap (HID): out-of-bounds normalized (${cx}, ${cy})`);
-        return false;
-      }
-      execSync(`argent run gesture-tap --udid ${udid} --x ${cx} --y ${cy}`, {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 4000,
-      });
-      this.log(`tap (HID): selector=${JSON.stringify(selector)} at (${cx.toFixed(3)}, ${cy.toFixed(3)})`);
-      this.lastTappedSelector = selector;
-      await this.sleep(120);
-      return true;
-    } catch (e) {
-      this.log(`tap (HID) error: ${(e as Error).message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Poll the iOS accessibility tree until the "Downloading 100%…" overlay
-   * (predictive-text dictionary fetch shown after a clearState reinstall)
-   * disappears, so the next assertVisible doesn't race it.
-   */
-  private async waitForKeyboardOverlay(udid: string, maxWaitMs: number = 6000): Promise<void> {
-    const start = Date.now();
-    while (Date.now() - start < maxWaitMs) {
-      try {
-        const desc = execSync(`argent run describe --udid ${udid}`, {
-          encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-          timeout: 3000,
-        });
-        if (!desc.includes('Downloading')) return;
-      } catch {
-        return;
-      }
-      await this.sleep(200);
-    }
-  }
-
-  private cachedScreenSize: { width: number; height: number } | null = null;
-  private async getScreenSize(_udid: string): Promise<{ width: number; height: number }> {
+  private async getScreenSize(): Promise<ScreenSize> {
     if (this.cachedScreenSize) return this.cachedScreenSize;
-    // iPhone 17 Pro logical points. Hardcode for now; query device info later.
-    this.cachedScreenSize = { width: 402, height: 874 };
+    this.cachedScreenSize = await this.xctest.getScreenSize();
     return this.cachedScreenSize;
   }
 
+  /**
+   * Read a Fabric shadow-node's layout metrics by testID.
+   * Returns null if the element doesn't exist or has no layout yet.
+   */
   private async getLayoutMetrics(testID: string): Promise<{ x: number; y: number; width: number; height: number; screenX: number; screenY: number } | null> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res: any = await (this.client as any).send('getLayoutMetrics', { testID });
     if (!res?.success || res.data == null || res.data === 'null') return null;
     return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+  }
+
+  /**
+   * Resolve a Maestro selector to normalized 0..1 coords on the simulator
+   * screen. Three paths, in priority order:
+   *
+   *   1. id-only with no other state ........ Fabric shadow-tree layout (fast)
+   *   2. text-only ............................ XCUI label search (helper)
+   *   3. id+state or other selectors .......... Nitro findBySelector (Fabric)
+   *
+   * We always go through XCUI for the *click* itself (only sanctioned API
+   * that wakes RN's gesture recognizer on iOS 26), but the *resolution* uses
+   * the cheaper Fabric path whenever an id exists.
+   *
+   * Returns null if the element can't be located.
+   */
+  private async resolveCoords(selector: MaestroSelector): Promise<{ x: number; y: number } | null> {
+    const screen = await this.getScreenSize();
+
+    // For id-based selectors with no extra state constraints, ask XCUI
+    // directly. Its frame is absolute window-relative — that sidesteps
+    // Fabric's navigator-screen-relative `screenY` offset, which would
+    // otherwise miss any element rendered inside a stack screen header.
+    if (selector.id && !selector.text) {
+      const xcuiHit = await this.xctest.findById(selector.id);
+      if (xcuiHit.found && xcuiHit.frame) {
+        const f = xcuiHit.frame;
+        const cx = (f.x + f.width / 2) / screen.width;
+        const cy = (f.y + f.height / 2) / screen.height;
+        if (cx >= 0 && cx <= 1 && cy >= 0 && cy <= 1) return { x: cx, y: cy };
+      }
+      // Fallback: Fabric layout (with safe-area inset). Used for elements
+      // outside the accessibility tree but present in the shadow tree.
+      const layout = await this.getLayoutMetrics(selector.id);
+      if (layout) {
+        const cx = (layout.screenX + layout.width / 2) / screen.width;
+        const cy = (layout.screenY + layout.height / 2 + screen.safeAreaTop) / screen.height;
+        if (cx >= 0 && cx <= 1 && cy >= 0 && cy <= 1) return { x: cx, y: cy };
+      }
+    }
+
+    // id + state, or text + id, or other compound selectors: use the Nitro
+    // shadow-tree finder for the state matching, then convert the layout
+    // (Fabric coords -> normalized) the same way as the Fabric fallback.
+    if (selector.id) {
+      const ennio = toEnnioSelector(selector);
+      const found = await this.client.findBySelector(ennio);
+      if (found?.layout) {
+        const l = found.layout;
+        const cx = (l.screenX + l.width / 2) / screen.width;
+        const cy = (l.screenY + l.height / 2 + screen.safeAreaTop) / screen.height;
+        if (cx >= 0 && cx <= 1 && cy >= 0 && cy <= 1) return { x: cx, y: cy };
+      }
+    }
+
+    if (selector.text) {
+      const found = await this.xctest.findByLabel(selector.text);
+      if (found.found && found.frame) {
+        const f = found.frame;
+        const cx = (f.x + f.width / 2) / screen.width;
+        const cy = (f.y + f.height / 2) / screen.height;
+        if (cx >= 0 && cx <= 1 && cy >= 0 && cy <= 1) return { x: cx, y: cy };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Best-effort soft-keyboard dismiss. Tap a corner that's almost certainly
+   * outside any focused TextInput (top-right safe-area). XCUI tap on a
+   * non-text region triggers iOS's standard "tap-to-dismiss" if the input
+   * is configured for it; otherwise it's a no-op tap.
+   */
+  private async hideKeyboard(): Promise<void> {
+    await this.xctest.tap(0.95, 0.05);
+    await this.sleep(120);
+  }
+
+  /**
+   * Translate a Maestro `scroll` direction + amount (px) into a swipe
+   * gesture in normalized coords. We swipe in the OPPOSITE direction the
+   * user wants to scroll: scroll down = drag finger up.
+   */
+  private async swipeForScroll(direction: 'up' | 'down' | 'left' | 'right', amount: number): Promise<void> {
+    const screen = await this.getScreenSize();
+    const cx = 0.5;
+    const cy = 0.5;
+    const dx = (direction === 'left' ? amount : direction === 'right' ? -amount : 0) / screen.width;
+    const dy = (direction === 'up' ? amount : direction === 'down' ? -amount : 0) / screen.height;
+    const fromX = cx;
+    const fromY = cy;
+    const toX = Math.max(0.02, Math.min(0.98, cx + dx));
+    const toY = Math.max(0.02, Math.min(0.98, cy + dy));
+    await this.xctest.swipe(fromX, fromY, toX, toY, 250);
   }
 
   /**
@@ -487,10 +466,7 @@ class MaestroExecutor {
         const buttons = await this.client.getAlertButtons();
         if (buttons.includes(buttonText)) {
           this.log(`(tapping alert button: "${buttonText}")`);
-          const ok = await this.client.tapAlertButton(buttonText);
-          if (!ok) {
-            throw new Error(`Alert button tap failed: ${buttonText}`);
-          }
+          await this.xctest.tapAlertButton(buttonText);
           await this.sleep(150);
           return true;
         }
@@ -500,9 +476,42 @@ class MaestroExecutor {
     return false;
   }
 
-  private async tap(selector: MaestroSelector): Promise<void> {
-    const ennioSelector = toEnnioSelector(selector);
+  /**
+   * Resolve and tap a selector via XCUI. Prefers `tapById` (XCUI picks the
+   * accessibility-correct hit point) for id-only selectors; falls back to
+   * coord-based tap for text and compound selectors.
+   *
+   * The retry loop covers the case where the element exists in the shadow
+   * tree but XCUI hasn't yet exposed the matching accessibility node (first
+   * frame after a route push, animated reveal, etc.).
+   */
+  private async tapResolveAndSend(selector: MaestroSelector): Promise<string> {
+    const start = Date.now();
+    if (selector.id && !selector.text) {
+      while (Date.now() - start < DEFAULT_VISIBLE_TIMEOUT) {
+        try {
+          await this.xctest.tapById(selector.id);
+          return `xcui-id ${selector.id}`;
+        } catch {
+          await this.sleep(DEFAULT_RETRY_INTERVAL);
+        }
+      }
+      // XCUI couldn't find it; fall back to coord-based path.
+    }
+    let coords: { x: number; y: number } | null = null;
+    while (Date.now() - start < DEFAULT_VISIBLE_TIMEOUT) {
+      coords = await this.resolveCoords(selector);
+      if (coords) break;
+      await this.sleep(DEFAULT_RETRY_INTERVAL);
+    }
+    if (!coords) {
+      throw new Error(`Element not resolvable to coords: ${JSON.stringify(selector)}`);
+    }
+    await this.xctest.tap(coords.x, coords.y);
+    return `coord (${coords.x.toFixed(3)}, ${coords.y.toFixed(3)})`;
+  }
 
+  private async tap(selector: MaestroSelector): Promise<void> {
     // Text-only selectors: try alert button tap first. Polls briefly because
     // Alert.alert presentation has a small animation lag after the trigger tap.
     if (selector.text && !selector.id) {
@@ -510,71 +519,42 @@ class MaestroExecutor {
       if (ok) return;
     }
 
-    // Wait for element to exist
     await this.waitFor(
       () => this.selectorExists(selector),
       DEFAULT_VISIBLE_TIMEOUT,
       `Element not found: ${JSON.stringify(selector)}`
     );
 
-    // Resolve element to absolute screen coords via argent (which mirrors
-    // iOS accessibility frames). Then tap via simulator HID input. This is
-    // the only iOS path that triggers Pressable's gesture recognizer
-    // reliably without app-side accessibility annotations.
-    const tappedViaHid = await this.tapViaSimulatorHid(selector);
-    if (tappedViaHid) return;
-
-    // Fallback: native event dispatch (works for UIControl-based elements
-    // like UITabBar, alerts already handled above).
-    let ok: boolean;
-    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-      ok = await this.client.tap(ennioSelector.id as string);
-    } else {
-      ok = await this.client.tapBySelector(ennioSelector);
-    }
-
-    if (!ok) {
-      throw new Error(`Tap failed: ${JSON.stringify(selector)}`);
-    }
-
-    // Track last tapped element for inputText
+    const where = await this.tapResolveAndSend(selector);
+    this.log(`tap: ${JSON.stringify(selector)} via ${where}`);
     this.lastTappedSelector = selector;
+    await this.sleep(120);
   }
 
   /**
    * Double tap on element
    */
   private async doubleTap(selector: MaestroSelector): Promise<void> {
-    const ennioSelector = toEnnioSelector(selector);
-
-    // Wait for element to exist
     await this.waitFor(
       () => this.selectorExists(selector),
       DEFAULT_VISIBLE_TIMEOUT,
       `Element not found: ${JSON.stringify(selector)}`
     );
-
-    let ok: boolean;
-    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-      ok = await this.client.doubleTap(ennioSelector.id as string);
-    } else {
-      ok = await this.client.doubleTapBySelector(ennioSelector);
-    }
-
-    if (!ok) {
-      throw new Error(`DoubleTap failed: ${JSON.stringify(selector)}`);
-    }
+    const coords = await this.resolveCoords(selector);
+    if (!coords) throw new Error(`DoubleTap unresolvable: ${JSON.stringify(selector)}`);
+    await this.xctest.doubleTap(coords.x, coords.y);
+    this.lastTappedSelector = selector;
   }
 
   /**
-   * Type text into focused element
+   * Type text into focused element. If a selector is provided, taps it
+   * first (skipping if it's already the last-tapped element to avoid
+   * double-tap selection). Then routes the text through the XCTest helper,
+   * which types into whatever TextInput holds keyboard focus.
    */
   private async typeText(text: string, selector?: MaestroSelector): Promise<void> {
     const targetSelector = selector || this.lastTappedSelector;
 
-    // If a target is given AND it isn't the last thing the user already
-    // tapped, focus it via HID tap. Skipping the redundant tap avoids
-    // double-tap selecting the word / inserting cursor mid-string.
     if (targetSelector) {
       await this.waitFor(
         () => this.selectorExists(targetSelector),
@@ -584,71 +564,41 @@ class MaestroExecutor {
       const sameAsLast = this.lastTappedSelector
         && JSON.stringify(this.lastTappedSelector) === JSON.stringify(targetSelector);
       if (!sameAsLast) {
-        await this.tapViaSimulatorHid(targetSelector);
-        await this.sleep(150);
+        await this.tapResolveAndSend(targetSelector);
+        this.lastTappedSelector = targetSelector;
+        await this.sleep(180);
       }
     }
 
-    // HID keyboard input - works against whatever TextInput is currently
-    // focused. argent run keyboard maps to UIDevice.synthesize().
-    const udid = getBootedSimulatorId();
-    if (udid) {
-      try {
-        execSync(`argent run keyboard --udid ${udid} --text ${JSON.stringify(text)}`, {
-          encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-          timeout: 8000,
-        });
-        // iOS shows a "Downloading 100%…" overlay the first time a TextInput
-        // is used after a fresh install (predictive-text dictionary fetch).
-        // Wait it out so the next assertVisible doesn't race the overlay.
-        await this.waitForKeyboardOverlay(udid);
-        await this.sleep(120);
-        return;
-      } catch (e) {
-        this.log(`typeText (HID) error: ${(e as Error).message}`);
-      }
-    }
-
-    // Fallback: ennio shadow-tree based typeText.
-    if (targetSelector) {
-      const ennioSelector = toEnnioSelector(targetSelector);
-      const ok = ennioSelector.id && Object.keys(ennioSelector).length === 1
-        ? await this.client.typeText(ennioSelector.id as string, text)
-        : await this.client.typeTextBySelector(ennioSelector, text);
-      if (!ok) throw new Error(`TypeText failed: ${JSON.stringify(targetSelector)}`);
-    } else {
-      const focused = await this.client.findBySelector({ focused: true });
-      if (focused?.testID) {
-        const ok = await this.client.typeText(focused.testID, text);
-        if (!ok) throw new Error('TypeText into focused element failed');
-      } else {
-        throw new Error('inputText: no selector provided and no focused element found');
-      }
-    }
+    await this.xctest.typeText(text);
+    await this.sleep(80);
   }
 
   /**
-   * Clear text from element
+   * Clear text from a TextInput by tapping it (to focus + show kb), then
+   * deleting characters one at a time. Maestro's clearText doesn't take a
+   * count, so erase up to 200 chars (typical TextInput cap) then stop on
+   * "no keyboard focus" - the helper will return an error once kb hides.
    */
   private async clearText(selector: MaestroSelector): Promise<void> {
-    const ennioSelector = toEnnioSelector(selector);
-
     await this.waitFor(
       () => this.selectorExists(selector),
       DEFAULT_VISIBLE_TIMEOUT,
       `Element not found: ${JSON.stringify(selector)}`
     );
-
-    let ok: boolean;
-    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-      ok = await this.client.clearText(ennioSelector.id as string);
-    } else {
-      ok = await this.client.clearTextBySelector(ennioSelector);
+    const sameAsLast = this.lastTappedSelector
+      && JSON.stringify(this.lastTappedSelector) === JSON.stringify(selector);
+    if (!sameAsLast) {
+      await this.tapResolveAndSend(selector);
+      this.lastTappedSelector = selector;
+      await this.sleep(180);
     }
-
-    if (!ok) {
-      throw new Error(`ClearText failed: ${JSON.stringify(selector)}`);
+    for (let i = 0; i < 100; i++) {
+      try {
+        await this.xctest.pressKey('backspace');
+      } catch {
+        break;
+      }
     }
   }
 
@@ -656,57 +606,30 @@ class MaestroExecutor {
    * Long press on element
    */
   private async longPress(selector: MaestroSelector, duration = 500): Promise<void> {
-    const ennioSelector = toEnnioSelector(selector);
-
     await this.waitFor(
       () => this.selectorExists(selector),
       DEFAULT_VISIBLE_TIMEOUT,
       `Element not found: ${JSON.stringify(selector)}`
     );
-
-    let ok: boolean;
-    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-      ok = await this.client.longPress(ennioSelector.id as string, duration);
-    } else {
-      ok = await this.client.longPressBySelector(ennioSelector, duration);
-    }
-
-    if (!ok) {
-      throw new Error(`LongPress failed: ${JSON.stringify(selector)}`);
-    }
+    const coords = await this.resolveCoords(selector);
+    if (!coords) throw new Error(`LongPress unresolvable: ${JSON.stringify(selector)}`);
+    await this.xctest.longPress(coords.x, coords.y, duration);
+    this.lastTappedSelector = selector;
   }
 
   /**
-   * Scroll in a direction
-   * Maestro scroll applies to the current visible scrollable view
+   * Scroll the visible screen in a direction by translating to a XCUI swipe
+   * gesture from the screen center. Works regardless of whether the
+   * scrollable view is registered with a testID.
    */
   private async scroll(direction: string, amount: number): Promise<void> {
     const dir = direction.toLowerCase() as 'up' | 'down' | 'left' | 'right';
-
-    // Try common scrollable container IDs
-    const scrollableIds = [
-      'scroll-view',
-      'scrollview',
-      'flatlist',
-      'profile-screen',
-      'products-list',
-      'cart-items-list',
-      'orders-list',
-      'settings-screen',
-    ];
-
-    for (const id of scrollableIds) {
-      const exists = await this.client.exists(id);
-      if (exists) {
-        await this.client.scroll(id, dir, amount);
-        await this.sleep(150);
-        return;
-      }
+    if (dir !== 'up' && dir !== 'down' && dir !== 'left' && dir !== 'right') {
+      this.log(`scroll: unknown direction ${direction}`);
+      return;
     }
-
-    // Last resort - log warning
-    this.log('scroll: no scrollable container found');
-    await this.sleep(100);
+    await this.swipeForScroll(dir, amount);
+    await this.sleep(150);
   }
 
   /**
@@ -773,16 +696,16 @@ class MaestroExecutor {
     if (processedCmd == null) return;
     if (typeof processedCmd === 'string') {
       if (processedCmd === 'back') {
-        await this.client.backGesture();
+        await this.xctest.back();
         await this.sleep(150);
         return;
       }
       if (processedCmd === 'hideKeyboard') {
-        await this.client.hideKeyboard();
+        await this.hideKeyboard();
         return;
       }
       if (processedCmd === 'pasteText') {
-        await this.client.pasteFromClipboard();
+        await this.xctest.paste();
         return;
       }
       throw new Error(`Unknown string command: ${processedCmd}`);
@@ -938,19 +861,23 @@ class MaestroExecutor {
     // swipe
     if ('swipe' in cmd) {
       const swipeCmd = cmd.swipe;
-      // Maestro swipe can be:
-      // - { start: "50%,80%", end: "50%,20%" }
-      // - { direction: "UP", duration: 500 }
-      // - { start: { x: 100, y: 500 }, end: { x: 100, y: 200 } }
       if (swipeCmd.direction) {
-        // Use direction-based scroll (same as scroll command)
         const amount = swipeCmd.duration || 400;
         await this.scroll(swipeCmd.direction.toLowerCase(), amount);
       } else if (swipeCmd.start && swipeCmd.end) {
-        // Coordinate-based swipe - TODO: implement with native gesture
-        this.log(`swipe: from ${JSON.stringify(swipeCmd.start)} to ${JSON.stringify(swipeCmd.end)}`);
-        // For now, approximate with scroll
-        await this.sleep(100);
+        const screen = await this.getScreenSize();
+        const toNorm = (p: string | { x: number; y: number }): { x: number; y: number } => {
+          if (typeof p === 'string') {
+            const [xs, ys] = p.split(',').map((s) => s.trim());
+            const x = xs.endsWith('%') ? parseFloat(xs) / 100 : parseFloat(xs) / screen.width;
+            const y = ys.endsWith('%') ? parseFloat(ys) / 100 : parseFloat(ys) / screen.height;
+            return { x, y };
+          }
+          return { x: p.x / screen.width, y: p.y / screen.height };
+        };
+        const from = toNorm(swipeCmd.start);
+        const to = toNorm(swipeCmd.end);
+        await this.xctest.swipe(from.x, from.y, to.x, to.y, swipeCmd.duration ?? 300);
       }
       return;
     }
@@ -1155,14 +1082,14 @@ class MaestroExecutor {
       const eraseCmd = cmd.eraseText;
       const chars = typeof eraseCmd === 'number' ? eraseCmd : (eraseCmd.characters || 50);
       this.log(`eraseText: ${chars} characters`);
-      await this.client.eraseText(chars);
+      await this.xctest.eraseText(chars);
       return;
     }
 
     // hideKeyboard
     if ('hideKeyboard' in cmd) {
       this.log('hideKeyboard');
-      await this.client.hideKeyboard();
+      await this.hideKeyboard();
       return;
     }
 
@@ -1170,7 +1097,7 @@ class MaestroExecutor {
     if ('pressKey' in cmd) {
       const keyName = cmd.pressKey as string;
       this.log(`pressKey: ${keyName}`);
-      await this.client.pressKey(keyName);
+      await this.xctest.pressKey(keyName);
       return;
     }
 
@@ -1178,11 +1105,10 @@ class MaestroExecutor {
     if ('copyTextFrom' in cmd) {
       const target = cmd.copyTextFrom as MaestroSelector;
       this.log(`copyTextFrom: ${JSON.stringify(target)}`);
-      // Get text from element and copy to clipboard
       const selector = toEnnioSelector(target);
       const text = await this.client.getTextBySelector(selector);
       if (text) {
-        await this.client.copyToClipboard(text);
+        await this.xctest.setPasteboard(text);
       }
       return;
     }
@@ -1190,7 +1116,7 @@ class MaestroExecutor {
     // pasteText
     if ('pasteText' in cmd) {
       this.log('pasteText');
-      await this.client.pasteFromClipboard();
+      await this.xctest.paste();
       return;
     }
 
@@ -1198,14 +1124,14 @@ class MaestroExecutor {
     if ('setClipboard' in cmd) {
       const text = cmd.setClipboard as string;
       this.log(`setClipboard: ${text}`);
-      await this.client.copyToClipboard(text);
+      await this.xctest.setPasteboard(text);
       return;
     }
 
     // back (iOS back gesture)
     if ('back' in cmd) {
       this.log('back gesture');
-      await this.client.backGesture();
+      await this.xctest.back();
       return;
     }
 
@@ -1412,37 +1338,14 @@ class MaestroExecutor {
   }
 
   /**
-   * Capture the booted-simulator accessibility tree via the `argent` CLI and
-   * print a one-line summary of the top labels. Used in --trace mode so the
-   * runner makes its expectations of state explicit between every step,
-   * letting us catch state drift the moment it happens (instead of waiting
-   * for the next assertVisible to time out).
+   * Print a one-line trace marker between commands. We used to dump the
+   * iOS a11y tree here via `argent describe`, but argent is no longer a
+   * dependency. Keep the hook so flows can stay verbose-instrumented; the
+   * caller can extend this to call `client.findBySelector` for richer info.
    */
   private async snapshotState(cmd: MaestroCommand): Promise<void> {
-    try {
-      const udid = getBootedSimulatorId();
-      if (!udid) return;
-      const out = execSync(`argent run describe --udid ${udid} --json`, {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 8000,
-      });
-      const tree = JSON.parse(out);
-      const labels: string[] = [];
-      const walk = (node: { label?: string; value?: string; children?: unknown[] }) => {
-        if (labels.length >= 12) return;
-        const txt = node.label ?? node.value;
-        if (txt) labels.push(String(txt).slice(0, 30));
-        if (Array.isArray(node.children)) {
-          for (const c of node.children) walk(c as never);
-        }
-      };
-      if (tree && typeof tree === 'object' && 'tree' in tree) walk(tree.tree as never);
-      else if (tree && typeof tree === 'object') walk(tree as never);
-      const cmdName = typeof cmd === 'string' ? cmd : Object.keys(cmd)[0];
-      console.log(`    [trace ${cmdName}] ${labels.join(' | ')}`);
-    } catch {
-      // Trace is best-effort; never break a flow.
-    }
+    if (!this.trace) return;
+    const cmdName = typeof cmd === 'string' ? cmd : Object.keys(cmd as object)[0];
+    console.log(`    [trace ${cmdName}]`);
   }
 }
