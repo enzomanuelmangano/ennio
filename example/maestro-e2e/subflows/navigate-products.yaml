@@ -5,7 +5,7 @@ appId: com.tasto.example
 ---
 
 - tapOn:
-    id: "tab-products"
+    text: "Products"
 - assertVisible:
     id: "products-screen"
     timeout: 3000

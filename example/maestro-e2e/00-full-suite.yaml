@@ -17,14 +17,14 @@ tags:
 
 # Navigate to home
 - tapOn:
-    id: "tab-home"
+    text: "Home"
 - assertVisible:
     id: "home-screen"
     timeout: 5000
 
 # Logout if logged in (check profile first)
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 
 # If profile-header visible = logged in, need to logout
 - runFlow:
@@ -49,7 +49,7 @@ tags:
 
 # Back to home
 - tapOn:
-    id: "tab-home"
+    text: "Home"
 - assertVisible:
     id: "home-screen"
     timeout: 3000
@@ -152,7 +152,7 @@ tags:
 
 # Navigate to products
 - tapOn:
-    id: "tab-products"
+    text: "Products"
 - assertVisible:
     id: "products-screen"
     timeout: 3000
@@ -263,7 +263,7 @@ tags:
 
 # Navigate to cart
 - tapOn:
-    id: "tab-cart"
+    text: "Cart"
 - assertVisible:
     id: "cart-screen"
     timeout: 3000
@@ -398,7 +398,7 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 - assertVisible:
     id: "profile-screen"
     timeout: 3000
@@ -435,7 +435,7 @@ tags:
 
 # Back to profile
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 - assertVisible:
     id: "profile-screen"
     timeout: 3000
@@ -445,7 +445,7 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "tab-cart"
+    text: "Cart"
 - assertVisible:
     id: "cart-screen-empty"
     timeout: 3000
@@ -458,7 +458,7 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 - assertVisible:
     id: "profile-screen"
     timeout: 3000

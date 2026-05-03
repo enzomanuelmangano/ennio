@@ -108,7 +108,7 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 
 - assertVisible:
     anyOf:
@@ -210,7 +210,7 @@ tags:
 
 # Check profile in dark mode
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 
 - assertVisible:
     id: "profile-screen"

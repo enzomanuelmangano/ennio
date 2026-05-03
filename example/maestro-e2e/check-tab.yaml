@@ -2,4 +2,4 @@ appId: com.tasto.example
 name: "Check Tab"
 ---
 - assertVisible:
-    id: "tab-home"
+    text: "Home"

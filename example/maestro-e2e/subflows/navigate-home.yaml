@@ -6,7 +6,7 @@ appId: com.tasto.example
 ---
 
 - tapOn:
-    id: "tab-home"
+    text: "Home"
 - assertVisible:
     id: "home-screen"
     timeout: 3000

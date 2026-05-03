@@ -21,7 +21,7 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 
 # Should show guest view initially (if not logged in)
 - runFlow:
@@ -58,7 +58,7 @@ tags:
 
 # Navigate back to profile
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 
 - assertVisible:
     id: "profile-screen"

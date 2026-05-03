@@ -24,7 +24,7 @@ tags:
         id: "home-signin-btn"
     commands:
       - tapOn:
-          id: "tab-profile"
+          text: "Profile"
       - tapOn:
           id: "menu-logout"
       - tapOn:
@@ -402,7 +402,7 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 
 - assertVisible:
     id: "profile-screen"

@@ -5,7 +5,7 @@ appId: com.tasto.example
 ---
 
 - tapOn:
-    id: "tab-cart"
+    text: "Cart"
 - assertVisible:
     anyOf:
       - id: "cart-screen"

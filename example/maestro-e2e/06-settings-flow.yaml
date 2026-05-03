@@ -219,7 +219,7 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "tab-profile"
+    text: "Profile"
 
 - assertVisible:
     id: "profile-screen"
