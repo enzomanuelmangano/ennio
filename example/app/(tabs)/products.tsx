@@ -10,6 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../store';
 import * as Haptics from 'expo-haptics';
 
@@ -220,8 +221,11 @@ export default function ProductsScreen() {
     });
   }, [allProducts, selectedCategory, searchQuery, sortBy]);
 
+  const insets = useSafeAreaInsets();
+  const TAB_BAR_HEIGHT = 49;
+
   return (
-    <View style={[styles.container, darkMode && styles.containerDark]} testID="products-screen">
+    <View style={[styles.container, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="products-screen">
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <TextInput

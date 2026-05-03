@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, ScrollView, Pressable, Image, Alert } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore, useCartStore, useSettingsStore } from '../../store';
 import * as Haptics from 'expo-haptics';
 
@@ -121,6 +122,8 @@ export default function ProfileScreen() {
   const logout = useAuthStore(state => state.logout);
   const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const insets = useSafeAreaInsets();
+  const TAB_BAR_HEIGHT = 49;
 
   const handleLogout = () => {
     Alert.alert(
@@ -149,6 +152,7 @@ export default function ProfileScreen() {
   return (
     <ScrollView
       style={[styles.container, darkMode && styles.containerDark]}
+      contentContainerStyle={{ paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
       testID="profile-screen"
     >
       <ProfileHeader />

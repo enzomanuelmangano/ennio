@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, FlatList, Pressable, Image, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCartStore, useAuthStore, useSettingsStore } from '../../store';
 import * as Haptics from 'expo-haptics';
 
@@ -109,6 +110,8 @@ export default function CartScreen() {
   const isAuthenticated = useAuthStore(state => state.isAuthenticated);
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const TAB_BAR_HEIGHT = 49;
 
   const handleCheckout = () => {
     router.push('/checkout');
@@ -127,7 +130,7 @@ export default function CartScreen() {
 
   if (items.length === 0) {
     return (
-      <View style={[styles.emptyContainer, darkMode && styles.containerDark]} testID="cart-screen-empty">
+      <View style={[styles.emptyContainer, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen-empty">
         <Text style={styles.emptyIcon}>🛒</Text>
         <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>Your cart is empty</Text>
         <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
@@ -145,7 +148,7 @@ export default function CartScreen() {
   }
 
   return (
-    <View style={[styles.container, darkMode && styles.containerDark]} testID="cart-screen">
+    <View style={[styles.container, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen">
       <View style={styles.header}>
         <Text style={[styles.headerTitle, darkMode && styles.textLight]}>
           {items.length} {items.length === 1 ? 'item' : 'items'}

@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, ScrollView, Pressable, Image } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore, useProductsStore, useCartStore, useSettingsStore } from '../../store';
 import * as Haptics from 'expo-haptics';
 
@@ -62,6 +63,8 @@ export default function HomeScreen() {
   const products = useProductsStore(state => state.products);
   const cartItemCount = useCartStore(state => state.getItemCount());
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const insets = useSafeAreaInsets();
+  const TAB_BAR_HEIGHT = 49;
 
   const featuredProducts = products.slice(0, 4);
   const trendingProducts = products.filter(p => p.rating >= 4.7).slice(0, 3);
@@ -69,6 +72,7 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={[styles.container, darkMode && styles.containerDark]}
+      contentContainerStyle={{ paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
       testID="home-screen"
     >
       {/* Header */}
