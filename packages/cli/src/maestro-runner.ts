@@ -550,18 +550,21 @@ class MaestroExecutor {
   private async typeText(text: string, selector?: MaestroSelector): Promise<void> {
     const targetSelector = selector || this.lastTappedSelector;
 
-    // If a target is given (or implied by last-tapped), focus it via HID tap
-    // first so the OS keyboard targets the right TextInput. Without this,
-    // typing into a modal-presented TextInput can land on a hidden field
-    // behind the modal because Z-order isn't respected by event-emitter dispatch.
+    // If a target is given AND it isn't the last thing the user already
+    // tapped, focus it via HID tap. Skipping the redundant tap avoids
+    // double-tap selecting the word / inserting cursor mid-string.
     if (targetSelector) {
       await this.waitFor(
         () => this.selectorExists(targetSelector),
         DEFAULT_VISIBLE_TIMEOUT,
         `Element not found: ${JSON.stringify(targetSelector)}`
       );
-      await this.tapViaSimulatorHid(targetSelector);
-      await this.sleep(150);
+      const sameAsLast = this.lastTappedSelector
+        && JSON.stringify(this.lastTappedSelector) === JSON.stringify(targetSelector);
+      if (!sameAsLast) {
+        await this.tapViaSimulatorHid(targetSelector);
+        await this.sleep(150);
+      }
     }
 
     // HID keyboard input - works against whatever TextInput is currently
