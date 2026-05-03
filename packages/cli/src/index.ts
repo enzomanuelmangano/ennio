@@ -5,21 +5,31 @@
  * Runs Maestro YAML flows against a React Native app on the iOS simulator.
  *
  * Architecture:
- *   - reads  go through the in-app WebSocket server (Fabric shadow tree)
- *   - writes go through a bundled XCTest helper (XCUI HID injection)
+ *   - reads always go through the in-app Ennio WebSocket server (Fabric).
+ *   - writes go through one of two backends:
+ *       --fast   (default) -> in-app sanctioned UIKit / accessibility APIs.
+ *                             ~5-15ms per action. No xcodebuild. Reliable
+ *                             for tap / typeText / scroll / alert. Will not
+ *                             cover RNGH gestures (pinch, pan, swipe-to-
+ *                             dismiss, drag-to-reorder).
+ *       --stable           -> XCTest helper (XCUI HID injection).
+ *                             ~30ms per action plus a one-time ~15s
+ *                             cold-start. Reliable for everything.
  *
  * Usage:
- *   ennio e2e/flow.yaml          # run a single flow
- *   ennio e2e/                   # run every *.yaml under the directory
+ *   ennio e2e/flow.yaml                # run a single flow (fast)
+ *   ennio e2e/                         # every *.yaml in directory
+ *   ennio e2e/ --stable                # use the XCTest helper
  */
 
 import { existsSync, statSync } from 'fs';
 import { resolve, basename, join } from 'path';
 import { glob } from 'glob';
-import { EnnioClient } from './client';
+import { EnnioClient, type Selector } from './client';
 import { XCTestClient } from './xctest-client';
 import { launchHelper, teardownHelper, type HelperHandle } from './xctest-helper';
 import { runMaestroTests } from './maestro-runner';
+import { NitroWriter, XCTestWriter, type Writer, type StableContext } from './writer';
 
 const DEFAULT_WS_PORT = 9876;
 
@@ -52,14 +62,15 @@ interface TestFileResultWithClient extends TestFileResult {
 
 async function runTestFile(
   client: EnnioClient,
-  xctest: XCTestClient,
+  writer: Writer,
+  xctest: XCTestClient | null,
   filePath: string,
   options: { verbose?: boolean; trace?: boolean; port?: number } = {}
 ): Promise<TestFileResultWithClient> {
   const fileName = basename(filePath);
   console.log(`▸ ${fileName}`);
   try {
-    const results = await runMaestroTests(client, xctest, filePath, {
+    const results = await runMaestroTests(client, writer, xctest, filePath, {
       verbose: options.verbose,
       trace: options.trace,
       port: options.port,
@@ -84,17 +95,52 @@ async function runTestFile(
   }
 }
 
+function buildStableContext(client: EnnioClient, xctest: XCTestClient): StableContext {
+  let cachedScreen: import('./xctest-client').ScreenSize | null = null;
+  return {
+    async resolveByIdViaXCUI(testID) {
+      const r = await xctest.findById(testID);
+      return r.found && r.frame ? r.frame : null;
+    },
+    async resolveByLabel(text) {
+      const r = await xctest.findByLabel(text);
+      return r.found && r.frame ? r.frame : null;
+    },
+    async getScreen() {
+      if (cachedScreen) return cachedScreen;
+      cachedScreen = await xctest.getScreenSize();
+      return cachedScreen;
+    },
+    async getLayoutMetrics(testID) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res: any = await (client as any).send('getLayoutMetrics', { testID });
+      if (!res?.success || res.data == null || res.data === 'null') return null;
+      return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+    },
+    async findBySelectorLayout(selector: Selector) {
+      const found = await client.findBySelector(selector);
+      return found?.layout ?? null;
+    },
+  };
+}
+
 async function main() {
   const args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
   const portArg = process.argv.find((a) => a.startsWith('--port='));
   const port = portArg ? parseInt(portArg.split('=')[1], 10) : DEFAULT_WS_PORT;
   const verbose = process.argv.includes('--verbose') || process.argv.includes('-v');
   const trace = process.argv.includes('--trace');
+  const stable = process.argv.includes('--stable');
+  const fastFlag = process.argv.includes('--fast');
+  // --fast is the default; --stable opts in to the XCTest helper path.
+  const mode: 'fast' | 'stable' = stable && !fastFlag ? 'stable' : 'fast';
 
   if (args.length === 0) {
     console.log('Usage: ennio <flow.yaml> [options]');
     console.log('       ennio e2e/           # runs every *.yaml under the directory');
     console.log('\nOptions:');
+    console.log('  --fast         (default) in-app writes via accessibilityActivate / UIKit');
+    console.log('  --stable       writes through the bundled XCTest helper (slower, more thorough)');
     console.log('  --port=9876    WebSocket port (default: 9876)');
     console.log('  --verbose, -v  show detailed command execution');
     console.log('  --trace        emit a trace marker between commands');
@@ -125,7 +171,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('\n🧪 Ennio\n');
+  console.log('\n🧪 Ennio (' + mode + ' mode)\n');
 
   const client = await tryWebSocketConnection(port);
   if (!client) {
@@ -139,18 +185,25 @@ async function main() {
 
   let helper: HelperHandle | null = null;
   let xctest: XCTestClient | null = null;
-  console.log('(Launching XCTest helper...)');
-  try {
-    helper = await launchHelper({ verbose });
-    xctest = new XCTestClient(helper.port);
-    await xctest.connect(15_000);
-    await xctest.ping();
-    console.log(`(XCTest helper ready on :${helper.port})\n`);
-  } catch (err) {
-    console.error(`Failed to launch XCTest helper: ${err}`);
-    if (helper) await teardownHelper(helper);
-    client.disconnect();
-    process.exit(1);
+  let writer: Writer;
+
+  if (mode === 'stable') {
+    console.log('(Launching XCTest helper...)');
+    try {
+      helper = await launchHelper({ verbose });
+      xctest = new XCTestClient(helper.port);
+      await xctest.connect(15_000);
+      await xctest.ping();
+      console.log(`(XCTest helper ready on :${helper.port})\n`);
+    } catch (err) {
+      console.error(`Failed to launch XCTest helper: ${err}`);
+      if (helper) await teardownHelper(helper);
+      client.disconnect();
+      process.exit(1);
+    }
+    writer = new XCTestWriter(xctest!, buildStableContext(client, xctest!));
+  } else {
+    writer = new NitroWriter(client);
   }
 
   let totalPassed = 0;
@@ -159,10 +212,18 @@ async function main() {
 
   try {
     for (const file of files) {
-      const result = await runTestFile(currentClient, xctest, file, { verbose, trace, port });
+      const result = await runTestFile(currentClient, writer, xctest, file, { verbose, trace, port });
       totalPassed += result.passed;
       totalFailed += result.failed;
-      if (result.client) currentClient = result.client;
+      if (result.client) {
+        currentClient = result.client;
+        // Re-bind writer if it depends on the WS client.
+        if (mode === 'fast') {
+          writer = new NitroWriter(currentClient);
+        } else if (xctest) {
+          writer = new XCTestWriter(xctest, buildStableContext(currentClient, xctest));
+        }
+      }
     }
   } finally {
     currentClient.disconnect();

@@ -19,6 +19,8 @@ namespace margelo::nitro::ennio { struct ElementInfo; }
 namespace margelo::nitro::ennio { struct LayoutMetrics; }
 // Forward declaration of `ExtendedElementInfo` to properly resolve imports.
 namespace margelo::nitro::ennio { struct ExtendedElementInfo; }
+// Forward declaration of `ScrollDirection` to properly resolve imports.
+namespace margelo::nitro::ennio { enum class ScrollDirection; }
 
 #include <NitroModules/Null.hpp>
 #include "ElementInfo.hpp"
@@ -27,6 +29,7 @@ namespace margelo::nitro::ennio { struct ExtendedElementInfo; }
 #include "LayoutMetrics.hpp"
 #include "ExtendedElementInfo.hpp"
 #include <vector>
+#include "ScrollDirection.hpp"
 
 namespace margelo::nitro::ennio {
 
@@ -77,6 +80,30 @@ namespace margelo::nitro::ennio {
       virtual bool isAlertPresent() = 0;
       virtual std::string getAlertText() = 0;
       virtual std::vector<std::string> getAlertButtons() = 0;
+      virtual bool tap(const std::string& testID) = 0;
+      virtual bool tapByLabel(const std::string& text) = 0;
+      virtual bool doubleTap(const std::string& testID) = 0;
+      virtual bool longPress(const std::string& testID, double durationMs) = 0;
+      virtual bool typeText(const std::string& testID, const std::string& text) = 0;
+      virtual bool clearText(const std::string& testID) = 0;
+      virtual bool eraseText(const std::string& testID, double count) = 0;
+      virtual bool pressKey(const std::string& testID, const std::string& keyName) = 0;
+      virtual bool scroll(const std::string& testID, ScrollDirection direction, double distance) = 0;
+      virtual bool swipe(const std::string& testID, ScrollDirection direction, double distance) = 0;
+      virtual bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) = 0;
+      virtual bool tapTab(double index) = 0;
+      virtual bool backGesture() = 0;
+      virtual bool hideKeyboard() = 0;
+      virtual bool tapBySelector(const std::string& selectorJson) = 0;
+      virtual bool doubleTapBySelector(const std::string& selectorJson) = 0;
+      virtual bool longPressBySelector(const std::string& selectorJson, double durationMs) = 0;
+      virtual bool typeTextBySelector(const std::string& selectorJson, const std::string& text) = 0;
+      virtual bool clearTextBySelector(const std::string& selectorJson) = 0;
+      virtual bool tapAlertButton(const std::string& buttonText) = 0;
+      virtual bool dismissAlert() = 0;
+      virtual bool copyToClipboard(const std::string& text) = 0;
+      virtual bool pasteFromClipboard(const std::string& testID) = 0;
+      virtual std::string getClipboardText() = 0;
 
     protected:
       // Hybrid Setup

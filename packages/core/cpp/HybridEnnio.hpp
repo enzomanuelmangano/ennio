@@ -76,6 +76,34 @@ public:
     std::vector<std::string> getAlertButtons() override;
 
     // ============================================
+    // Fast-mode Writes
+    // ============================================
+    bool tap(const std::string& testID) override;
+    bool tapByLabel(const std::string& text) override;
+    bool doubleTap(const std::string& testID) override;
+    bool longPress(const std::string& testID, double durationMs) override;
+    bool typeText(const std::string& testID, const std::string& text) override;
+    bool clearText(const std::string& testID) override;
+    bool eraseText(const std::string& testID, double count) override;
+    bool pressKey(const std::string& testID, const std::string& keyName) override;
+    bool scroll(const std::string& testID, ScrollDirection direction, double distance) override;
+    bool swipe(const std::string& testID, ScrollDirection direction, double distance) override;
+    bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) override;
+    bool tapTab(double index) override;
+    bool backGesture() override;
+    bool hideKeyboard() override;
+    bool tapBySelector(const std::string& selectorJson) override;
+    bool doubleTapBySelector(const std::string& selectorJson) override;
+    bool longPressBySelector(const std::string& selectorJson, double durationMs) override;
+    bool typeTextBySelector(const std::string& selectorJson, const std::string& text) override;
+    bool clearTextBySelector(const std::string& selectorJson) override;
+    bool tapAlertButton(const std::string& buttonText) override;
+    bool dismissAlert() override;
+    bool copyToClipboard(const std::string& text) override;
+    bool pasteFromClipboard(const std::string& testID) override;
+    std::string getClipboardText() override;
+
+    // ============================================
     // Initialization (called from JS)
     // ============================================
 

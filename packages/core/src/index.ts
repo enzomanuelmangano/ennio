@@ -9,6 +9,7 @@ import type {
   TextMatchMode,
   Point,
   Trait,
+  ScrollDirection,
 } from './Ennio.nitro';
 
 export type {
@@ -21,6 +22,7 @@ export type {
   TextMatchMode,
   Point,
   Trait,
+  ScrollDirection,
 };
 
 /**

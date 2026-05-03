@@ -74,6 +74,36 @@ public:
      */
     std::vector<std::string> getAlertButtons();
 
+    // ============================================
+    // Fast-mode Writes
+    //
+    // Each method finds a UIView via accessibilityIdentifier (RN testID)
+    // and drives the action directly through UIKit / iOS accessibility
+    // APIs. No XCUI helper, no synthetic touches. Per-call latency is
+    // dominated by the view-tree DFS (~5ms on the example app); no
+    // cross-process IPC, no animation race.
+    // ============================================
+
+    bool tap(const std::string& testID);
+    bool tapByLabel(const std::string& text);
+    bool doubleTap(const std::string& testID);
+    bool longPress(const std::string& testID, int durationMs);
+    bool typeText(const std::string& testID, const std::string& text);
+    bool clearText(const std::string& testID);
+    bool eraseText(const std::string& testID, int count);
+    bool pressKey(const std::string& testID, const std::string& keyName);
+    bool scroll(const std::string& testID, const std::string& direction, double distance);
+    bool swipe(const std::string& testID, const std::string& direction, double distance);
+    bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID);
+    bool tapTab(int index);
+    bool backGesture();
+    bool hideKeyboard();
+    bool tapAlertButton(const std::string& buttonText);
+    bool dismissAlert();
+    bool copyToClipboard(const std::string& text);
+    bool pasteFromClipboard(const std::string& testID);
+    std::string getClipboardText();
+
 private:
     EnnioRuntimeHelper() = default;
     ~EnnioRuntimeHelper() = default;

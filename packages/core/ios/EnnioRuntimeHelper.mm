@@ -402,6 +402,657 @@ std::vector<std::string> EnnioRuntimeHelper::getAlertButtons() {
 
 } // namespace ennio
 
+// ============================================
+// Fast-mode write helpers (file-local)
+// ============================================
+
+// Private UIKit shims so we can build a fake UITouch and feed it through
+// UIApplication's standard event pipeline. RN Fabric's
+// RCTSurfaceTouchHandler watches sendEvent: and routes the touch through
+// its responder system, which is the JS-side path Pressable hangs off.
+@interface UITouch (EnnioPrivate)
+- (void)_setLocationInWindow:(CGPoint)point resetPrevious:(BOOL)reset;
+- (void)_setIsFirstTouchForView:(BOOL)isFirst;
+@end
+
+@interface UIEvent (EnnioPrivate)
+- (void)_addTouch:(UITouch*)touch forDelayedDelivery:(BOOL)delayed;
+- (void)_clearTouches;
+@end
+
+@interface UIApplication (EnnioPrivate)
+- (UIEvent*)_touchesEvent;
+@end
+
+// Synthesize a Began -> Ended touch sequence at a view's centre. Returns
+// YES if the simulated event was actually delivered (sendEvent: never
+// throws, but we guard against window/runtime weirdness).
+static BOOL synthesizeTouchAtViewCenter(UIView* view) {
+    if (!view || !view.window) return NO;
+    UIWindow* window = view.window;
+    CGPoint center = CGPointMake(view.bounds.size.width / 2, view.bounds.size.height / 2);
+    CGPoint locationInWindow = [view convertPoint:center toView:window];
+
+    UIEvent* event = nil;
+    UIApplication* app = [UIApplication sharedApplication];
+    if ([app respondsToSelector:@selector(_touchesEvent)]) {
+        event = [app _touchesEvent];
+    }
+    if (!event) return NO;
+
+    UITouch* touch = [[UITouch alloc] init];
+    if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
+        [touch _setLocationInWindow:locationInWindow resetPrevious:NO];
+    } else {
+        [touch setValue:[NSValue valueWithCGPoint:locationInWindow] forKey:@"locationInWindow"];
+    }
+    [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
+    [touch setValue:window forKey:@"window"];
+    [touch setValue:view forKey:@"view"];
+    [touch setValue:@(1) forKey:@"tapCount"];
+    [touch setValue:@([[NSProcessInfo processInfo] systemUptime]) forKey:@"timestamp"];
+    if ([touch respondsToSelector:@selector(_setIsFirstTouchForView:)]) {
+        [touch _setIsFirstTouchForView:YES];
+    }
+
+    @try {
+        if ([event respondsToSelector:@selector(_clearTouches)]) {
+            [event _clearTouches];
+        }
+        if ([event respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
+            [event _addTouch:touch forDelayedDelivery:NO];
+        }
+        [app sendEvent:event];
+
+        // End phase (release).
+        [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
+        [touch setValue:@([[NSProcessInfo processInfo] systemUptime]) forKey:@"timestamp"];
+        [app sendEvent:event];
+        return YES;
+    } @catch (NSException* e) {
+        NSLog(@"[Ennio] synthesizeTouchAtViewCenter: %@", e.reason);
+        return NO;
+    }
+}
+
+// Try every reasonable activation path on a view. Returns YES on the first
+// one that succeeds. RN Pressable/Touchable* don't accept accessibilityActivate
+// reliably — their onPress is wired through a UITapGestureRecognizer that we
+// have to invoke directly. UIControl subclasses (UITabBar buttons, UIButton)
+// respond to sendActionsForControlEvents.
+static BOOL fireActivation(UIView* view) {
+    if (!view) return NO;
+
+    // 1. UIControl: sendActionsForControlEvents fires every connected target.
+    if ([view isKindOfClass:[UIControl class]]) {
+        UIControl* ctrl = (UIControl*)view;
+        if (ctrl.enabled) {
+            [ctrl sendActionsForControlEvents:UIControlEventTouchUpInside];
+            return YES;
+        }
+    }
+
+    // 2. accessibilityActivate (works for some RN setups + native controls).
+    if ([view accessibilityActivate]) return YES;
+
+    // 3. Tap gesture recognizers: invoke each registered action directly.
+    //    This is what RN Pressable's onPress hangs off of.
+    for (UIGestureRecognizer* gr in view.gestureRecognizers) {
+        if (!gr.enabled) continue;
+        if (![gr isKindOfClass:[UITapGestureRecognizer class]]) continue;
+        @try {
+            NSArray* targets = [gr valueForKey:@"_targets"];
+            for (id target in targets) {
+                id realTarget = [target valueForKey:@"_target"];
+                NSString* actionName = [target valueForKey:@"_action"];
+                if (!realTarget || !actionName) continue;
+                SEL action = NSSelectorFromString(actionName);
+                if (![realTarget respondsToSelector:action]) continue;
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [realTarget performSelector:action withObject:gr];
+                #pragma clang diagnostic pop
+            }
+            return YES;
+        } @catch (NSException* e) {
+            NSLog(@"[Ennio] fireActivation: gesture-recognizer KVC failed: %@", e.reason);
+        }
+    }
+    return NO;
+}
+
+// Recursively search the view tree for a UIView whose accessibilityIdentifier
+// matches the testID. Hidden / size-zero views skipped because they're not
+// interactable.
+static UIView* findViewByTestID(UIView* root, NSString* testID) {
+    if (!root || root.hidden || root.alpha < 0.01) return nil;
+    if ([root.accessibilityIdentifier isEqualToString:testID]) return root;
+    for (UIView* sub in root.subviews) {
+        UIView* hit = findViewByTestID(sub, testID);
+        if (hit) return hit;
+    }
+    return nil;
+}
+
+// Walk every connected scene window so views inside presented modals /
+// child windows (alerts, action sheets, sheet routers) are findable.
+static UIView* findViewByTestIDInAllWindows(NSString* testID) {
+    if (testID.length == 0) return nil;
+    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        UIWindowScene* ws = (UIWindowScene*)scene;
+        // Iterate in reverse so the most-recently-presented window wins.
+        for (UIWindow* win in [ws.windows reverseObjectEnumerator]) {
+            UIView* hit = findViewByTestID(win, testID);
+            if (hit) return hit;
+        }
+    }
+    return nil;
+}
+
+// Locate the first responder hosting the keyboard, if any.
+static UIView* findFirstResponderUnder(UIView* root) {
+    if (!root) return nil;
+    if (root.isFirstResponder) return root;
+    for (UIView* sub in root.subviews) {
+        UIView* hit = findFirstResponderUnder(sub);
+        if (hit) return hit;
+    }
+    return nil;
+}
+static UIView* findFirstResponder() {
+    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        UIWindowScene* ws = (UIWindowScene*)scene;
+        for (UIWindow* win in [ws.windows reverseObjectEnumerator]) {
+            UIView* hit = findFirstResponderUnder(win);
+            if (hit) return hit;
+        }
+    }
+    return nil;
+}
+
+// Resolve the closest UIScrollView ancestor for a testID. Used by
+// scroll / swipe so the caller can just point at any descendant.
+static UIScrollView* findEnclosingScrollView(UIView* view) {
+    UIView* node = view;
+    while (node) {
+        if ([node isKindOfClass:[UIScrollView class]]) return (UIScrollView*)node;
+        node = node.superview;
+    }
+    return nil;
+}
+
+// Top-most view controller, walking modal / nav stacks.
+static UIViewController* topMostViewController(UIViewController* root) {
+    if (root.presentedViewController) {
+        return topMostViewController(root.presentedViewController);
+    }
+    if ([root isKindOfClass:[UINavigationController class]]) {
+        UINavigationController* nav = (UINavigationController*)root;
+        if (nav.visibleViewController) return topMostViewController(nav.visibleViewController);
+    }
+    if ([root isKindOfClass:[UITabBarController class]]) {
+        UITabBarController* tab = (UITabBarController*)root;
+        if (tab.selectedViewController) return topMostViewController(tab.selectedViewController);
+    }
+    return root;
+}
+static UIViewController* topMostViewControllerForKeyWindow() {
+    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        UIWindowScene* ws = (UIWindowScene*)scene;
+        for (UIWindow* win in [ws.windows reverseObjectEnumerator]) {
+            if (!win.rootViewController) continue;
+            return topMostViewController(win.rootViewController);
+        }
+    }
+    return nil;
+}
+
+// Pull a UIAlertAction's stored handler block via KVC. Apple keeps the
+// handler private but the ivar name is stable across iOS versions.
+static void invokeAlertAction(UIAlertController* alert, UIAlertAction* action) {
+    @try {
+        id handler = [action valueForKey:@"handler"];
+        if (handler) {
+            void (^block)(UIAlertAction*) = (void (^)(UIAlertAction*))handler;
+            block(action);
+        }
+    } @catch (NSException* e) {
+        NSLog(@"[Ennio] invokeAlertAction: KVC handler lookup failed: %@", e.reason);
+    }
+    if (alert.presentingViewController) {
+        [alert.presentingViewController dismissViewControllerAnimated:NO completion:nil];
+    }
+}
+
+namespace ennio {
+
+bool EnnioRuntimeHelper::tap(const std::string& testID) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view) {
+            NSLog(@"[Ennio] tap: testID '%@' not found in view tree", tid);
+            return;
+        }
+        if (fireActivation(view)) { ok = true; return; }
+        NSMutableArray* queue = [NSMutableArray arrayWithArray:view.subviews];
+        while (queue.count > 0) {
+            UIView* next = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            if (fireActivation(next)) { ok = true; return; }
+            [queue addObjectsFromArray:next.subviews];
+        }
+        UIView* cursor = view.superview;
+        while (cursor) {
+            if (fireActivation(cursor)) { ok = true; return; }
+            cursor = cursor.superview;
+        }
+        // Last resort: synthesize a tap at the view's centre via private
+        // UITouch / UIApplication selectors. RN Fabric's
+        // RCTViewComponentView intercepts touches through its
+        // touchesBegan/Ended overrides — the only path that actually fires
+        // Pressable onPress without a real HID event.
+        if (synthesizeTouchAtViewCenter(view)) { ok = true; return; }
+        NSLog(@"[Ennio] tap: '%@' has no activation path (class=%@, traits=0x%llx, isAccessibilityElement=%d)",
+              tid, NSStringFromClass([view class]), (unsigned long long)view.accessibilityTraits, view.isAccessibilityElement);
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::doubleTap(const std::string& testID) {
+    if (!tap(testID)) return false;
+    [NSThread sleepForTimeInterval:0.12];
+    return tap(testID);
+}
+
+// Recursive label search across UIKit. Picks the smallest matching frame
+// (most specific element) — important because RN's tab bar has both the
+// outer container (full bar) and the per-item button carrying the label.
+//
+// VoiceOver / UITabBar augment accessibilityLabel with extra context
+// ("Home, Tab, 1 of 4"), so we try exact match first then CONTAINS.
+static UIView* findLabelMatch(UIView* root, NSString* text, UIView* best) {
+    if (!root || root.hidden || root.alpha < 0.01) return best;
+    NSString* label = root.accessibilityLabel;
+    BOOL matches = NO;
+    if (label) {
+        if ([label isEqualToString:text]) {
+            matches = YES;
+        } else if ([label rangeOfString:text options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            // CONTAINS, but require the match to be a whole word so "Home"
+            // doesn't match "Welcome Home". Word boundaries: start of
+            // string, end of string, or non-letter neighbour.
+            NSRange r = [label rangeOfString:text options:NSCaseInsensitiveSearch];
+            BOOL leftOk = r.location == 0 || ![[NSCharacterSet letterCharacterSet] characterIsMember:[label characterAtIndex:r.location - 1]];
+            BOOL rightOk = r.location + r.length == label.length || ![[NSCharacterSet letterCharacterSet] characterIsMember:[label characterAtIndex:r.location + r.length]];
+            matches = leftOk && rightOk;
+        }
+    }
+    if (matches) {
+        if (!best || root.bounds.size.width * root.bounds.size.height
+                     < best.bounds.size.width * best.bounds.size.height) {
+            best = root;
+        }
+    }
+    for (UIView* sub in root.subviews) {
+        best = findLabelMatch(sub, text, best);
+    }
+    return best;
+}
+
+bool EnnioRuntimeHelper::tapByLabel(const std::string& text) {
+    NSString* label = [NSString stringWithUTF8String:text.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* hit = nil;
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+                hit = findLabelMatch(win, label, hit);
+            }
+        }
+        if (!hit) {
+            NSLog(@"[Ennio] tapByLabel: no UIView matched label '%@'", label);
+            return;
+        }
+        // Try the matched view + every ancestor up to the window. RN often
+        // attaches the gesture recognizer on a wrapper, not on the leaf
+        // text label that carries accessibilityLabel.
+        UIView* cursor = hit;
+        while (cursor) {
+            if (fireActivation(cursor)) { ok = true; return; }
+            cursor = cursor.superview;
+        }
+        // Last-resort: synthesized UITouch on the matched view's centre.
+        if (synthesizeTouchAtViewCenter(hit)) { ok = true; return; }
+        NSLog(@"[Ennio] tapByLabel: no activation path on '%@' or any ancestor", label);
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::longPress(const std::string& testID, int durationMs) {
+    // RN's longPress is driven by a touch-progress timer that we can't
+    // synthesize without real UITouch events. As a best effort, fire
+    // accessibilityActivate (matches what VoiceOver users get) and let
+    // the duration argument be advisory.
+    (void)durationMs;
+    return tap(testID);
+}
+
+bool EnnioRuntimeHelper::typeText(const std::string& testID, const std::string& text) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    NSString* str = [NSString stringWithUTF8String:text.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view) return;
+        // RN's TextInput maps to RCTBackedTextInputView, which conforms
+        // to UITextInput. insertText: at the current selection appends
+        // and fires the change delegate so React's onChangeText runs.
+        if ([view conformsToProtocol:@protocol(UITextInput)]) {
+            id<UITextInput> input = (id<UITextInput>)view;
+            if (![view isFirstResponder]) [view becomeFirstResponder];
+            [input insertText:str];
+            ok = true;
+            return;
+        }
+        // RN sometimes wraps the actual UITextField a level deeper.
+        for (UIView* sub in view.subviews) {
+            if ([sub conformsToProtocol:@protocol(UITextInput)]) {
+                if (![sub isFirstResponder]) [sub becomeFirstResponder];
+                [(id<UITextInput>)sub insertText:str];
+                ok = true;
+                return;
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::clearText(const std::string& testID) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view) return;
+        UIView* target = view;
+        if (![target conformsToProtocol:@protocol(UITextInput)]) {
+            for (UIView* sub in view.subviews) {
+                if ([sub conformsToProtocol:@protocol(UITextInput)]) { target = sub; break; }
+            }
+        }
+        if (![target conformsToProtocol:@protocol(UITextInput)]) return;
+        if (![target isFirstResponder]) [target becomeFirstResponder];
+        // Select-all then delete fires a single UITextInput change so
+        // React sees one onChangeText with empty string.
+        if ([target respondsToSelector:@selector(selectAll:)]) {
+            [target performSelector:@selector(selectAll:) withObject:nil];
+        }
+        if ([target respondsToSelector:@selector(deleteBackward)]) {
+            [target performSelector:@selector(deleteBackward)];
+        }
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::eraseText(const std::string& testID, int count) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view) return;
+        UIView* target = view;
+        if (![target conformsToProtocol:@protocol(UITextInput)]) {
+            for (UIView* sub in view.subviews) {
+                if ([sub conformsToProtocol:@protocol(UITextInput)]) { target = sub; break; }
+            }
+        }
+        if (![target conformsToProtocol:@protocol(UITextInput)]) return;
+        if (![target isFirstResponder]) [target becomeFirstResponder];
+        for (int i = 0; i < count; i++) {
+            if ([target respondsToSelector:@selector(deleteBackward)]) {
+                [target performSelector:@selector(deleteBackward)];
+            }
+        }
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::pressKey(const std::string& testID, const std::string& keyName) {
+    NSString* key = [[NSString stringWithUTF8String:keyName.c_str()] lowercaseString];
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* view = tid.length > 0 ? findViewByTestIDInAllWindows(tid) : findFirstResponder();
+        if (!view) return;
+        UIView* target = view;
+        if (![target conformsToProtocol:@protocol(UITextInput)]) {
+            for (UIView* sub in view.subviews) {
+                if ([sub conformsToProtocol:@protocol(UITextInput)]) { target = sub; break; }
+            }
+        }
+        if (![target conformsToProtocol:@protocol(UITextInput)]) return;
+        if (![target isFirstResponder]) [target becomeFirstResponder];
+
+        if ([key isEqualToString:@"backspace"] || [key isEqualToString:@"delete"]) {
+            if ([target respondsToSelector:@selector(deleteBackward)]) {
+                [target performSelector:@selector(deleteBackward)];
+                ok = true;
+            }
+        } else if ([key isEqualToString:@"return"] || [key isEqualToString:@"enter"]) {
+            [(id<UITextInput>)target insertText:@"\n"];
+            ok = true;
+        } else if ([key isEqualToString:@"tab"]) {
+            [(id<UITextInput>)target insertText:@"\t"];
+            ok = true;
+        } else if ([key isEqualToString:@"space"]) {
+            [(id<UITextInput>)target insertText:@" "];
+            ok = true;
+        } else if (key.length == 1) {
+            [(id<UITextInput>)target insertText:key];
+            ok = true;
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+static bool scrollImpl(NSString* tid, NSString* direction, double distance) {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view) return;
+        UIScrollView* sv = [view isKindOfClass:[UIScrollView class]] ? (UIScrollView*)view : findEnclosingScrollView(view);
+        if (!sv) return;
+        CGPoint offset = sv.contentOffset;
+        CGFloat dx = 0, dy = 0;
+        NSString* d = [direction lowercaseString];
+        if ([d isEqualToString:@"up"]) dy = -distance;
+        else if ([d isEqualToString:@"down"]) dy = distance;
+        else if ([d isEqualToString:@"left"]) dx = -distance;
+        else if ([d isEqualToString:@"right"]) dx = distance;
+        offset.x = MAX(-sv.contentInset.left, MIN(offset.x + dx, sv.contentSize.width - sv.bounds.size.width + sv.contentInset.right));
+        offset.y = MAX(-sv.contentInset.top, MIN(offset.y + dy, sv.contentSize.height - sv.bounds.size.height + sv.contentInset.bottom));
+        [sv setContentOffset:offset animated:NO];
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::scroll(const std::string& testID, const std::string& direction, double distance) {
+    return scrollImpl([NSString stringWithUTF8String:testID.c_str()],
+                      [NSString stringWithUTF8String:direction.c_str()],
+                      distance);
+}
+
+bool EnnioRuntimeHelper::swipe(const std::string& testID, const std::string& direction, double distance) {
+    return scrollImpl([NSString stringWithUTF8String:testID.c_str()],
+                      [NSString stringWithUTF8String:direction.c_str()],
+                      distance);
+}
+
+bool EnnioRuntimeHelper::scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) {
+    NSString* svId = [NSString stringWithUTF8String:scrollViewTestID.c_str()];
+    NSString* elId = [NSString stringWithUTF8String:elementTestID.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* svView = findViewByTestIDInAllWindows(svId);
+        UIView* elView = findViewByTestIDInAllWindows(elId);
+        if (!svView || !elView) return;
+        UIScrollView* sv = [svView isKindOfClass:[UIScrollView class]] ? (UIScrollView*)svView : findEnclosingScrollView(svView);
+        if (!sv) return;
+        CGRect frame = [elView convertRect:elView.bounds toView:sv];
+        [sv scrollRectToVisible:frame animated:NO];
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::tapTab(int index) {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        // Walk every window for a UITabBarController, pick the index.
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in ((UIWindowScene*)scene).windows) {
+                UIViewController* root = win.rootViewController;
+                __block UITabBarController* tab = nil;
+                void (^find)(UIViewController*) = ^(UIViewController* vc) {};
+                __block __weak void (^findWeak)(UIViewController*) = nil;
+                find = ^(UIViewController* vc) {
+                    if (!vc || tab) return;
+                    if ([vc isKindOfClass:[UITabBarController class]]) { tab = (UITabBarController*)vc; return; }
+                    for (UIViewController* child in vc.childViewControllers) findWeak(child);
+                    if (vc.presentedViewController) findWeak(vc.presentedViewController);
+                };
+                findWeak = find;
+                find(root);
+                if (tab && index >= 0 && index < (int)tab.viewControllers.count) {
+                    tab.selectedIndex = (NSUInteger)index;
+                    ok = true;
+                    return;
+                }
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::backGesture() {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIViewController* top = topMostViewControllerForKeyWindow();
+        UIViewController* cursor = top;
+        while (cursor) {
+            if ([cursor isKindOfClass:[UINavigationController class]]) {
+                UINavigationController* nav = (UINavigationController*)cursor;
+                if (nav.viewControllers.count > 1) {
+                    [nav popViewControllerAnimated:NO];
+                    ok = true;
+                    return;
+                }
+            }
+            cursor = cursor.parentViewController ?: cursor.presentingViewController;
+        }
+        // Last-resort: dismiss whatever is presented modally.
+        if (top.presentingViewController) {
+            [top dismissViewControllerAnimated:NO completion:nil];
+            ok = true;
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::hideKeyboard() {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* fr = findFirstResponder();
+        if (fr) { [fr resignFirstResponder]; ok = true; }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::tapAlertButton(const std::string& buttonText) {
+    NSString* title = [NSString stringWithUTF8String:buttonText.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIAlertController* alert = findPresentedAlertController();
+        if (!alert) return;
+        for (UIAlertAction* action in alert.actions) {
+            if ([action.title isEqualToString:title]) {
+                invokeAlertAction(alert, action);
+                ok = true;
+                return;
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::dismissAlert() {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIAlertController* alert = findPresentedAlertController();
+        if (!alert) return;
+        UIAlertAction* pick = nil;
+        for (NSString* preferred in @[@"Cancel", @"OK", @"Dismiss"]) {
+            for (UIAlertAction* action in alert.actions) {
+                if ([action.title isEqualToString:preferred]) { pick = action; break; }
+            }
+            if (pick) break;
+        }
+        if (!pick && alert.actions.count > 0) pick = alert.actions.firstObject;
+        if (pick) { invokeAlertAction(alert, pick); ok = true; }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::copyToClipboard(const std::string& text) {
+    NSString* str = [NSString stringWithUTF8String:text.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        [UIPasteboard generalPasteboard].string = str;
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::pasteFromClipboard(const std::string& testID) {
+    NSString* clip = [UIPasteboard generalPasteboard].string ?: @"";
+    return typeText(testID, [clip UTF8String]);
+}
+
+std::string EnnioRuntimeHelper::getClipboardText() {
+    __block std::string result;
+    void (^block)(void) = ^{
+        NSString* s = [UIPasteboard generalPasteboard].string;
+        if (s) result = [s UTF8String];
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return result;
+}
+
+} // namespace ennio
+
 // Objective-C helper for setting the surface presenter
 extern "C" void EnnioSetSurfacePresenter(RCTSurfacePresenter* presenter) {
     ennio::EnnioRuntimeHelper::getInstance().setSurfacePresenter((__bridge void*)presenter);

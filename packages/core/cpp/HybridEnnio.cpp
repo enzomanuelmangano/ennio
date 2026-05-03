@@ -523,6 +523,131 @@ void HybridEnnio::synchronize() {
             ENNIO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector response ready success=%d data=%s",
                 response.success, response.data.c_str());
         }
+        // ============================================
+        // Fast-mode write dispatch (NitroWriter -> WS -> here)
+        // ============================================
+        else if (type == "tap") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            response.success = tap(testID);
+        }
+        else if (type == "tapByLabel") {
+            std::string text = ::ennio::json::parseString(payload, "text");
+            response.success = tapByLabel(text);
+        }
+        else if (type == "doubleTap") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            response.success = doubleTap(testID);
+        }
+        else if (type == "longPress") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            double duration = ::ennio::json::parseDouble(payload, "duration");
+            if (duration <= 0) duration = 500;
+            response.success = longPress(testID, duration);
+        }
+        else if (type == "typeText") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            std::string text = ::ennio::json::parseString(payload, "text");
+            response.success = typeText(testID, text);
+        }
+        else if (type == "clearText") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            response.success = clearText(testID);
+        }
+        else if (type == "eraseText") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            double count = ::ennio::json::parseDouble(payload, "count");
+            if (count <= 0) count = 1;
+            response.success = eraseText(testID, count);
+        }
+        else if (type == "pressKey") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            std::string keyName = ::ennio::json::parseString(payload, "keyName");
+            response.success = pressKey(testID, keyName);
+        }
+        else if (type == "scroll") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            std::string dir = ::ennio::json::parseString(payload, "direction");
+            if (dir.empty()) dir = "down";
+            double distance = ::ennio::json::parseDouble(payload, "distance");
+            if (distance <= 0) distance = 200;
+            ScrollDirection sd = ScrollDirection::DOWN;
+            if (dir == "up") sd = ScrollDirection::UP;
+            else if (dir == "down") sd = ScrollDirection::DOWN;
+            else if (dir == "left") sd = ScrollDirection::LEFT;
+            else if (dir == "right") sd = ScrollDirection::RIGHT;
+            response.success = scroll(testID, sd, distance);
+        }
+        else if (type == "swipe") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            std::string dir = ::ennio::json::parseString(payload, "direction");
+            if (dir.empty()) dir = "down";
+            double distance = ::ennio::json::parseDouble(payload, "distance");
+            if (distance <= 0) distance = 200;
+            ScrollDirection sd = ScrollDirection::DOWN;
+            if (dir == "up") sd = ScrollDirection::UP;
+            else if (dir == "down") sd = ScrollDirection::DOWN;
+            else if (dir == "left") sd = ScrollDirection::LEFT;
+            else if (dir == "right") sd = ScrollDirection::RIGHT;
+            response.success = swipe(testID, sd, distance);
+        }
+        else if (type == "scrollTo") {
+            std::string sv = ::ennio::json::parseString(payload, "scrollViewTestID");
+            std::string el = ::ennio::json::parseString(payload, "elementTestID");
+            response.success = scrollTo(sv, el);
+        }
+        else if (type == "tapTab") {
+            double idx = ::ennio::json::parseDouble(payload, "index");
+            response.success = tapTab(idx);
+        }
+        else if (type == "backGesture") {
+            response.success = backGesture();
+        }
+        else if (type == "hideKeyboard") {
+            response.success = hideKeyboard();
+        }
+        else if (type == "tapBySelector") {
+            std::string sel = ::ennio::json::parseString(payload, "selector");
+            response.success = tapBySelector(sel);
+        }
+        else if (type == "doubleTapBySelector") {
+            std::string sel = ::ennio::json::parseString(payload, "selector");
+            response.success = doubleTapBySelector(sel);
+        }
+        else if (type == "longPressBySelector") {
+            std::string sel = ::ennio::json::parseString(payload, "selector");
+            double duration = ::ennio::json::parseDouble(payload, "duration");
+            if (duration <= 0) duration = 500;
+            response.success = longPressBySelector(sel, duration);
+        }
+        else if (type == "typeTextBySelector") {
+            std::string sel = ::ennio::json::parseString(payload, "selector");
+            std::string text = ::ennio::json::parseString(payload, "text");
+            response.success = typeTextBySelector(sel, text);
+        }
+        else if (type == "clearTextBySelector") {
+            std::string sel = ::ennio::json::parseString(payload, "selector");
+            response.success = clearTextBySelector(sel);
+        }
+        else if (type == "tapAlertButton") {
+            std::string btn = ::ennio::json::parseString(payload, "buttonText");
+            response.success = tapAlertButton(btn);
+        }
+        else if (type == "dismissAlert") {
+            response.success = dismissAlert();
+        }
+        else if (type == "copyToClipboard") {
+            std::string text = ::ennio::json::parseString(payload, "text");
+            response.success = copyToClipboard(text);
+        }
+        else if (type == "pasteFromClipboard") {
+            std::string testID = ::ennio::json::parseString(payload, "testID");
+            response.success = pasteFromClipboard(testID);
+        }
+        else if (type == "getClipboardText") {
+            std::string text = getClipboardText();
+            response.success = true;
+            response.data = "\"" + text + "\"";
+        }
         else {
             response.success = false;
             response.error = "Unknown command: " + type;
@@ -785,6 +910,160 @@ bool HybridEnnio::isVisibleBySelector(const std::string& selectorJson) {
         ENNIO_LOG_ERROR("isVisibleBySelector", "Error: " << e.what());
         return false;
     }
+}
+
+// ============================================
+// Fast-mode Writes
+//
+// Each method delegates to EnnioRuntimeHelper, which finds the UIView by
+// accessibilityIdentifier and invokes the matching UIKit / accessibility
+// API. Selector-based variants resolve the testID through the shadow
+// tree first, then dispatch the same write.
+// ============================================
+
+#if defined(__APPLE__)
+
+namespace {
+
+const char* scrollDirectionToString(ScrollDirection direction) {
+    switch (direction) {
+        case ScrollDirection::UP: return "up";
+        case ScrollDirection::DOWN: return "down";
+        case ScrollDirection::LEFT: return "left";
+        case ScrollDirection::RIGHT: return "right";
+        default: return "down";
+    }
+}
+
+} // namespace
+
+bool HybridEnnio::tap(const std::string& testID) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().tap(testID);
+}
+bool HybridEnnio::tapByLabel(const std::string& text) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().tapByLabel(text);
+}
+bool HybridEnnio::doubleTap(const std::string& testID) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().doubleTap(testID);
+}
+bool HybridEnnio::longPress(const std::string& testID, double durationMs) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().longPress(testID, static_cast<int>(durationMs));
+}
+bool HybridEnnio::typeText(const std::string& testID, const std::string& text) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().typeText(testID, text);
+}
+bool HybridEnnio::clearText(const std::string& testID) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().clearText(testID);
+}
+bool HybridEnnio::eraseText(const std::string& testID, double count) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().eraseText(testID, static_cast<int>(count));
+}
+bool HybridEnnio::pressKey(const std::string& testID, const std::string& keyName) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().pressKey(testID, keyName);
+}
+bool HybridEnnio::scroll(const std::string& testID, ScrollDirection direction, double distance) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().scroll(testID, scrollDirectionToString(direction), distance);
+}
+bool HybridEnnio::swipe(const std::string& testID, ScrollDirection direction, double distance) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().swipe(testID, scrollDirectionToString(direction), distance);
+}
+bool HybridEnnio::scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().scrollTo(scrollViewTestID, elementTestID);
+}
+bool HybridEnnio::tapTab(double index) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().tapTab(static_cast<int>(index));
+}
+bool HybridEnnio::backGesture() {
+    return ::ennio::EnnioRuntimeHelper::getInstance().backGesture();
+}
+bool HybridEnnio::hideKeyboard() {
+    return ::ennio::EnnioRuntimeHelper::getInstance().hideKeyboard();
+}
+bool HybridEnnio::tapAlertButton(const std::string& buttonText) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().tapAlertButton(buttonText);
+}
+bool HybridEnnio::dismissAlert() {
+    return ::ennio::EnnioRuntimeHelper::getInstance().dismissAlert();
+}
+bool HybridEnnio::copyToClipboard(const std::string& text) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().copyToClipboard(text);
+}
+bool HybridEnnio::pasteFromClipboard(const std::string& testID) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().pasteFromClipboard(testID);
+}
+std::string HybridEnnio::getClipboardText() {
+    return ::ennio::EnnioRuntimeHelper::getInstance().getClipboardText();
+}
+
+#else
+
+// Non-Apple stubs so the spec can still build. Android fast mode is out
+// of scope (the helper-less path needs UIAutomator + a different write
+// surface).
+bool HybridEnnio::tap(const std::string&) { return false; }
+bool HybridEnnio::tapByLabel(const std::string&) { return false; }
+bool HybridEnnio::doubleTap(const std::string&) { return false; }
+bool HybridEnnio::longPress(const std::string&, double) { return false; }
+bool HybridEnnio::typeText(const std::string&, const std::string&) { return false; }
+bool HybridEnnio::clearText(const std::string&) { return false; }
+bool HybridEnnio::eraseText(const std::string&, double) { return false; }
+bool HybridEnnio::pressKey(const std::string&, const std::string&) { return false; }
+bool HybridEnnio::scroll(const std::string&, ScrollDirection, double) { return false; }
+bool HybridEnnio::swipe(const std::string&, ScrollDirection, double) { return false; }
+bool HybridEnnio::scrollTo(const std::string&, const std::string&) { return false; }
+bool HybridEnnio::tapTab(double) { return false; }
+bool HybridEnnio::backGesture() { return false; }
+bool HybridEnnio::hideKeyboard() { return false; }
+bool HybridEnnio::tapAlertButton(const std::string&) { return false; }
+bool HybridEnnio::dismissAlert() { return false; }
+bool HybridEnnio::copyToClipboard(const std::string&) { return false; }
+bool HybridEnnio::pasteFromClipboard(const std::string&) { return false; }
+std::string HybridEnnio::getClipboardText() { return ""; }
+
+#endif
+
+// Selector-based writes: resolve the selector to a testID via the shadow
+// tree, then dispatch through the testID-keyed write. Skips wires that
+// would require a different code path (the shadow-tree finder already
+// handles all the complex Maestro selector forms).
+
+namespace {
+
+std::optional<std::string> resolveSelectorToTestID(
+    const HybridEnnio& self,
+    const std::string& selectorJson
+) {
+    // We can't call findBySelector across const (it acquires the mutex);
+    // cast away the const safely because we own the instance.
+    auto& mutSelf = const_cast<HybridEnnio&>(self);
+    auto found = mutSelf.findBySelector(selectorJson);
+    if (std::holds_alternative<nitro::NullType>(found)) return std::nullopt;
+    auto info = std::get<ExtendedElementInfo>(found);
+    if (info.testID.empty()) return std::nullopt;
+    return info.testID;
+}
+
+} // namespace
+
+bool HybridEnnio::tapBySelector(const std::string& selectorJson) {
+    auto id = resolveSelectorToTestID(*this, selectorJson);
+    return id ? tap(*id) : false;
+}
+bool HybridEnnio::doubleTapBySelector(const std::string& selectorJson) {
+    auto id = resolveSelectorToTestID(*this, selectorJson);
+    return id ? doubleTap(*id) : false;
+}
+bool HybridEnnio::longPressBySelector(const std::string& selectorJson, double durationMs) {
+    auto id = resolveSelectorToTestID(*this, selectorJson);
+    return id ? longPress(*id, durationMs) : false;
+}
+bool HybridEnnio::typeTextBySelector(const std::string& selectorJson, const std::string& text) {
+    auto id = resolveSelectorToTestID(*this, selectorJson);
+    return id ? typeText(*id, text) : false;
+}
+bool HybridEnnio::clearTextBySelector(const std::string& selectorJson) {
+    auto id = resolveSelectorToTestID(*this, selectorJson);
+    return id ? clearText(*id) : false;
 }
 
 } // namespace margelo::nitro::ennio

@@ -61,6 +61,11 @@ export interface Point {
 export type Trait = 'text' | 'long-text' | 'square';
 
 /**
+ * Direction for scroll / swipe gestures
+ */
+export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
+
+/**
  * Selector - Full Maestro selector parity
  *
  * Supports:
@@ -326,4 +331,77 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
    * Get the button titles of the current alert
    */
   getAlertButtons(): string[];
+
+  // ============================================
+  // Fast-mode Writes (in-app, no XCUI)
+  //
+  // All actions resolve a UIView by accessibilityIdentifier (testID) and
+  // drive sanctioned-ish UIKit APIs:
+  //   - tap        -> UIView.accessibilityActivate
+  //   - typeText   -> [textInput insertText:]
+  //   - clearText  -> setText:@"" + delegate fire
+  //   - eraseText  -> deleteBackward × n
+  //   - scroll     -> UIScrollView.setContentOffset(animated:NO)
+  //   - alerts     -> walk UIAlertController.actions, invoke handler
+  //   - back       -> UINavigationController.popViewController
+  //
+  // Skips iOS gesture recognizer entirely. Reliable for the standard
+  // RN component set (Pressable, Touchable*, TextInput, ScrollView,
+  // FlatList, native iOS alert). Will not work for RN-gesture-handler-
+  // driven gestures (pinch, pan, swipe-to-dismiss) — use --stable for
+  // flows that exercise those.
+  // ============================================
+
+  tap(testID: string): boolean;
+  /**
+   * Walk the UIKit view tree (not the Fabric shadow tree) looking for any
+   * UIView whose accessibilityLabel matches `text` and invoke
+   * accessibilityActivate on it. This is the only way to hit native UIKit
+   * elements that don't appear in the React shadow tree — UITabBar items,
+   * UIAlertController buttons, system pickers, etc.
+   */
+  tapByLabel(text: string): boolean;
+  doubleTap(testID: string): boolean;
+  longPress(testID: string, durationMs: number): boolean;
+  typeText(testID: string, text: string): boolean;
+  clearText(testID: string): boolean;
+  eraseText(testID: string, count: number): boolean;
+  pressKey(testID: string, keyName: string): boolean;
+  scroll(testID: string, direction: ScrollDirection, distance: number): boolean;
+  swipe(testID: string, direction: ScrollDirection, distance: number): boolean;
+  scrollTo(scrollViewTestID: string, elementTestID: string): boolean;
+
+  /**
+   * Tap the n-th tab in the topmost UITabBar. 0-indexed left to right.
+   * RN's NativeTabs items don't expose their accessibilityIdentifier on
+   * the underlying UITabBarItem reliably, so we index instead.
+   */
+  tapTab(index: number): boolean;
+
+  /**
+   * Drive a back navigation. Pops the top view controller of the
+   * current UINavigationController.
+   */
+  backGesture(): boolean;
+
+  hideKeyboard(): boolean;
+
+  // Selector-aware variants. Underlying impl resolves the selector
+  // through the same shadow-tree finder as findBySelector, then
+  // applies the matching write to the resolved testID.
+  tapBySelector(selectorJson: string): boolean;
+  doubleTapBySelector(selectorJson: string): boolean;
+  longPressBySelector(selectorJson: string, durationMs: number): boolean;
+  typeTextBySelector(selectorJson: string, text: string): boolean;
+  clearTextBySelector(selectorJson: string): boolean;
+
+  // Alert writes (the matching reads — isAlertPresent, getAlertText,
+  // getAlertButtons — already exist above).
+  tapAlertButton(buttonText: string): boolean;
+  dismissAlert(): boolean;
+
+  // Pasteboard
+  copyToClipboard(text: string): boolean;
+  pasteFromClipboard(testID: string): boolean;
+  getClipboardText(): string;
 }
