@@ -96,11 +96,13 @@ async function runTestFile(
 
     console.log(`  ${results.passed} passed, ${results.failed} failed\n`);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const resultsWithClient = results as any;
     return {
       file: fileName,
       passed: results.passed,
       failed: results.failed,
-      client: 'client' in results ? results.client : undefined,
+      client: 'client' in results ? resultsWithClient.client : undefined,
     };
   } catch (err) {
     console.error(`  Error: ${err}\n`);

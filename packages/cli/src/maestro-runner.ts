@@ -689,10 +689,13 @@ class MaestroExecutor {
 
     // scrollUntilVisible
     if ('scrollUntilVisible' in cmd) {
-      const scrollCmd = cmd.scrollUntilVisible;
-      const selector = normalizeSelector(scrollCmd.element || scrollCmd);
-      const direction = (scrollCmd.direction || 'DOWN').toLowerCase();
-      const timeout = scrollCmd.timeout || 10000;
+      const scrollCmd = cmd.scrollUntilVisible as
+        | MaestroSelector
+        | { element: MaestroSelector; direction?: string; timeout?: number };
+      const hasElement = typeof scrollCmd === 'object' && 'element' in scrollCmd;
+      const selector = normalizeSelector(hasElement ? scrollCmd.element : scrollCmd as MaestroSelector);
+      const direction = (hasElement ? scrollCmd.direction || 'DOWN' : 'DOWN').toLowerCase();
+      const timeout = hasElement ? scrollCmd.timeout || 10000 : 10000;
       const scrollAmount = 300;
 
       this.log(`scrollUntilVisible: ${JSON.stringify(selector)}`);
@@ -937,20 +940,57 @@ class MaestroExecutor {
       const eraseCmd = cmd.eraseText;
       const chars = typeof eraseCmd === 'number' ? eraseCmd : (eraseCmd.characters || 50);
       this.log(`eraseText: ${chars} characters`);
-      // TODO: Send backspace events via native layer
-      // For now, try clearing the focused element
-      const focused = await this.client.findBySelector({ focused: true });
-      if (focused?.testID) {
-        await this.client.clearText(focused.testID);
-      }
+      await this.client.eraseText(chars);
       return;
     }
 
     // hideKeyboard
     if ('hideKeyboard' in cmd) {
       this.log('hideKeyboard');
-      // TODO: Implement via TastoRuntimeHelper - for now tap outside
-      await this.sleep(100);
+      await this.client.hideKeyboard();
+      return;
+    }
+
+    // pressKey
+    if ('pressKey' in cmd) {
+      const keyName = cmd.pressKey as string;
+      this.log(`pressKey: ${keyName}`);
+      await this.client.pressKey(keyName);
+      return;
+    }
+
+    // copyTextFrom
+    if ('copyTextFrom' in cmd) {
+      const target = cmd.copyTextFrom as MaestroSelector;
+      this.log(`copyTextFrom: ${JSON.stringify(target)}`);
+      // Get text from element and copy to clipboard
+      const selector = toTastoSelector(target);
+      const text = await this.client.getTextBySelector(selector);
+      if (text) {
+        await this.client.copyToClipboard(text);
+      }
+      return;
+    }
+
+    // pasteText
+    if ('pasteText' in cmd) {
+      this.log('pasteText');
+      await this.client.pasteFromClipboard();
+      return;
+    }
+
+    // setClipboard
+    if ('setClipboard' in cmd) {
+      const text = cmd.setClipboard as string;
+      this.log(`setClipboard: ${text}`);
+      await this.client.copyToClipboard(text);
+      return;
+    }
+
+    // back (iOS back gesture)
+    if ('back' in cmd) {
+      this.log('back gesture');
+      await this.client.backGesture();
       return;
     }
 

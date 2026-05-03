@@ -810,6 +810,61 @@ void HybridTasto::synchronize() {
             }
         }
         // ============================================
+        // Keyboard Handling
+        // ============================================
+        else if (type == "hideKeyboard") {
+            bool result = hideKeyboard();
+            response.success = result;
+        }
+        else if (type == "eraseText") {
+            double count = ::tasto::json::parseDouble(payload, "count");
+            bool result = eraseText(count);
+            response.success = result;
+        }
+        else if (type == "pressKey") {
+            std::string keyName = ::tasto::json::parseString(payload, "keyName");
+            bool result = pressKey(keyName);
+            response.success = result;
+        }
+        // ============================================
+        // Clipboard Handling
+        // ============================================
+        else if (type == "copyToClipboard") {
+            std::string text = ::tasto::json::parseString(payload, "text");
+            bool result = copyToClipboard(text);
+            response.success = result;
+        }
+        else if (type == "pasteFromClipboard") {
+            bool result = pasteFromClipboard();
+            response.success = result;
+        }
+        else if (type == "getClipboardText") {
+            std::string text = getClipboardText();
+            response.success = true;
+            response.data = "\"" + escapeJsonString(text) + "\"";
+        }
+        // ============================================
+        // Device Control
+        // ============================================
+        else if (type == "setOrientation") {
+            double orientation = ::tasto::json::parseDouble(payload, "orientation");
+            bool result = setOrientation(orientation);
+            response.success = result;
+        }
+        else if (type == "swipeCoordinates") {
+            double startX = ::tasto::json::parseDouble(payload, "startX");
+            double startY = ::tasto::json::parseDouble(payload, "startY");
+            double endX = ::tasto::json::parseDouble(payload, "endX");
+            double endY = ::tasto::json::parseDouble(payload, "endY");
+            double durationMs = ::tasto::json::parseDouble(payload, "durationMs");
+            bool result = swipeCoordinates(startX, startY, endX, endY, durationMs);
+            response.success = result;
+        }
+        else if (type == "backGesture") {
+            bool result = backGesture();
+            response.success = result;
+        }
+        // ============================================
         // Selector-based Commands
         // ============================================
         else if (type == "findBySelector") {
@@ -1053,6 +1108,134 @@ bool HybridTasto::dismissAlert() {
 #if defined(__APPLE__)
     auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
     return helper.dismissAlert();
+#else
+    return false;
+#endif
+}
+
+// ============================================
+// Double Tap
+// ============================================
+
+bool HybridTasto::doubleTap(const std::string& testID) {
+    TASTO_LOG_DEBUG_F(LOG_TAG, "doubleTap called for testID=%s", testID.c_str());
+    auto node = findNode(testID);
+    if (!node) {
+        TASTO_LOG_WARN("doubleTap", "Element not found: " << testID);
+        return false;
+    }
+    return ::tasto::EventDispatcher::doubleTap(node);
+}
+
+bool HybridTasto::doubleTapBySelector(const std::string& selectorJson) {
+    try {
+        auto criteria = ::tasto::SelectorParser::parse(selectorJson);
+        auto node = findNodeBySelector(criteria);
+        if (!node) {
+            TASTO_LOG_WARN("doubleTapBySelector", "No element found for selector");
+            return false;
+        }
+        return ::tasto::EventDispatcher::doubleTap(node);
+    } catch (const std::exception& e) {
+        TASTO_LOG_ERROR("doubleTapBySelector", "Error: " << e.what());
+        return false;
+    }
+}
+
+// ============================================
+// Keyboard Handling
+// ============================================
+
+bool HybridTasto::hideKeyboard() {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.hideKeyboard();
+#else
+    return false;
+#endif
+}
+
+bool HybridTasto::eraseText(double count) {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.eraseText(static_cast<int>(count));
+#else
+    return false;
+#endif
+}
+
+bool HybridTasto::pressKey(const std::string& keyName) {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.pressKey(keyName);
+#else
+    return false;
+#endif
+}
+
+// ============================================
+// Clipboard Handling
+// ============================================
+
+bool HybridTasto::copyToClipboard(const std::string& text) {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.copyToClipboard(text);
+#else
+    return false;
+#endif
+}
+
+bool HybridTasto::pasteFromClipboard() {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.pasteFromClipboard();
+#else
+    return false;
+#endif
+}
+
+std::string HybridTasto::getClipboardText() {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.getClipboardText();
+#else
+    return "";
+#endif
+}
+
+// ============================================
+// Device Control
+// ============================================
+
+bool HybridTasto::setOrientation(double orientation) {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.setOrientation(static_cast<int>(orientation));
+#else
+    return false;
+#endif
+}
+
+bool HybridTasto::swipeCoordinates(double startX, double startY, double endX, double endY, double durationMs) {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.performSwipe(
+        static_cast<float>(startX),
+        static_cast<float>(startY),
+        static_cast<float>(endX),
+        static_cast<float>(endY),
+        static_cast<float>(durationMs)
+    );
+#else
+    return false;
+#endif
+}
+
+bool HybridTasto::backGesture() {
+#if defined(__APPLE__)
+    auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+    return helper.performBackGesture();
 #else
     return false;
 #endif

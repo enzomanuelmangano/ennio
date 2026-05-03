@@ -1578,6 +1578,449 @@ bool TastoRuntimeHelper::dismissAlert() {
     return success;
 }
 
+// ============================================
+// Keyboard Handling
+// ============================================
+
+bool TastoRuntimeHelper::hideKeyboard() {
+    __block bool success = false;
+
+    void (^block)(void) = ^{
+        NSLog(@"[Tasto] hideKeyboard: Resigning first responder");
+
+        // Find and resign the current first responder
+        UIView* firstResponder = findFirstResponderInAllWindows();
+        if (firstResponder) {
+            [firstResponder resignFirstResponder];
+            success = true;
+            NSLog(@"[Tasto] hideKeyboard: Resigned first responder: %@", NSStringFromClass([firstResponder class]));
+        } else {
+            // Alternative: send endEditing to the key window
+            UIWindow* keyWindow = findKeyWindow();
+            if (keyWindow) {
+                [keyWindow endEditing:YES];
+                success = true;
+                NSLog(@"[Tasto] hideKeyboard: Called endEditing on key window");
+            } else {
+                NSLog(@"[Tasto] hideKeyboard: No first responder or key window found");
+            }
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatchSyncMainWithTimeout(block);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::eraseText(int count) {
+    __block bool success = false;
+
+    void (^block)(void) = ^{
+        NSLog(@"[Tasto] eraseText: Erasing %d characters", count);
+
+        UIView* firstResponder = findFirstResponderInAllWindows();
+        if (!firstResponder) {
+            NSLog(@"[Tasto] eraseText: No first responder found");
+            return;
+        }
+
+        // Check if it's a text field or text view
+        if ([firstResponder isKindOfClass:[UITextField class]]) {
+            UITextField* textField = (UITextField*)firstResponder;
+            NSString* currentText = textField.text ?: @"";
+
+            if (currentText.length > 0) {
+                NSInteger charsToRemove = MIN(count, (int)currentText.length);
+                NSString* newText = [currentText substringToIndex:currentText.length - charsToRemove];
+                textField.text = newText;
+
+                // Trigger text change notification
+                [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+
+                SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
+                UIView* componentView = textField.superview;
+                if (componentView && [componentView respondsToSelector:textInputDidChangeSel]) {
+                    #pragma clang diagnostic push
+                    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    [componentView performSelector:textInputDidChangeSel];
+                    #pragma clang diagnostic pop
+                }
+
+                success = true;
+                NSLog(@"[Tasto] eraseText: Erased %ld characters, new text: '%@'", (long)charsToRemove, newText);
+            }
+        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+            UITextView* textView = (UITextView*)firstResponder;
+            NSString* currentText = textView.text ?: @"";
+
+            if (currentText.length > 0) {
+                NSInteger charsToRemove = MIN(count, (int)currentText.length);
+                NSString* newText = [currentText substringToIndex:currentText.length - charsToRemove];
+                textView.text = newText;
+
+                id delegate = textView.delegate;
+                if (delegate && [delegate respondsToSelector:@selector(textViewDidChange:)]) {
+                    [delegate performSelector:@selector(textViewDidChange:) withObject:textView];
+                }
+
+                success = true;
+                NSLog(@"[Tasto] eraseText: Erased %ld characters from UITextView", (long)charsToRemove);
+            }
+        } else {
+            NSLog(@"[Tasto] eraseText: First responder is not a text input: %@", NSStringFromClass([firstResponder class]));
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatchSyncMainWithTimeout(block);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::pressKey(const std::string& keyName) {
+    __block bool success = false;
+    NSString* keyNameStr = [NSString stringWithUTF8String:keyName.c_str()];
+
+    void (^block)(void) = ^{
+        NSLog(@"[Tasto] pressKey: Pressing key '%@'", keyNameStr);
+
+        UIView* firstResponder = findFirstResponderInAllWindows();
+
+        // Handle special keys
+        if ([keyNameStr caseInsensitiveCompare:@"Enter"] == NSOrderedSame ||
+            [keyNameStr caseInsensitiveCompare:@"Return"] == NSOrderedSame) {
+
+            if ([firstResponder isKindOfClass:[UITextField class]]) {
+                UITextField* textField = (UITextField*)firstResponder;
+                id delegate = textField.delegate;
+                if (delegate && [delegate respondsToSelector:@selector(textFieldShouldReturn:)]) {
+                    [delegate performSelector:@selector(textFieldShouldReturn:) withObject:textField];
+                }
+                success = true;
+            } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+                UITextView* textView = (UITextView*)firstResponder;
+                // Insert newline
+                textView.text = [textView.text stringByAppendingString:@"\n"];
+                success = true;
+            }
+        } else if ([keyNameStr caseInsensitiveCompare:@"Tab"] == NSOrderedSame) {
+            // Tab - try to move to next responder
+            UIView* nextResponder = [firstResponder.superview viewWithTag:firstResponder.tag + 1];
+            if (nextResponder && [nextResponder canBecomeFirstResponder]) {
+                [nextResponder becomeFirstResponder];
+                success = true;
+            }
+        } else if ([keyNameStr caseInsensitiveCompare:@"Escape"] == NSOrderedSame) {
+            // Escape - resign first responder (hide keyboard)
+            [firstResponder resignFirstResponder];
+            success = true;
+        } else if ([keyNameStr caseInsensitiveCompare:@"Backspace"] == NSOrderedSame ||
+                   [keyNameStr caseInsensitiveCompare:@"Delete"] == NSOrderedSame) {
+            // Delete one character
+            success = TastoRuntimeHelper::getInstance().eraseText(1);
+        } else {
+            NSLog(@"[Tasto] pressKey: Unknown key '%@'", keyNameStr);
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatchSyncMainWithTimeout(block);
+    }
+
+    return success;
+}
+
+// ============================================
+// Clipboard Handling
+// ============================================
+
+bool TastoRuntimeHelper::copyToClipboard(const std::string& text) {
+    __block bool success = false;
+    NSString* textStr = [NSString stringWithUTF8String:text.c_str()];
+
+    void (^block)(void) = ^{
+        NSLog(@"[Tasto] copyToClipboard: Copying text to clipboard");
+        UIPasteboard* pasteboard = [UIPasteboard generalPasteboard];
+        pasteboard.string = textStr;
+        success = YES;
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatchSyncMainWithTimeout(block);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::pasteFromClipboard() {
+    __block bool success = false;
+
+    void (^block)(void) = ^{
+        NSLog(@"[Tasto] pasteFromClipboard: Pasting from clipboard");
+
+        UIPasteboard* pasteboard = [UIPasteboard generalPasteboard];
+        NSString* text = pasteboard.string;
+
+        if (!text || text.length == 0) {
+            NSLog(@"[Tasto] pasteFromClipboard: Clipboard is empty");
+            return;
+        }
+
+        UIView* firstResponder = findFirstResponderInAllWindows();
+        if (!firstResponder) {
+            NSLog(@"[Tasto] pasteFromClipboard: No first responder found");
+            return;
+        }
+
+        if ([firstResponder isKindOfClass:[UITextField class]]) {
+            UITextField* textField = (UITextField*)firstResponder;
+
+            // Insert at current cursor position or append
+            NSString* currentText = textField.text ?: @"";
+            textField.text = [currentText stringByAppendingString:text];
+
+            [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+
+            SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
+            UIView* componentView = textField.superview;
+            if (componentView && [componentView respondsToSelector:textInputDidChangeSel]) {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [componentView performSelector:textInputDidChangeSel];
+                #pragma clang diagnostic pop
+            }
+
+            success = true;
+            NSLog(@"[Tasto] pasteFromClipboard: Pasted text into UITextField");
+        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+            UITextView* textView = (UITextView*)firstResponder;
+            NSString* currentText = textView.text ?: @"";
+            textView.text = [currentText stringByAppendingString:text];
+
+            id delegate = textView.delegate;
+            if (delegate && [delegate respondsToSelector:@selector(textViewDidChange:)]) {
+                [delegate performSelector:@selector(textViewDidChange:) withObject:textView];
+            }
+
+            success = true;
+            NSLog(@"[Tasto] pasteFromClipboard: Pasted text into UITextView");
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatchSyncMainWithTimeout(block);
+    }
+
+    return success;
+}
+
+std::string TastoRuntimeHelper::getClipboardText() {
+    __block std::string result;
+
+    void (^block)(void) = ^{
+        UIPasteboard* pasteboard = [UIPasteboard generalPasteboard];
+        NSString* text = pasteboard.string;
+        if (text) {
+            result = [text UTF8String];
+            NSLog(@"[Tasto] getClipboardText: Got text from clipboard");
+        } else {
+            NSLog(@"[Tasto] getClipboardText: Clipboard is empty");
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatchSyncMainWithTimeout(block);
+    }
+
+    return result;
+}
+
+// ============================================
+// Device Control
+// ============================================
+
+bool TastoRuntimeHelper::setOrientation(int orientation) {
+    __block bool success = false;
+
+    void (^block)(void) = ^{
+        NSLog(@"[Tasto] setOrientation: Setting orientation to %d", orientation);
+
+        UIInterfaceOrientation targetOrientation;
+        switch (orientation) {
+            case 0:
+                targetOrientation = UIInterfaceOrientationPortrait;
+                break;
+            case 1:
+                targetOrientation = UIInterfaceOrientationPortraitUpsideDown;
+                break;
+            case 2:
+                targetOrientation = UIInterfaceOrientationLandscapeLeft;
+                break;
+            case 3:
+                targetOrientation = UIInterfaceOrientationLandscapeRight;
+                break;
+            default:
+                NSLog(@"[Tasto] setOrientation: Invalid orientation %d", orientation);
+                return;
+        }
+
+        // For iOS 16+, use the new UIWindowScene API
+        if (@available(iOS 16.0, *)) {
+            for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    UIWindowScene* windowScene = (UIWindowScene*)scene;
+
+                    UIWindowSceneGeometryPreferencesIOS* preferences =
+                        [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:
+                            (1 << targetOrientation)];
+
+                    NSError* error = nil;
+                    [windowScene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError* err) {
+                        if (err) {
+                            NSLog(@"[Tasto] setOrientation: Error setting orientation: %@", err);
+                        }
+                    }];
+
+                    success = YES;
+                    break;
+                }
+            }
+        } else {
+            // For older iOS, use UIDevice orientation (deprecated but works)
+            [[UIDevice currentDevice] setValue:@(targetOrientation) forKey:@"orientation"];
+            [UIViewController attemptRotationToDeviceOrientation];
+            success = YES;
+        }
+
+        NSLog(@"[Tasto] setOrientation: Result = %@", success ? @"YES" : @"NO");
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatchSyncMainWithTimeout(block);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::performSwipe(float startX, float startY, float endX, float endY, float durationMs) {
+    __block bool success = false;
+
+    void (^block)(void) = ^{
+        NSLog(@"[Tasto] performSwipe: (%.1f, %.1f) -> (%.1f, %.1f) duration=%.0fms",
+              startX, startY, endX, endY, durationMs);
+
+        CGPoint startPoint = CGPointMake(startX, startY);
+        CGPoint endPoint = CGPointMake(endX, endY);
+
+        UIWindow* targetWindow = findWindowAtPoint(startPoint);
+        if (!targetWindow) {
+            NSLog(@"[Tasto] performSwipe: No window found at start point");
+            return;
+        }
+
+        UIView* hitView = [targetWindow hitTest:startPoint withEvent:nil];
+        if (!hitView) {
+            hitView = targetWindow;
+        }
+
+        // Create the touch
+        UITouch* touch = [[UITouch alloc] init];
+        NSTimeInterval startTime = [[NSProcessInfo processInfo] systemUptime];
+
+        // Touch began
+        [touch setWindow:targetWindow];
+        [touch setView:hitView];
+        [touch setPhase:UITouchPhaseBegan];
+        [touch setTapCount:1];
+        [touch _setLocationInWindow:startPoint resetPrevious:YES];
+        [touch setTimestamp:startTime];
+        [touch _setIsFirstTouchForView:YES];
+
+        UIApplication* app = [UIApplication sharedApplication];
+        UIEvent* event = [app _touchesEvent];
+        [event _clearTouches];
+        [event _addTouch:touch forDelayedDelivery:NO];
+        [app sendEvent:event];
+
+        // Animate the touch movement
+        int steps = MAX(10, (int)(durationMs / 16)); // ~60fps
+        float stepDuration = (durationMs / 1000.0f) / steps;
+
+        for (int i = 1; i <= steps; i++) {
+            float progress = (float)i / steps;
+            CGPoint currentPoint = CGPointMake(
+                startPoint.x + (endPoint.x - startPoint.x) * progress,
+                startPoint.y + (endPoint.y - startPoint.y) * progress
+            );
+
+            [touch setPhase:UITouchPhaseMoved];
+            [touch _setLocationInWindow:currentPoint resetPrevious:NO];
+            [touch setTimestamp:startTime + (stepDuration * i)];
+
+            [event _clearTouches];
+            [event _addTouch:touch forDelayedDelivery:NO];
+            [app sendEvent:event];
+
+            usleep((useconds_t)(stepDuration * 1000000));
+        }
+
+        // Touch ended
+        [touch setPhase:UITouchPhaseEnded];
+        [touch _setLocationInWindow:endPoint resetPrevious:NO];
+        [touch setTimestamp:[[NSProcessInfo processInfo] systemUptime]];
+
+        [event _clearTouches];
+        [event _addTouch:touch forDelayedDelivery:NO];
+        [app sendEvent:event];
+
+        success = true;
+        NSLog(@"[Tasto] performSwipe: Completed swipe gesture");
+    };
+
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatchSyncMainWithTimeout(block);
+    }
+
+    return success;
+}
+
+bool TastoRuntimeHelper::performBackGesture() {
+    NSLog(@"[Tasto] performBackGesture: Simulating edge swipe from left");
+
+    // Get screen dimensions
+    CGRect screenBounds = [[UIScreen mainScreen] bounds];
+    float screenWidth = screenBounds.size.width;
+    float screenHeight = screenBounds.size.height;
+
+    // Swipe from left edge to center
+    float startX = 10; // Near left edge
+    float startY = screenHeight / 2;
+    float endX = screenWidth / 2;
+    float endY = screenHeight / 2;
+    float duration = 300; // 300ms
+
+    return performSwipe(startX, startY, endX, endY, duration);
+}
+
 } // namespace tasto
 
 // Objective-C helper for setting the surface presenter

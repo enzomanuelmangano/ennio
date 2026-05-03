@@ -272,6 +272,13 @@ export interface Tasto extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   tap(testID: string): boolean;
 
   /**
+   * Simulate a double tap on an element
+   * @param testID - The testID prop value
+   * @returns true if double tap was dispatched successfully
+   */
+  doubleTap(testID: string): boolean;
+
+  /**
    * Simulate a long press on an element
    * @param testID - The testID prop value
    * @param durationMs - Duration of long press in milliseconds
@@ -418,4 +425,108 @@ export interface Tasto extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
    * @param selectorJson - JSON-encoded Selector object
    */
   isVisibleBySelector(selectorJson: string): boolean;
+
+  /**
+   * Double tap an element using a selector (JSON string)
+   * @param selectorJson - JSON-encoded Selector object
+   * @returns true if double tap was dispatched successfully
+   */
+  doubleTapBySelector(selectorJson: string): boolean;
+
+  // ============================================
+  // Alert/Modal Handling
+  // ============================================
+
+  /**
+   * Check if an alert is currently presented
+   */
+  isAlertPresent(): boolean;
+
+  /**
+   * Get the text content of the current alert (title + message)
+   */
+  getAlertText(): string;
+
+  /**
+   * Get the button titles of the current alert
+   */
+  getAlertButtons(): string[];
+
+  /**
+   * Tap an alert button by its text
+   * @param buttonText - The button title to tap
+   * @returns true if successful
+   */
+  tapAlertButton(buttonText: string): boolean;
+
+  /**
+   * Dismiss the current alert (taps cancel/OK button)
+   */
+  dismissAlert(): boolean;
+
+  // ============================================
+  // Keyboard Handling
+  // ============================================
+
+  /**
+   * Hide the keyboard by resigning first responder
+   */
+  hideKeyboard(): boolean;
+
+  /**
+   * Erase text by sending backspace key events
+   * @param count - Number of characters to erase
+   */
+  eraseText(count: number): boolean;
+
+  /**
+   * Press a key by name (e.g., "Enter", "Tab", "Escape")
+   * @param keyName - The key to press
+   */
+  pressKey(keyName: string): boolean;
+
+  // ============================================
+  // Clipboard Handling
+  // ============================================
+
+  /**
+   * Copy text to clipboard
+   * @param text - Text to copy
+   */
+  copyToClipboard(text: string): boolean;
+
+  /**
+   * Paste from clipboard into the focused text field
+   */
+  pasteFromClipboard(): boolean;
+
+  /**
+   * Get current clipboard contents
+   */
+  getClipboardText(): string;
+
+  // ============================================
+  // Device Control
+  // ============================================
+
+  /**
+   * Set device orientation
+   * @param orientation - 0=portrait, 1=portraitUpsideDown, 2=landscapeLeft, 3=landscapeRight
+   */
+  setOrientation(orientation: number): boolean;
+
+  /**
+   * Perform a swipe gesture between coordinates
+   * @param startX - Start X coordinate
+   * @param startY - Start Y coordinate
+   * @param endX - End X coordinate
+   * @param endY - End Y coordinate
+   * @param durationMs - Duration of swipe in milliseconds
+   */
+  swipeCoordinates(startX: number, startY: number, endX: number, endY: number, durationMs: number): boolean;
+
+  /**
+   * Simulate back gesture (swipe from left edge on iOS)
+   */
+  backGesture(): boolean;
 }

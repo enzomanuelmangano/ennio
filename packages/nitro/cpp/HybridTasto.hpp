@@ -85,6 +85,42 @@ public:
     bool longPressBySelector(const std::string& selectorJson, double durationMs) override;
     std::variant<nitro::NullType, std::string> getTextBySelector(const std::string& selectorJson) override;
     bool isVisibleBySelector(const std::string& selectorJson) override;
+    bool doubleTapBySelector(const std::string& selectorJson) override;
+
+    // ============================================
+    // Double Tap
+    // ============================================
+    bool doubleTap(const std::string& testID) override;
+
+    // ============================================
+    // Alert/Modal Handling
+    // ============================================
+    bool isAlertPresent() override;
+    std::string getAlertText() override;
+    std::vector<std::string> getAlertButtons() override;
+    bool tapAlertButton(const std::string& buttonText) override;
+    bool dismissAlert() override;
+
+    // ============================================
+    // Keyboard Handling
+    // ============================================
+    bool hideKeyboard() override;
+    bool eraseText(double count) override;
+    bool pressKey(const std::string& keyName) override;
+
+    // ============================================
+    // Clipboard Handling
+    // ============================================
+    bool copyToClipboard(const std::string& text) override;
+    bool pasteFromClipboard() override;
+    std::string getClipboardText() override;
+
+    // ============================================
+    // Device Control
+    // ============================================
+    bool setOrientation(double orientation) override;
+    bool swipeCoordinates(double startX, double startY, double endX, double endY, double durationMs) override;
+    bool backGesture() override;
 
     // ============================================
     // Initialization (called from JS)
@@ -153,35 +189,6 @@ private:
      * Find a node by selector criteria
      */
     ShadowNodePtr findNodeBySelector(const ::tasto::SelectorCriteria& criteria) const;
-
-    // ============================================
-    // Alert/Modal Handling (WebSocket only)
-    // ============================================
-
-    /**
-     * Check if an alert is currently present
-     */
-    bool isAlertPresent();
-
-    /**
-     * Get the text of the current alert (title + message)
-     */
-    std::string getAlertText();
-
-    /**
-     * Get the button titles of the current alert
-     */
-    std::vector<std::string> getAlertButtons();
-
-    /**
-     * Tap an alert button by its text
-     */
-    bool tapAlertButton(const std::string& buttonText);
-
-    /**
-     * Dismiss the current alert
-     */
-    bool dismissAlert();
 };
 
 } // namespace margelo::nitro::tasto

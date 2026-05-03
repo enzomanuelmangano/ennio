@@ -458,4 +458,104 @@ export class TastoClient {
     const response = await this.send('isVisibleBySelector', { selector: selectorJson });
     return response.data === true || response.data === 'true';
   }
+
+  // ============================================
+  // Keyboard Handling
+  // ============================================
+
+  /**
+   * Hide the keyboard by resigning first responder
+   */
+  async hideKeyboard(): Promise<boolean> {
+    const response = await this.send('hideKeyboard', {});
+    return response.success;
+  }
+
+  /**
+   * Erase text by sending backspace key events
+   * @param count Number of characters to erase
+   */
+  async eraseText(count: number): Promise<boolean> {
+    const response = await this.send('eraseText', { count });
+    return response.success;
+  }
+
+  /**
+   * Press a key by name (e.g., "Enter", "Tab", "Escape")
+   * @param keyName The key to press
+   */
+  async pressKey(keyName: string): Promise<boolean> {
+    const response = await this.send('pressKey', { keyName });
+    return response.success;
+  }
+
+  // ============================================
+  // Clipboard Handling
+  // ============================================
+
+  /**
+   * Copy text to clipboard
+   * @param text Text to copy
+   */
+  async copyToClipboard(text: string): Promise<boolean> {
+    const response = await this.send('copyToClipboard', { text });
+    return response.success;
+  }
+
+  /**
+   * Paste from clipboard into the focused text field
+   */
+  async pasteFromClipboard(): Promise<boolean> {
+    const response = await this.send('pasteFromClipboard', {});
+    return response.success;
+  }
+
+  /**
+   * Get current clipboard contents
+   */
+  async getClipboardText(): Promise<string> {
+    const response = await this.send('getClipboardText', {});
+    return typeof response.data === 'string' ? response.data.replace(/^"|"$/g, '') : '';
+  }
+
+  // ============================================
+  // Device Control
+  // ============================================
+
+  /**
+   * Set device orientation
+   * @param orientation 0=portrait, 1=portraitUpsideDown, 2=landscapeLeft, 3=landscapeRight
+   */
+  async setOrientation(orientation: number): Promise<boolean> {
+    const response = await this.send('setOrientation', { orientation });
+    return response.success;
+  }
+
+  /**
+   * Perform a swipe gesture between coordinates
+   */
+  async swipeCoordinates(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    durationMs: number = 300
+  ): Promise<boolean> {
+    const response = await this.send('swipeCoordinates', {
+      startX,
+      startY,
+      endX,
+      endY,
+      durationMs,
+    });
+    return response.success;
+  }
+
+  /**
+   * Simulate back gesture (swipe from left edge on iOS)
+   */
+  async backGesture(): Promise<boolean> {
+    const response = await this.send('backGesture', {});
+    return response.success;
+  }
 }

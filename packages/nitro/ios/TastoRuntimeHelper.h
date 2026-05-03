@@ -141,6 +141,65 @@ public:
      */
     bool dismissAlert();
 
+    // ============================================
+    // Keyboard Handling
+    // ============================================
+
+    /**
+     * Hide the keyboard by resigning first responder
+     */
+    bool hideKeyboard();
+
+    /**
+     * Erase text by sending backspace key events
+     * @param count Number of characters to erase
+     */
+    bool eraseText(int count);
+
+    /**
+     * Press a key by name (e.g., "Enter", "Tab", "Escape")
+     */
+    bool pressKey(const std::string& keyName);
+
+    // ============================================
+    // Clipboard Handling
+    // ============================================
+
+    /**
+     * Copy text to clipboard
+     */
+    bool copyToClipboard(const std::string& text);
+
+    /**
+     * Paste from clipboard into the focused text field
+     */
+    bool pasteFromClipboard();
+
+    /**
+     * Get current clipboard contents
+     */
+    std::string getClipboardText();
+
+    // ============================================
+    // Device Control
+    // ============================================
+
+    /**
+     * Set device orientation
+     * @param orientation 0=portrait, 1=portraitUpsideDown, 2=landscapeLeft, 3=landscapeRight
+     */
+    bool setOrientation(int orientation);
+
+    /**
+     * Perform a swipe gesture from start to end coordinates
+     */
+    bool performSwipe(float startX, float startY, float endX, float endY, float durationMs);
+
+    /**
+     * Simulate back gesture (swipe from left edge)
+     */
+    bool performBackGesture();
+
 private:
     TastoRuntimeHelper() = default;
     ~TastoRuntimeHelper() = default;
