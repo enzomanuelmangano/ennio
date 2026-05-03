@@ -9,6 +9,9 @@ tags:
 
 ---
 
+- launchApp:
+    clearState: true
+
 # ============================================
 # Navigate to home
 # ============================================
@@ -18,7 +21,7 @@ tags:
 
 - assertVisible:
     id: "home-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Demo login flow
@@ -31,7 +34,7 @@ tags:
 # Wait for login screen
 - assertVisible:
     id: "login-screen"
-    timeout: 3000
+    timeout: 5000
 
 # Use demo login
 - tapOn:

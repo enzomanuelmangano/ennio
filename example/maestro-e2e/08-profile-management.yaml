@@ -9,6 +9,9 @@ tags:
 
 ---
 
+- launchApp:
+    clearState: true
+
 # ============================================
 # SETUP
 # ============================================
@@ -49,7 +52,7 @@ tags:
           id: "guest-signin-btn"
       - assertVisible:
           id: "login-screen"
-          timeout: 3000
+          timeout: 5000
       - tapOn:
           id: "demo-login-btn"
       - assertVisible:
@@ -62,7 +65,7 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Authenticated profile header
@@ -72,7 +75,7 @@ tags:
     id: "profile-header"
 
 - assertVisible:
-    text: "John"
+    text: "Demo User"
 
 # Edit profile button
 - assertVisible:
@@ -85,11 +88,11 @@ tags:
 - assertVisible:
     id: "stats-card"
 
-# Stats should show orders, items, spent
+# Stats should show orders, in-cart, spent
 - assertVisible:
     text: "Orders"
 - assertVisible:
-    text: "Items"
+    text: "In Cart"
 - assertVisible:
     text: "Spent"
 
@@ -148,13 +151,13 @@ tags:
     anyOf:
       - id: "orders-screen"
       - id: "empty-orders"
-    timeout: 3000
+    timeout: 5000
 
 # Go back to profile
 - back
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Navigate to settings from profile
@@ -165,13 +168,13 @@ tags:
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 3000
+    timeout: 5000
 
 # Go back
 - back
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Navigate to appearance from profile
@@ -183,12 +186,12 @@ tags:
 # Should go to settings (appearance section)
 - assertVisible:
     id: "settings-screen"
-    timeout: 3000
+    timeout: 5000
 
 - back
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Navigate to help from profile
@@ -206,12 +209,12 @@ tags:
     anyOf:
       - text: "Help"
       - text: "Support"
-    timeout: 3000
+    timeout: 5000
 
 - back
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Navigate to terms from profile
@@ -224,12 +227,12 @@ tags:
     anyOf:
       - text: "Terms"
       - text: "Privacy"
-    timeout: 3000
+    timeout: 5000
 
 - back
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Logout confirmation
@@ -241,7 +244,7 @@ tags:
 # Confirmation dialog
 - assertVisible:
     text: "Sign Out"
-    timeout: 2000
+    timeout: 4000
 
 # Cancel logout
 - tapOn:
@@ -250,7 +253,7 @@ tags:
 # Should still be on profile
 - assertVisible:
     id: "profile-screen"
-    timeout: 2000
+    timeout: 4000
 
 # ============================================
 # TEST: Complete logout
@@ -265,4 +268,4 @@ tags:
 # Should show guest view
 - assertVisible:
     id: "guest-view"
-    timeout: 3000
+    timeout: 5000

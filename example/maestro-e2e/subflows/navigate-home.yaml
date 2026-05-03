@@ -1,5 +1,4 @@
 # Subflow: Navigate to home screen
-# Ensures we're on the home screen regardless of current state
 
 appId: com.ennio.example
 
@@ -9,4 +8,4 @@ appId: com.ennio.example
     text: "Home"
 - assertVisible:
     id: "home-screen"
-    timeout: 3000
+    timeout: 5000

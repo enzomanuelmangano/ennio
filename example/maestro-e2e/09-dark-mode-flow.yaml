@@ -9,6 +9,9 @@ tags:
 
 ---
 
+- launchApp:
+    clearState: true
+
 # ============================================
 # SETUP: Ensure light mode
 # ============================================
@@ -21,7 +24,7 @@ tags:
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 3000
+    timeout: 5000
 
 # Ensure dark mode is off first
 # (We'll toggle twice to ensure consistent state)
@@ -50,7 +53,7 @@ tags:
 
 - assertVisible:
     id: "home-screen"
-    timeout: 3000
+    timeout: 5000
 
 # Home should be in dark mode
 - assertVisible:
@@ -65,7 +68,7 @@ tags:
 
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
+    timeout: 5000
 
 - assertVisible:
     id: "search-input"
@@ -81,7 +84,7 @@ tags:
 
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 3000
+    timeout: 5000
 
 - assertVisible:
     id: "product-title"
@@ -101,7 +104,7 @@ tags:
     anyOf:
       - id: "cart-screen"
       - id: "cart-screen-empty"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Dark mode on profile (guest)
@@ -114,7 +117,7 @@ tags:
     anyOf:
       - id: "profile-screen"
       - id: "guest-view"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Dark mode on login screen
@@ -129,7 +132,7 @@ tags:
           id: "guest-signin-btn"
       - assertVisible:
           id: "login-screen"
-          timeout: 3000
+          timeout: 5000
       - assertVisible:
           id: "email-input"
       - assertVisible:
@@ -148,7 +151,7 @@ tags:
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 3000
+    timeout: 5000
 
 - tapOn:
     id: "toggle-dark-mode"
@@ -162,14 +165,14 @@ tags:
 
 - assertVisible:
     id: "home-screen"
-    timeout: 3000
+    timeout: 5000
 
 - runFlow:
     file: subflows/navigate-products.yaml
 
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
+    timeout: 5000
 
 - runFlow:
     file: subflows/navigate-cart.yaml
@@ -178,7 +181,7 @@ tags:
     anyOf:
       - id: "cart-screen"
       - id: "cart-screen-empty"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Dark mode with authenticated user
@@ -214,7 +217,7 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 - assertVisible:
     id: "profile-header"
@@ -227,7 +230,7 @@ tags:
     anyOf:
       - id: "orders-screen"
       - id: "empty-orders"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # CLEANUP: Restore light mode

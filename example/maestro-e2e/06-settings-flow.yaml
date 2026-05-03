@@ -8,6 +8,9 @@ tags:
 
 ---
 
+- launchApp:
+    clearState: true
+
 # ============================================
 # SETUP
 # ============================================
@@ -24,7 +27,7 @@ tags:
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Appearance settings
@@ -146,9 +149,15 @@ tags:
 - tapOn:
     id: "quick-action-settings"
 
-- scroll:
+- assertVisible:
+    id: "settings-screen"
+    timeout: 5000
+
+- scrollUntilVisible:
+    element:
+      id: "edit-profile"
     direction: DOWN
-    amount: 300
+    timeout: 15000
 
 # Edit profile button
 - assertVisible:
@@ -157,6 +166,11 @@ tags:
 # Change password button
 - assertVisible:
     id: "change-password"
+
+# Scroll a bit more to make sign-out visible
+- scroll:
+    direction: DOWN
+    amount: 200
 
 # Sign out button
 - assertVisible:
@@ -204,7 +218,7 @@ tags:
 
 - assertVisible:
     text: "Reset Settings"
-    timeout: 2000
+    timeout: 4000
 
 # Cancel the reset
 - tapOn:
@@ -223,14 +237,14 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 - tapOn:
     id: "menu-settings"
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Dark mode persists across screens

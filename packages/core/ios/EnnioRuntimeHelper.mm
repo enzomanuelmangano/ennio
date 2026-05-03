@@ -50,10 +50,26 @@ static UIView* findViewByAccessibilityIdentifier(UIView* root, NSString* identif
     return nil;
 }
 
-// Helper to find a view by accessibility label (text) recursively
-// This is used for native iOS elements like tab bars that aren't in shadow tree
-static UIView* findViewByAccessibilityLabel(UIView* root, NSString* label) {
-    // Skip debugging overlays
+// Match modes used internally - separate exact and contains passes so tab-bar
+// labels like "Products" win over generic content text like "Featured Products".
+typedef NS_ENUM(NSInteger, EnnioLabelMatchMode) {
+    EnnioLabelMatchExact,
+    EnnioLabelMatchContains,
+};
+
+static BOOL labelMatchesMode(UIView* view, NSString* label, EnnioLabelMatchMode mode) {
+    if (!view.accessibilityLabel) return NO;
+    if (mode == EnnioLabelMatchExact) {
+        return [view.accessibilityLabel isEqualToString:label];
+    }
+    return [view.accessibilityLabel rangeOfString:label].location != NSNotFound;
+}
+
+// Recursive helper for findViewByAccessibilityLabel. Returns first match for the
+// given mode and `tappableOnly` constraint.
+static UIView* findViewByAccessibilityLabelMode(UIView* root, NSString* label,
+                                                 EnnioLabelMatchMode mode,
+                                                 BOOL tappableOnly) {
     NSString* className = NSStringFromClass([root class]);
     if ([className containsString:@"DebuggingOverlay"] ||
         [className containsString:@"DebugOverlay"] ||
@@ -61,36 +77,42 @@ static UIView* findViewByAccessibilityLabel(UIView* root, NSString* label) {
         return nil;
     }
 
-    // Check this view's accessibilityLabel
-    if (root.accessibilityLabel && [root.accessibilityLabel isEqualToString:label]) {
-        // Prefer buttons/tappable elements
-        if ([root isKindOfClass:[UIButton class]] ||
-            [root isKindOfClass:[UIControl class]] ||
-            (root.accessibilityTraits & UIAccessibilityTraitButton) != 0) {
-            NSLog(@"[Ennio] findViewByAccessibilityLabel: Found button/control '%@' class=%@",
-                  label, className);
+    if (labelMatchesMode(root, label, mode)) {
+        BOOL isTappable = [root isKindOfClass:[UIButton class]] ||
+                          [root isKindOfClass:[UIControl class]] ||
+                          (root.accessibilityTraits & UIAccessibilityTraitButton) != 0;
+        if (!tappableOnly || isTappable) {
             return root;
         }
     }
 
-    // Check children first (depth-first)
     for (UIView* subview in root.subviews) {
-        UIView* found = findViewByAccessibilityLabel(subview, label);
-        if (found) {
-            return found;
-        }
-    }
-
-    // If no button found in children, accept any matching accessible element
-    if (root.accessibilityLabel && [root.accessibilityLabel isEqualToString:label]) {
-        if (root.isAccessibilityElement) {
-            NSLog(@"[Ennio] findViewByAccessibilityLabel: Found accessible '%@' class=%@",
-                  label, className);
-            return root;
-        }
+        UIView* found = findViewByAccessibilityLabelMode(subview, label, mode, tappableOnly);
+        if (found) return found;
     }
 
     return nil;
+}
+
+// Public helper: find best view for an accessibility label.
+// Order: exact-match tappable -> exact-match accessible -> contains tappable -> contains accessible.
+// This avoids matching descriptive Text ("Featured Products") when a tab bar
+// button labelled exactly "Products" exists elsewhere in the hierarchy.
+static UIView* findViewByAccessibilityLabel(UIView* root, NSString* label) {
+    UIView* found = findViewByAccessibilityLabelMode(root, label, EnnioLabelMatchExact, YES);
+    if (found) return found;
+    found = findViewByAccessibilityLabelMode(root, label, EnnioLabelMatchExact, NO);
+    if (found) return found;
+    found = findViewByAccessibilityLabelMode(root, label, EnnioLabelMatchContains, YES);
+    if (found) return found;
+    return findViewByAccessibilityLabelMode(root, label, EnnioLabelMatchContains, NO);
+}
+
+// Backwards-compat label matcher used by other helpers - tries both modes.
+static BOOL labelMatches(UIView* view, NSString* label) {
+    if (!view.accessibilityLabel) return NO;
+    if ([view.accessibilityLabel isEqualToString:label]) return YES;
+    return [view.accessibilityLabel rangeOfString:label].location != NSNotFound;
 }
 
 // Find ALL views with matching accessibility label (for debugging)
@@ -100,7 +122,7 @@ static void findAllViewsByAccessibilityLabel(UIView* root, NSString* label, NSMu
         return;
     }
 
-    if (root.accessibilityLabel && [root.accessibilityLabel isEqualToString:label]) {
+    if (labelMatches(root, label)) {
         [results addObject:root];
     }
 

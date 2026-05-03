@@ -145,31 +145,22 @@ ShadowNodePtr HybridEnnio::getShadowTreeRoot() const {
 ShadowNodePtr HybridEnnio::findNode(const std::string& testID) const {
     ENNIO_LOG_DEBUG(LOG_TAG, ENNIO_LOG_FMT("findNode: testID=" << testID));
 
-    // First try O(1) registry lookup
-    auto& registry = ::ennio::TestIDRegistry::getInstance();
-    auto node = registry.findByTestID(testID);
-
-    if (node) {
-        ENNIO_LOG_TRACE(LOG_TAG, "findNode: found in registry");
-        return node;
-    }
-
-    ENNIO_LOG_TRACE(LOG_TAG, "findNode: not in registry, trying tree traversal");
-
-    // Fallback to tree traversal
+    // Walk the live shadow tree first. The registry caches weak_ptr to nodes
+    // captured at update time; after a re-render React produces new nodes for
+    // the same testID, but the old shared_ptr can still be alive (held by
+    // prior commits). Dispatching events on that stale node hits dead handlers.
+    // Live walk costs O(n) but matches what the user sees on screen.
     auto root = getShadowTreeRoot();
-    if (!root) {
-        ENNIO_LOG_WARN(LOG_TAG, "findNode: no shadow tree root");
-        return nullptr;
+    if (root) {
+        auto found = ::ennio::ShadowTreeTraverser::findByTestID(root, testID);
+        if (found) {
+            ::ennio::TestIDRegistry::getInstance().registerNode(testID, found);
+            return found;
+        }
     }
 
-    // Update registry while we're at it
-    registry.updateFromTree(root);
-
-    auto found = ::ennio::ShadowTreeTraverser::findByTestID(root, testID);
-    ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("findNode: tree traversal result=" << (found ? "found" : "not found")));
-
-    return found;
+    // Fall back to registry only when we can't reach the live tree.
+    return ::ennio::TestIDRegistry::getInstance().findByTestID(testID);
 }
 
 // ============================================
@@ -323,61 +314,49 @@ std::variant<nitro::NullType, std::string> HybridEnnio::getText(const std::strin
 bool HybridEnnio::tap(const std::string& testID) {
     ENNIO_LOG_DEBUG_F(LOG_TAG, "tap called for testID=%s", testID.c_str());
 
-    // First, find the node in shadow tree (works on all platforms)
-    auto node = findNode(testID);
-    if (!node) {
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: Element not found in shadow tree: %s", testID.c_str());
-
 #if defined(__APPLE__)
-        auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
+    auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
 
-        // First try to find by accessibilityIdentifier
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: Trying UIView search by accessibilityIdentifier");
-        if (helper.performTapByTestID(testID)) {
-            return true;
-        }
-
-        // If that fails, try derived accessibility label with retries
-        // Native elements might need time to stabilize after navigation
-        std::string derivedLabel = deriveLabel(testID);
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: accessibilityIdentifier failed, trying derived label '%s'", derivedLabel.c_str());
-
-        return helper.performTapByLabel(derivedLabel);
-#else
-        return false;
-#endif
-    }
-
-    ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: Found node, dispatching events");
-
-    // Try dispatching events through the event emitter (cross-platform approach)
-    // This directly triggers onPress in Pressable components
-    bool eventResult = ::ennio::EventDispatcher::tap(node);
-    ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: EventDispatcher result=%d", eventResult);
-
-    if (eventResult) {
+    // Prefer native UIView search by accessibilityIdentifier. This routes through
+    // the real UIKit responder chain on the main thread, which is safer than
+    // queuing events from the WS thread (we've seen RN's
+    // UIManagerBinding::dispatchEventToJS assert when target becomes stale by
+    // the time the event beat flushes).
+    if (helper.performTapByTestID(testID)) {
+        ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: native accessibilityIdentifier match");
         return true;
     }
 
-#if defined(__APPLE__)
-    // If event dispatch didn't work, try native tap on iOS
+    // Try shadow-tree layout to tap by absolute coords.
     auto root = getShadowTreeRoot();
     if (root) {
         auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
-        if (metrics) {
+        if (metrics && metrics->width > 0 && metrics->height > 0) {
             float centerX = metrics->screenX + (metrics->width / 2.0f);
             float centerY = metrics->screenY + (metrics->height / 2.0f);
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: Trying native tap at (%.1f, %.1f)", centerX, centerY);
-
-            auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
-            bool nativeResult = helper.performTap(centerX, centerY);
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: native tap result=%d", nativeResult);
-            return nativeResult;
+            ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: native coord tap at (%.1f, %.1f)", centerX, centerY);
+            if (helper.performTap(centerX, centerY)) {
+                return true;
+            }
         }
+    }
+
+    // Last resort: derive an accessibility label from the testID (e.g.
+    // tab-home -> "Home") and search the UIKit tree.
+    std::string derivedLabel = deriveLabel(testID);
+    ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: native coord tap failed; trying label '%s'", derivedLabel.c_str());
+    if (helper.performTapByLabel(derivedLabel)) {
+        return true;
     }
 #endif
 
-    return eventResult;
+    // Cross-platform fallback: dispatch events directly to the shadow node's
+    // event emitter. Used on Android and as a last resort on iOS.
+    auto node = findNode(testID);
+    if (!node) {
+        return false;
+    }
+    return ::ennio::EventDispatcher::tap(node);
 }
 
 bool HybridEnnio::longPress(const std::string& testID, double durationMs) {
@@ -1528,62 +1507,64 @@ std::variant<nitro::NullType, std::string> HybridEnnio::getTextBySelector(const 
 bool HybridEnnio::isVisibleBySelector(const std::string& selectorJson) {
     ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: START selector=%s", selectorJson.c_str());
     try {
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: parsing selector");
         auto criteria = ::ennio::SelectorParser::parse(selectorJson);
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: parsed, finding node");
-        auto node = findNodeBySelector(criteria);
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: findNodeBySelector returned %s", node ? "node" : "null");
-        if (!node) {
-            // Node not found in shadow tree - return FALSE
-            // Tap/exists functions handle native element fallback separately
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: node not found in shadow tree, returning false");
-            return false;
-        }
 
-        auto testID = ::ennio::ShadowTreeTraverser::getTestID(*node);
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: testID=%s", testID ? testID->c_str() : "none");
-        if (testID) {
-            bool result = isVisible(*testID);
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: isVisible result=%d", result);
-            return result;
-        }
-
-        // Fallback: check metrics directly
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: no testID, checking metrics directly");
         auto root = getShadowTreeRoot();
         if (!root) {
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: no root, returning false");
+            ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: no shadow tree root");
             return false;
         }
 
-        // Use screen dimensions if set, otherwise use reasonable defaults
-        float width = screenWidth_ > 0 ? screenWidth_ : 430.0f;
-        float height = screenHeight_ > 0 ? screenHeight_ : 932.0f;
+        // For multi-match selectors (text, traits, etc.) ANY visible match passes.
+        // Avoids returning false when findFirst picks an off-screen sibling but
+        // a different match is on-screen.
+        auto nodes = ::ennio::ElementMatcher::findAll(root, criteria);
+        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: findAll returned %zu nodes", nodes.size());
 
-        auto layoutable = dynamic_cast<const facebook::react::LayoutableShadowNode*>(node.get());
-        if (!layoutable) {
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: not layoutable, returning false");
+        if (nodes.empty()) {
+            ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: no matches, returning false");
             return false;
         }
 
-        auto metrics = layoutable->getLayoutMetrics();
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: metrics x=%.1f y=%.1f w=%.1f h=%.1f",
-            metrics.frame.origin.x, metrics.frame.origin.y,
-            metrics.frame.size.width, metrics.frame.size.height);
-        if (metrics.frame.origin.x + metrics.frame.size.width < 0 ||
-            metrics.frame.origin.y + metrics.frame.size.height < 0 ||
-            metrics.frame.origin.x > width ||
-            metrics.frame.origin.y > height) {
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: out of bounds, returning false");
-            return false;
+        // Apply index if specified - only this node counts.
+        if (criteria.index.has_value()) {
+            int idx = *criteria.index;
+            if (idx < 0 || idx >= static_cast<int>(nodes.size())) {
+                return false;
+            }
+            nodes = { nodes[idx] };
         }
 
-        bool result = metrics.frame.size.width > 0 && metrics.frame.size.height > 0;
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: END result=%d", result);
-        return result;
+        const float width = screenWidth_ > 0 ? screenWidth_ : 430.0f;
+        const float height = screenHeight_ > 0 ? screenHeight_ : 932.0f;
+
+        for (const auto& node : nodes) {
+            auto testID = ::ennio::ShadowTreeTraverser::getTestID(*node);
+            if (testID) {
+                if (::ennio::ShadowTreeTraverser::isVisible(root, *testID, width, height)) {
+                    ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: visible via testID=%s", testID->c_str());
+                    return true;
+                }
+                continue;
+            }
+
+            // No testID - check layout metrics directly
+            auto layoutable = dynamic_cast<const facebook::react::LayoutableShadowNode*>(node.get());
+            if (!layoutable) continue;
+            auto metrics = layoutable->getLayoutMetrics();
+            if (metrics.frame.size.width <= 0 || metrics.frame.size.height <= 0) continue;
+            if (metrics.frame.origin.x + metrics.frame.size.width < 0) continue;
+            if (metrics.frame.origin.y + metrics.frame.size.height < 0) continue;
+            if (metrics.frame.origin.x > width) continue;
+            if (metrics.frame.origin.y > height) continue;
+            ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: visible via metrics (no testID)");
+            return true;
+        }
+
+        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: no match was visible");
+        return false;
     } catch (const std::exception& e) {
         ENNIO_LOG_ERROR("isVisibleBySelector", "Error: " << e.what());
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: EXCEPTION %s", e.what());
         return false;
     }
 }

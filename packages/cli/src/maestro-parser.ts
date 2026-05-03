@@ -146,9 +146,12 @@ export function toEnnioSelector(selector: MaestroSelector): Record<string, unkno
 
   if (selector.id !== undefined) result.id = selector.id;
 
-  // Handle text selector - Maestro uses regex patterns
+  // Handle text selector - Maestro semantics: text matches as substring (or regex if it
+  // contains regex metacharacters / explicit .* anchors). Plain text falls back to
+  // 'contains' so e.g. text: "Wireless" matches "Wireless Headphones".
+  // Use TextMatcher shape so client.selectorToJson serializes flat form expected by
+  // the native SelectorParser ({ text, textMatchMode }).
   if (selector.text !== undefined) {
-    // Check if it's a regex pattern (starts with .* or contains regex chars)
     if (
       selector.text.startsWith('.*') ||
       selector.text.endsWith('.*') ||
@@ -156,7 +159,7 @@ export function toEnnioSelector(selector: MaestroSelector): Record<string, unkno
     ) {
       result.text = { pattern: selector.text, mode: 'regex' };
     } else {
-      result.text = selector.text;
+      result.text = { pattern: selector.text, mode: 'contains' };
     }
   }
 

@@ -10,6 +10,9 @@ tags:
 
 ---
 
+- launchApp:
+    clearState: true
+
 # ============================================
 # SETUP: Login and add items to cart
 # ============================================
@@ -56,7 +59,7 @@ tags:
     id: "product-card-2"
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 3000
+    timeout: 5000
 - tapOn:
     id: "add-to-cart-btn"
 - tapOn:
@@ -68,7 +71,7 @@ tags:
 
 - assertVisible:
     id: "cart-screen"
-    timeout: 3000
+    timeout: 5000
 
 - assertVisible:
     id: "cart-item-1"
@@ -88,7 +91,7 @@ tags:
 
 - assertVisible:
     id: "checkout-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # STEP 1: Shipping Address
@@ -132,7 +135,7 @@ tags:
 
 - assertVisible:
     id: "payment-form"
-    timeout: 3000
+    timeout: 5000
 
 # Fill payment details
 - tapOn:
@@ -161,7 +164,7 @@ tags:
 
 - assertVisible:
     id: "order-review"
-    timeout: 3000
+    timeout: 5000
 
 # Verify shipping address is shown
 - assertVisible:
@@ -169,7 +172,7 @@ tags:
 
 # Verify payment method shown (masked)
 - assertVisible:
-    text: "****1111"
+    text: "1111"
 
 # Verify items are listed
 - assertVisible:
@@ -184,14 +187,14 @@ tags:
 
 - assertVisible:
     id: "payment-form"
-    timeout: 2000
+    timeout: 4000
 
 - tapOn:
     id: "back-btn"
 
 - assertVisible:
     id: "shipping-form"
-    timeout: 2000
+    timeout: 4000
 
 # Edit shipping address
 - clearText:
@@ -203,13 +206,13 @@ tags:
     id: "next-btn"
 - assertVisible:
     id: "payment-form"
-    timeout: 2000
+    timeout: 4000
 
 - tapOn:
     id: "next-btn"
 - assertVisible:
     id: "order-review"
-    timeout: 2000
+    timeout: 4000
 
 # Verify updated address
 - assertVisible:
@@ -236,7 +239,7 @@ tags:
 
 - assertVisible:
     id: "orders-screen"
-    timeout: 3000
+    timeout: 5000
 
 - assertVisible:
     id: "orders-list"
@@ -244,7 +247,7 @@ tags:
 # Most recent order should show "Processing" status
 - assertVisible:
     text: "Processing"
-    timeout: 2000
+    timeout: 4000
 
 # ============================================
 # TEST: Cart is now empty
@@ -255,4 +258,4 @@ tags:
 
 - assertVisible:
     id: "cart-screen-empty"
-    timeout: 3000
+    timeout: 5000

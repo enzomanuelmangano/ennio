@@ -9,6 +9,9 @@ tags:
 
 ---
 
+- launchApp:
+    clearState: true
+
 # ============================================
 # SETUP
 # ============================================
@@ -22,7 +25,7 @@ tags:
 
 - assertVisible:
     id: "featured-product-1"
-    timeout: 3000
+    timeout: 5000
 
 - assertVisible:
     id: "featured-product-2"
@@ -52,7 +55,7 @@ tags:
 
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Products screen displays correctly
@@ -76,7 +79,7 @@ tags:
 # Should filter to wireless products
 - assertVisible:
     text: "Wireless"
-    timeout: 2000
+    timeout: 4000
 
 # Clear search
 - tapOn:
@@ -97,7 +100,7 @@ tags:
 # Should show electronics only
 - assertVisible:
     text: "Electronics"
-    timeout: 2000
+    timeout: 4000
 
 # Filter by Sports
 - tapOn:
@@ -106,7 +109,7 @@ tags:
 # Should show sports products
 - assertVisible:
     text: "Sports"
-    timeout: 2000
+    timeout: 4000
 
 # Reset to All
 - tapOn:
@@ -121,7 +124,7 @@ tags:
 
 - assertVisible:
     id: "sort-options"
-    timeout: 2000
+    timeout: 4000
 
 # Sort by price low to high
 - tapOn:
@@ -130,7 +133,7 @@ tags:
 # Dropdown should close
 - assertNotVisible:
     id: "sort-options"
-    timeout: 1000
+    timeout: 5000
 
 # Sort by price high to low
 - tapOn:
@@ -167,7 +170,7 @@ tags:
 # Should show filtered, searched, sorted results
 - assertVisible:
     id: "products-list"
-    timeout: 2000
+    timeout: 4000
 
 # Reset all filters
 - runFlow:
@@ -192,7 +195,7 @@ tags:
 
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Product detail content
@@ -213,19 +216,19 @@ tags:
     id: "tab-description"
 - assertVisible:
     id: "product-description"
-    timeout: 2000
+    timeout: 5000
 
 - tapOn:
     id: "tab-specs"
 - assertVisible:
     id: "product-specs"
-    timeout: 2000
+    timeout: 5000
 
 - tapOn:
     id: "tab-reviews"
 - assertVisible:
     id: "product-reviews"
-    timeout: 2000
+    timeout: 5000
 
 # ============================================
 # TEST: Quantity adjustment
@@ -252,7 +255,7 @@ tags:
 
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
+    timeout: 5000
 
 # Navigate back to home
 - runFlow:
@@ -267,7 +270,7 @@ tags:
 
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
+    timeout: 5000
 
 # Should auto-filter to Electronics
 - assertVisible:

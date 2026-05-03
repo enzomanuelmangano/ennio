@@ -111,22 +111,18 @@ export default function CartScreen() {
   const router = useRouter();
 
   const handleCheckout = () => {
-    if (!isAuthenticated) {
-      Alert.alert(
-        'Sign In Required',
-        'Please sign in to proceed with checkout',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Sign In', onPress: () => router.push('/auth/login') },
-        ]
-      );
-      return;
-    }
     router.push('/checkout');
   };
 
   const handleClearCart = () => {
-    clearCart();
+    Alert.alert(
+      'Clear Cart',
+      'Remove all items from your cart?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: () => clearCart() },
+      ],
+    );
   };
 
   if (items.length === 0) {

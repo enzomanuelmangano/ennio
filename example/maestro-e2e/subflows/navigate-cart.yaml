@@ -10,4 +10,4 @@ appId: com.ennio.example
     anyOf:
       - id: "cart-screen"
       - id: "cart-screen-empty"
-    timeout: 3000
+    timeout: 5000

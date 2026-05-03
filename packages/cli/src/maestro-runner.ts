@@ -324,24 +324,39 @@ class MaestroExecutor {
    * Tap on element
    * Also handles tapping native alert buttons for text-based selectors
    */
+  /**
+   * Best-effort tap on a native alert/action-sheet button by exact title.
+   * Polls up to `pollMs` (~30ms granularity) so callers can race the alert
+   * presentation. Returns true only if the button was actually tapped.
+   */
+  private async tryTapAlertButton(buttonText: string, pollMs: number): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < pollMs) {
+      if (await this.client.isAlertPresent()) {
+        const buttons = await this.client.getAlertButtons();
+        if (buttons.includes(buttonText)) {
+          this.log(`(tapping alert button: "${buttonText}")`);
+          const ok = await this.client.tapAlertButton(buttonText);
+          if (!ok) {
+            throw new Error(`Alert button tap failed: ${buttonText}`);
+          }
+          await this.sleep(150);
+          return true;
+        }
+      }
+      await this.sleep(30);
+    }
+    return false;
+  }
+
   private async tap(selector: MaestroSelector): Promise<void> {
     const ennioSelector = toEnnioSelector(selector);
 
-    // Check if this is an alert button tap (text-only selector)
+    // Text-only selectors: try alert button tap first. Polls briefly because
+    // Alert.alert presentation has a small animation lag after the trigger tap.
     if (selector.text && !selector.id) {
-      const alertPresent = await this.client.isAlertPresent();
-      if (alertPresent) {
-        const buttons = await this.client.getAlertButtons();
-        if (buttons.includes(selector.text)) {
-          this.log(`(tapping alert button: "${selector.text}")`);
-          const ok = await this.client.tapAlertButton(selector.text);
-          if (!ok) {
-            throw new Error(`Alert button tap failed: ${selector.text}`);
-          }
-          await this.sleep(100);
-          return;
-        }
-      }
+      const ok = await this.tryTapAlertButton(selector.text, 800);
+      if (ok) return;
     }
 
     // Wait for element to exist
@@ -569,6 +584,29 @@ class MaestroExecutor {
   async executeCommand(cmd: MaestroCommand): Promise<void> {
     // Preprocess command to evaluate ${} expressions
     const processedCmd = preprocessCommand(cmd, this.jsContext);
+
+    // YAML may produce string-form commands (e.g. `- back`) or null entries.
+    // Handle them before any `in` operator runs against a non-object.
+    if (processedCmd == null) return;
+    if (typeof processedCmd === 'string') {
+      if (processedCmd === 'back') {
+        await this.client.backGesture();
+        await this.sleep(150);
+        return;
+      }
+      if (processedCmd === 'hideKeyboard') {
+        await this.client.hideKeyboard();
+        return;
+      }
+      if (processedCmd === 'pasteText') {
+        await this.client.pasteFromClipboard();
+        return;
+      }
+      throw new Error(`Unknown string command: ${processedCmd}`);
+    }
+    if (typeof processedCmd !== 'object') {
+      throw new Error(`Unsupported command type: ${typeof processedCmd}`);
+    }
 
     // evalScript
     if ('evalScript' in processedCmd) {

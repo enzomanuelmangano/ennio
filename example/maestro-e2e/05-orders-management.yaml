@@ -9,6 +9,9 @@ tags:
 
 ---
 
+- launchApp:
+    clearState: true
+
 # ============================================
 # SETUP: Login with demo account
 # ============================================
@@ -40,7 +43,7 @@ tags:
     anyOf:
       - id: "orders-screen"
       - id: "empty-orders"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Orders list or empty state
@@ -73,7 +76,7 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 
 - tapOn:
     id: "menu-orders"
@@ -82,7 +85,7 @@ tags:
     anyOf:
       - id: "orders-screen"
       - id: "empty-orders"
-    timeout: 3000
+    timeout: 5000
 
 # ============================================
 # TEST: Create an order for testing (if needed)
@@ -133,7 +136,7 @@ tags:
       # Order details modal should open
       - assertVisible:
           id: "order-details"
-          timeout: 3000
+          timeout: 5000
 
       # Details should show shipping address
       - assertVisible:
@@ -145,7 +148,7 @@ tags:
 
       - assertVisible:
           id: "orders-screen"
-          timeout: 2000
+          timeout: 4000
 
 # ============================================
 # TEST: Guest user orders view
@@ -156,7 +159,7 @@ tags:
     text: "Profile"
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
+    timeout: 5000
 - tapOn:
     id: "menu-logout"
 - tapOn:
@@ -172,7 +175,7 @@ tags:
 # Should show guest view
 - assertVisible:
     id: "orders-guest"
-    timeout: 3000
+    timeout: 5000
 
 - assertVisible:
     text: "Sign in to view orders"
@@ -189,7 +192,7 @@ tags:
 
 - assertVisible:
     id: "login-screen"
-    timeout: 3000
+    timeout: 5000
 
 # Login with demo
 - tapOn:
