@@ -1,0 +1,11 @@
+# Subflow: Navigate to home screen
+
+appId: com.ennio.example
+
+---
+
+- tapOn:
+    text: "Home"
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000

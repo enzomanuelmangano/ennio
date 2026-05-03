@@ -1,0 +1,24 @@
+{
+  "$schema": "https://nitro.margelo.com/nitro.schema.json",
+  "cxxNamespace": ["ennio"],
+  "ios": {
+    "iosModuleName": "EnnioCore"
+  },
+  "android": {
+    "androidNamespace": ["ennio"],
+    "androidCxxLibName": "EnnioCore"
+  },
+  "autolinking": {
+    "Ennio": {
+      "ios": {
+        "language": "c++",
+        "implementationClassName": "HybridEnnio"
+      },
+      "android": {
+        "language": "c++",
+        "implementationClassName": "HybridEnnio"
+      }
+    }
+  },
+  "ignorePaths": ["node_modules"]
+}

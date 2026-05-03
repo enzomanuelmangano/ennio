@@ -1,0 +1,429 @@
+# Test: Full End-to-End Purchase Flow
+# Complete journey from browse to order delivery
+
+appId: com.ennio.example
+name: "Full Purchase Flow"
+tags:
+  - e2e
+  - critical
+  - purchase
+
+---
+
+- launchApp:
+    clearState: true
+
+# ============================================
+# PHASE 1: Fresh Start
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# Logout if logged in
+- runFlow:
+    when:
+      notVisible:
+        id: "home-signin-btn"
+    commands:
+      - tapOn:
+          text: "Profile"
+      - tapOn:
+          id: "menu-logout"
+      - tapOn:
+          text: "Sign Out"
+      - runFlow:
+          file: subflows/navigate-home.yaml
+
+# Clear cart if has items
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- runFlow:
+    when:
+      visible:
+        id: "clear-cart-btn"
+    commands:
+      - tapOn:
+          id: "clear-cart-btn"
+      - tapOn:
+          text: "Clear"
+
+# ============================================
+# PHASE 2: Browse as Guest
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# Explore featured products
+- assertVisible:
+    id: "featured-product-1"
+    timeout: 3000
+
+# Navigate via category
+- tapOn:
+    id: "category-electronics"
+
+- assertVisible:
+    id: "products-screen"
+    timeout: 3000
+
+# Search for specific product
+- tapOn:
+    id: "search-input"
+- inputText: "Wireless"
+
+- assertVisible:
+    text: "Wireless"
+    timeout: 2000
+
+# ============================================
+# PHASE 3: Add Multiple Products to Cart
+# ============================================
+
+# Add first search result
+- tapOn:
+    id: "product-card-1"
+
+- assertVisible:
+    id: "product-detail-screen"
+    timeout: 3000
+
+# Check product details
+- assertVisible:
+    id: "product-title"
+- assertVisible:
+    id: "product-price"
+
+# View description tab
+- tapOn:
+    id: "tab-description"
+- assertVisible:
+    id: "product-description"
+
+# Add 2 of this item
+- tapOn:
+    id: "increase-quantity"
+- tapOn:
+    id: "add-to-cart-btn"
+
+# Continue shopping
+- tapOn:
+    text: "Continue Shopping"
+
+# Back to products
+- back
+- assertVisible:
+    id: "products-screen"
+    timeout: 3000
+
+# Clear search and find another product
+- tapOn:
+    id: "clear-search"
+- tapOn:
+    id: "filter-category-sports"
+
+# Add another product from grid
+- tapOn:
+    id: "add-to-cart-1"
+
+# ============================================
+# PHASE 4: Review Cart
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    id: "cart-screen"
+    timeout: 3000
+
+# Should have multiple items
+- assertVisible:
+    id: "cart-items-list"
+- assertVisible:
+    id: "cart-summary"
+- assertVisible:
+    id: "cart-total"
+
+# Adjust quantity in cart
+- tapOn:
+    id: "increase-qty-1"
+- tapOn:
+    id: "decrease-qty-1"
+
+# ============================================
+# PHASE 5: Attempt Checkout as Guest
+# ============================================
+
+- tapOn:
+    id: "checkout-btn"
+
+# Should prompt for sign in
+- assertVisible:
+    text: "Sign In"
+    timeout: 2000
+
+- tapOn:
+    text: "Sign In"
+
+# ============================================
+# PHASE 6: Registration Flow
+# ============================================
+
+- assertVisible:
+    id: "login-screen"
+    timeout: 3000
+
+# Go to register
+- tapOn:
+    id: "go-to-register"
+
+- assertVisible:
+    id: "register-screen"
+    timeout: 3000
+
+# Complete registration
+- tapOn:
+    id: "name-input"
+- inputText: "Jane Smith"
+
+- tapOn:
+    id: "email-input"
+- inputText: "jane.smith@example.com"
+
+- tapOn:
+    id: "password-input"
+- inputText: "securepass123"
+
+- tapOn:
+    id: "confirm-password-input"
+- inputText: "securepass123"
+
+- tapOn:
+    id: "accept-terms"
+
+- tapOn:
+    id: "register-btn"
+
+# Should be logged in
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000
+
+# ============================================
+# PHASE 7: Cart Still Has Items
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    id: "cart-screen"
+    timeout: 3000
+
+# Items should still be there
+- assertVisible:
+    id: "cart-items-list"
+
+# ============================================
+# PHASE 8: Complete Checkout
+# ============================================
+
+- tapOn:
+    id: "checkout-btn"
+
+- assertVisible:
+    id: "checkout-screen"
+    timeout: 3000
+
+# STEP 1: Shipping
+- assertVisible:
+    id: "shipping-form"
+
+- tapOn:
+    id: "shipping-name"
+- inputText: "Jane Smith"
+
+- tapOn:
+    id: "shipping-street"
+- inputText: "789 Pine Street"
+
+- tapOn:
+    id: "shipping-city"
+- inputText: "Los Angeles"
+
+- tapOn:
+    id: "shipping-state"
+- inputText: "CA"
+
+- tapOn:
+    id: "shipping-zip"
+- inputText: "90001"
+
+- tapOn:
+    id: "shipping-phone"
+- inputText: "310-555-0199"
+
+- tapOn:
+    id: "next-btn"
+
+# STEP 2: Payment
+- assertVisible:
+    id: "payment-form"
+    timeout: 3000
+
+- tapOn:
+    id: "payment-card-number"
+- inputText: "5555555555554444"
+
+- tapOn:
+    id: "payment-cardholder"
+- inputText: "Jane Smith"
+
+- tapOn:
+    id: "payment-expiry"
+- inputText: "06/27"
+
+- tapOn:
+    id: "payment-cvv"
+- inputText: "321"
+
+- tapOn:
+    id: "next-btn"
+
+# STEP 3: Review
+- assertVisible:
+    id: "order-review"
+    timeout: 3000
+
+# Verify shipping shown
+- assertVisible:
+    text: "789 Pine Street"
+
+# Verify payment masked
+- assertVisible:
+    text: "****4444"
+
+# Place the order
+- tapOn:
+    id: "place-order-btn"
+
+# ============================================
+# PHASE 9: Order Confirmation
+# ============================================
+
+- assertVisible:
+    text: "Order Placed"
+    timeout: 5000
+
+- tapOn:
+    text: "View Orders"
+
+# ============================================
+# PHASE 10: Verify Order in History
+# ============================================
+
+- assertVisible:
+    id: "orders-screen"
+    timeout: 3000
+
+- assertVisible:
+    id: "orders-list"
+
+# Latest order should be at top
+- assertVisible:
+    text: "Processing"
+
+# View order details
+- tapOn:
+    below:
+      text: "Order"
+    index: 0
+
+- assertVisible:
+    id: "order-details"
+    timeout: 3000
+
+# Verify order contains our items
+- assertVisible:
+    text: "789 Pine Street"
+
+- tapOn:
+    id: "close-details"
+
+# ============================================
+# PHASE 11: Cart is Empty
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    id: "cart-screen-empty"
+    timeout: 3000
+
+# ============================================
+# PHASE 12: Continue Shopping
+# ============================================
+
+- tapOn:
+    id: "browse-products-btn"
+
+- assertVisible:
+    id: "products-screen"
+    timeout: 3000
+
+# ============================================
+# PHASE 13: Quick Reorder Flow
+# ============================================
+
+# Add another product quickly from home
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- tapOn:
+    id: "add-to-cart-featured-2"
+
+# Verify cart updated
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    id: "cart-screen"
+    timeout: 3000
+
+# Clear for next test
+- tapOn:
+    id: "clear-cart-btn"
+- tapOn:
+    text: "Clear"
+
+# ============================================
+# PHASE 14: Verify User Stats Updated
+# ============================================
+
+- tapOn:
+    text: "Profile"
+
+- assertVisible:
+    id: "profile-screen"
+    timeout: 3000
+
+# Stats should reflect the order
+- assertVisible:
+    id: "stats-card"
+
+# ============================================
+# CLEANUP: Logout
+# ============================================
+
+- tapOn:
+    id: "menu-logout"
+- tapOn:
+    text: "Sign Out"
+
+- assertVisible:
+    id: "guest-view"
+    timeout: 3000

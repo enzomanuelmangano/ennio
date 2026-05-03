@@ -1,0 +1,11 @@
+# Subflow: Navigate to products screen
+
+appId: com.ennio.example
+
+---
+
+- tapOn:
+    text: "Products"
+- assertVisible:
+    id: "products-screen"
+    timeout: 5000

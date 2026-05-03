@@ -1,0 +1,237 @@
+# Test: Cart Management Flow
+# Tests add/remove items, quantity updates, cart summary
+
+appId: com.ennio.example
+name: "Cart Management"
+tags:
+  - cart
+  - critical
+
+---
+
+- launchApp:
+    clearState: true
+
+# ============================================
+# SETUP: Clear any existing cart items
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+# Clear cart if not empty
+- runFlow:
+    when:
+      visible:
+        id: "clear-cart-btn"
+    commands:
+      - tapOn:
+          id: "clear-cart-btn"
+      - tapOn:
+          text: "Clear"
+
+# ============================================
+# TEST: Empty cart state
+# ============================================
+
+- assertVisible:
+    id: "cart-screen-empty"
+    timeout: 5000
+
+- assertVisible:
+    text: "Your cart is empty"
+
+- assertVisible:
+    id: "browse-products-btn"
+
+# ============================================
+# TEST: Navigate to products from empty cart
+# ============================================
+
+- tapOn:
+    id: "browse-products-btn"
+
+- assertVisible:
+    id: "products-screen"
+    timeout: 5000
+
+# ============================================
+# TEST: Add product to cart from products list
+# ============================================
+
+- tapOn:
+    id: "add-to-cart-1"
+
+# Cart badge should update (if visible)
+# Navigate to cart to verify
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    id: "cart-screen"
+    timeout: 5000
+
+- assertVisible:
+    id: "cart-item-1"
+
+# ============================================
+# TEST: Add product from product detail
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-products.yaml
+
+- tapOn:
+    id: "product-card-2"
+
+- assertVisible:
+    id: "product-detail-screen"
+    timeout: 5000
+
+# Increase quantity before adding
+- tapOn:
+    id: "increase-quantity"
+- tapOn:
+    id: "increase-quantity"
+
+- tapOn:
+    id: "add-to-cart-btn"
+
+# Handle alert
+- assertVisible:
+    text: "Added to Cart"
+    timeout: 4000
+- tapOn:
+    text: "View Cart"
+
+# ============================================
+# TEST: Cart has multiple items
+# ============================================
+
+- assertVisible:
+    id: "cart-screen"
+    timeout: 5000
+
+- assertVisible:
+    id: "cart-item-1"
+- assertVisible:
+    id: "cart-item-2"
+
+# ============================================
+# TEST: Update quantity in cart
+# ============================================
+
+# Increase quantity of first item
+- tapOn:
+    id: "increase-qty-1"
+
+# Verify quantity updated
+- assertVisible:
+    id: "qty-1"
+
+# Decrease quantity
+- tapOn:
+    id: "decrease-qty-1"
+
+# ============================================
+# TEST: Cart summary updates
+# ============================================
+
+- assertVisible:
+    id: "cart-summary"
+- assertVisible:
+    id: "cart-total"
+
+# ============================================
+# TEST: Remove single item
+# ============================================
+
+- tapOn:
+    id: "remove-item-2"
+
+# Item 2 should be gone
+- assertNotVisible:
+    id: "cart-item-2"
+    timeout: 4000
+
+# Item 1 should still be there
+- assertVisible:
+    id: "cart-item-1"
+
+# ============================================
+# TEST: Add more items from home featured
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- tapOn:
+    id: "add-to-cart-featured-3"
+
+# Navigate back to cart
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    id: "cart-item-3"
+    timeout: 5000
+
+# ============================================
+# TEST: Clear entire cart
+# ============================================
+
+- tapOn:
+    id: "clear-cart-btn"
+
+# Confirm clear
+- assertVisible:
+    text: "Clear Cart"
+    timeout: 4000
+- tapOn:
+    text: "Clear"
+
+# Should show empty state
+- assertVisible:
+    id: "cart-screen-empty"
+    timeout: 5000
+
+# ============================================
+# TEST: Add from trending products
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# Scroll to trending section
+- scroll:
+    direction: DOWN
+    amount: 300
+
+- tapOn:
+    id: "trending-product-4"
+
+- assertVisible:
+    id: "product-detail-screen"
+    timeout: 5000
+
+- tapOn:
+    id: "add-to-cart-btn"
+
+- tapOn:
+    text: "View Cart"
+
+- scrollUntilVisible:
+    element:
+      id: "cart-item-4"
+    timeout: 8000
+
+- assertVisible:
+    id: "cart-item-4"
+    timeout: 5000
+
+# ============================================
+# TEST: Checkout button visible
+# ============================================
+
+- assertVisible:
+    id: "checkout-btn"

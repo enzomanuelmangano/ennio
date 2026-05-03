@@ -1,0 +1,46 @@
+# Test: Simple Authentication Flow
+# Tests demo login only
+
+appId: com.ennio.example
+name: "Authentication Flow"
+tags:
+  - auth
+  - critical
+
+---
+
+- launchApp:
+    clearState: true
+
+# ============================================
+# Navigate to home
+# ============================================
+
+- tapOn:
+    text: "Home"
+
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000
+
+# ============================================
+# TEST: Demo login flow
+# ============================================
+
+# Tap sign in button on home
+- tapOn:
+    id: "home-signin-btn"
+
+# Wait for login screen
+- assertVisible:
+    id: "login-screen"
+    timeout: 5000
+
+# Use demo login
+- tapOn:
+    id: "demo-login-btn"
+
+# Should return to home with greeting
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000

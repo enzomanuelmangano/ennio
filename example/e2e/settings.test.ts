@@ -1,4 +1,4 @@
-import { element, sleep, runTest } from '@tasto/test';
+import { element, sleep, runTest } from '@ennio/test';
 import { goHome } from './shared';
 
 await runTest('should navigate to settings', async () => {

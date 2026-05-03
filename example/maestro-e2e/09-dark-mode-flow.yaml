@@ -1,0 +1,249 @@
+# Test: Dark Mode Flow
+# Tests dark mode toggle and persistence across screens
+
+appId: com.ennio.example
+name: "Dark Mode Flow"
+tags:
+  - dark-mode
+  - appearance
+
+---
+
+- launchApp:
+    clearState: true
+
+# ============================================
+# SETUP: Ensure light mode
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- tapOn:
+    id: "quick-action-settings"
+
+- assertVisible:
+    id: "settings-screen"
+    timeout: 5000
+
+# Ensure dark mode is off first
+# (We'll toggle twice to ensure consistent state)
+- tapOn:
+    id: "toggle-dark-mode"
+- tapOn:
+    id: "toggle-dark-mode"
+
+# ============================================
+# TEST: Enable dark mode
+# ============================================
+
+- tapOn:
+    id: "toggle-dark-mode"
+
+# Settings screen should update
+- assertVisible:
+    id: "settings-screen"
+
+# ============================================
+# TEST: Dark mode persists on home
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000
+
+# Home should be in dark mode
+- assertVisible:
+    id: "featured-product-1"
+
+# ============================================
+# TEST: Dark mode on products screen
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-products.yaml
+
+- assertVisible:
+    id: "products-screen"
+    timeout: 5000
+
+- assertVisible:
+    id: "search-input"
+- assertVisible:
+    id: "products-list"
+
+# ============================================
+# TEST: Dark mode on product detail
+# ============================================
+
+- tapOn:
+    id: "product-card-1"
+
+- assertVisible:
+    id: "product-detail-screen"
+    timeout: 5000
+
+- assertVisible:
+    id: "product-title"
+- assertVisible:
+    id: "add-to-cart-btn"
+
+- back
+
+# ============================================
+# TEST: Dark mode on cart
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    anyOf:
+      - id: "cart-screen"
+      - id: "cart-screen-empty"
+    timeout: 5000
+
+# ============================================
+# TEST: Dark mode on profile (guest)
+# ============================================
+
+- tapOn:
+    text: "Profile"
+
+- assertVisible:
+    anyOf:
+      - id: "profile-screen"
+      - id: "guest-view"
+    timeout: 5000
+
+# ============================================
+# TEST: Dark mode on login screen
+# ============================================
+
+- runFlow:
+    when:
+      visible:
+        id: "guest-view"
+    commands:
+      - tapOn:
+          id: "guest-signin-btn"
+      - assertVisible:
+          id: "login-screen"
+          timeout: 5000
+      - assertVisible:
+          id: "email-input"
+      - assertVisible:
+          id: "login-btn"
+      - back
+
+# ============================================
+# TEST: Toggle dark mode off
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- tapOn:
+    id: "quick-action-settings"
+
+- assertVisible:
+    id: "settings-screen"
+    timeout: 5000
+
+- tapOn:
+    id: "toggle-dark-mode"
+
+# ============================================
+# TEST: Light mode restored on all screens
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000
+
+- runFlow:
+    file: subflows/navigate-products.yaml
+
+- assertVisible:
+    id: "products-screen"
+    timeout: 5000
+
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    anyOf:
+      - id: "cart-screen"
+      - id: "cart-screen-empty"
+    timeout: 5000
+
+# ============================================
+# TEST: Dark mode with authenticated user
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# Login
+- runFlow:
+    when:
+      visible:
+        id: "home-signin-btn"
+    commands:
+      - tapOn:
+          id: "home-signin-btn"
+      - tapOn:
+          id: "demo-login-btn"
+
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000
+
+# Enable dark mode
+- tapOn:
+    id: "quick-action-settings"
+- tapOn:
+    id: "toggle-dark-mode"
+
+# Check profile in dark mode
+- tapOn:
+    text: "Profile"
+
+- assertVisible:
+    id: "profile-screen"
+    timeout: 5000
+
+- assertVisible:
+    id: "profile-header"
+
+# Check orders in dark mode
+- tapOn:
+    id: "menu-orders"
+
+- assertVisible:
+    anyOf:
+      - id: "orders-screen"
+      - id: "empty-orders"
+    timeout: 5000
+
+# ============================================
+# CLEANUP: Restore light mode
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+- tapOn:
+    id: "quick-action-settings"
+
+- tapOn:
+    id: "toggle-dark-mode"
+
+- assertVisible:
+    id: "settings-screen"

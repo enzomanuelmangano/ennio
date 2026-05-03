@@ -1,0 +1,24 @@
+# Subflow: Add first available product to cart from products screen
+# Assumes already on products screen
+
+appId: com.ennio.example
+
+---
+
+# Tap first product card to view details
+- tapOn:
+    id: "product-card-1"
+- assertVisible:
+    id: "product-detail-screen"
+    timeout: 3000
+
+# Add to cart
+- tapOn:
+    id: "add-to-cart-btn"
+
+# Handle the alert
+- assertVisible:
+    text: "Added to Cart"
+    timeout: 2000
+- tapOn:
+    text: "Continue Shopping"

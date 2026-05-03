@@ -358,7 +358,7 @@ export default function SettingsScreen() {
           <SettingButton
             icon="❓"
             label="Help & Support"
-            onPress={() => Alert.alert('Help', 'Contact us at support@tasto.example')}
+            onPress={() => Alert.alert('Help', 'Contact us at support@ennio.example')}
             darkMode={darkMode}
             testID="help"
           />

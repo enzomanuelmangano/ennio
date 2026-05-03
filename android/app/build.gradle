@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.reactiive.tasto'
+    namespace 'com.reactiive.ennio'
     defaultConfig {
-        applicationId 'com.reactiive.tasto'
+        applicationId 'com.reactiive.ennio'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

@@ -1,0 +1,261 @@
+# Test: Complete Checkout Flow
+# Tests multi-step checkout: shipping, payment, review, order
+
+appId: com.ennio.example
+name: "Checkout Flow"
+tags:
+  - checkout
+  - critical
+  - auth-required
+
+---
+
+- launchApp:
+    clearState: true
+
+# ============================================
+# SETUP: Login and add items to cart
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# Login with demo account
+- runFlow:
+    when:
+      visible:
+        id: "home-signin-btn"
+    commands:
+      - tapOn:
+          id: "home-signin-btn"
+      - tapOn:
+          id: "demo-login-btn"
+      - assertVisible:
+          id: "home-screen"
+          timeout: 5000
+
+# Clear cart first
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- runFlow:
+    when:
+      visible:
+        id: "clear-cart-btn"
+    commands:
+      - tapOn:
+          id: "clear-cart-btn"
+      - tapOn:
+          text: "Clear"
+
+# Add products to cart
+- runFlow:
+    file: subflows/navigate-products.yaml
+
+- tapOn:
+    id: "add-to-cart-1"
+
+- tapOn:
+    id: "product-card-2"
+- assertVisible:
+    id: "product-detail-screen"
+    timeout: 5000
+- tapOn:
+    id: "add-to-cart-btn"
+- tapOn:
+    text: "View Cart"
+
+# ============================================
+# TEST: Cart shows items before checkout
+# ============================================
+
+- assertVisible:
+    id: "cart-screen"
+    timeout: 5000
+
+- assertVisible:
+    id: "cart-item-1"
+- assertVisible:
+    id: "cart-item-2"
+- assertVisible:
+    id: "cart-summary"
+- assertVisible:
+    id: "checkout-btn"
+
+# ============================================
+# TEST: Start checkout
+# ============================================
+
+- tapOn:
+    id: "checkout-btn"
+
+- assertVisible:
+    id: "checkout-screen"
+    timeout: 5000
+
+# ============================================
+# STEP 1: Shipping Address
+# ============================================
+
+- assertVisible:
+    id: "shipping-form"
+
+# Fill shipping details
+- tapOn:
+    id: "shipping-name"
+- inputText: "John Doe"
+
+- tapOn:
+    id: "shipping-street"
+- inputText: "123 Main Street"
+
+- tapOn:
+    id: "shipping-city"
+- inputText: "San Francisco"
+
+- tapOn:
+    id: "shipping-state"
+- inputText: "CA"
+
+- tapOn:
+    id: "shipping-zip"
+- inputText: "94105"
+
+- tapOn:
+    id: "shipping-phone"
+- inputText: "415-555-0123"
+
+# Go to next step
+- tapOn:
+    id: "next-btn"
+
+# ============================================
+# STEP 2: Payment Details
+# ============================================
+
+- assertVisible:
+    id: "payment-form"
+    timeout: 5000
+
+# Fill payment details
+- tapOn:
+    id: "payment-card-number"
+- inputText: "4111111111111111"
+
+- tapOn:
+    id: "payment-cardholder"
+- inputText: "John Doe"
+
+- tapOn:
+    id: "payment-expiry"
+- inputText: "12/25"
+
+- tapOn:
+    id: "payment-cvv"
+- inputText: "123"
+
+# Go to next step
+- tapOn:
+    id: "next-btn"
+
+# ============================================
+# STEP 3: Order Review
+# ============================================
+
+- assertVisible:
+    id: "order-review"
+    timeout: 5000
+
+# Verify shipping address is shown
+- assertVisible:
+    text: "123 Main Street"
+
+# Verify payment method shown (masked)
+- assertVisible:
+    text: "1111"
+
+# Verify items are listed
+- assertVisible:
+    id: "cart-summary"
+
+# ============================================
+# TEST: Go back to edit shipping
+# ============================================
+
+- tapOn:
+    id: "back-btn"
+
+- assertVisible:
+    id: "payment-form"
+    timeout: 4000
+
+- tapOn:
+    id: "back-btn"
+
+- assertVisible:
+    id: "shipping-form"
+    timeout: 4000
+
+# Edit shipping address
+- clearText:
+    id: "shipping-street"
+- inputText: "456 Oak Avenue"
+
+# Go forward again
+- tapOn:
+    id: "next-btn"
+- assertVisible:
+    id: "payment-form"
+    timeout: 4000
+
+- tapOn:
+    id: "next-btn"
+- assertVisible:
+    id: "order-review"
+    timeout: 4000
+
+# Verify updated address
+- assertVisible:
+    text: "456 Oak Avenue"
+
+# ============================================
+# TEST: Place order
+# ============================================
+
+- tapOn:
+    id: "place-order-btn"
+
+# Success alert
+- assertVisible:
+    text: "Order Placed"
+    timeout: 5000
+
+- tapOn:
+    text: "View Orders"
+
+# ============================================
+# TEST: Order appears in orders list
+# ============================================
+
+- assertVisible:
+    id: "orders-screen"
+    timeout: 5000
+
+- assertVisible:
+    id: "orders-list"
+
+# Most recent order should show "Processing" status
+- assertVisible:
+    text: "Processing"
+    timeout: 4000
+
+# ============================================
+# TEST: Cart is now empty
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-cart.yaml
+
+- assertVisible:
+    id: "cart-screen-empty"
+    timeout: 5000

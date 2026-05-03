@@ -1,0 +1,22 @@
+# Subflow: Clear cart if not empty
+
+appId: com.ennio.example
+
+---
+
+- runFlow:
+    file: navigate-cart.yaml
+
+# Only clear if cart has items
+- runFlow:
+    when:
+      visible:
+        id: "clear-cart-btn"
+    commands:
+      - tapOn:
+          id: "clear-cart-btn"
+      - tapOn:
+          text: "Clear"
+      - assertVisible:
+          id: "cart-screen-empty"
+          timeout: 2000

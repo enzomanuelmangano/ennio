@@ -3,22 +3,22 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Expo config plugin for Tasto E2E testing
+ * Expo config plugin for Ennio E2E testing
  *
- * This plugin conditionally includes the @tasto/nitro native module.
+ * This plugin conditionally includes the @ennio/core native module.
  * By default, it's only included in non-production builds.
  *
  * Usage:
  *   // app.json - include in all builds
- *   ["@tasto/expo-plugin"]
+ *   ["@ennio/expo-plugin"]
  *
  *   // app.json - configure options
- *   ["@tasto/expo-plugin", { "enabled": true }]
+ *   ["@ennio/expo-plugin", { "enabled": true }]
  *
- * Set TASTO_ENABLED=0 environment variable to disable at prebuild time.
+ * Set ENNIO_ENABLED=0 environment variable to disable at prebuild time.
  */
 
-function withTastoIOS(config) {
+function withEnnioIOS(config) {
   return withDangerousMod(config, [
     'ios',
     async (config) => {
@@ -34,20 +34,20 @@ function withTastoIOS(config) {
       let podfile = fs.readFileSync(podfilePath, 'utf-8');
 
       // Check if already modified
-      if (podfile.includes('# Tasto E2E Testing')) {
+      if (podfile.includes('# Ennio E2E Testing')) {
         return config;
       }
 
       // Add conditional pod inclusion before post_install block
       // Support both standard and monorepo layouts
-      const tastoConfig = `
-  # Tasto E2E Testing - conditionally included
-  # Set TASTO_ENABLED=0 to disable
-  if ENV['TASTO_ENABLED'] != '0'
+      const ennioConfig = `
+  # Ennio E2E Testing - conditionally included
+  # Set ENNIO_ENABLED=0 to disable
+  if ENV['ENNIO_ENABLED'] != '0'
     # Try standard layout first, then monorepo layout
-    tasto_path = File.join(__dir__, '..', 'node_modules', '@tasto', 'nitro')
-    tasto_path = File.join(__dir__, '..', '..', 'node_modules', '@tasto', 'nitro') unless File.exist?(tasto_path)
-    pod 'TastoNitro', :path => tasto_path if File.exist?(tasto_path)
+    ennio_path = File.join(__dir__, '..', 'node_modules', '@ennio', 'core')
+    ennio_path = File.join(__dir__, '..', '..', 'node_modules', '@ennio', 'core') unless File.exist?(ennio_path)
+    pod 'EnnioCore', :path => ennio_path if File.exist?(ennio_path)
   end
 
 `;
@@ -58,7 +58,7 @@ function withTastoIOS(config) {
       if (postInstallMatch) {
         podfile = podfile.replace(
           postInstallMatch[0],
-          postInstallMatch[1] + tastoConfig + postInstallMatch[2]
+          postInstallMatch[1] + ennioConfig + postInstallMatch[2]
         );
       } else {
         // Fallback: try to add before final 'end' of the target block
@@ -66,20 +66,20 @@ function withTastoIOS(config) {
         if (targetEndMatch) {
           podfile = podfile.replace(
             targetEndMatch[0],
-            targetEndMatch[1] + '\n' + tastoConfig + targetEndMatch[2]
+            targetEndMatch[1] + '\n' + ennioConfig + targetEndMatch[2]
           );
         }
       }
 
       fs.writeFileSync(podfilePath, podfile);
-      console.log('[Tasto] Added conditional pod to Podfile');
+      console.log('[Ennio] Added conditional pod to Podfile');
 
       return config;
     },
   ]);
 }
 
-function withTastoAndroid(config) {
+function withEnnioAndroid(config) {
   return withDangerousMod(config, [
     'android',
     async (config) => {
@@ -96,16 +96,16 @@ function withTastoAndroid(config) {
       let buildGradle = fs.readFileSync(buildGradlePath, 'utf-8');
 
       // Check if already modified
-      if (buildGradle.includes('// Tasto E2E Testing')) {
+      if (buildGradle.includes('// Ennio E2E Testing')) {
         return config;
       }
 
       // Add conditional dependency
-      const tastoConfig = `
-    // Tasto E2E Testing - conditionally included
-    // Set TASTO_ENABLED=false to disable
-    if (findProperty("TASTO_ENABLED") != "false") {
-        implementation project(':tasto-nitro')
+      const ennioConfig = `
+    // Ennio E2E Testing - conditionally included
+    // Set ENNIO_ENABLED=false to disable
+    if (findProperty("ENNIO_ENABLED") != "false") {
+        implementation project(':ennio-core')
     }
 `;
 
@@ -114,35 +114,35 @@ function withTastoAndroid(config) {
       if (depsMatch) {
         buildGradle = buildGradle.replace(
           depsMatch[0],
-          depsMatch[0] + tastoConfig
+          depsMatch[0] + ennioConfig
         );
       }
 
       fs.writeFileSync(buildGradlePath, buildGradle);
-      console.log('[Tasto] Added conditional dependency to build.gradle');
+      console.log('[Ennio] Added conditional dependency to build.gradle');
 
       return config;
     },
   ]);
 }
 
-function withTasto(config, options = {}) {
+function withEnnio(config, options = {}) {
   // Check if disabled via env var
-  if (process.env.TASTO_ENABLED === '0' || process.env.TASTO_ENABLED === 'false') {
-    console.log('[Tasto] Disabled via TASTO_ENABLED environment variable');
+  if (process.env.ENNIO_ENABLED === '0' || process.env.ENNIO_ENABLED === 'false') {
+    console.log('[Ennio] Disabled via ENNIO_ENABLED environment variable');
     return config;
   }
 
   // Check if disabled via plugin options
   if (options.enabled === false) {
-    console.log('[Tasto] Disabled via plugin options');
+    console.log('[Ennio] Disabled via plugin options');
     return config;
   }
 
-  config = withTastoIOS(config);
-  config = withTastoAndroid(config);
+  config = withEnnioIOS(config);
+  config = withEnnioAndroid(config);
 
   return config;
 }
 
-module.exports = withTasto;
+module.exports = withEnnio;

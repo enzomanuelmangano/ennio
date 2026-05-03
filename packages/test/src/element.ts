@@ -1,80 +1,254 @@
 /**
- * Element API for Tasto - Direct Nitro access, no WebSocket
+ * Element API for Ennio - Direct Nitro access, no WebSocket
+ *
+ * Supports full Maestro selector parity:
+ * - Primary: id, text, index, point
+ * - State: enabled, checked, focused, selected
+ * - Spatial: below, above, leftOf, rightOf
+ * - Hierarchical: containsChild, childOf, containsDescendants
+ * - Dimensions: width, height, tolerance
+ * - Traits: text, long-text, square
  */
-import { getTastoModule, type ElementInfo, type LayoutMetrics } from '@tasto/nitro';
+import {
+  getEnnioModule,
+  type ElementInfo,
+  type ExtendedElementInfo,
+  type LayoutMetrics,
+  type Selector,
+  type TextMatcher,
+} from '@ennio/core';
 
 // Get the Nitro module directly
-const getTasto = () => {
-  const tasto = getTastoModule();
-  if (!tasto) {
-    throw new Error('[Tasto] Native module not available. Make sure @tasto/nitro is properly installed.');
+const getEnnio = () => {
+  const ennio = getEnnioModule();
+  if (!ennio) {
+    throw new Error('[Ennio] Native module not available. Make sure @ennio/core is properly installed.');
   }
-  return tasto;
+  return ennio;
 };
 
 // Helper to wait
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
+ * Normalize text selector to TextMatcher format
+ */
+function normalizeTextSelector(text: string | TextMatcher): TextMatcher {
+  if (typeof text === 'string') {
+    return { pattern: text, mode: 'exact' };
+  }
+  return text;
+}
+
+/**
+ * Convert Selector to JSON string for native layer
+ */
+function selectorToJson(selector: Selector): string {
+  // Deep clone and normalize text selectors
+  const normalized: Record<string, unknown> = {};
+
+  if (selector.id !== undefined) normalized.id = selector.id;
+
+  if (selector.text !== undefined) {
+    const textMatcher = normalizeTextSelector(selector.text);
+    normalized.text = textMatcher.pattern;
+    if (textMatcher.mode && textMatcher.mode !== 'exact') {
+      normalized.textMatchMode = textMatcher.mode;
+    }
+  }
+
+  if (selector.index !== undefined) normalized.index = selector.index;
+
+  if (selector.point !== undefined) {
+    if (typeof selector.point === 'string') {
+      normalized.point = selector.point;
+    } else {
+      normalized.point = {
+        x: selector.point.x,
+        y: selector.point.y,
+      };
+    }
+  }
+
+  // State selectors
+  if (selector.enabled !== undefined) normalized.enabled = selector.enabled;
+  if (selector.checked !== undefined) normalized.checked = selector.checked;
+  if (selector.focused !== undefined) normalized.focused = selector.focused;
+  if (selector.selected !== undefined) normalized.selected = selector.selected;
+
+  // Spatial selectors (recursive)
+  if (selector.below) normalized.below = JSON.parse(selectorToJson(selector.below));
+  if (selector.above) normalized.above = JSON.parse(selectorToJson(selector.above));
+  if (selector.leftOf) normalized.leftOf = JSON.parse(selectorToJson(selector.leftOf));
+  if (selector.rightOf) normalized.rightOf = JSON.parse(selectorToJson(selector.rightOf));
+
+  // Hierarchical selectors
+  if (selector.containsChild) {
+    normalized.containsChild = JSON.parse(selectorToJson(selector.containsChild));
+  }
+  if (selector.childOf) {
+    normalized.childOf = JSON.parse(selectorToJson(selector.childOf));
+  }
+  if (selector.containsDescendants) {
+    normalized.containsDescendants = selector.containsDescendants.map(
+      (s) => JSON.parse(selectorToJson(s))
+    );
+  }
+
+  // Dimension selectors
+  if (selector.width !== undefined) normalized.width = selector.width;
+  if (selector.height !== undefined) normalized.height = selector.height;
+  if (selector.tolerance !== undefined) normalized.tolerance = selector.tolerance;
+
+  // Trait selectors
+  if (selector.traits) normalized.traits = selector.traits;
+
+  return JSON.stringify(normalized);
+}
+
+/**
+ * Check if selector is simple id-only (for fast path)
+ */
+function isIdOnlySelector(selector: Selector): boolean {
+  const keys = Object.keys(selector);
+  return keys.length === 1 && keys[0] === 'id';
+}
+
+/**
  * Element class - fluent API for interacting with elements
+ *
+ * Supports both legacy testID strings and full Maestro selectors:
+ *
+ * ```typescript
+ * // Legacy (testID string)
+ * element('my-button').tap()
+ *
+ * // Full selector
+ * element({ text: 'Submit', enabled: true }).tap()
+ * element({ id: 'btn', below: { text: 'Header' } }).tap()
+ * ```
  */
 export class Element {
-  constructor(private testID: string) {}
+  private selector: Selector;
+  private selectorJson: string;
+
+  constructor(selector: string | Selector) {
+    // Normalize string to id selector
+    if (typeof selector === 'string') {
+      this.selector = { id: selector };
+    } else {
+      this.selector = selector;
+    }
+    this.selectorJson = selectorToJson(this.selector);
+  }
+
+  /**
+   * Get the selector description for error messages
+   */
+  private getSelectorDescription(): string {
+    if (this.selector.id && isIdOnlySelector(this.selector)) {
+      return `testID: ${this.selector.id}`;
+    }
+    return `selector: ${this.selectorJson}`;
+  }
 
   /**
    * Check if element exists in the tree
    */
   async exists(): Promise<boolean> {
-    const tasto = getTasto();
-    return tasto.exists(this.testID);
+    const ennio = getEnnio();
+
+    // Fast path for id-only selectors
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      return ennio.exists(this.selector.id);
+    }
+
+    return ennio.existsBySelector(this.selectorJson);
   }
 
   /**
    * Check if element is visible on screen
    */
   async isVisible(): Promise<boolean> {
-    const tasto = getTasto();
-    return tasto.isVisible(this.testID);
+    const ennio = getEnnio();
+
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      return ennio.isVisible(this.selector.id);
+    }
+
+    return ennio.isVisibleBySelector(this.selectorJson);
   }
 
   /**
    * Get element info
    */
-  async getInfo(): Promise<ElementInfo | null> {
-    const tasto = getTasto();
-    const result = tasto.findByTestID(this.testID);
+  async getInfo(): Promise<ExtendedElementInfo | null> {
+    const ennio = getEnnio();
+
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      const result = ennio.findByTestID(this.selector.id);
+      if (result === null || result === undefined) return null;
+      // Convert ElementInfo to ExtendedElementInfo with defaults
+      const info = result as ElementInfo;
+      return {
+        ...info,
+        checked: false,
+        focused: false,
+        selected: false,
+      };
+    }
+
+    const result = ennio.findBySelector(this.selectorJson);
     if (result === null || result === undefined) return null;
-    return result as ElementInfo;
+    return result as ExtendedElementInfo;
   }
 
   /**
    * Get layout metrics (position, size)
    */
   async getLayout(): Promise<LayoutMetrics | null> {
-    const tasto = getTasto();
-    const result = tasto.getLayoutMetrics(this.testID);
-    if (result === null || result === undefined) return null;
-    return result as LayoutMetrics;
+    const ennio = getEnnio();
+
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      const result = ennio.getLayoutMetrics(this.selector.id);
+      if (result === null || result === undefined) return null;
+      return result as LayoutMetrics;
+    }
+
+    // For complex selectors, get info and extract layout
+    const info = await this.getInfo();
+    return info?.layout ?? null;
   }
 
   /**
    * Get text content
    */
-  async getText(): Promise<string> {
-    const tasto = getTasto();
-    return tasto.getText(this.testID);
+  async getText(): Promise<string | null> {
+    const ennio = getEnnio();
+
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      return ennio.getText(this.selector.id);
+    }
+
+    return ennio.getTextBySelector(this.selectorJson);
   }
 
   /**
    * Tap on the element
    */
   async tap(): Promise<void> {
-    const tasto = getTasto();
-    const success = tasto.tap(this.testID);
-    if (!success) {
-      throw new Error(`[Tasto] Failed to tap element with testID: ${this.testID}`);
+    const ennio = getEnnio();
+    let success: boolean;
+
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      success = ennio.tap(this.selector.id);
+    } else {
+      success = ennio.tapBySelector(this.selectorJson);
     }
-    // Small delay for UI to update
+
+    if (!success) {
+      throw new Error(`[Ennio] Failed to tap element with ${this.getSelectorDescription()}`);
+    }
     await sleep(50);
   }
 
@@ -82,10 +256,17 @@ export class Element {
    * Long press on the element
    */
   async longPress(duration: number = 500): Promise<void> {
-    const tasto = getTasto();
-    const success = tasto.longPress(this.testID, duration);
+    const ennio = getEnnio();
+    let success: boolean;
+
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      success = ennio.longPress(this.selector.id, duration);
+    } else {
+      success = ennio.longPressBySelector(this.selectorJson, duration);
+    }
+
     if (!success) {
-      throw new Error(`[Tasto] Failed to long press element with testID: ${this.testID}`);
+      throw new Error(`[Ennio] Failed to long press element with ${this.getSelectorDescription()}`);
     }
     await sleep(50);
   }
@@ -94,10 +275,17 @@ export class Element {
    * Type text into the element
    */
   async typeText(text: string): Promise<void> {
-    const tasto = getTasto();
-    const success = tasto.typeText(this.testID, text);
+    const ennio = getEnnio();
+    let success: boolean;
+
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      success = ennio.typeText(this.selector.id, text);
+    } else {
+      success = ennio.typeTextBySelector(this.selectorJson, text);
+    }
+
     if (!success) {
-      throw new Error(`[Tasto] Failed to type text into element with testID: ${this.testID}`);
+      throw new Error(`[Ennio] Failed to type text into element with ${this.getSelectorDescription()}`);
     }
     await sleep(50);
   }
@@ -106,10 +294,17 @@ export class Element {
    * Clear text from the element
    */
   async clearText(): Promise<void> {
-    const tasto = getTasto();
-    const success = tasto.clearText(this.testID);
+    const ennio = getEnnio();
+    let success: boolean;
+
+    if (isIdOnlySelector(this.selector) && this.selector.id) {
+      success = ennio.clearText(this.selector.id);
+    } else {
+      success = ennio.clearTextBySelector(this.selectorJson);
+    }
+
     if (!success) {
-      throw new Error(`[Tasto] Failed to clear text from element with testID: ${this.testID}`);
+      throw new Error(`[Ennio] Failed to clear text from element with ${this.getSelectorDescription()}`);
     }
     await sleep(50);
   }
@@ -126,22 +321,59 @@ export class Element {
    * Scroll the element
    */
   async scroll(direction: 'up' | 'down' | 'left' | 'right', amount: number = 200): Promise<void> {
-    const tasto = getTasto();
-    const success = tasto.scroll(this.testID, direction, amount);
+    const ennio = getEnnio();
+
+    // Scroll requires testID - get it from element info
+    let testID: string | undefined = this.selector.id;
+
+    if (!testID || !isIdOnlySelector(this.selector)) {
+      const info = await this.getInfo();
+      testID = info?.testID;
+    }
+
+    if (!testID) {
+      throw new Error(`[Ennio] Cannot scroll element without testID: ${this.getSelectorDescription()}`);
+    }
+
+    const deltaX = direction === 'left' ? -amount : direction === 'right' ? amount : 0;
+    const deltaY = direction === 'up' ? -amount : direction === 'down' ? amount : 0;
+
+    const success = ennio.scroll(testID, deltaX, deltaY);
     if (!success) {
-      throw new Error(`[Tasto] Failed to scroll element with testID: ${this.testID}`);
+      throw new Error(`[Ennio] Failed to scroll element with ${this.getSelectorDescription()}`);
     }
     await sleep(100);
   }
 
   /**
-   * Scroll to specific offset
+   * Scroll to make child element visible
    */
-  async scrollTo(x: number, y: number): Promise<void> {
-    const tasto = getTasto();
-    const success = tasto.scrollTo(this.testID, x, y);
+  async scrollTo(childSelector: string | Selector): Promise<void> {
+    const ennio = getEnnio();
+
+    // scrollTo requires testIDs
+    let scrollViewTestID: string | undefined = this.selector.id;
+    if (!scrollViewTestID || !isIdOnlySelector(this.selector)) {
+      const info = await this.getInfo();
+      scrollViewTestID = info?.testID;
+    }
+
+    let childTestID: string;
+    if (typeof childSelector === 'string') {
+      childTestID = childSelector;
+    } else {
+      const childElement = new Element(childSelector);
+      const childInfo = await childElement.getInfo();
+      childTestID = childInfo?.testID ?? '';
+    }
+
+    if (!scrollViewTestID || !childTestID) {
+      throw new Error(`[Ennio] scrollTo requires both elements to have testIDs`);
+    }
+
+    const success = ennio.scrollTo(scrollViewTestID, childTestID);
     if (!success) {
-      throw new Error(`[Tasto] Failed to scroll to offset for element with testID: ${this.testID}`);
+      throw new Error(`[Ennio] Failed to scroll to element`);
     }
     await sleep(100);
   }
@@ -152,7 +384,7 @@ export class Element {
   async toBeVisible(): Promise<void> {
     const visible = await this.isVisible();
     if (!visible) {
-      throw new Error(`[Tasto] Expected element with testID "${this.testID}" to be visible`);
+      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be visible`);
     }
   }
 
@@ -162,7 +394,7 @@ export class Element {
   async toExist(): Promise<void> {
     const exists = await this.exists();
     if (!exists) {
-      throw new Error(`[Tasto] Expected element with testID "${this.testID}" to exist`);
+      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to exist`);
     }
   }
 
@@ -172,14 +404,114 @@ export class Element {
   async toHaveText(expected: string): Promise<void> {
     const text = await this.getText();
     if (text !== expected) {
-      throw new Error(`[Tasto] Expected element "${this.testID}" to have text "${expected}", got "${text}"`);
+      throw new Error(
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to have text "${expected}", got "${text}"`
+      );
+    }
+  }
+
+  /**
+   * Assert element has text containing substring
+   */
+  async toContainText(substring: string): Promise<void> {
+    const text = await this.getText();
+    if (!text || !text.includes(substring)) {
+      throw new Error(
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to contain text "${substring}", got "${text}"`
+      );
+    }
+  }
+
+  /**
+   * Assert element is enabled
+   */
+  async toBeEnabled(): Promise<void> {
+    const info = await this.getInfo();
+    if (!info?.enabled) {
+      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be enabled`);
+    }
+  }
+
+  /**
+   * Assert element is disabled
+   */
+  async toBeDisabled(): Promise<void> {
+    const info = await this.getInfo();
+    if (info?.enabled !== false) {
+      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be disabled`);
+    }
+  }
+
+  /**
+   * Assert element is checked
+   */
+  async toBeChecked(): Promise<void> {
+    const info = await this.getInfo();
+    if (!info?.checked) {
+      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be checked`);
+    }
+  }
+
+  /**
+   * Assert element is selected
+   */
+  async toBeSelected(): Promise<void> {
+    const info = await this.getInfo();
+    if (!info?.selected) {
+      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be selected`);
     }
   }
 }
 
 /**
  * Create an element selector
+ *
+ * Supports both legacy testID strings and full Maestro selectors:
+ *
+ * @example
+ * // Legacy - select by testID
+ * element('my-button').tap()
+ *
+ * @example
+ * // By text
+ * element({ text: 'Submit' }).tap()
+ *
+ * @example
+ * // By text with regex
+ * element({ text: { pattern: '.*Login.*', mode: 'regex' } }).tap()
+ *
+ * @example
+ * // Combined selectors
+ * element({ text: 'OK', enabled: true }).tap()
+ *
+ * @example
+ * // Spatial selectors
+ * element({ text: 'Save', below: { id: 'form-header' } }).tap()
+ *
+ * @example
+ * // Hierarchical selectors
+ * element({ containsChild: { text: 'Price' } }).tap()
+ *
+ * @example
+ * // Index selector (nth match)
+ * element({ text: 'Item', index: 2 }).tap()  // Third matching element
  */
-export function element(testID: string): Element {
-  return new Element(testID);
+export function element(selector: string | Selector): Element {
+  return new Element(selector);
+}
+
+/**
+ * Helper to find all elements matching a selector
+ *
+ * @example
+ * const items = await elements({ text: 'Item' });
+ * console.log(`Found ${items.length} items`);
+ */
+export async function elements(selector: string | Selector): Promise<ExtendedElementInfo[]> {
+  const ennio = getEnnio();
+
+  const selectorObj: Selector = typeof selector === 'string' ? { id: selector } : selector;
+  const selectorJson = selectorToJson(selectorObj);
+
+  return ennio.findAllBySelector(selectorJson);
 }

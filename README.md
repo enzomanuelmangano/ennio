@@ -1,12 +1,12 @@
-# Tasto
+# Ennio
 
 > Fast React Native E2E testing via direct Fabric shadow tree access
 
-Tasto provides blazing-fast E2E testing for React Native apps by directly accessing the Fabric shadow tree, bypassing the need for XCTest/Espresso bridges. Unlike traditional testing frameworks that use accessibility APIs or native test frameworks, Tasto communicates directly with React Native's rendering engine for maximum speed and reliability.
+Ennio provides blazing-fast E2E testing for React Native apps by directly accessing the Fabric shadow tree, bypassing the need for XCTest/Espresso bridges. Unlike traditional testing frameworks that use accessibility APIs or native test frameworks, Ennio communicates directly with React Native's rendering engine for maximum speed and reliability.
 
-## Why Tasto?
+## Why Ennio?
 
-| Feature | Tasto | Detox | Appium |
+| Feature | Ennio | Detox | Appium |
 |---------|-------|-------|--------|
 | Element lookup | O(1) hash-based | O(n) accessibility tree | O(n) accessibility tree |
 | Setup complexity | Single npm package | Complex native deps | Complex server setup |
@@ -38,16 +38,16 @@ Tasto provides blazing-fast E2E testing for React Native apps by directly access
 
 ```bash
 # Using bun
-bun add @tasto/nitro @tasto/app
-bun add -D @tasto/runner
+bun add @ennio/core @ennio/app
+bun add -D @ennio/runner
 
 # Using yarn
-yarn add @tasto/nitro @tasto/app
-yarn add -D @tasto/runner
+yarn add @ennio/core @ennio/app
+yarn add -D @ennio/runner
 
 # Using npm
-npm install @tasto/nitro @tasto/app
-npm install -D @tasto/runner
+npm install @ennio/core @ennio/app
+npm install -D @ennio/runner
 ```
 
 ### 2. iOS Setup
@@ -60,22 +60,22 @@ cd ios && pod install
 
 No additional setup required - the native module auto-links.
 
-### 4. Wrap your app with TastoProvider
+### 4. Wrap your app with EnnioProvider
 
 ```tsx
 // App.tsx or your root component
-import { TastoProvider } from '@tasto/app';
+import { EnnioProvider } from '@ennio/app';
 
 export default function App() {
   return (
-    <TastoProvider port={9876}>
+    <EnnioProvider port={9876}>
       <YourApp />
-    </TastoProvider>
+    </EnnioProvider>
   );
 }
 ```
 
-The `TastoProvider`:
+The `EnnioProvider`:
 - Starts a WebSocket server on the specified port (default: 9876)
 - Initializes the shadow tree access
 - Only active in development builds
@@ -85,7 +85,7 @@ The `TastoProvider`:
 ```json
 {
   "scripts": {
-    "test:e2e": "tasto e2e/"
+    "test:e2e": "ennio e2e/"
   }
 }
 ```
@@ -124,7 +124,7 @@ import {
   waitForVisible,
   waitForElement,
   sleep
-} from '@tasto/runner';
+} from '@ennio/runner';
 
 export default async function searchTests(): Promise<void> {
   // Wait for screen to be visible
@@ -156,7 +156,7 @@ npx react-native run-ios
 # In another terminal, run tests
 bun run test:e2e
 # or
-npx tasto e2e/
+npx ennio e2e/
 ```
 
 ## Writing Tests
@@ -167,7 +167,7 @@ Each test file should export a default async function:
 
 ```typescript
 // e2e/my-feature.test.ts
-import { element, waitForVisible, sleep } from '@tasto/runner';
+import { element, waitForVisible, sleep } from '@ennio/runner';
 
 export default async function myFeatureTests(): Promise<void> {
   // Your tests here
@@ -196,7 +196,7 @@ export async function runTest(
 }
 
 // e2e/login.test.ts
-import { element, waitForVisible } from '@tasto/runner';
+import { element, waitForVisible } from '@ennio/runner';
 import { runTest } from './setup';
 
 export default async function loginTests(): Promise<void> {
@@ -220,7 +220,7 @@ export default async function loginTests(): Promise<void> {
 ### Element Selection
 
 ```typescript
-import { element } from '@tasto/runner';
+import { element } from '@ennio/runner';
 
 // Get element by testID
 const el = element('my-button');
@@ -314,7 +314,7 @@ import {
   waitForNotExist,
   waitForNotVisible,
   sleep
-} from '@tasto/runner';
+} from '@ennio/runner';
 
 // Wait for element to exist
 await waitForElement('loading-indicator');
@@ -341,7 +341,7 @@ await sleep(500);
 ### Alert/Modal Handling
 
 ```typescript
-import { Alert, isAlertPresent, tapAlertButton, waitForAlert } from '@tasto/runner';
+import { Alert, isAlertPresent, tapAlertButton, waitForAlert } from '@ennio/runner';
 
 // Check if an alert is present
 const hasAlert: boolean = await Alert.isPresent();
@@ -367,7 +367,7 @@ await Alert.dismiss();
 ### Configuration
 
 ```typescript
-import { configure } from '@tasto/runner';
+import { configure } from '@ennio/runner';
 
 // Configure test runner
 configure({
@@ -381,7 +381,7 @@ configure({
 ### Synchronization
 
 ```typescript
-import { synchronize, waitForIdle } from '@tasto/runner';
+import { synchronize, waitForIdle } from '@ennio/runner';
 
 // Wait for app to be idle (no pending animations/network)
 await waitForIdle(5000);
@@ -396,28 +396,28 @@ await synchronize();
 
 ```bash
 # Run all tests in e2e/ directory
-npx tasto e2e/
+npx ennio e2e/
 
 # Run specific test file
-npx tasto e2e/login.test.ts
+npx ennio e2e/login.test.ts
 
 # Run with custom port
-npx tasto e2e/ --port 9999
+npx ennio e2e/ --port 9999
 
 # Run with verbose output
-npx tasto e2e/ --verbose
+npx ennio e2e/ --verbose
 ```
 
 ### With bun
 
 ```bash
-bun run tasto e2e/
+bun run ennio e2e/
 ```
 
 ### Test Output
 
 ```
-Tasto Test Runner
+Ennio Test Runner
 Connecting to localhost:9876...
 Connected!
 
@@ -442,7 +442,7 @@ Results:
 
 ## Configuration File
 
-Create `tasto.config.js` in your project root:
+Create `ennio.config.js` in your project root:
 
 ```javascript
 module.exports = {
@@ -482,8 +482,8 @@ configure({ verbose: true });
 ### Check Native Logs
 
 ```bash
-# iOS - view Tasto logs
-xcrun simctl spawn booted log stream --predicate 'process == "YourApp" AND message CONTAINS "[Tasto]"'
+# iOS - view Ennio logs
+xcrun simctl spawn booted log stream --predicate 'process == "YourApp" AND message CONTAINS "[Ennio]"'
 ```
 
 ### Common Issues
@@ -520,9 +520,9 @@ xcrun simctl spawn booted log stream --predicate 'process == "YourApp" AND messa
 ┌─────────────────────────────────────────────────────────────────┐
 │                    React Native App                             │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    TastoProvider                            ││
+│  │                    EnnioProvider                            ││
 │  │  ┌───────────────┐  ┌───────────────┐  ┌─────────────────┐ ││
-│  │  │ WebSocket     │  │ HybridTasto   │  │ Event           │ ││
+│  │  │ WebSocket     │  │ HybridEnnio   │  │ Event           │ ││
 │  │  │ Server (C++)  │  │ (Nitro)       │  │ Dispatcher      │ ││
 │  │  └───────────────┘  └───────────────┘  └─────────────────┘ ││
 │  └─────────────────────────────────────────────────────────────┘│
@@ -550,17 +550,17 @@ xcrun simctl spawn booted log stream --predicate 'process == "YourApp" AND messa
 
 ### Key Components
 
-1. **Test Runner** (`@tasto/runner`)
+1. **Test Runner** (`@ennio/runner`)
    - Node.js CLI tool
    - Fluent API for writing tests
    - WebSocket client for communication
 
-2. **TastoProvider** (`@tasto/app`)
-   - React component that initializes Tasto
+2. **EnnioProvider** (`@ennio/app`)
+   - React component that initializes Ennio
    - Starts WebSocket server
    - Development-only (no production overhead)
 
-3. **HybridTasto** (`@tasto/nitro`)
+3. **HybridEnnio** (`@ennio/core`)
    - C++ Nitro module
    - Direct access to Fabric shadow tree
    - Native event dispatch
@@ -706,7 +706,7 @@ export default async function tests() {
 
 ### "Connection refused" error
 
-- Ensure the app is running with TastoProvider
+- Ensure the app is running with EnnioProvider
 - Check if the port (default 9876) is available
 - Verify the app is running on the same machine/network
 

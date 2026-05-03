@@ -1,0 +1,8 @@
+appId: com.ennio.example
+name: "Simple Test"
+---
+- tapOn:
+    text: "Home"
+- assertVisible:
+    id: "home-screen"
+    timeout: 3000

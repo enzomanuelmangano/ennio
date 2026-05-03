@@ -1,0 +1,12 @@
+# Subflow: Login with demo credentials
+# Quick login using the demo button
+
+appId: com.ennio.example
+
+---
+
+- tapOn:
+    id: "demo-login-btn"
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000

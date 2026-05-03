@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,8 +7,10 @@ import {
   Pressable,
   TextInput,
   Image,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../store';
 import * as Haptics from 'expo-haptics';
 
@@ -111,8 +113,9 @@ function SortDropdown({
   value: SortOption;
   onChange: (value: SortOption) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const [open, setOpen] = useState(false);
 
   const options: { value: SortOption; label: string }[] = [
     { value: 'rating', label: 'Top Rated' },
@@ -123,45 +126,54 @@ function SortDropdown({
 
   const selectedLabel = options.find(o => o.value === value)?.label || 'Sort By';
 
+  const handleOpen = () => {
+    if (hapticEnabled) Haptics.selectionAsync();
+    setOpen(true);
+  };
+
+  const handleSelect = (val: SortOption) => {
+    onChange(val);
+    setOpen(false);
+    if (hapticEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
   return (
-    <View style={styles.sortContainer}>
+    <>
       <Pressable
         style={[styles.sortButton, darkMode && styles.sortButtonDark]}
-        onPress={() => setIsOpen(!isOpen)}
+        onPress={handleOpen}
         testID="sort-dropdown"
       >
         <Text style={[styles.sortButtonText, darkMode && styles.textLight]}>{selectedLabel}</Text>
-        <Text style={styles.sortArrow}>{isOpen ? '▲' : '▼'}</Text>
+        <Text style={styles.sortArrow}>▼</Text>
       </Pressable>
-      {isOpen && (
-        <View style={[styles.sortDropdown, darkMode && styles.cardDark]} testID="sort-options">
-          {options.map(option => (
-            <Pressable
-              key={option.value}
-              style={[
-                styles.sortOption,
-                value === option.value && styles.sortOptionActive,
-              ]}
-              onPress={() => {
-                onChange(option.value);
-                setIsOpen(false);
-              }}
-              testID={`sort-option-${option.value}`}
-            >
-              <Text
-                style={[
-                  styles.sortOptionText,
-                  darkMode && styles.textLight,
-                  value === option.value && styles.sortOptionTextActive,
-                ]}
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOpen(false)}
+      >
+        <Pressable style={styles.sortBackdrop} onPress={() => setOpen(false)}>
+          <View
+            style={[styles.sortMenu, darkMode && styles.sortMenuDark]}
+            testID="sort-options"
+          >
+            {options.map(o => (
+              <Pressable
+                key={o.value}
+                style={[styles.sortOption, value === o.value && styles.sortOptionActive]}
+                onPress={() => handleSelect(o.value)}
+                testID={`sort-option-${o.value}`}
               >
-                {option.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
-    </View>
+                <Text style={[styles.sortOptionText, darkMode && styles.textLight]}>
+                  {o.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
@@ -209,8 +221,11 @@ export default function ProductsScreen() {
     });
   }, [allProducts, selectedCategory, searchQuery, sortBy]);
 
+  const insets = useSafeAreaInsets();
+  const TAB_BAR_HEIGHT = 49;
+
   return (
-    <View style={[styles.container, darkMode && styles.containerDark]} testID="products-screen">
+    <View style={[styles.container, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="products-screen">
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <TextInput
@@ -366,10 +381,6 @@ const styles = StyleSheet.create({
   textLight: {
     color: '#fff',
   },
-  sortContainer: {
-    position: 'relative',
-    zIndex: 10,
-  },
   sortButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -390,36 +401,36 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#666',
   },
-  sortDropdown: {
-    position: 'absolute',
-    top: '100%',
-    right: 0,
-    marginTop: 4,
+  sortBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sortMenu: {
     backgroundColor: '#fff',
-    borderRadius: 8,
+    borderRadius: 12,
+    width: '80%',
+    paddingVertical: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
     shadowRadius: 8,
-    elevation: 5,
-    minWidth: 180,
+    elevation: 6,
+  },
+  sortMenuDark: {
+    backgroundColor: '#1a1a2e',
   },
   sortOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
   },
   sortOptionActive: {
-    backgroundColor: '#f0f8ff',
+    backgroundColor: '#e6f0ff',
   },
   sortOptionText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  sortOptionTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
+    fontSize: 16,
+    color: '#222',
   },
   productsList: {
     padding: 10,

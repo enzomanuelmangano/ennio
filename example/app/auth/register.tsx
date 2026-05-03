@@ -134,7 +134,7 @@ export default function RegisterScreen() {
         >
           <View style={styles.header}>
             <Text style={styles.logo}>🎉</Text>
-            <Text style={[styles.title, darkMode && styles.textLight]}>Join Tasto Shop</Text>
+            <Text style={[styles.title, darkMode && styles.textLight]}>Join Ennio Shop</Text>
             <Text style={[styles.subtitle, darkMode && styles.subtitleDark]}>
               Create an account to start shopping
             </Text>

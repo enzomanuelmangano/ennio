@@ -1,0 +1,126 @@
+# Subflow: Create a test order to populate orders list
+# Assumes: user is logged in and currently on orders screen with empty-orders visible.
+# Flow: navigate to products, add a product to cart, checkout, place order.
+
+appId: com.ennio.example
+
+---
+
+# Navigate to products
+- runFlow:
+    file: navigate-products.yaml
+
+# Add first product to cart via product detail
+- tapOn:
+    id: "product-card-1"
+- assertVisible:
+    id: "product-detail-screen"
+    timeout: 3000
+- tapOn:
+    id: "add-to-cart-btn"
+
+# Dismiss "Added to Cart" alert if present
+- runFlow:
+    when:
+      visible:
+        text: "Continue Shopping"
+    commands:
+      - tapOn:
+          text: "Continue Shopping"
+
+# Navigate to cart
+- runFlow:
+    file: navigate-cart.yaml
+
+# Begin checkout
+- assertVisible:
+    id: "checkout-btn"
+    timeout: 3000
+- tapOn:
+    id: "checkout-btn"
+
+- assertVisible:
+    id: "checkout-screen"
+    timeout: 3000
+
+# Step 1: shipping
+- tapOn:
+    id: "shipping-name"
+- inputText: "Demo User"
+- hideKeyboard
+
+- tapOn:
+    id: "shipping-street"
+- inputText: "123 Test St"
+- hideKeyboard
+
+- tapOn:
+    id: "shipping-city"
+- inputText: "San Francisco"
+- hideKeyboard
+
+- tapOn:
+    id: "shipping-state"
+- inputText: "CA"
+- hideKeyboard
+
+- tapOn:
+    id: "shipping-zip"
+- inputText: "94105"
+- hideKeyboard
+
+- tapOn:
+    id: "shipping-phone"
+- inputText: "5555550100"
+- hideKeyboard
+
+- tapOn:
+    id: "next-btn"
+
+# Step 2: payment
+- tapOn:
+    id: "payment-card-number"
+- inputText: "4111111111111111"
+- hideKeyboard
+
+- tapOn:
+    id: "payment-cardholder"
+- inputText: "Demo User"
+- hideKeyboard
+
+- tapOn:
+    id: "payment-expiry"
+- inputText: "1230"
+- hideKeyboard
+
+- tapOn:
+    id: "payment-cvv"
+- inputText: "123"
+- hideKeyboard
+
+- tapOn:
+    id: "next-btn"
+
+# Step 3: review + place order
+- assertVisible:
+    id: "place-order-btn"
+    timeout: 3000
+- tapOn:
+    id: "place-order-btn"
+
+# Wait for confirmation / navigation back to orders
+- assertVisible:
+    anyOf:
+      - id: "orders-screen"
+      - id: "orders-list"
+      - text: "Order Placed"
+    timeout: 10000
+
+# Ensure we end on orders screen
+- runFlow:
+    when:
+      notVisible:
+        id: "orders-screen"
+    commands:
+      - tapOn:
+          id: "quick-action-orders"

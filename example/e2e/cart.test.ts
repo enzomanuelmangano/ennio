@@ -1,4 +1,4 @@
-import { element, sleep, runTest, waitForVisible, Alert } from '@tasto/test';
+import { element, sleep, runTest, waitForVisible, Alert } from '@ennio/test';
 import { goCart, goProducts } from './shared';
 
 await runTest('should start with empty cart', async () => {

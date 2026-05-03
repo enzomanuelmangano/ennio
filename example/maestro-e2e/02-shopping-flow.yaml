@@ -1,0 +1,277 @@
+# Test: Complete Shopping Flow
+# Tests browsing, searching, filtering, sorting, and product details
+
+appId: com.ennio.example
+name: "Shopping Flow"
+tags:
+  - shopping
+  - critical
+
+---
+
+- launchApp:
+    clearState: true
+
+# ============================================
+# SETUP
+# ============================================
+
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# ============================================
+# TEST: Home screen featured products
+# ============================================
+
+- assertVisible:
+    id: "featured-product-1"
+    timeout: 5000
+
+- assertVisible:
+    id: "featured-product-2"
+
+- assertVisible:
+    text: "Featured Products"
+
+# ============================================
+# TEST: Quick actions on home
+# ============================================
+
+- assertVisible:
+    id: "quick-action-search"
+- assertVisible:
+    id: "quick-action-cart"
+- assertVisible:
+    id: "quick-action-orders"
+- assertVisible:
+    id: "quick-action-settings"
+
+# ============================================
+# TEST: Navigate to products via "See All"
+# ============================================
+
+- tapOn:
+    id: "see-all-featured"
+
+- assertVisible:
+    id: "products-screen"
+    timeout: 5000
+
+# ============================================
+# TEST: Products screen displays correctly
+# ============================================
+
+- assertVisible:
+    id: "search-input"
+- assertVisible:
+    id: "sort-dropdown"
+- assertVisible:
+    id: "products-list"
+
+# ============================================
+# TEST: Search functionality
+# ============================================
+
+- tapOn:
+    id: "search-input"
+- inputText: "Wireless"
+
+# Should filter to wireless products
+- assertVisible:
+    text: "Wireless"
+    timeout: 4000
+
+# Clear search
+- tapOn:
+    id: "clear-search"
+
+# Products list should show all again
+- assertVisible:
+    id: "products-list"
+
+# ============================================
+# TEST: Category filtering
+# ============================================
+
+# Filter by Electronics
+- tapOn:
+    id: "filter-category-electronics"
+
+# Should show electronics only
+- assertVisible:
+    text: "Electronics"
+    timeout: 4000
+
+# Filter by Sports
+- tapOn:
+    id: "filter-category-sports"
+
+# Should show sports products
+- assertVisible:
+    text: "Sports"
+    timeout: 4000
+
+# Reset to All
+- tapOn:
+    id: "filter-category-all"
+
+# ============================================
+# TEST: Sort functionality
+# ============================================
+
+- tapOn:
+    id: "sort-dropdown"
+
+- assertVisible:
+    id: "sort-options"
+    timeout: 4000
+
+# Sort by price low to high
+- tapOn:
+    id: "sort-option-price-asc"
+
+# Dropdown should close
+- assertNotVisible:
+    id: "sort-options"
+    timeout: 5000
+
+# Sort by price high to low
+- tapOn:
+    id: "sort-dropdown"
+- tapOn:
+    id: "sort-option-price-desc"
+
+# Sort by name
+- tapOn:
+    id: "sort-dropdown"
+- tapOn:
+    id: "sort-option-name"
+
+# Sort by rating (default)
+- tapOn:
+    id: "sort-dropdown"
+- tapOn:
+    id: "sort-option-rating"
+
+# ============================================
+# TEST: Combined search + filter + sort
+# ============================================
+
+- tapOn:
+    id: "filter-category-electronics"
+- tapOn:
+    id: "search-input"
+- inputText: "Pro"
+- tapOn:
+    id: "sort-dropdown"
+- tapOn:
+    id: "sort-option-price-desc"
+
+# Should show filtered, searched, sorted results
+- assertVisible:
+    id: "products-list"
+    timeout: 4000
+
+# Reset all filters
+- runFlow:
+    when:
+      visible:
+        id: "reset-filters"
+    commands:
+      - tapOn:
+          id: "reset-filters"
+
+# ============================================
+# TEST: Product detail navigation
+# ============================================
+
+- tapOn:
+    id: "filter-category-all"
+- tapOn:
+    id: "clear-search"
+
+- tapOn:
+    id: "product-card-1"
+
+- assertVisible:
+    id: "product-detail-screen"
+    timeout: 5000
+
+# ============================================
+# TEST: Product detail content
+# ============================================
+
+- assertVisible:
+    id: "product-title"
+- assertVisible:
+    id: "product-price"
+- assertVisible:
+    id: "add-to-cart-btn"
+
+# ============================================
+# TEST: Product tabs
+# ============================================
+
+- tapOn:
+    id: "tab-description"
+- assertVisible:
+    id: "product-description"
+    timeout: 5000
+
+- tapOn:
+    id: "tab-specs"
+- assertVisible:
+    id: "product-specs"
+    timeout: 5000
+
+- tapOn:
+    id: "tab-reviews"
+- assertVisible:
+    id: "product-reviews"
+    timeout: 5000
+
+# ============================================
+# TEST: Quantity adjustment
+# ============================================
+
+- assertVisible:
+    id: "quantity-value"
+
+# Increase quantity
+- tapOn:
+    id: "increase-quantity"
+- tapOn:
+    id: "increase-quantity"
+
+# Decrease quantity
+- tapOn:
+    id: "decrease-quantity"
+
+# ============================================
+# TEST: Navigate back via categories
+# ============================================
+
+- back
+
+- assertVisible:
+    id: "products-screen"
+    timeout: 5000
+
+# Navigate back to home
+- runFlow:
+    file: subflows/navigate-home.yaml
+
+# ============================================
+# TEST: Category navigation from home
+# ============================================
+
+- tapOn:
+    id: "category-electronics"
+
+- assertVisible:
+    id: "products-screen"
+    timeout: 5000
+
+# Should auto-filter to Electronics
+- assertVisible:
+    id: "filter-category-electronics"
