@@ -30,6 +30,56 @@ import {
 } from './js-evaluator';
 
 // ============================================
+// Accessibility-tree search helpers
+// ============================================
+
+interface AxNode {
+  role?: string;
+  label?: string;
+  value?: string;
+  identifier?: string;
+  frame: { x: number; y: number; width: number; height: number };
+  children?: AxNode[];
+}
+
+/**
+ * Walk the iOS accessibility tree (as returned by `argent run describe`)
+ * and return the first node matching the Maestro selector. Match priority:
+ * exact label/identifier first, then substring (Maestro semantics).
+ */
+function findInAxTree(root: AxNode, selector: MaestroSelector): AxNode | null {
+  if (!root) return null;
+  const wantId = selector.id?.trim();
+  const wantText = selector.text?.trim();
+  const exactPasses: AxNode[] = [];
+  const substrPasses: AxNode[] = [];
+  const walk = (node: AxNode) => {
+    if (!node) return;
+    const id = node.identifier ?? '';
+    const lbl = node.label ?? node.value ?? '';
+    let matched = false;
+    if (wantId) {
+      if (id === wantId) {
+        exactPasses.push(node);
+        matched = true;
+      }
+    } else if (wantText) {
+      if (lbl === wantText) {
+        exactPasses.push(node);
+        matched = true;
+      } else if (lbl.includes(wantText)) {
+        substrPasses.push(node);
+        matched = true;
+      }
+    }
+    void matched;
+    if (node.children) for (const c of node.children) walk(c);
+  };
+  walk(root);
+  return exactPasses[0] ?? substrPasses[0] ?? null;
+}
+
+// ============================================
 // Configuration
 // ============================================
 
@@ -47,6 +97,9 @@ const DEFAULT_WS_PORT = 9876;
  * Get the booted iOS simulator device ID
  */
 function getBootedSimulatorId(): string | null {
+  // Honor ENNIO_UDID env override so tests pin to a specific simulator
+  // even when other sims are booted (avoid argent / xcrun picking wrong one).
+  if (process.env.ENNIO_UDID) return process.env.ENNIO_UDID;
   try {
     const output = execSync('xcrun simctl list devices booted -j', { encoding: 'utf-8' });
     const data = JSON.parse(output);
@@ -329,6 +382,78 @@ class MaestroExecutor {
    * Also handles tapping native alert buttons for text-based selectors
    */
   /**
+   * Tap a selector via simulator HID input (argent gesture-tap). Resolves
+   * the element through the iOS accessibility tree so we get the exact
+   * frame the user sees, then taps the center in normalized coords.
+   *
+   * iOS-only. Returns true on tap, false if element wasn't found in the a11y
+   * tree (caller falls back to event-emitter dispatch).
+   */
+  private async tapViaSimulatorHid(selector: MaestroSelector): Promise<boolean> {
+    const udid = getBootedSimulatorId();
+    if (!udid) return false;
+    try {
+      // For id-based selectors, get the React layout from Ennio and convert
+      // to normalized screen coords (Ennio's screenX/screenY are React surface
+      // relative; add safe-area top inset). For text selectors use argent's
+      // accessibility tree (already returns absolute normalized frames).
+      let cx: number; let cy: number;
+      if (selector.id && !selector.text) {
+        const layout = await this.getLayoutMetrics(selector.id);
+        if (!layout) return false;
+        const screenSize = await this.getScreenSize(udid);
+        const TOP_INSET = 59;  // iPhone 17 Pro Dynamic Island
+        const absX = layout.screenX + layout.width / 2;
+        const absY = layout.screenY + layout.height / 2 + TOP_INSET;
+        cx = absX / screenSize.width;
+        cy = absY / screenSize.height;
+      } else {
+        const desc = execSync(`argent run describe --udid ${udid}`, {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 4000,
+        });
+        const tree = JSON.parse(desc);
+        const target = findInAxTree(tree.tree ?? tree, selector);
+        if (!target) return false;
+        cx = target.frame.x + target.frame.width / 2;
+        cy = target.frame.y + target.frame.height / 2;
+      }
+      if (cx < 0 || cy < 0 || cx > 1 || cy > 1) {
+        this.log(`tap (HID): out-of-bounds normalized (${cx}, ${cy})`);
+        return false;
+      }
+      execSync(`argent run gesture-tap --udid ${udid} --x ${cx} --y ${cy}`, {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 4000,
+      });
+      this.log(`tap (HID): selector=${JSON.stringify(selector)} at (${cx.toFixed(3)}, ${cy.toFixed(3)})`);
+      this.lastTappedSelector = selector;
+      await this.sleep(120);
+      return true;
+    } catch (e) {
+      this.log(`tap (HID) error: ${(e as Error).message}`);
+      return false;
+    }
+  }
+
+  private cachedScreenSize: { width: number; height: number } | null = null;
+  private async getScreenSize(_udid: string): Promise<{ width: number; height: number }> {
+    if (this.cachedScreenSize) return this.cachedScreenSize;
+    // iPhone 17 Pro logical points. Hardcode for now; query device info later.
+    this.cachedScreenSize = { width: 402, height: 874 };
+    return this.cachedScreenSize;
+  }
+
+  private async getLayoutMetrics(testID: string): Promise<{ x: number; y: number; width: number; height: number; screenX: number; screenY: number } | null> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res: any = await (this.client as any).send('getLayoutMetrics', { testID });
+    if (!res?.success || res.data == null || res.data === 'null') return null;
+    return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+  }
+
+  /**
    * Best-effort tap on a native alert/action-sheet button by exact title.
    * Polls up to `pollMs` (~30ms granularity) so callers can race the alert
    * presentation. Returns true only if the button was actually tapped.
@@ -370,6 +495,15 @@ class MaestroExecutor {
       `Element not found: ${JSON.stringify(selector)}`
     );
 
+    // Resolve element to absolute screen coords via argent (which mirrors
+    // iOS accessibility frames). Then tap via simulator HID input. This is
+    // the only iOS path that triggers Pressable's gesture recognizer
+    // reliably without app-side accessibility annotations.
+    const tappedViaHid = await this.tapViaSimulatorHid(selector);
+    if (tappedViaHid) return;
+
+    // Fallback: native event dispatch (works for UIControl-based elements
+    // like UITabBar, alerts already handled above).
     let ok: boolean;
     if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
       ok = await this.client.tap(ennioSelector.id as string);
@@ -414,35 +548,51 @@ class MaestroExecutor {
    * Type text into focused element
    */
   private async typeText(text: string, selector?: MaestroSelector): Promise<void> {
-    // Use provided selector or fall back to last tapped element
     const targetSelector = selector || this.lastTappedSelector;
 
+    // If a target is given (or implied by last-tapped), focus it via HID tap
+    // first so the OS keyboard targets the right TextInput. Without this,
+    // typing into a modal-presented TextInput can land on a hidden field
+    // behind the modal because Z-order isn't respected by event-emitter dispatch.
     if (targetSelector) {
-      const ennioSelector = toEnnioSelector(targetSelector);
       await this.waitFor(
         () => this.selectorExists(targetSelector),
         DEFAULT_VISIBLE_TIMEOUT,
         `Element not found: ${JSON.stringify(targetSelector)}`
       );
+      await this.tapViaSimulatorHid(targetSelector);
+      await this.sleep(150);
+    }
 
-      let ok: boolean;
-      if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-        ok = await this.client.typeText(ennioSelector.id as string, text);
-      } else {
-        ok = await this.client.typeTextBySelector(ennioSelector, text);
+    // HID keyboard input - works against whatever TextInput is currently
+    // focused. argent run keyboard maps to UIDevice.synthesize().
+    const udid = getBootedSimulatorId();
+    if (udid) {
+      try {
+        execSync(`argent run keyboard --udid ${udid} --text ${JSON.stringify(text)}`, {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 8000,
+        });
+        await this.sleep(80);
+        return;
+      } catch (e) {
+        this.log(`typeText (HID) error: ${(e as Error).message}`);
       }
+    }
 
-      if (!ok) {
-        throw new Error(`TypeText failed: ${JSON.stringify(targetSelector)}`);
-      }
+    // Fallback: ennio shadow-tree based typeText.
+    if (targetSelector) {
+      const ennioSelector = toEnnioSelector(targetSelector);
+      const ok = ennioSelector.id && Object.keys(ennioSelector).length === 1
+        ? await this.client.typeText(ennioSelector.id as string, text)
+        : await this.client.typeTextBySelector(ennioSelector, text);
+      if (!ok) throw new Error(`TypeText failed: ${JSON.stringify(targetSelector)}`);
     } else {
-      // Try to find a focused element
       const focused = await this.client.findBySelector({ focused: true });
       if (focused?.testID) {
         const ok = await this.client.typeText(focused.testID, text);
-        if (!ok) {
-          throw new Error('TypeText into focused element failed');
-        }
+        if (!ok) throw new Error('TypeText into focused element failed');
       } else {
         throw new Error('inputText: no selector provided and no focused element found');
       }
