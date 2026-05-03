@@ -17,8 +17,6 @@
 namespace margelo::nitro::ennio { struct ElementInfo; }
 // Forward declaration of `LayoutMetrics` to properly resolve imports.
 namespace margelo::nitro::ennio { struct LayoutMetrics; }
-// Forward declaration of `ScrollDirection` to properly resolve imports.
-namespace margelo::nitro::ennio { enum class ScrollDirection; }
 // Forward declaration of `ExtendedElementInfo` to properly resolve imports.
 namespace margelo::nitro::ennio { struct ExtendedElementInfo; }
 
@@ -27,7 +25,6 @@ namespace margelo::nitro::ennio { struct ExtendedElementInfo; }
 #include <variant>
 #include <string>
 #include "LayoutMetrics.hpp"
-#include "ScrollDirection.hpp"
 #include "ExtendedElementInfo.hpp"
 #include <vector>
 
@@ -70,42 +67,16 @@ namespace margelo::nitro::ennio {
       virtual std::variant<nitro::NullType, LayoutMetrics> getLayoutMetrics(const std::string& testID) = 0;
       virtual bool isVisible(const std::string& testID) = 0;
       virtual std::variant<nitro::NullType, std::string> getText(const std::string& testID) = 0;
-      virtual bool tap(const std::string& testID) = 0;
-      virtual bool doubleTap(const std::string& testID) = 0;
-      virtual bool longPress(const std::string& testID, double durationMs) = 0;
-      virtual bool typeText(const std::string& testID, const std::string& text) = 0;
-      virtual bool clearText(const std::string& testID) = 0;
-      virtual bool replaceText(const std::string& testID, const std::string& text) = 0;
-      virtual bool scroll(const std::string& testID, double deltaX, double deltaY) = 0;
-      virtual bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) = 0;
-      virtual bool scrollToIndex(const std::string& testID, double index) = 0;
-      virtual bool swipe(const std::string& testID, ScrollDirection direction, double distance) = 0;
       virtual bool waitForIdle(double timeoutMs) = 0;
       virtual void synchronize() = 0;
       virtual std::variant<nitro::NullType, ExtendedElementInfo> findBySelector(const std::string& selectorJson) = 0;
       virtual std::vector<ExtendedElementInfo> findAllBySelector(const std::string& selectorJson) = 0;
       virtual bool existsBySelector(const std::string& selectorJson) = 0;
-      virtual bool tapBySelector(const std::string& selectorJson) = 0;
-      virtual bool typeTextBySelector(const std::string& selectorJson, const std::string& text) = 0;
-      virtual bool clearTextBySelector(const std::string& selectorJson) = 0;
-      virtual bool longPressBySelector(const std::string& selectorJson, double durationMs) = 0;
       virtual std::variant<nitro::NullType, std::string> getTextBySelector(const std::string& selectorJson) = 0;
       virtual bool isVisibleBySelector(const std::string& selectorJson) = 0;
-      virtual bool doubleTapBySelector(const std::string& selectorJson) = 0;
       virtual bool isAlertPresent() = 0;
       virtual std::string getAlertText() = 0;
       virtual std::vector<std::string> getAlertButtons() = 0;
-      virtual bool tapAlertButton(const std::string& buttonText) = 0;
-      virtual bool dismissAlert() = 0;
-      virtual bool hideKeyboard() = 0;
-      virtual bool eraseText(double count) = 0;
-      virtual bool pressKey(const std::string& keyName) = 0;
-      virtual bool copyToClipboard(const std::string& text) = 0;
-      virtual bool pasteFromClipboard() = 0;
-      virtual std::string getClipboardText() = 0;
-      virtual bool setOrientation(double orientation) = 0;
-      virtual bool swipeCoordinates(double startX, double startY, double endX, double endY, double durationMs) = 0;
-      virtual bool backGesture() = 0;
 
     protected:
       // Hybrid Setup

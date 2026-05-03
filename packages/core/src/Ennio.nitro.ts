@@ -34,11 +34,6 @@ export interface ExtendedElementInfo extends ElementInfo {
 }
 
 /**
- * Scroll direction for scroll operations
- */
-export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
-
-/**
  * Text matching mode for text selectors
  */
 export type TextMatchMode = 'exact' | 'contains' | 'regex' | 'startsWith' | 'endsWith';
@@ -261,89 +256,6 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   getText(testID: string): string | null;
 
   // ============================================
-  // Actions
-  // ============================================
-
-  /**
-   * Simulate a tap on an element
-   * @param testID - The testID prop value
-   * @returns true if tap was dispatched successfully
-   */
-  tap(testID: string): boolean;
-
-  /**
-   * Simulate a double tap on an element
-   * @param testID - The testID prop value
-   * @returns true if double tap was dispatched successfully
-   */
-  doubleTap(testID: string): boolean;
-
-  /**
-   * Simulate a long press on an element
-   * @param testID - The testID prop value
-   * @param durationMs - Duration of long press in milliseconds
-   * @returns true if long press was dispatched successfully
-   */
-  longPress(testID: string, durationMs: number): boolean;
-
-  /**
-   * Type text into a TextInput element
-   * @param testID - The testID prop value
-   * @param text - Text to type
-   * @returns true if text was entered successfully
-   */
-  typeText(testID: string, text: string): boolean;
-
-  /**
-   * Clear text from a TextInput element
-   * @param testID - The testID prop value
-   * @returns true if text was cleared successfully
-   */
-  clearText(testID: string): boolean;
-
-  /**
-   * Replace text in a TextInput element
-   * @param testID - The testID prop value
-   * @param text - New text to set
-   * @returns true if text was replaced successfully
-   */
-  replaceText(testID: string, text: string): boolean;
-
-  /**
-   * Scroll a ScrollView by delta values
-   * @param testID - The testID prop of the ScrollView
-   * @param deltaX - Horizontal scroll delta (positive = right)
-   * @param deltaY - Vertical scroll delta (positive = down)
-   * @returns true if scroll was dispatched successfully
-   */
-  scroll(testID: string, deltaX: number, deltaY: number): boolean;
-
-  /**
-   * Scroll to make a child element visible
-   * @param scrollViewTestID - The testID of the ScrollView
-   * @param elementTestID - The testID of the element to scroll to
-   * @returns true if scroll was dispatched successfully
-   */
-  scrollTo(scrollViewTestID: string, elementTestID: string): boolean;
-
-  /**
-   * Scroll a list to a specific index
-   * @param testID - The testID of the FlatList/SectionList
-   * @param index - Index to scroll to
-   * @returns true if scroll was dispatched successfully
-   */
-  scrollToIndex(testID: string, index: number): boolean;
-
-  /**
-   * Perform a swipe gesture
-   * @param testID - The testID of the element
-   * @param direction - Direction of swipe
-   * @param distance - Distance to swipe in points
-   * @returns true if swipe was dispatched successfully
-   */
-  swipe(testID: string, direction: ScrollDirection, distance: number): boolean;
-
-  // ============================================
   // Synchronization
   // ============================================
 
@@ -384,36 +296,6 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   existsBySelector(selectorJson: string): boolean;
 
   /**
-   * Tap an element using a selector (JSON string)
-   * @param selectorJson - JSON-encoded Selector object
-   * @returns true if tap was dispatched successfully
-   */
-  tapBySelector(selectorJson: string): boolean;
-
-  /**
-   * Type text into an element using a selector (JSON string)
-   * @param selectorJson - JSON-encoded Selector object
-   * @param text - Text to type
-   * @returns true if text was entered successfully
-   */
-  typeTextBySelector(selectorJson: string, text: string): boolean;
-
-  /**
-   * Clear text from an element using a selector (JSON string)
-   * @param selectorJson - JSON-encoded Selector object
-   * @returns true if text was cleared successfully
-   */
-  clearTextBySelector(selectorJson: string): boolean;
-
-  /**
-   * Long press an element using a selector (JSON string)
-   * @param selectorJson - JSON-encoded Selector object
-   * @param durationMs - Duration of long press in milliseconds
-   * @returns true if long press was dispatched successfully
-   */
-  longPressBySelector(selectorJson: string, durationMs: number): boolean;
-
-  /**
    * Get text content of an element using a selector (JSON string)
    * @param selectorJson - JSON-encoded Selector object
    * @returns Text content if available, null otherwise
@@ -425,13 +307,6 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
    * @param selectorJson - JSON-encoded Selector object
    */
   isVisibleBySelector(selectorJson: string): boolean;
-
-  /**
-   * Double tap an element using a selector (JSON string)
-   * @param selectorJson - JSON-encoded Selector object
-   * @returns true if double tap was dispatched successfully
-   */
-  doubleTapBySelector(selectorJson: string): boolean;
 
   // ============================================
   // Alert/Modal Handling
@@ -451,82 +326,4 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
    * Get the button titles of the current alert
    */
   getAlertButtons(): string[];
-
-  /**
-   * Tap an alert button by its text
-   * @param buttonText - The button title to tap
-   * @returns true if successful
-   */
-  tapAlertButton(buttonText: string): boolean;
-
-  /**
-   * Dismiss the current alert (taps cancel/OK button)
-   */
-  dismissAlert(): boolean;
-
-  // ============================================
-  // Keyboard Handling
-  // ============================================
-
-  /**
-   * Hide the keyboard by resigning first responder
-   */
-  hideKeyboard(): boolean;
-
-  /**
-   * Erase text by sending backspace key events
-   * @param count - Number of characters to erase
-   */
-  eraseText(count: number): boolean;
-
-  /**
-   * Press a key by name (e.g., "Enter", "Tab", "Escape")
-   * @param keyName - The key to press
-   */
-  pressKey(keyName: string): boolean;
-
-  // ============================================
-  // Clipboard Handling
-  // ============================================
-
-  /**
-   * Copy text to clipboard
-   * @param text - Text to copy
-   */
-  copyToClipboard(text: string): boolean;
-
-  /**
-   * Paste from clipboard into the focused text field
-   */
-  pasteFromClipboard(): boolean;
-
-  /**
-   * Get current clipboard contents
-   */
-  getClipboardText(): string;
-
-  // ============================================
-  // Device Control
-  // ============================================
-
-  /**
-   * Set device orientation
-   * @param orientation - 0=portrait, 1=portraitUpsideDown, 2=landscapeLeft, 3=landscapeRight
-   */
-  setOrientation(orientation: number): boolean;
-
-  /**
-   * Perform a swipe gesture between coordinates
-   * @param startX - Start X coordinate
-   * @param startY - Start Y coordinate
-   * @param endX - End X coordinate
-   * @param endY - End Y coordinate
-   * @param durationMs - Duration of swipe in milliseconds
-   */
-  swipeCoordinates(startX: number, startY: number, endX: number, endY: number, durationMs: number): boolean;
-
-  /**
-   * Simulate back gesture (swipe from left edge on iOS)
-   */
-  backGesture(): boolean;
 }

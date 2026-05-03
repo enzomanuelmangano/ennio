@@ -17,7 +17,6 @@
 #include "WebSocketServer.hpp"
 #include "TestIDRegistry.hpp"
 #include "ShadowTreeTraverser.hpp"
-#include "EventDispatcher.hpp"
 #include "SelectorCriteria.hpp"
 #include "SelectorParser.hpp"
 #include "ElementMatcher.hpp"
@@ -55,19 +54,6 @@ public:
     std::variant<nitro::NullType, std::string> getText(const std::string& testID) override;
 
     // ============================================
-    // Actions
-    // ============================================
-    bool tap(const std::string& testID) override;
-    bool longPress(const std::string& testID, double durationMs) override;
-    bool typeText(const std::string& testID, const std::string& text) override;
-    bool clearText(const std::string& testID) override;
-    bool replaceText(const std::string& testID, const std::string& text) override;
-    bool scroll(const std::string& testID, double deltaX, double deltaY) override;
-    bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) override;
-    bool scrollToIndex(const std::string& testID, double index) override;
-    bool swipe(const std::string& testID, ScrollDirection direction, double distance) override;
-
-    // ============================================
     // Synchronization
     // ============================================
     bool waitForIdle(double timeoutMs) override;
@@ -79,18 +65,8 @@ public:
     std::variant<nitro::NullType, ExtendedElementInfo> findBySelector(const std::string& selectorJson) override;
     std::vector<ExtendedElementInfo> findAllBySelector(const std::string& selectorJson) override;
     bool existsBySelector(const std::string& selectorJson) override;
-    bool tapBySelector(const std::string& selectorJson) override;
-    bool typeTextBySelector(const std::string& selectorJson, const std::string& text) override;
-    bool clearTextBySelector(const std::string& selectorJson) override;
-    bool longPressBySelector(const std::string& selectorJson, double durationMs) override;
     std::variant<nitro::NullType, std::string> getTextBySelector(const std::string& selectorJson) override;
     bool isVisibleBySelector(const std::string& selectorJson) override;
-    bool doubleTapBySelector(const std::string& selectorJson) override;
-
-    // ============================================
-    // Double Tap
-    // ============================================
-    bool doubleTap(const std::string& testID) override;
 
     // ============================================
     // Alert/Modal Handling
@@ -98,29 +74,6 @@ public:
     bool isAlertPresent() override;
     std::string getAlertText() override;
     std::vector<std::string> getAlertButtons() override;
-    bool tapAlertButton(const std::string& buttonText) override;
-    bool dismissAlert() override;
-
-    // ============================================
-    // Keyboard Handling
-    // ============================================
-    bool hideKeyboard() override;
-    bool eraseText(double count) override;
-    bool pressKey(const std::string& keyName) override;
-
-    // ============================================
-    // Clipboard Handling
-    // ============================================
-    bool copyToClipboard(const std::string& text) override;
-    bool pasteFromClipboard() override;
-    std::string getClipboardText() override;
-
-    // ============================================
-    // Device Control
-    // ============================================
-    bool setOrientation(double orientation) override;
-    bool swipeCoordinates(double startX, double startY, double endX, double endY, double durationMs) override;
-    bool backGesture() override;
 
     // ============================================
     // Initialization (called from JS)
