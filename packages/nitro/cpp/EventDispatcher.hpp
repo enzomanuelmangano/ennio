@@ -33,6 +33,12 @@ public:
     static bool tap(ShadowNodePtr node);
 
     /**
+     * Simulate a double tap on an element
+     * Two taps with 50ms delay between them
+     */
+    static bool doubleTap(ShadowNodePtr node);
+
+    /**
      * Simulate a long press on an element
      * @param durationMs - Duration of the press in milliseconds
      */

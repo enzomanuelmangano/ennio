@@ -1,10 +1,13 @@
 #include "SelectorParser.hpp"
+#include "TastoLog.hpp"
 #include <stdexcept>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
 
 namespace tasto {
+
+static const char* LOG_TAG = "SelectorParser";
 
 namespace {
     // Helper to trim whitespace
@@ -96,18 +99,18 @@ SelectorCriteria SelectorParser::parse(const std::string& json) {
 
 SelectorCriteria SelectorParser::parseObject(const std::string& json) {
     SelectorCriteria criteria;
-    fprintf(stderr, "[Tasto SP] parseObject: json=%s\n", json.c_str());
+    TASTO_LOG_TRACE(LOG_TAG, TASTO_LOG_FMT("parseObject: json=" << json));
 
     // Parse id
     if (hasKey(json, "id")) {
         criteria.id = extractString(json, "id");
-        fprintf(stderr, "[Tasto SP] parseObject: id=%s\n", criteria.id->c_str());
+        TASTO_LOG_DEBUG(LOG_TAG, TASTO_LOG_FMT("parseObject: id=" << *criteria.id));
     }
 
     // Parse text (can be string or object with pattern/mode)
     if (hasKey(json, "text")) {
         std::string textValue = extractString(json, "text");
-        fprintf(stderr, "[Tasto SP] parseObject: textValue=%s (len=%zu)\n", textValue.c_str(), textValue.length());
+        TASTO_LOG_DEBUG(LOG_TAG, TASTO_LOG_FMT("parseObject: text=" << textValue));
         TextMatchMode mode = TextMatchMode::Exact;
 
         // Check for textMatchMode
@@ -116,8 +119,6 @@ SelectorCriteria SelectorParser::parseObject(const std::string& json) {
         }
 
         criteria.text = TextMatcher{textValue, mode};
-    } else {
-        fprintf(stderr, "[Tasto SP] parseObject: no 'text' key found\n");
     }
 
     // Parse index

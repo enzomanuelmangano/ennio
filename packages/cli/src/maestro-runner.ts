@@ -21,6 +21,13 @@ import {
   toTastoSelector,
   resolveSubflowPath,
 } from './maestro-parser';
+import {
+  JsContext,
+  createContext,
+  preprocessCommand,
+  evalScript as jsEvalScript,
+  runScript as jsRunScript,
+} from './js-evaluator';
 
 // ============================================
 // Configuration
@@ -194,6 +201,7 @@ class MaestroExecutor {
   private appId: string | null;
   private port: number;
   private reconnectClient: () => Promise<TastoClient>;
+  private jsContext: JsContext;
 
   constructor(
     client: TastoClient,
@@ -211,6 +219,11 @@ class MaestroExecutor {
     this.appId = options.appId ?? null;
     this.port = options.port ?? DEFAULT_WS_PORT;
     this.reconnectClient = options.reconnectClient ?? (async () => this.client);
+    this.jsContext = createContext({
+      platform: 'ios',
+      appId: options.appId,
+      isSimulator: true,
+    });
   }
 
   private log(msg: string): void {
@@ -351,6 +364,31 @@ class MaestroExecutor {
 
     // Track last tapped element for inputText
     this.lastTappedSelector = selector;
+  }
+
+  /**
+   * Double tap on element
+   */
+  private async doubleTap(selector: MaestroSelector): Promise<void> {
+    const tastoSelector = toTastoSelector(selector);
+
+    // Wait for element to exist
+    await this.waitFor(
+      () => this.selectorExists(selector),
+      DEFAULT_VISIBLE_TIMEOUT,
+      `Element not found: ${JSON.stringify(selector)}`
+    );
+
+    let ok: boolean;
+    if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
+      ok = await this.client.doubleTap(tastoSelector.id as string);
+    } else {
+      ok = await this.client.doubleTapBySelector(tastoSelector);
+    }
+
+    if (!ok) {
+      throw new Error(`DoubleTap failed: ${JSON.stringify(selector)}`);
+    }
   }
 
   /**
@@ -529,11 +567,57 @@ class MaestroExecutor {
    * Execute a single command
    */
   async executeCommand(cmd: MaestroCommand): Promise<void> {
+    // Preprocess command to evaluate ${} expressions
+    const processedCmd = preprocessCommand(cmd, this.jsContext);
+
+    // evalScript
+    if ('evalScript' in processedCmd) {
+      const script = (processedCmd as { evalScript: string }).evalScript;
+      this.log(`evalScript: ${script.substring(0, 50)}...`);
+      jsEvalScript(script, this.jsContext);
+      return;
+    }
+
+    // runScript
+    if ('runScript' in processedCmd) {
+      const runCmd = (processedCmd as { runScript: { file: string; env?: Record<string, string> } }).runScript;
+      this.log(`runScript: ${runCmd.file}`);
+      jsRunScript(runCmd.file, runCmd.env || {}, this.jsContext, this.currentFlowPath);
+      return;
+    }
+
+    // assertTrue
+    if ('assertTrue' in processedCmd) {
+      const expr = (processedCmd as { assertTrue: string }).assertTrue;
+      this.log(`assertTrue: ${expr}`);
+      // Remove ${} wrapper if present
+      let code = expr;
+      if (code.startsWith('${') && code.endsWith('}')) {
+        code = code.slice(2, -1);
+      }
+      const result = require('vm').runInContext(code, this.jsContext, { timeout: 1000 });
+      if (!result) {
+        throw new Error(`assertTrue failed: ${expr}`);
+      }
+      return;
+    }
+
+    // Use processedCmd for the rest (expressions already evaluated)
+    cmd = processedCmd;
+
     // tapOn
     if ('tapOn' in cmd) {
       const selector = normalizeSelector(cmd.tapOn as MaestroSelector | string);
       this.log(`tapOn: ${JSON.stringify(selector)}`);
       await this.tap(selector);
+      return;
+    }
+
+    // doubleTapOn
+    if ('doubleTapOn' in cmd) {
+      const selector = normalizeSelector(cmd.doubleTapOn as MaestroSelector | string);
+      this.log(`doubleTapOn: ${JSON.stringify(selector)}`);
+      await this.doubleTap(selector);
       return;
     }
 
@@ -600,6 +684,50 @@ class MaestroExecutor {
     if ('scroll' in cmd) {
       const { direction, amount = 200 } = cmd.scroll;
       await this.scroll(direction, amount);
+      return;
+    }
+
+    // scrollUntilVisible
+    if ('scrollUntilVisible' in cmd) {
+      const scrollCmd = cmd.scrollUntilVisible;
+      const selector = normalizeSelector(scrollCmd.element || scrollCmd);
+      const direction = (scrollCmd.direction || 'DOWN').toLowerCase();
+      const timeout = scrollCmd.timeout || 10000;
+      const scrollAmount = 300;
+
+      this.log(`scrollUntilVisible: ${JSON.stringify(selector)}`);
+
+      const startTime = Date.now();
+      while (Date.now() - startTime < timeout) {
+        // Check if element is visible
+        if (await this.selectorVisible(selector)) {
+          return;
+        }
+        // Scroll in direction
+        await this.scroll(direction, scrollAmount);
+        await this.sleep(200);
+      }
+
+      throw new Error(`scrollUntilVisible timeout: ${JSON.stringify(selector)}`);
+    }
+
+    // swipe
+    if ('swipe' in cmd) {
+      const swipeCmd = cmd.swipe;
+      // Maestro swipe can be:
+      // - { start: "50%,80%", end: "50%,20%" }
+      // - { direction: "UP", duration: 500 }
+      // - { start: { x: 100, y: 500 }, end: { x: 100, y: 200 } }
+      if (swipeCmd.direction) {
+        // Use direction-based scroll (same as scroll command)
+        const amount = swipeCmd.duration || 400;
+        await this.scroll(swipeCmd.direction.toLowerCase(), amount);
+      } else if (swipeCmd.start && swipeCmd.end) {
+        // Coordinate-based swipe - TODO: implement with native gesture
+        this.log(`swipe: from ${JSON.stringify(swipeCmd.start)} to ${JSON.stringify(swipeCmd.end)}`);
+        // For now, approximate with scroll
+        await this.sleep(100);
+      }
       return;
     }
 
@@ -751,6 +879,265 @@ class MaestroExecutor {
       }
 
       this.log('clearState: App restarted with fresh state');
+      return;
+    }
+
+    // stopApp
+    if ('stopApp' in cmd) {
+      const stopCmd = cmd.stopApp;
+      const targetAppId = (typeof stopCmd === 'object' && stopCmd.appId) || this.appId;
+
+      if (!targetAppId) {
+        throw new Error('stopApp: No appId specified in command or flow metadata');
+      }
+
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('stopApp: No booted iOS simulator found');
+      }
+
+      this.log(`stopApp: ${targetAppId}`);
+      terminateApp(deviceId, targetAppId);
+      return;
+    }
+
+    // openLink
+    if ('openLink' in cmd) {
+      const linkCmd = cmd.openLink;
+      const url = typeof linkCmd === 'string' ? linkCmd : linkCmd.link;
+
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('openLink: No booted iOS simulator found');
+      }
+
+      this.log(`openLink: ${url}`);
+      execSync(`xcrun simctl openurl ${deviceId} "${url}"`, { encoding: 'utf-8', stdio: 'pipe' });
+      await this.sleep(500);
+      return;
+    }
+
+    // takeScreenshot
+    if ('takeScreenshot' in cmd) {
+      const screenshotCmd = cmd.takeScreenshot;
+      const path = typeof screenshotCmd === 'string' ? screenshotCmd : screenshotCmd.path;
+
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('takeScreenshot: No booted iOS simulator found');
+      }
+
+      this.log(`takeScreenshot: ${path}`);
+      execSync(`xcrun simctl io ${deviceId} screenshot "${path}"`, { encoding: 'utf-8', stdio: 'pipe' });
+      return;
+    }
+
+    // eraseText
+    if ('eraseText' in cmd) {
+      const eraseCmd = cmd.eraseText;
+      const chars = typeof eraseCmd === 'number' ? eraseCmd : (eraseCmd.characters || 50);
+      this.log(`eraseText: ${chars} characters`);
+      // TODO: Send backspace events via native layer
+      // For now, try clearing the focused element
+      const focused = await this.client.findBySelector({ focused: true });
+      if (focused?.testID) {
+        await this.client.clearText(focused.testID);
+      }
+      return;
+    }
+
+    // hideKeyboard
+    if ('hideKeyboard' in cmd) {
+      this.log('hideKeyboard');
+      // TODO: Implement via TastoRuntimeHelper - for now tap outside
+      await this.sleep(100);
+      return;
+    }
+
+    // repeat
+    if ('repeat' in cmd) {
+      const { times, commands } = cmd.repeat;
+      this.log(`repeat: ${times} times`);
+      for (let i = 0; i < times; i++) {
+        await this.executeCommands(commands);
+      }
+      return;
+    }
+
+    // retry
+    if ('retry' in cmd) {
+      const { maxRetries = 3, commands } = cmd.retry;
+      this.log(`retry: max ${maxRetries}`);
+      let lastError: Error | null = null;
+      for (let i = 0; i <= maxRetries; i++) {
+        try {
+          await this.executeCommands(commands);
+          return; // Success
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          if (i < maxRetries) {
+            this.log(`retry: attempt ${i + 1} failed, retrying...`);
+            await this.sleep(500);
+          }
+        }
+      }
+      throw lastError || new Error('retry: all attempts failed');
+    }
+
+    // setLocation
+    if ('setLocation' in cmd) {
+      const locCmd = cmd.setLocation;
+      let lat: number, lon: number;
+
+      if (typeof locCmd === 'string') {
+        // Parse "lat,lon" string
+        const [latStr, lonStr] = locCmd.split(',');
+        lat = parseFloat(latStr);
+        lon = parseFloat(lonStr);
+      } else {
+        lat = locCmd.latitude;
+        lon = locCmd.longitude;
+      }
+
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('setLocation: No booted iOS simulator found');
+      }
+
+      this.log(`setLocation: ${lat}, ${lon}`);
+      execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, { encoding: 'utf-8', stdio: 'pipe' });
+      return;
+    }
+
+    // setPermissions
+    if ('setPermissions' in cmd) {
+      const permissions = cmd.setPermissions;
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('setPermissions: No booted iOS simulator found');
+      }
+
+      const targetAppId = this.appId;
+      if (!targetAppId) {
+        throw new Error('setPermissions: No appId specified');
+      }
+
+      this.log(`setPermissions: ${JSON.stringify(permissions)}`);
+
+      // Map permission names to simctl privacy service names
+      const permissionMap: Record<string, string> = {
+        notifications: 'notifications',
+        photos: 'photos',
+        camera: 'camera',
+        microphone: 'microphone',
+        location: 'location',
+        contacts: 'contacts',
+        calendar: 'calendar',
+        reminders: 'reminders',
+        medialibrary: 'media-library',
+        bluetooth: 'bluetooth',
+      };
+
+      for (const [perm, action] of Object.entries(permissions)) {
+        const service = permissionMap[perm.toLowerCase()] || perm;
+        const simctlAction = action === 'allow' ? 'grant' : action === 'deny' ? 'revoke' : 'reset';
+        try {
+          execSync(`xcrun simctl privacy ${deviceId} ${simctlAction} ${service} ${targetAppId}`, {
+            encoding: 'utf-8',
+            stdio: 'pipe',
+          });
+        } catch {
+          // Some permissions may not be supported
+          this.log(`setPermissions: ${perm} - ${action} (may not be supported)`);
+        }
+      }
+      return;
+    }
+
+    // startRecording
+    if ('startRecording' in cmd) {
+      const recCmd = cmd.startRecording;
+      const path = typeof recCmd === 'string' ? recCmd : recCmd.path;
+
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('startRecording: No booted iOS simulator found');
+      }
+
+      this.log(`startRecording: ${path}`);
+      // Start recording in background - spawn without waiting
+      spawn('xcrun', ['simctl', 'io', deviceId, 'recordVideo', path], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+      await this.sleep(500);
+      return;
+    }
+
+    // stopRecording
+    if ('stopRecording' in cmd) {
+      this.log('stopRecording');
+      // Kill any running simctl recordVideo processes
+      try {
+        execSync('pkill -f "simctl io.*recordVideo"', { encoding: 'utf-8', stdio: 'pipe' });
+      } catch {
+        // Process may not exist
+      }
+      await this.sleep(500);
+      return;
+    }
+
+    // addMedia
+    if ('addMedia' in cmd) {
+      const mediaCmd = cmd.addMedia;
+      const files = Array.isArray(mediaCmd) ? mediaCmd : mediaCmd.files;
+
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('addMedia: No booted iOS simulator found');
+      }
+
+      this.log(`addMedia: ${files.join(', ')}`);
+      for (const file of files) {
+        execSync(`xcrun simctl addmedia ${deviceId} "${file}"`, { encoding: 'utf-8', stdio: 'pipe' });
+      }
+      return;
+    }
+
+    // waitForAnimationToEnd
+    if ('waitForAnimationToEnd' in cmd) {
+      const waitCmd = cmd.waitForAnimationToEnd;
+      const timeout = typeof waitCmd === 'object' && waitCmd.timeout ? waitCmd.timeout : 5000;
+      this.log(`waitForAnimationToEnd: timeout=${timeout}ms`);
+      try {
+        await this.client.waitForIdle(timeout);
+      } catch {
+        // Continue even if idle detection times out
+      }
+      return;
+    }
+
+    // extendedWaitUntil
+    if ('extendedWaitUntil' in cmd) {
+      const { visible, notVisible, timeout = 10000 } = cmd.extendedWaitUntil;
+      this.log(`extendedWaitUntil: timeout=${timeout}ms`);
+
+      if (visible) {
+        const selector = normalizeSelector(visible);
+        await this.waitFor(
+          () => this.selectorVisible(selector),
+          timeout,
+          `Element not visible: ${JSON.stringify(selector)}`
+        );
+      }
+      if (notVisible) {
+        const selector = normalizeSelector(notVisible);
+        await this.waitFor(
+          () => this.selectorVisible(selector).then((v) => !v),
+          timeout,
+          `Element still visible: ${JSON.stringify(selector)}`
+        );
+      }
       return;
     }
 

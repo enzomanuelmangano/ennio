@@ -149,12 +149,23 @@ public:
 #define TASTO_LOG_TRACE(tag, msg) do {} while(0)
 #endif
 
-// Format helper for building messages
+// Format helper for building messages with stream syntax
 #define TASTO_LOG_FMT(...) ([]() { \
     std::ostringstream _oss; \
     _oss << __VA_ARGS__; \
     return _oss.str(); \
 }())
+
+// Printf-style format helper for DEBUG level (used by legacy code)
+#if TASTO_DEBUG >= 3
+#define TASTO_LOG_DEBUG_F(tag, fmt, ...) do { \
+    char _buf[512]; \
+    snprintf(_buf, sizeof(_buf), fmt, ##__VA_ARGS__); \
+    ::tasto::TastoLog::debug(tag, _buf); \
+} while(0)
+#else
+#define TASTO_LOG_DEBUG_F(tag, fmt, ...) do {} while(0)
+#endif
 
 #else // TASTO_DEBUG not defined
 
@@ -164,6 +175,7 @@ public:
 #define TASTO_LOG_DEBUG(tag, msg) do {} while(0)
 #define TASTO_LOG_TRACE(tag, msg) do {} while(0)
 #define TASTO_LOG_FMT(...)        std::string()
+#define TASTO_LOG_DEBUG_F(tag, fmt, ...) do {} while(0)
 
 #endif // TASTO_DEBUG
 

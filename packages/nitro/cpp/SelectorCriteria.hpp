@@ -25,6 +25,32 @@ enum class TextMatchMode {
 struct TextMatcher {
     std::string pattern;
     TextMatchMode mode = TextMatchMode::Exact;
+
+    /**
+     * Check if the given text matches this matcher
+     */
+    bool matches(const std::string& text) const {
+        switch (mode) {
+            case TextMatchMode::Exact:
+                return text == pattern;
+            case TextMatchMode::Contains:
+                return text.find(pattern) != std::string::npos;
+            case TextMatchMode::StartsWith:
+                return text.size() >= pattern.size() &&
+                       text.compare(0, pattern.size(), pattern) == 0;
+            case TextMatchMode::EndsWith:
+                return text.size() >= pattern.size() &&
+                       text.compare(text.size() - pattern.size(), pattern.size(), pattern) == 0;
+            case TextMatchMode::Regex:
+                try {
+                    std::regex re(pattern);
+                    return std::regex_search(text, re);
+                } catch (...) {
+                    return false;
+                }
+        }
+        return false;
+    }
 };
 
 /**

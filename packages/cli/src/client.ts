@@ -227,6 +227,11 @@ export class TastoClient {
     return response.success;
   }
 
+  async doubleTap(testID: string): Promise<boolean> {
+    const response = await this.send('doubleTap', { testID });
+    return response.success;
+  }
+
   async getElementInfo(testID: string): Promise<ExtendedElementInfo | null> {
     const response = await this.send('getElementInfo', { testID });
     if (!response.success || !response.data) return null;
@@ -419,6 +424,15 @@ export class TastoClient {
   async longPressBySelector(selector: Selector, duration: number = 500): Promise<boolean> {
     const selectorJson = this.selectorToJson(selector);
     const response = await this.send('longPressBySelector', { selector: selectorJson, duration });
+    return response.success;
+  }
+
+  /**
+   * Double tap element by selector
+   */
+  async doubleTapBySelector(selector: Selector): Promise<boolean> {
+    const selectorJson = this.selectorToJson(selector);
+    const response = await this.send('doubleTapBySelector', { selector: selectorJson });
     return response.success;
   }
 

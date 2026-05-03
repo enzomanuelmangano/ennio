@@ -14,15 +14,6 @@
 // iOS-specific helper for accessing UIManager
 #if defined(__APPLE__)
 #include "../ios/TastoRuntimeHelper.h"
-// Use the logging function defined in TastoRuntimeHelper
-extern "C" void TastoLogMessage(const char* message);
-#define TASTO_LOG_IOS(fmt, ...) do { \
-    char buf[512]; \
-    snprintf(buf, sizeof(buf), "[Tasto] " fmt, ##__VA_ARGS__); \
-    TastoLogMessage(buf); \
-} while(0)
-#else
-#define TASTO_LOG_IOS(fmt, ...) fprintf(stderr, "[Tasto] " fmt "\n", ##__VA_ARGS__)
 #endif
 
 // Logging tag for this module
@@ -106,36 +97,27 @@ ShadowNodePtr HybridTasto::getShadowTreeRoot() const {
     // On iOS, try to get the UIManager through TastoRuntimeHelper first
     auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
 
-    // Always log via NSLog for debugging
-    fprintf(stderr, "[Tasto] getShadowTreeRoot: TastoRuntimeHelper initialized=%s\n",
-            helper.isInitialized() ? "YES" : "NO");
+    TASTO_LOG_TRACE(LOG_TAG, TASTO_LOG_FMT("getShadowTreeRoot: helper initialized=" << (helper.isInitialized() ? "YES" : "NO")));
 
     if (helper.isInitialized()) {
         auto uiManager = helper.getUIManager();
-        fprintf(stderr, "[Tasto] getShadowTreeRoot: UIManager=%s\n",
-                uiManager ? "available" : "null");
+        TASTO_LOG_TRACE(LOG_TAG, TASTO_LOG_FMT("getShadowTreeRoot: UIManager=" << (uiManager ? "available" : "null")));
 
         if (uiManager) {
             auto& shadowTreeRegistry = uiManager->getShadowTreeRegistry();
             ShadowNodePtr rootNode = nullptr;
-            int surfaceCount = 0;
 
             shadowTreeRegistry.enumerate([&](const facebook::react::ShadowTree& shadowTree, bool& stop) {
-                surfaceCount++;
                 rootNode = shadowTree.getCurrentRevision().rootShadowNode;
-                fprintf(stderr, "[Tasto] getShadowTreeRoot: Found surface %d with root=%s\n",
-                        surfaceCount, rootNode ? "YES" : "NO");
                 stop = true;
             });
-
-            fprintf(stderr, "[Tasto] getShadowTreeRoot: Total surfaces=%d\n", surfaceCount);
 
             if (rootNode) {
                 return rootNode;
             }
         }
     } else {
-        fprintf(stderr, "[Tasto] getShadowTreeRoot: TastoRuntimeHelper NOT initialized\n");
+        TASTO_LOG_DEBUG(LOG_TAG, "getShadowTreeRoot: TastoRuntimeHelper NOT initialized");
     }
 #endif
 
@@ -161,33 +143,31 @@ ShadowNodePtr HybridTasto::getShadowTreeRoot() const {
 }
 
 ShadowNodePtr HybridTasto::findNode(const std::string& testID) const {
-    TASTO_LOG_IOS("HybridTasto::findNode called for testID=%s", testID.c_str());
+    TASTO_LOG_DEBUG(LOG_TAG, TASTO_LOG_FMT("findNode: testID=" << testID));
 
     // First try O(1) registry lookup
     auto& registry = ::tasto::TestIDRegistry::getInstance();
     auto node = registry.findByTestID(testID);
 
     if (node) {
-        TASTO_LOG_IOS("HybridTasto::findNode: Found in registry");
+        TASTO_LOG_TRACE(LOG_TAG, "findNode: found in registry");
         return node;
     }
 
-    TASTO_LOG_IOS("HybridTasto::findNode: Not in registry, trying tree traversal");
+    TASTO_LOG_TRACE(LOG_TAG, "findNode: not in registry, trying tree traversal");
 
     // Fallback to tree traversal
     auto root = getShadowTreeRoot();
     if (!root) {
-        TASTO_LOG_IOS("HybridTasto::findNode: No shadow tree root!");
+        TASTO_LOG_WARN(LOG_TAG, "findNode: no shadow tree root");
         return nullptr;
     }
-
-    TASTO_LOG_IOS("HybridTasto::findNode: Got shadow tree root, updating registry");
 
     // Update registry while we're at it
     registry.updateFromTree(root);
 
     auto found = ::tasto::ShadowTreeTraverser::findByTestID(root, testID);
-    TASTO_LOG_IOS("HybridTasto::findNode: Tree traversal result: %s", found ? "found" : "not found");
+    TASTO_LOG_TRACE(LOG_TAG, TASTO_LOG_FMT("findNode: tree traversal result=" << (found ? "found" : "not found")));
 
     return found;
 }
@@ -274,7 +254,7 @@ bool HybridTasto::exists(const std::string& testID) {
     // Check if this looks like a native tab/nav element
     if (testID.rfind("tab-", 0) == 0 || testID.rfind("nav-", 0) == 0) {
         std::string derivedLabel = deriveLabel(testID);
-        TASTO_LOG_IOS("exists: testID=%s not in shadow tree, assuming native element '%s' exists",
+        TASTO_LOG_DEBUG_F(LOG_TAG, "exists: testID=%s not in shadow tree, assuming native element '%s' exists",
             testID.c_str(), derivedLabel.c_str());
         return true;
     }
@@ -310,7 +290,7 @@ bool HybridTasto::isVisible(const std::string& testID) {
     // Get metrics for debugging
     auto metrics = ::tasto::ShadowTreeTraverser::getLayoutMetrics(root, testID);
     if (metrics) {
-        TASTO_LOG_IOS("isVisible: testID=%s screenX=%.1f screenY=%.1f w=%.1f h=%.1f (screen: %.0fx%.0f)",
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisible: testID=%s screenX=%.1f screenY=%.1f w=%.1f h=%.1f (screen: %.0fx%.0f)",
             testID.c_str(), metrics->screenX, metrics->screenY, metrics->width, metrics->height, width, height);
         return ::tasto::ShadowTreeTraverser::isVisible(root, testID, width, height);
     }
@@ -318,12 +298,12 @@ bool HybridTasto::isVisible(const std::string& testID) {
     // Fallback: testID not found in shadow tree, try native accessibility with derived label
 #if defined(__APPLE__)
     std::string derivedLabel = deriveLabel(testID);
-    TASTO_LOG_IOS("isVisible: testID=%s not in shadow tree, assuming native '%s' is visible",
+    TASTO_LOG_DEBUG_F(LOG_TAG, "isVisible: testID=%s not in shadow tree, assuming native '%s' is visible",
         testID.c_str(), derivedLabel.c_str());
     // For native elements, optimistically return true - tap will verify
     return true;
 #else
-    TASTO_LOG_IOS("isVisible: testID=%s - no metrics", testID.c_str());
+    TASTO_LOG_DEBUG_F(LOG_TAG, "isVisible: testID=%s - no metrics", testID.c_str());
     return false;
 #endif
 }
@@ -347,18 +327,18 @@ std::variant<nitro::NullType, std::string> HybridTasto::getText(const std::strin
 // ============================================
 
 bool HybridTasto::tap(const std::string& testID) {
-    TASTO_LOG_IOS("HybridTasto::tap called for testID=%s", testID.c_str());
+    TASTO_LOG_DEBUG_F(LOG_TAG, "tap called for testID=%s", testID.c_str());
 
     // First, find the node in shadow tree (works on all platforms)
     auto node = findNode(testID);
     if (!node) {
-        TASTO_LOG_IOS("HybridTasto::tap: Element not found in shadow tree: %s", testID.c_str());
+        TASTO_LOG_DEBUG_F(LOG_TAG, "tap: Element not found in shadow tree: %s", testID.c_str());
 
 #if defined(__APPLE__)
         auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
 
         // First try to find by accessibilityIdentifier
-        TASTO_LOG_IOS("HybridTasto::tap: Trying UIView search by accessibilityIdentifier");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "tap: Trying UIView search by accessibilityIdentifier");
         if (helper.performTapByTestID(testID)) {
             return true;
         }
@@ -366,7 +346,7 @@ bool HybridTasto::tap(const std::string& testID) {
         // If that fails, try derived accessibility label with retries
         // Native elements might need time to stabilize after navigation
         std::string derivedLabel = deriveLabel(testID);
-        TASTO_LOG_IOS("HybridTasto::tap: accessibilityIdentifier failed, trying derived label '%s'", derivedLabel.c_str());
+        TASTO_LOG_DEBUG_F(LOG_TAG, "tap: accessibilityIdentifier failed, trying derived label '%s'", derivedLabel.c_str());
 
         return helper.performTapByLabel(derivedLabel);
 #else
@@ -374,12 +354,12 @@ bool HybridTasto::tap(const std::string& testID) {
 #endif
     }
 
-    TASTO_LOG_IOS("HybridTasto::tap: Found node, dispatching events");
+    TASTO_LOG_DEBUG_F(LOG_TAG, "tap: Found node, dispatching events");
 
     // Try dispatching events through the event emitter (cross-platform approach)
     // This directly triggers onPress in Pressable components
     bool eventResult = ::tasto::EventDispatcher::tap(node);
-    TASTO_LOG_IOS("HybridTasto::tap: EventDispatcher result=%d", eventResult);
+    TASTO_LOG_DEBUG_F(LOG_TAG, "tap: EventDispatcher result=%d", eventResult);
 
     if (eventResult) {
         return true;
@@ -393,11 +373,11 @@ bool HybridTasto::tap(const std::string& testID) {
         if (metrics) {
             float centerX = metrics->screenX + (metrics->width / 2.0f);
             float centerY = metrics->screenY + (metrics->height / 2.0f);
-            TASTO_LOG_IOS("HybridTasto::tap: Trying native tap at (%.1f, %.1f)", centerX, centerY);
+            TASTO_LOG_DEBUG_F(LOG_TAG, "tap: Trying native tap at (%.1f, %.1f)", centerX, centerY);
 
             auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
             bool nativeResult = helper.performTap(centerX, centerY);
-            TASTO_LOG_IOS("HybridTasto::tap: native tap result=%d", nativeResult);
+            TASTO_LOG_DEBUG_F(LOG_TAG, "tap: native tap result=%d", nativeResult);
             return nativeResult;
         }
     }
@@ -416,12 +396,12 @@ bool HybridTasto::longPress(const std::string& testID, double durationMs) {
 }
 
 bool HybridTasto::typeText(const std::string& testID, const std::string& text) {
-    TASTO_LOG_IOS("HybridTasto::typeText called for testID=%s text=%s", testID.c_str(), text.c_str());
+    TASTO_LOG_DEBUG_F(LOG_TAG, "typeText called for testID=%s text=%s", testID.c_str(), text.c_str());
 
     // Find node in shadow tree first
     auto node = findNode(testID);
     if (!node) {
-        TASTO_LOG_IOS("HybridTasto::typeText node not found in shadow tree");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "typeText node not found in shadow tree");
         return false;
     }
 
@@ -444,56 +424,56 @@ bool HybridTasto::typeText(const std::string& testID, const std::string& text) {
             // But this varies by device. Try to tap the element using its testID coordinates
             // from the actual native view hierarchy instead.
 
-            TASTO_LOG_IOS("HybridTasto::typeText node metrics: screenX=%.1f screenY=%.1f w=%.1f h=%.1f center=(%.1f,%.1f)",
+            TASTO_LOG_DEBUG_F(LOG_TAG, "typeText node metrics: screenX=%.1f screenY=%.1f w=%.1f h=%.1f center=(%.1f,%.1f)",
                 metrics->screenX, metrics->screenY, metrics->width, metrics->height, centerX, centerY);
 
             // First tap to focus the element using shadow tree coordinates
-            TASTO_LOG_IOS("HybridTasto::typeText tapping to focus at (%.1f, %.1f)", centerX, centerY);
+            TASTO_LOG_DEBUG_F(LOG_TAG, "typeText tapping to focus at (%.1f, %.1f)", centerX, centerY);
             bool tapResult = helper.performTap(centerX, centerY);
-            TASTO_LOG_IOS("HybridTasto::typeText tap result=%d", tapResult);
+            TASTO_LOG_DEBUG_F(LOG_TAG, "typeText tap result=%d", tapResult);
 
             if (tapResult) {
                 // Wait for focus to take effect
                 std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
                 // Type text into the currently focused text input
-                TASTO_LOG_IOS("HybridTasto::typeText typing into focused input at point");
+                TASTO_LOG_DEBUG_F(LOG_TAG, "typeText typing into focused input at point");
                 bool typeResult = helper.performTypeTextAtPoint(centerX, centerY, text);
-                TASTO_LOG_IOS("HybridTasto::typeText type result=%d", typeResult);
+                TASTO_LOG_DEBUG_F(LOG_TAG, "typeText type result=%d", typeResult);
 
                 if (typeResult) {
                     return true;
                 }
             }
         } else {
-            TASTO_LOG_IOS("HybridTasto::typeText no screen metrics for node");
+            TASTO_LOG_DEBUG_F(LOG_TAG, "typeText no screen metrics for node");
         }
     }
 
     // Fallback: try native type by testID
-    TASTO_LOG_IOS("HybridTasto::typeText trying native performTypeText by testID");
+    TASTO_LOG_DEBUG_F(LOG_TAG, "typeText trying native performTypeText by testID");
     if (helper.performTypeText(testID, text)) {
         return true;
     }
 #endif
 
-    TASTO_LOG_IOS("HybridTasto::typeText all methods failed");
+    TASTO_LOG_DEBUG_F(LOG_TAG, "typeText all methods failed");
     return false;
 }
 
 bool HybridTasto::clearText(const std::string& testID) {
-    TASTO_LOG_IOS("HybridTasto::clearText called for testID=%s", testID.c_str());
+    TASTO_LOG_DEBUG_F(LOG_TAG, "clearText called for testID=%s", testID.c_str());
 
     // Use EventDispatcher to dispatch React events for text input
     auto node = findNode(testID);
     if (!node) {
-        TASTO_LOG_IOS("HybridTasto::clearText node not found");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "clearText node not found");
         return false;
     }
 
-    TASTO_LOG_IOS("HybridTasto::clearText using EventDispatcher");
+    TASTO_LOG_DEBUG_F(LOG_TAG, "clearText using EventDispatcher");
     bool result = ::tasto::EventDispatcher::clearText(node);
-    TASTO_LOG_IOS("HybridTasto::clearText result=%d", result);
+    TASTO_LOG_DEBUG_F(LOG_TAG, "clearText result=%d", result);
     return result;
 }
 
@@ -599,7 +579,7 @@ void HybridTasto::synchronize() {
     ::tasto::Response response;
     response.id = request.id;
 
-    TASTO_LOG_IOS("HybridTasto::handleCommand: type=%s", request.type.c_str());
+    TASTO_LOG_DEBUG_F(LOG_TAG, "handleCommand: type=%s", request.type.c_str());
 
     try {
         const std::string& type = request.type;
@@ -687,6 +667,20 @@ void HybridTasto::synchronize() {
             response.success = result;
             if (!result) {
                 response.error = "Element not found: " + testID;
+            }
+        }
+        else if (type == "doubleTap") {
+            std::string testID = ::tasto::json::parseString(payload, "testID");
+            auto node = findNode(testID);
+            if (!node) {
+                response.success = false;
+                response.error = "Element not found: " + testID;
+            } else {
+                bool result = ::tasto::EventDispatcher::doubleTap(node);
+                response.success = result;
+                if (!result) {
+                    response.error = "Double tap failed: " + testID;
+                }
             }
         }
         else if (type == "longPress") {
@@ -902,6 +896,26 @@ void HybridTasto::synchronize() {
                 response.error = "Element not found for selector";
             }
         }
+        else if (type == "doubleTapBySelector") {
+            std::string selector = ::tasto::json::parseString(payload, "selector");
+            try {
+                auto criteria = ::tasto::SelectorParser::parse(selector);
+                auto node = findNodeBySelector(criteria);
+                if (!node) {
+                    response.success = false;
+                    response.error = "Element not found for selector";
+                } else {
+                    bool result = ::tasto::EventDispatcher::doubleTap(node);
+                    response.success = result;
+                    if (!result) {
+                        response.error = "Double tap failed";
+                    }
+                }
+            } catch (const std::exception& e) {
+                response.success = false;
+                response.error = e.what();
+            }
+        }
         else if (type == "typeTextBySelector") {
             std::string selector = ::tasto::json::parseString(payload, "selector");
             std::string text = ::tasto::json::parseString(payload, "text");
@@ -939,14 +953,14 @@ void HybridTasto::synchronize() {
             }
         }
         else if (type == "isVisibleBySelector") {
-            TASTO_LOG_IOS("handleCommand: isVisibleBySelector parsing selector from payload");
+            TASTO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector parsing selector from payload");
             std::string selector = ::tasto::json::parseString(payload, "selector");
-            TASTO_LOG_IOS("handleCommand: isVisibleBySelector selector=%s", selector.c_str());
+            TASTO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector selector=%s", selector.c_str());
             bool result = isVisibleBySelector(selector);
-            TASTO_LOG_IOS("handleCommand: isVisibleBySelector result=%d", result);
+            TASTO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector result=%d", result);
             response.success = true;
             response.data = result ? "true" : "false";
-            TASTO_LOG_IOS("handleCommand: isVisibleBySelector response ready success=%d data=%s",
+            TASTO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector response ready success=%d data=%s",
                 response.success, response.data.c_str());
         }
         else {
@@ -1144,7 +1158,7 @@ bool HybridTasto::existsBySelector(const std::string& selectorJson) {
         // This handles native iOS elements like tab bars that aren't in React shadow tree
 #if defined(__APPLE__)
         if (criteria.text.has_value() && !criteria.id.has_value()) {
-            TASTO_LOG_IOS("existsBySelector: checking native accessibility for text '%s'", criteria.text->pattern.c_str());
+            TASTO_LOG_DEBUG_F(LOG_TAG, "existsBySelector: checking native accessibility for text '%s'", criteria.text->pattern.c_str());
             return true;  // Optimistically return true, tap will verify
         }
 
@@ -1152,7 +1166,7 @@ bool HybridTasto::existsBySelector(const std::string& selectorJson) {
         // Native iOS elements (like tab bars) may not have testID but have accessibility labels
         if (criteria.id.has_value() && !criteria.text.has_value()) {
             std::string derivedLabel = deriveLabel(*criteria.id);
-            TASTO_LOG_IOS("existsBySelector: id '%s' not in shadow tree, trying native label '%s'",
+            TASTO_LOG_DEBUG_F(LOG_TAG, "existsBySelector: id '%s' not in shadow tree, trying native label '%s'",
                 criteria.id->c_str(), derivedLabel.c_str());
             return true;  // Optimistically return true, tap will verify
         }
@@ -1167,9 +1181,9 @@ bool HybridTasto::existsBySelector(const std::string& selectorJson) {
 
 bool HybridTasto::tapBySelector(const std::string& selectorJson) {
     try {
-        TASTO_LOG_IOS("tapBySelector: parsing selector=%s", selectorJson.c_str());
+        TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: parsing selector=%s", selectorJson.c_str());
         auto criteria = ::tasto::SelectorParser::parse(selectorJson);
-        TASTO_LOG_IOS("tapBySelector: parsed - text.has_value=%d, id.has_value=%d",
+        TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: parsed - text.has_value=%d, id.has_value=%d",
             criteria.text.has_value() ? 1 : 0, criteria.id.has_value() ? 1 : 0);
 
 #if defined(__APPLE__)
@@ -1179,13 +1193,13 @@ bool HybridTasto::tapBySelector(const std::string& selectorJson) {
         // This handles native iOS elements (like tab bars) that aren't in React shadow tree
         if (criteria.text.has_value() && !criteria.id.has_value()) {
             const auto& textPattern = criteria.text->pattern;
-            TASTO_LOG_IOS("tapBySelector: text-only selector '%s', trying native accessibility first", textPattern.c_str());
+            TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: text-only selector '%s', trying native accessibility first", textPattern.c_str());
 
             if (helper.performTapByLabel(textPattern)) {
-                TASTO_LOG_IOS("tapBySelector: native accessibility tap succeeded for '%s'", textPattern.c_str());
+                TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: native accessibility tap succeeded for '%s'", textPattern.c_str());
                 return true;
             }
-            TASTO_LOG_IOS("tapBySelector: native accessibility tap failed, falling back to shadow tree");
+            TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: native accessibility tap failed, falling back to shadow tree");
         }
 #endif
 
@@ -1195,14 +1209,14 @@ bool HybridTasto::tapBySelector(const std::string& selectorJson) {
 #if defined(__APPLE__)
         if (!node && criteria.id.has_value() && !criteria.text.has_value()) {
             std::string derivedLabel = deriveLabel(*criteria.id);
-            TASTO_LOG_IOS("tapBySelector: id '%s' not found, trying native label '%s'",
+            TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: id '%s' not found, trying native label '%s'",
                 criteria.id->c_str(), derivedLabel.c_str());
 
             if (helper.performTapByLabel(derivedLabel)) {
-                TASTO_LOG_IOS("tapBySelector: native tap with derived label '%s' succeeded", derivedLabel.c_str());
+                TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: native tap with derived label '%s' succeeded", derivedLabel.c_str());
                 return true;
             }
-            TASTO_LOG_IOS("tapBySelector: native tap with derived label failed");
+            TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: native tap with derived label failed");
         }
 #endif
         if (!node) {
@@ -1210,12 +1224,12 @@ bool HybridTasto::tapBySelector(const std::string& selectorJson) {
             return false;
         }
 
-        TASTO_LOG_IOS("tapBySelector: found node in shadow tree");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: found node in shadow tree");
 
         // Get testID for existing tap implementation
         auto testID = ::tasto::ShadowTreeTraverser::getTestID(*node);
         if (testID) {
-            TASTO_LOG_IOS("tapBySelector: using tap by testID=%s", testID->c_str());
+            TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: using tap by testID=%s", testID->c_str());
             return tap(*testID);
         }
 
@@ -1234,7 +1248,7 @@ bool HybridTasto::tapBySelector(const std::string& selectorJson) {
                 float x = metrics.frame.origin.x + metrics.frame.size.width / 2;
                 float y = metrics.frame.origin.y + metrics.frame.size.height / 2;
 
-                TASTO_LOG_IOS("tapBySelector: using coordinates (%.1f, %.1f)", x, y);
+                TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: using coordinates (%.1f, %.1f)", x, y);
 
                 auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
                 return helper.performTap(x, y);
@@ -1243,7 +1257,7 @@ bool HybridTasto::tapBySelector(const std::string& selectorJson) {
 #endif
 
         // Fallback: direct event dispatch (may cause issues from background thread)
-        TASTO_LOG_IOS("tapBySelector: falling back to EventDispatcher");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "tapBySelector: falling back to EventDispatcher");
         return ::tasto::EventDispatcher::tap(node);
     } catch (const std::exception& e) {
         TASTO_LOG_ERROR("tapBySelector", "Error: " << e.what());
@@ -1335,19 +1349,19 @@ std::variant<nitro::NullType, std::string> HybridTasto::getTextBySelector(const 
 }
 
 bool HybridTasto::isVisibleBySelector(const std::string& selectorJson) {
-    TASTO_LOG_IOS("isVisibleBySelector: START selector=%s", selectorJson.c_str());
+    TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: START selector=%s", selectorJson.c_str());
     try {
-        TASTO_LOG_IOS("isVisibleBySelector: parsing selector");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: parsing selector");
         auto criteria = ::tasto::SelectorParser::parse(selectorJson);
-        TASTO_LOG_IOS("isVisibleBySelector: parsed, finding node");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: parsed, finding node");
         auto node = findNodeBySelector(criteria);
-        TASTO_LOG_IOS("isVisibleBySelector: findNodeBySelector returned %s", node ? "node" : "null");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: findNodeBySelector returned %s", node ? "node" : "null");
         if (!node) {
             // For id selectors that failed in shadow tree, check native accessibility
 #if defined(__APPLE__)
             if (criteria.id.has_value() && !criteria.text.has_value()) {
                 std::string derivedLabel = deriveLabel(*criteria.id);
-                TASTO_LOG_IOS("isVisibleBySelector: id '%s' not in shadow tree, checking native label '%s'",
+                TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: id '%s' not in shadow tree, checking native label '%s'",
                     criteria.id->c_str(), derivedLabel.c_str());
                 // Native elements visible by default if they exist with that label
                 // performTapByLabel will verify at tap time
@@ -1355,28 +1369,28 @@ bool HybridTasto::isVisibleBySelector(const std::string& selectorJson) {
             }
             // For text selectors, also assume visible if native element exists
             if (criteria.text.has_value() && !criteria.id.has_value()) {
-                TASTO_LOG_IOS("isVisibleBySelector: text '%s' not in shadow tree, assuming native visible",
+                TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: text '%s' not in shadow tree, assuming native visible",
                     criteria.text->pattern.c_str());
                 return true;
             }
 #endif
-            TASTO_LOG_IOS("isVisibleBySelector: node not found, returning false");
+            TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: node not found, returning false");
             return false;
         }
 
         auto testID = ::tasto::ShadowTreeTraverser::getTestID(*node);
-        TASTO_LOG_IOS("isVisibleBySelector: testID=%s", testID ? testID->c_str() : "none");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: testID=%s", testID ? testID->c_str() : "none");
         if (testID) {
             bool result = isVisible(*testID);
-            TASTO_LOG_IOS("isVisibleBySelector: isVisible result=%d", result);
+            TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: isVisible result=%d", result);
             return result;
         }
 
         // Fallback: check metrics directly
-        TASTO_LOG_IOS("isVisibleBySelector: no testID, checking metrics directly");
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: no testID, checking metrics directly");
         auto root = getShadowTreeRoot();
         if (!root) {
-            TASTO_LOG_IOS("isVisibleBySelector: no root, returning false");
+            TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: no root, returning false");
             return false;
         }
 
@@ -1386,28 +1400,28 @@ bool HybridTasto::isVisibleBySelector(const std::string& selectorJson) {
 
         auto layoutable = dynamic_cast<const facebook::react::LayoutableShadowNode*>(node.get());
         if (!layoutable) {
-            TASTO_LOG_IOS("isVisibleBySelector: not layoutable, returning false");
+            TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: not layoutable, returning false");
             return false;
         }
 
         auto metrics = layoutable->getLayoutMetrics();
-        TASTO_LOG_IOS("isVisibleBySelector: metrics x=%.1f y=%.1f w=%.1f h=%.1f",
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: metrics x=%.1f y=%.1f w=%.1f h=%.1f",
             metrics.frame.origin.x, metrics.frame.origin.y,
             metrics.frame.size.width, metrics.frame.size.height);
         if (metrics.frame.origin.x + metrics.frame.size.width < 0 ||
             metrics.frame.origin.y + metrics.frame.size.height < 0 ||
             metrics.frame.origin.x > width ||
             metrics.frame.origin.y > height) {
-            TASTO_LOG_IOS("isVisibleBySelector: out of bounds, returning false");
+            TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: out of bounds, returning false");
             return false;
         }
 
         bool result = metrics.frame.size.width > 0 && metrics.frame.size.height > 0;
-        TASTO_LOG_IOS("isVisibleBySelector: END result=%d", result);
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: END result=%d", result);
         return result;
     } catch (const std::exception& e) {
         TASTO_LOG_ERROR("isVisibleBySelector", "Error: " << e.what());
-        TASTO_LOG_IOS("isVisibleBySelector: EXCEPTION %s", e.what());
+        TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: EXCEPTION %s", e.what());
         return false;
     }
 }

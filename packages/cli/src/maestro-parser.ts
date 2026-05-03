@@ -41,18 +41,38 @@ export interface MaestroCondition {
 
 export type MaestroCommand =
   | { tapOn: MaestroSelector | string }
-  | { assertVisible: MaestroSelector & { timeout?: number } }
+  | { doubleTapOn: MaestroSelector | string }
+  | { assertVisible: MaestroSelector & { timeout?: number; anyOf?: MaestroSelector[] } }
   | { assertNotVisible: MaestroSelector & { timeout?: number } }
   | { inputText: string }
   | { clearText: MaestroSelector | string }
+  | { eraseText: number | { characters?: number } }
   | { scroll: { direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'; amount?: number } }
+  | { scrollUntilVisible: MaestroSelector | { element: MaestroSelector; direction?: string; timeout?: number } }
+  | { swipe: { direction?: string; start?: string | { x: number; y: number }; end?: string | { x: number; y: number }; duration?: number } }
   | { longPress: MaestroSelector | string }
   | { back: true }
   | { runFlow: RunFlowCommand }
   | { waitFor: MaestroSelector & { timeout?: number } }
   | { assertAnyVisible: { anyOf: MaestroSelector[] } }
   | { launchApp: true | { clearState?: boolean; appId?: string } }
-  | { clearState: true | { appId?: string } };
+  | { clearState: true | { appId?: string } }
+  | { stopApp: true | { appId?: string } }
+  | { openLink: string | { link: string } }
+  | { takeScreenshot: string | { path: string } }
+  | { hideKeyboard: true }
+  | { repeat: { times: number; commands: MaestroCommand[] } }
+  | { retry: { maxRetries?: number; commands: MaestroCommand[] } }
+  | { assertTrue: string }
+  | { evalScript: string }
+  | { runScript: { file: string; env?: Record<string, string> } }
+  | { setLocation: { latitude: number; longitude: number } | string }
+  | { setPermissions: Record<string, 'allow' | 'deny' | 'unset'> }
+  | { startRecording: string | { path: string } }
+  | { stopRecording: true }
+  | { addMedia: string[] | { files: string[] } }
+  | { waitForAnimationToEnd: true | { timeout?: number } }
+  | { extendedWaitUntil: { visible?: MaestroSelector; notVisible?: MaestroSelector; timeout?: number } };
 
 export interface RunFlowCommand {
   file?: string;

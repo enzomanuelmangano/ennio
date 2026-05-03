@@ -1,4 +1,5 @@
 #include "EventDispatcher.hpp"
+#include "TastoLog.hpp"
 
 #include <thread>
 #include <chrono>
@@ -14,9 +15,11 @@
 
 namespace tasto {
 
+static const char* LOG_TAG = "EventDispatcher";
+
 bool EventDispatcher::tap(ShadowNodePtr node) {
     if (!node) {
-        fprintf(stderr, "[Tasto] EventDispatcher::tap: node is null\n");
+        TASTO_LOG_WARN(LOG_TAG, "tap: node is null");
         return false;
     }
 
@@ -24,7 +27,7 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
     // This dispatches events directly through React's event system
     auto emitter = getEventEmitter(node);
     if (!emitter) {
-        fprintf(stderr, "[Tasto] EventDispatcher::tap: emitter is null for tag=%d\n", node->getTag());
+        TASTO_LOG_WARN(LOG_TAG, TASTO_LOG_FMT("tap: emitter is null for tag=" << node->getTag()));
         return false;
     }
 
@@ -41,7 +44,7 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
         ).count()
     );
 
-    fprintf(stderr, "[Tasto] EventDispatcher::tap: tag=%d, center=(%.1f, %.1f)\n", nodeTag, centerX, centerY);
+    TASTO_LOG_DEBUG(LOG_TAG, TASTO_LOG_FMT("tap: tag=" << nodeTag << " center=(" << centerX << "," << centerY << ")"));
 
     // Dispatch touch and click events through the event emitter
     // This directly triggers the React Native event handlers
@@ -52,7 +55,57 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
     // Dispatch click event - this is what triggers onPress in Pressable
     dispatchClickEvent(emitter, centerX, centerY);
 
-    fprintf(stderr, "[Tasto] EventDispatcher::tap: completed\n");
+    TASTO_LOG_TRACE(LOG_TAG, "tap: completed");
+    return true;
+}
+
+bool EventDispatcher::doubleTap(ShadowNodePtr node) {
+    if (!node) {
+        TASTO_LOG_WARN(LOG_TAG, "doubleTap: node is null");
+        return false;
+    }
+
+    auto emitter = getEventEmitter(node);
+    if (!emitter) {
+        TASTO_LOG_WARN(LOG_TAG, "doubleTap: emitter is null");
+        return false;
+    }
+
+    auto [centerX, centerY] = getCenterPoint(node);
+    int32_t nodeTag = node->getTag();
+
+    auto now = std::chrono::system_clock::now();
+    double timestamp = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()
+        ).count()
+    );
+
+    TASTO_LOG_DEBUG(LOG_TAG, TASTO_LOG_FMT("doubleTap: tag=" << nodeTag << " center=(" << centerX << "," << centerY << ")"));
+
+    // First tap
+    dispatchTouchEvent(emitter, "touchStart", centerX, centerY, nodeTag, timestamp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    dispatchTouchEvent(emitter, "touchEnd", centerX, centerY, nodeTag, timestamp);
+    dispatchClickEvent(emitter, centerX, centerY);
+
+    // Brief pause between taps (50ms is typical double-tap threshold)
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Second tap
+    auto now2 = std::chrono::system_clock::now();
+    double timestamp2 = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            now2.time_since_epoch()
+        ).count()
+    );
+
+    dispatchTouchEvent(emitter, "touchStart", centerX, centerY, nodeTag, timestamp2);
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    dispatchTouchEvent(emitter, "touchEnd", centerX, centerY, nodeTag, timestamp2);
+    dispatchClickEvent(emitter, centerX, centerY);
+
+    TASTO_LOG_TRACE(LOG_TAG, "doubleTap: completed");
     return true;
 }
 
@@ -93,9 +146,9 @@ bool EventDispatcher::typeText(ShadowNodePtr node, const std::string& text) {
     // race conditions with React Native's UIManagerBinding.
     // typeText should use native iOS APIs instead.
     // This is kept as a stub for cross-platform fallback.
-    fprintf(stderr, "[Tasto] EventDispatcher::typeText: WARNING - called but not dispatching events (use native approach)\n");
+    TASTO_LOG_DEBUG(LOG_TAG, "typeText: using native approach");
 
-    // Return true since the native approach should handle this
+    // Return false to signal native approach should handle this
     return false;
 }
 
@@ -121,7 +174,7 @@ bool EventDispatcher::replaceText(ShadowNodePtr node, const std::string& text) {
 
 bool EventDispatcher::scroll(ShadowNodePtr node, float deltaX, float deltaY) {
     if (!node) {
-        fprintf(stderr, "[Tasto] EventDispatcher::scroll: node is null\n");
+        TASTO_LOG_WARN(LOG_TAG, "scroll: node is null");
         return false;
     }
 
@@ -141,7 +194,7 @@ bool EventDispatcher::scroll(ShadowNodePtr node, float deltaX, float deltaY) {
 
     auto emitter = getEventEmitter(node);
     if (!emitter) {
-        fprintf(stderr, "[Tasto] EventDispatcher::scroll: emitter is null\n");
+        TASTO_LOG_WARN(LOG_TAG, "scroll: emitter is null");
         return false;
     }
 
