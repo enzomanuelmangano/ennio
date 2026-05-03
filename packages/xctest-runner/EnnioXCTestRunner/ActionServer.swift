@@ -148,8 +148,8 @@ final class ActionServer {
         // without activate() the synthesized tap lands on the runner.
         switch type {
         case "tap", "doubleTap", "longPress", "swipe", "typeText", "pressKey",
-             "clearText", "tapAlertButton", "dismissAlert", "paste", "back",
-             "findByLabel", "findById", "tapById":
+             "clearText", "tapAlertButton", "dismissAlert", "paste",
+             "back", "findByLabel", "findById", "tapById":
             app.activate()
         default: break
         }

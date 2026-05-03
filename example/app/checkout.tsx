@@ -8,6 +8,8 @@ import {
   Pressable,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useCartStore, useSettingsStore } from '../store';
@@ -164,10 +166,13 @@ export default function CheckoutScreen() {
         <Text style={[styles.label, darkMode && styles.textLight]}>Full Name</Text>
         <TextInput
           style={[styles.input, darkMode && styles.inputDark, errors.fullName && styles.inputError]}
-          value={shippingAddress.fullName}
+          defaultValue={shippingAddress.fullName}
           onChangeText={text => setShippingAddress(prev => ({ ...prev, fullName: text }))}
           placeholder="John Doe"
           placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
           testID="shipping-name"
         />
         {errors.fullName && <Text style={styles.errorText}>{errors.fullName}</Text>}
@@ -177,10 +182,13 @@ export default function CheckoutScreen() {
         <Text style={[styles.label, darkMode && styles.textLight]}>Street Address</Text>
         <TextInput
           style={[styles.input, darkMode && styles.inputDark, errors.street && styles.inputError]}
-          value={shippingAddress.street}
+          defaultValue={shippingAddress.street}
           onChangeText={text => setShippingAddress(prev => ({ ...prev, street: text }))}
           placeholder="123 Main St"
           placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
           testID="shipping-street"
         />
         {errors.street && <Text style={styles.errorText}>{errors.street}</Text>}
@@ -191,10 +199,13 @@ export default function CheckoutScreen() {
           <Text style={[styles.label, darkMode && styles.textLight]}>City</Text>
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.city && styles.inputError]}
-            value={shippingAddress.city}
+            defaultValue={shippingAddress.city}
             onChangeText={text => setShippingAddress(prev => ({ ...prev, city: text }))}
             placeholder="New York"
             placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
             testID="shipping-city"
           />
           {errors.city && <Text style={styles.errorText}>{errors.city}</Text>}
@@ -203,10 +214,13 @@ export default function CheckoutScreen() {
           <Text style={[styles.label, darkMode && styles.textLight]}>State</Text>
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.state && styles.inputError]}
-            value={shippingAddress.state}
+            defaultValue={shippingAddress.state}
             onChangeText={text => setShippingAddress(prev => ({ ...prev, state: text }))}
             placeholder="NY"
             placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
             testID="shipping-state"
           />
           {errors.state && <Text style={styles.errorText}>{errors.state}</Text>}
@@ -218,10 +232,13 @@ export default function CheckoutScreen() {
           <Text style={[styles.label, darkMode && styles.textLight]}>ZIP Code</Text>
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.zipCode && styles.inputError]}
-            value={shippingAddress.zipCode}
+            defaultValue={shippingAddress.zipCode}
             onChangeText={text => setShippingAddress(prev => ({ ...prev, zipCode: text }))}
             placeholder="10001"
             placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
             keyboardType="numeric"
             testID="shipping-zip"
           />
@@ -231,11 +248,13 @@ export default function CheckoutScreen() {
           <Text style={[styles.label, darkMode && styles.textLight]}>Phone</Text>
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.phone && styles.inputError]}
-            value={shippingAddress.phone}
+            defaultValue={shippingAddress.phone}
             onChangeText={text => setShippingAddress(prev => ({ ...prev, phone: text }))}
             placeholder="(555) 123-4567"
             placeholderTextColor={darkMode ? '#666' : '#999'}
-            keyboardType="phone-pad"
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
             testID="shipping-phone"
           />
           {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
@@ -252,10 +271,13 @@ export default function CheckoutScreen() {
         <Text style={[styles.label, darkMode && styles.textLight]}>Card Number</Text>
         <TextInput
           style={[styles.input, darkMode && styles.inputDark, errors.cardNumber && styles.inputError]}
-          value={paymentMethod.cardNumber}
+          defaultValue={paymentMethod.cardNumber}
           onChangeText={text => setPaymentMethod(prev => ({ ...prev, cardNumber: formatCardNumber(text) }))}
           placeholder="1234 5678 9012 3456"
           placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
           keyboardType="numeric"
           testID="payment-card-number"
         />
@@ -266,11 +288,13 @@ export default function CheckoutScreen() {
         <Text style={[styles.label, darkMode && styles.textLight]}>Cardholder Name</Text>
         <TextInput
           style={[styles.input, darkMode && styles.inputDark, errors.cardholderName && styles.inputError]}
-          value={paymentMethod.cardholderName}
+          defaultValue={paymentMethod.cardholderName}
           onChangeText={text => setPaymentMethod(prev => ({ ...prev, cardholderName: text }))}
           placeholder="JOHN DOE"
           placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
           autoCapitalize="characters"
+          spellCheck={false}
           testID="payment-cardholder"
         />
         {errors.cardholderName && <Text style={styles.errorText}>{errors.cardholderName}</Text>}
@@ -281,10 +305,13 @@ export default function CheckoutScreen() {
           <Text style={[styles.label, darkMode && styles.textLight]}>Expiry Date</Text>
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.expiryDate && styles.inputError]}
-            value={paymentMethod.expiryDate}
+            defaultValue={paymentMethod.expiryDate}
             onChangeText={text => setPaymentMethod(prev => ({ ...prev, expiryDate: formatExpiryDate(text) }))}
             placeholder="MM/YY"
             placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
             keyboardType="numeric"
             testID="payment-expiry"
           />
@@ -294,10 +321,13 @@ export default function CheckoutScreen() {
           <Text style={[styles.label, darkMode && styles.textLight]}>CVV</Text>
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.cvv && styles.inputError]}
-            value={paymentMethod.cvv}
+            defaultValue={paymentMethod.cvv}
             onChangeText={text => setPaymentMethod(prev => ({ ...prev, cvv: text.replace(/\D/g, '').slice(0, 4) }))}
             placeholder="123"
             placeholderTextColor={darkMode ? '#666' : '#999'}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
             keyboardType="numeric"
             secureTextEntry
             testID="payment-cvv"
@@ -380,10 +410,19 @@ export default function CheckoutScreen() {
           headerTintColor: darkMode ? '#ffffff' : '#000000',
         }}
       />
-      <View style={[styles.container, darkMode && styles.containerDark]} testID="checkout-screen">
+      <KeyboardAvoidingView
+        style={[styles.container, darkMode && styles.containerDark]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        testID="checkout-screen"
+      >
         {renderStepIndicator()}
 
-        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+        >
           {currentStep === 'shipping' && renderShippingForm()}
           {currentStep === 'payment' && renderPaymentForm()}
           {currentStep === 'review' && renderReview()}
@@ -418,7 +457,7 @@ export default function CheckoutScreen() {
             )}
           </Pressable>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </>
   );
 }
@@ -484,6 +523,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 20,
+    paddingBottom: 380,
   },
   sectionTitle: {
     fontSize: 20,
