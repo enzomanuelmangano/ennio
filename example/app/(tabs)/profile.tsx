@@ -97,7 +97,7 @@ function GuestView() {
   return (
     <View style={[styles.guestContainer, darkMode && styles.containerDark]} testID="guest-view">
       <Text style={styles.guestIcon}>👤</Text>
-      <Text style={[styles.guestTitle, darkMode && styles.textLight]}>Welcome to Tasto Shop</Text>
+      <Text style={[styles.guestTitle, darkMode && styles.textLight]}>Welcome to Ennio Shop</Text>
       <Text style={[styles.guestSubtitle, darkMode && styles.subtitleDark]}>
         Sign in to access your profile, view orders, and more
       </Text>
@@ -213,7 +213,7 @@ export default function ProfileScreen() {
         <MenuItem
           icon="💬"
           label="Contact Us"
-          onPress={() => Alert.alert('Contact', 'support@tasto.example')}
+          onPress={() => Alert.alert('Contact', 'support@ennio.example')}
           testID="menu-contact"
         />
         <MenuItem

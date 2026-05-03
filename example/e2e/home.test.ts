@@ -1,4 +1,4 @@
-import { element, sleep, runTest, waitForVisible } from '@tasto/test';
+import { element, sleep, runTest, waitForVisible } from '@ennio/test';
 import { goHome } from './shared';
 
 await goHome();

@@ -1,26 +1,26 @@
 //
-// TastoInitializer.mm
-// Objective-C++ implementation for Tasto initialization
+// EnnioInitializer.mm
+// Objective-C++ implementation for Ennio initialization
 //
 
-#import "TastoInitializer.h"
-#import "TastoRuntimeHelper.h"
+#import "EnnioInitializer.h"
+#import "EnnioRuntimeHelper.h"
 #import <React/RCTSurfacePresenter.h>
 
-@implementation TastoInitializer
+@implementation EnnioInitializer
 
 + (void)initializeWithSurfacePresenter:(RCTSurfacePresenter *)surfacePresenter {
     if (surfacePresenter == nil) {
-        NSLog(@"[Tasto] Warning: surfacePresenter is nil, cannot initialize");
+        NSLog(@"[Ennio] Warning: surfacePresenter is nil, cannot initialize");
         return;
     }
 
-    TastoSetSurfacePresenter(surfacePresenter);
-    NSLog(@"[Tasto] Initialized with surface presenter");
+    EnnioSetSurfacePresenter(surfacePresenter);
+    NSLog(@"[Ennio] Initialized with surface presenter");
 }
 
 + (BOOL)isInitialized {
-    return tasto::TastoRuntimeHelper::getInstance().isInitialized();
+    return ennio::EnnioRuntimeHelper::getInstance().isInitialized();
 }
 
 @end

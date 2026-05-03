@@ -3,7 +3,7 @@
  * Equivalent to maestro-e2e/10-full-purchase-flow.yaml
  * Complete journey from browse to order delivery
  */
-import { element, sleep, runTest } from '@tasto/test';
+import { element, sleep, runTest } from '@ennio/test';
 import {
   goHome,
   goProducts,

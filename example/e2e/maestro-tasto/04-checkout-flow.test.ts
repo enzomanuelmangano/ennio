@@ -2,7 +2,7 @@
  * Checkout Flow Tests
  * Equivalent to maestro-e2e/04-checkout-flow.yaml
  */
-import { element, sleep, runTest } from '@tasto/test';
+import { element, sleep, runTest } from '@ennio/test';
 import { goHome, goProducts, goCart, clearCart, loginWithDemo } from './shared';
 
 // ============================================

@@ -7,7 +7,7 @@
 #include <gtest/gtest.h>
 #include "SelectorParser.hpp"
 
-namespace tasto {
+namespace ennio {
 namespace {
 
 // ============================================
@@ -331,4 +331,4 @@ TEST(SelectorCriteriaTest, FromTextFactory) {
 }
 
 } // namespace
-} // namespace tasto
+} // namespace ennio

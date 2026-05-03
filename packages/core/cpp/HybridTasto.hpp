@@ -1,7 +1,7 @@
 #pragma once
 
 // Include the generated spec
-#include "../nitrogen/generated/shared/c++/HybridTastoSpec.hpp"
+#include "../nitrogen/generated/shared/c++/HybridEnnioSpec.hpp"
 
 #include <memory>
 #include <string>
@@ -22,21 +22,21 @@
 #include "SelectorParser.hpp"
 #include "ElementMatcher.hpp"
 
-namespace margelo::nitro::tasto {
+namespace margelo::nitro::ennio {
 
 using ShadowNodePtr = std::shared_ptr<const facebook::react::ShadowNode>;
 using RuntimeExecutor = std::function<void(std::function<void(facebook::jsi::Runtime&)>&&)>;
 
 /**
- * HybridTasto - Main Nitro HybridObject for E2E testing
+ * HybridEnnio - Main Nitro HybridObject for E2E testing
  *
  * Provides direct access to React Native's Fabric shadow tree
  * for fast, reliable E2E testing without instrumentation.
  */
-class HybridTasto : public HybridTastoSpec {
+class HybridEnnio : public HybridEnnioSpec {
 public:
-    HybridTasto();
-    ~HybridTasto() override = default;
+    HybridEnnio();
+    ~HybridEnnio() override = default;
 
     // ============================================
     // Server Management
@@ -144,7 +144,7 @@ private:
     // Server state
     bool serverRunning_ = false;
     int serverPort_ = 0;
-    std::unique_ptr<::tasto::WebSocketServer> webSocketServer_;
+    std::unique_ptr<::ennio::WebSocketServer> webSocketServer_;
 
     // Shadow tree access
     std::weak_ptr<facebook::react::UIManager> uiManager_;
@@ -168,27 +168,27 @@ private:
     /**
      * Handle incoming WebSocket commands
      */
-    ::tasto::Response handleCommand(const ::tasto::Request& request);
+    ::ennio::Response handleCommand(const ::ennio::Request& request);
 
     /**
      * Convert internal ElementInfo to Nitro struct
      */
-    ElementInfo convertElementInfo(const ::tasto::ElementInfo& info) const;
+    ElementInfo convertElementInfo(const ::ennio::ElementInfo& info) const;
 
     /**
      * Convert internal LayoutMetrics to Nitro struct
      */
-    LayoutMetrics convertLayoutMetrics(const ::tasto::LayoutMetrics& metrics) const;
+    LayoutMetrics convertLayoutMetrics(const ::ennio::LayoutMetrics& metrics) const;
 
     /**
      * Convert internal ExtendedElementInfo to Nitro struct
      */
-    ExtendedElementInfo convertExtendedElementInfo(const ::tasto::ExtendedElementInfo& info) const;
+    ExtendedElementInfo convertExtendedElementInfo(const ::ennio::ExtendedElementInfo& info) const;
 
     /**
      * Find a node by selector criteria
      */
-    ShadowNodePtr findNodeBySelector(const ::tasto::SelectorCriteria& criteria) const;
+    ShadowNodePtr findNodeBySelector(const ::ennio::SelectorCriteria& criteria) const;
 };
 
-} // namespace margelo::nitro::tasto
+} // namespace margelo::nitro::ennio

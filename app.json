@@ -1,8 +1,8 @@
 {
   "ios": {
-    "bundleIdentifier": "com.reactiive.tasto"
+    "bundleIdentifier": "com.reactiive.ennio"
   },
   "android": {
-    "package": "com.reactiive.tasto"
+    "package": "com.reactiive.ennio"
   }
 }

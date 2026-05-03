@@ -29,13 +29,13 @@
 #endif
 
 // Forward declaration of `LayoutMetrics` to properly resolve imports.
-namespace margelo::nitro::tasto { struct LayoutMetrics; }
+namespace margelo::nitro::ennio { struct LayoutMetrics; }
 
 #include <string>
 #include <optional>
 #include "LayoutMetrics.hpp"
 
-namespace margelo::nitro::tasto {
+namespace margelo::nitro::ennio {
 
   /**
    * A struct which can be represented as a JavaScript object (ExtendedElementInfo).
@@ -60,16 +60,16 @@ namespace margelo::nitro::tasto {
     friend bool operator==(const ExtendedElementInfo& lhs, const ExtendedElementInfo& rhs) = default;
   };
 
-} // namespace margelo::nitro::tasto
+} // namespace margelo::nitro::ennio
 
 namespace margelo::nitro {
 
   // C++ ExtendedElementInfo <> JS ExtendedElementInfo (object)
   template <>
-  struct JSIConverter<margelo::nitro::tasto::ExtendedElementInfo> final {
-    static inline margelo::nitro::tasto::ExtendedElementInfo fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
+  struct JSIConverter<margelo::nitro::ennio::ExtendedElementInfo> final {
+    static inline margelo::nitro::ennio::ExtendedElementInfo fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
       jsi::Object obj = arg.asObject(runtime);
-      return margelo::nitro::tasto::ExtendedElementInfo(
+      return margelo::nitro::ennio::ExtendedElementInfo(
         JSIConverter<bool>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "checked"))),
         JSIConverter<bool>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "focused"))),
         JSIConverter<bool>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "selected"))),
@@ -78,10 +78,10 @@ namespace margelo::nitro {
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "text"))),
         JSIConverter<bool>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "accessible"))),
         JSIConverter<bool>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "enabled"))),
-        JSIConverter<margelo::nitro::tasto::LayoutMetrics>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "layout")))
+        JSIConverter<margelo::nitro::ennio::LayoutMetrics>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "layout")))
       );
     }
-    static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::tasto::ExtendedElementInfo& arg) {
+    static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::ennio::ExtendedElementInfo& arg) {
       jsi::Object obj(runtime);
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "checked"), JSIConverter<bool>::toJSI(runtime, arg.checked));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "focused"), JSIConverter<bool>::toJSI(runtime, arg.focused));
@@ -91,7 +91,7 @@ namespace margelo::nitro {
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "text"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.text));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "accessible"), JSIConverter<bool>::toJSI(runtime, arg.accessible));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "enabled"), JSIConverter<bool>::toJSI(runtime, arg.enabled));
-      obj.setProperty(runtime, PropNameIDCache::get(runtime, "layout"), JSIConverter<margelo::nitro::tasto::LayoutMetrics>::toJSI(runtime, arg.layout));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "layout"), JSIConverter<margelo::nitro::ennio::LayoutMetrics>::toJSI(runtime, arg.layout));
       return obj;
     }
     static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
@@ -110,7 +110,7 @@ namespace margelo::nitro {
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "text")))) return false;
       if (!JSIConverter<bool>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "accessible")))) return false;
       if (!JSIConverter<bool>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "enabled")))) return false;
-      if (!JSIConverter<margelo::nitro::tasto::LayoutMetrics>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "layout")))) return false;
+      if (!JSIConverter<margelo::nitro::ennio::LayoutMetrics>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "layout")))) return false;
       return true;
     }
   };

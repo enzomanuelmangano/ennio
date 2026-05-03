@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		237B107DC6736FCDCC7A7A2D /* libPods-tasto.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A118FF872B67FB7986B39C59 /* libPods-tasto.a */; };
+		237B107DC6736FCDCC7A7A2D /* libPods-ennio.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A118FF872B67FB7986B39C59 /* libPods-ennio.a */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		4A9FEA8735B36E11E6055FE9 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 403D683787A45DF5BB0D9825 /* ExpoModulesProvider.swift */; };
 		A598ABD95BBE56A2C8812770 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1BD7F5DD3B1DFD22B51E1F5F /* PrivacyInfo.xcprivacy */; };
@@ -17,19 +17,19 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		13B07F961A680F5B00A75B9A /* tasto.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = tasto.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = tasto/Images.xcassets; sourceTree = "<group>"; };
-		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = tasto/Info.plist; sourceTree = "<group>"; };
-		1BD7F5DD3B1DFD22B51E1F5F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = tasto/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		3B3527B80849C0D7A9D00493 /* Pods-tasto.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tasto.debug.xcconfig"; path = "Target Support Files/Pods-tasto/Pods-tasto.debug.xcconfig"; sourceTree = "<group>"; };
-		403D683787A45DF5BB0D9825 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-tasto/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		A118FF872B67FB7986B39C59 /* libPods-tasto.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-tasto.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = tasto/SplashScreen.storyboard; sourceTree = "<group>"; };
+		13B07F961A680F5B00A75B9A /* ennio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ennio.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = ennio/Images.xcassets; sourceTree = "<group>"; };
+		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = ennio/Info.plist; sourceTree = "<group>"; };
+		1BD7F5DD3B1DFD22B51E1F5F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = ennio/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		3B3527B80849C0D7A9D00493 /* Pods-ennio.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ennio.debug.xcconfig"; path = "Target Support Files/Pods-ennio/Pods-ennio.debug.xcconfig"; sourceTree = "<group>"; };
+		403D683787A45DF5BB0D9825 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-ennio/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		A118FF872B67FB7986B39C59 /* libPods-ennio.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ennio.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = ennio/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = tasto/AppDelegate.swift; sourceTree = "<group>"; };
-		F11748442D0722820044C1D9 /* tasto-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "tasto-Bridging-Header.h"; path = "tasto/tasto-Bridging-Header.h"; sourceTree = "<group>"; };
-		FBCF6AF71C823A9725DD9594 /* Pods-tasto.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tasto.release.xcconfig"; path = "Target Support Files/Pods-tasto/Pods-tasto.release.xcconfig"; sourceTree = "<group>"; };
+		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = ennio/AppDelegate.swift; sourceTree = "<group>"; };
+		F11748442D0722820044C1D9 /* ennio-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "ennio-Bridging-Header.h"; path = "ennio/ennio-Bridging-Header.h"; sourceTree = "<group>"; };
+		FBCF6AF71C823A9725DD9594 /* Pods-ennio.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ennio.release.xcconfig"; path = "Target Support Files/Pods-ennio/Pods-ennio.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,32 +37,32 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				237B107DC6736FCDCC7A7A2D /* libPods-tasto.a in Frameworks */,
+				237B107DC6736FCDCC7A7A2D /* libPods-ennio.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		13B07FAE1A68108700A75B9A /* tasto */ = {
+		13B07FAE1A68108700A75B9A /* ennio */ = {
 			isa = PBXGroup;
 			children = (
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
-				F11748442D0722820044C1D9 /* tasto-Bridging-Header.h */,
+				F11748442D0722820044C1D9 /* ennio-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
 				1BD7F5DD3B1DFD22B51E1F5F /* PrivacyInfo.xcprivacy */,
 			);
-			name = tasto;
+			name = ennio;
 			sourceTree = "<group>";
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				A118FF872B67FB7986B39C59 /* libPods-tasto.a */,
+				A118FF872B67FB7986B39C59 /* libPods-ennio.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -70,7 +70,7 @@
 		3CE0793579A6D5D07A370C24 /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				B3D356AA7B323B3A53293C68 /* tasto */,
+				B3D356AA7B323B3A53293C68 /* ennio */,
 			);
 			name = ExpoModulesProviders;
 			sourceTree = "<group>";
@@ -78,8 +78,8 @@
 		5DB861D82B35B1EC726214D5 /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				3B3527B80849C0D7A9D00493 /* Pods-tasto.debug.xcconfig */,
-				FBCF6AF71C823A9725DD9594 /* Pods-tasto.release.xcconfig */,
+				3B3527B80849C0D7A9D00493 /* Pods-ennio.debug.xcconfig */,
+				FBCF6AF71C823A9725DD9594 /* Pods-ennio.release.xcconfig */,
 			);
 			name = Pods;
 			path = Pods;
@@ -95,7 +95,7 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
-				13B07FAE1A68108700A75B9A /* tasto */,
+				13B07FAE1A68108700A75B9A /* ennio */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -110,17 +110,17 @@
 		83CBBA001A601CBA00E9B192 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				13B07F961A680F5B00A75B9A /* tasto.app */,
+				13B07F961A680F5B00A75B9A /* ennio.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		B3D356AA7B323B3A53293C68 /* tasto */ = {
+		B3D356AA7B323B3A53293C68 /* ennio */ = {
 			isa = PBXGroup;
 			children = (
 				403D683787A45DF5BB0D9825 /* ExpoModulesProvider.swift */,
 			);
-			name = tasto;
+			name = ennio;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -129,15 +129,15 @@
 				BB2F792C24A3F905000567C9 /* Expo.plist */,
 			);
 			name = Supporting;
-			path = tasto/Supporting;
+			path = ennio/Supporting;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		13B07F861A680F5B00A75B9A /* tasto */ = {
+		13B07F861A680F5B00A75B9A /* ennio */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "tasto" */;
+			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "ennio" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
 				08AB032C5ADA0D98313153C9 /* [Expo] Configure project */,
@@ -152,9 +152,9 @@
 			);
 			dependencies = (
 			);
-			name = tasto;
-			productName = tasto;
-			productReference = 13B07F961A680F5B00A75B9A /* tasto.app */;
+			name = ennio;
+			productName = ennio;
+			productReference = 13B07F961A680F5B00A75B9A /* ennio.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -170,7 +170,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "tasto" */;
+			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "ennio" */;
 			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -183,7 +183,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				13B07F861A680F5B00A75B9A /* tasto */,
+				13B07F861A680F5B00A75B9A /* ennio */,
 			);
 		};
 /* End PBXProject section */
@@ -224,7 +224,7 @@
 			files = (
 			);
 			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-tasto/Pods-tasto-frameworks.sh",
+				"${PODS_ROOT}/Target Support Files/Pods-ennio/Pods-ennio-frameworks.sh",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermes.framework/hermes",
 			);
 			name = "[CP] Embed Pods Frameworks";
@@ -233,7 +233,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-tasto/Pods-tasto-frameworks.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ennio/Pods-ennio-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */ = {
@@ -251,7 +251,7 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-tasto-checkManifestLockResult.txt",
+				"$(DERIVED_FILE_DIR)/Pods-ennio-checkManifestLockResult.txt",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -275,7 +275,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-tasto/expo-configure-project.sh\"\n";
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-ennio/expo-configure-project.sh\"\n";
 		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -283,7 +283,7 @@
 			files = (
 			);
 			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-tasto/Pods-tasto-resources.sh",
+				"${PODS_ROOT}/Target Support Files/Pods-ennio/Pods-ennio-resources.sh",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/EXConstants.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/ExpoConstants_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoFileSystem/ExpoFileSystem_privacy.bundle",
@@ -306,7 +306,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-tasto/Pods-tasto-resources.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ennio/Pods-ennio-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -326,18 +326,18 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3B3527B80849C0D7A9D00493 /* Pods-tasto.debug.xcconfig */;
+			baseConfigurationReference = 3B3527B80849C0D7A9D00493 /* Pods-ennio.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = tasto/tasto.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ennio/ennio.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
 					"FB_SONARKIT_ENABLED=1",
 				);
-				INFOPLIST_FILE = tasto/Info.plist;
+				INFOPLIST_FILE = ennio/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -350,9 +350,9 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.reactiive.tasto;
-				PRODUCT_NAME = tasto;
-				SWIFT_OBJC_BRIDGING_HEADER = "tasto/tasto-Bridging-Header.h";
+				PRODUCT_BUNDLE_IDENTIFIER = com.reactiive.ennio;
+				PRODUCT_NAME = ennio;
+				SWIFT_OBJC_BRIDGING_HEADER = "ennio/ennio-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -362,13 +362,13 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = FBCF6AF71C823A9725DD9594 /* Pods-tasto.release.xcconfig */;
+			baseConfigurationReference = FBCF6AF71C823A9725DD9594 /* Pods-ennio.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = tasto/tasto.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ennio/ennio.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				INFOPLIST_FILE = tasto/Info.plist;
+				INFOPLIST_FILE = ennio/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -381,9 +381,9 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.reactiive.tasto;
-				PRODUCT_NAME = tasto;
-				SWIFT_OBJC_BRIDGING_HEADER = "tasto/tasto-Bridging-Header.h";
+				PRODUCT_BUNDLE_IDENTIFIER = com.reactiive.ennio;
+				PRODUCT_NAME = ennio;
+				SWIFT_OBJC_BRIDGING_HEADER = "ennio/ennio-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
@@ -517,7 +517,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "tasto" */ = {
+		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "ennio" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
@@ -526,7 +526,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "tasto" */ = {
+		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "ennio" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				83CBBA201A601CBA00E9B192 /* Debug */,

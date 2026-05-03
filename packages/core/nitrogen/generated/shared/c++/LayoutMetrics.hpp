@@ -32,7 +32,7 @@
 
 
 
-namespace margelo::nitro::tasto {
+namespace margelo::nitro::ennio {
 
   /**
    * A struct which can be represented as a JavaScript object (LayoutMetrics).
@@ -54,16 +54,16 @@ namespace margelo::nitro::tasto {
     friend bool operator==(const LayoutMetrics& lhs, const LayoutMetrics& rhs) = default;
   };
 
-} // namespace margelo::nitro::tasto
+} // namespace margelo::nitro::ennio
 
 namespace margelo::nitro {
 
   // C++ LayoutMetrics <> JS LayoutMetrics (object)
   template <>
-  struct JSIConverter<margelo::nitro::tasto::LayoutMetrics> final {
-    static inline margelo::nitro::tasto::LayoutMetrics fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
+  struct JSIConverter<margelo::nitro::ennio::LayoutMetrics> final {
+    static inline margelo::nitro::ennio::LayoutMetrics fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
       jsi::Object obj = arg.asObject(runtime);
-      return margelo::nitro::tasto::LayoutMetrics(
+      return margelo::nitro::ennio::LayoutMetrics(
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "x"))),
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "y"))),
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "width"))),
@@ -72,7 +72,7 @@ namespace margelo::nitro {
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "screenY")))
       );
     }
-    static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::tasto::LayoutMetrics& arg) {
+    static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::ennio::LayoutMetrics& arg) {
       jsi::Object obj(runtime);
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "x"), JSIConverter<double>::toJSI(runtime, arg.x));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "y"), JSIConverter<double>::toJSI(runtime, arg.y));

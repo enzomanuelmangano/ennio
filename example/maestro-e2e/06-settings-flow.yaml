@@ -1,7 +1,7 @@
 # Test: Settings Flow
 # Tests all settings toggles and configurations
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Settings Flow"
 tags:
   - settings

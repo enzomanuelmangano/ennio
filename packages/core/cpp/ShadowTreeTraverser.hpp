@@ -8,7 +8,7 @@
 #include <react/renderer/core/ShadowNode.h>
 #include <react/renderer/core/LayoutMetrics.h>
 
-namespace tasto {
+namespace ennio {
 
 /**
  * Information about a found element
@@ -139,4 +139,4 @@ private:
     );
 };
 
-} // namespace tasto
+} // namespace ennio

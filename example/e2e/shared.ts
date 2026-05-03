@@ -1,5 +1,5 @@
-// App-specific navigation helpers for the Tasto Example e-commerce app
-import { element, sleep } from '@tasto/test';
+// App-specific navigation helpers for the Ennio Example e-commerce app
+import { element, sleep } from '@ennio/test';
 
 export function goHome() {
   return element('tab-home').tap().then(() => sleep(300));

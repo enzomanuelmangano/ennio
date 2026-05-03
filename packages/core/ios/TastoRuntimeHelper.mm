@@ -1,9 +1,9 @@
 //
-// TastoRuntimeHelper.mm
+// EnnioRuntimeHelper.mm
 // Objective-C++ implementation for accessing React Native runtime
 //
 
-#import "TastoRuntimeHelper.h"
+#import "EnnioRuntimeHelper.h"
 #import <React/RCTSurfacePresenter.h>
 #import <React/RCTScheduler.h>
 #import <react/renderer/core/ShadowNode.h>
@@ -13,7 +13,7 @@
 #import <unistd.h>
 
 // Private UITouch methods we need to call
-@interface UITouch (TastoPrivate)
+@interface UITouch (EnnioPrivate)
 - (void)setView:(UIView *)view;
 - (void)setWindow:(UIWindow *)window;
 - (void)setPhase:(UITouchPhase)phase;
@@ -24,13 +24,13 @@
 @end
 
 // Private UIEvent methods
-@interface UIEvent (TastoPrivate)
+@interface UIEvent (EnnioPrivate)
 - (void)_addTouch:(UITouch *)touch forDelayedDelivery:(BOOL)delayed;
 - (void)_clearTouches;
 @end
 
 // Private application methods for creating touch events
-@interface UIApplication (TastoPrivate)
+@interface UIApplication (EnnioPrivate)
 - (UIEvent *)_touchesEvent;
 @end
 
@@ -67,7 +67,7 @@ static UIView* findViewByAccessibilityLabel(UIView* root, NSString* label) {
         if ([root isKindOfClass:[UIButton class]] ||
             [root isKindOfClass:[UIControl class]] ||
             (root.accessibilityTraits & UIAccessibilityTraitButton) != 0) {
-            NSLog(@"[Tasto] findViewByAccessibilityLabel: Found button/control '%@' class=%@",
+            NSLog(@"[Ennio] findViewByAccessibilityLabel: Found button/control '%@' class=%@",
                   label, className);
             return root;
         }
@@ -84,7 +84,7 @@ static UIView* findViewByAccessibilityLabel(UIView* root, NSString* label) {
     // If no button found in children, accept any matching accessible element
     if (root.accessibilityLabel && [root.accessibilityLabel isEqualToString:label]) {
         if (root.isAccessibilityElement) {
-            NSLog(@"[Tasto] findViewByAccessibilityLabel: Found accessible '%@' class=%@",
+            NSLog(@"[Ennio] findViewByAccessibilityLabel: Found accessible '%@' class=%@",
                   label, className);
             return root;
         }
@@ -133,7 +133,7 @@ static BOOL dispatchSyncMainWithTimeout(void (^block)(void)) {
     long result = dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MAIN_THREAD_TIMEOUT_NS));
 
     if (result != 0) {
-        NSLog(@"[Tasto] WARNING: Main thread dispatch timed out after 5 seconds");
+        NSLog(@"[Ennio] WARNING: Main thread dispatch timed out after 5 seconds");
         return NO;
     }
 
@@ -152,7 +152,7 @@ static UIWindow* findWindowAtPoint(CGPoint point) {
         }
     }
 
-    NSLog(@"[Tasto] findWindowAtPoint: Found %lu windows total", (unsigned long)allWindows.count);
+    NSLog(@"[Ennio] findWindowAtPoint: Found %lu windows total", (unsigned long)allWindows.count);
 
     // Sort by window level (highest first) and check if point is in window
     [allWindows sortUsingComparator:^NSComparisonResult(UIWindow* w1, UIWindow* w2) {
@@ -162,13 +162,13 @@ static UIWindow* findWindowAtPoint(CGPoint point) {
     }];
 
     for (UIWindow* window in allWindows) {
-        NSLog(@"[Tasto] findWindowAtPoint: Checking window %@ (level: %.0f, hidden: %d, alpha: %.1f)",
+        NSLog(@"[Ennio] findWindowAtPoint: Checking window %@ (level: %.0f, hidden: %d, alpha: %.1f)",
               NSStringFromClass([window class]), window.windowLevel, window.isHidden, window.alpha);
 
         if (!window.isHidden && window.alpha > 0) {
             UIView* hitView = [window hitTest:point withEvent:nil];
             if (hitView && hitView != window) {
-                NSLog(@"[Tasto] findWindowAtPoint: Using window with hitView %@",
+                NSLog(@"[Ennio] findWindowAtPoint: Using window with hitView %@",
                       NSStringFromClass([hitView class]));
                 return window;
             }
@@ -178,7 +178,7 @@ static UIWindow* findWindowAtPoint(CGPoint point) {
     // Fallback to key window
     for (UIWindow* window in allWindows) {
         if (window.isKeyWindow) {
-            NSLog(@"[Tasto] findWindowAtPoint: Falling back to key window");
+            NSLog(@"[Ennio] findWindowAtPoint: Falling back to key window");
             return window;
         }
     }
@@ -201,27 +201,27 @@ static UIWindow* findKeyWindow(void) {
     return nil;
 }
 
-namespace tasto {
+namespace ennio {
 
-TastoRuntimeHelper& TastoRuntimeHelper::getInstance() {
-    static TastoRuntimeHelper instance;
+EnnioRuntimeHelper& EnnioRuntimeHelper::getInstance() {
+    static EnnioRuntimeHelper instance;
     return instance;
 }
 
-void TastoRuntimeHelper::setSurfacePresenter(void* surfacePresenter) {
+void EnnioRuntimeHelper::setSurfacePresenter(void* surfacePresenter) {
     surfacePresenter_ = surfacePresenter;
-    NSLog(@"[Tasto] TastoRuntimeHelper::setSurfacePresenter called with %p", surfacePresenter);
+    NSLog(@"[Ennio] EnnioRuntimeHelper::setSurfacePresenter called with %p", surfacePresenter);
 }
 
 // Helper to find surface presenter by looking through runtime objects
 static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
-    NSLog(@"[Tasto] Searching for surface presenter...");
+    NSLog(@"[Ennio] Searching for surface presenter...");
 
     // Try to access through the app delegate
     UIApplication* app = [UIApplication sharedApplication];
     id appDelegate = app.delegate;
 
-    NSLog(@"[Tasto] AppDelegate class: %@", NSStringFromClass([appDelegate class]));
+    NSLog(@"[Ennio] AppDelegate class: %@", NSStringFromClass([appDelegate class]));
 
     // Method 1: Try reactNativeFactory -> reactHost -> surfacePresenter (newer Expo pattern)
     SEL factorySel = NSSelectorFromString(@"reactNativeFactory");
@@ -232,7 +232,7 @@ static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
         #pragma clang diagnostic pop
 
         if (factory) {
-            NSLog(@"[Tasto] Found reactNativeFactory: %@", NSStringFromClass([factory class]));
+            NSLog(@"[Ennio] Found reactNativeFactory: %@", NSStringFromClass([factory class]));
 
             // Try reactHost first
             SEL hostSel = NSSelectorFromString(@"reactHost");
@@ -243,7 +243,7 @@ static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
                 #pragma clang diagnostic pop
 
                 if (host) {
-                    NSLog(@"[Tasto] Found reactHost: %@", NSStringFromClass([host class]));
+                    NSLog(@"[Ennio] Found reactHost: %@", NSStringFromClass([host class]));
 
                     SEL presenterSel = NSSelectorFromString(@"surfacePresenter");
                     if ([host respondsToSelector:presenterSel]) {
@@ -253,7 +253,7 @@ static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
                         #pragma clang diagnostic pop
 
                         if (presenter) {
-                            NSLog(@"[Tasto] Found surfacePresenter via host: %@", presenter);
+                            NSLog(@"[Ennio] Found surfacePresenter via host: %@", presenter);
                             return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
                         }
                     }
@@ -269,24 +269,24 @@ static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
                 #pragma clang diagnostic pop
 
                 if (presenter) {
-                    NSLog(@"[Tasto] Found surfacePresenter on factory: %@", presenter);
+                    NSLog(@"[Ennio] Found surfacePresenter on factory: %@", presenter);
                     return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
                 }
             }
 
             // Log available methods on factory for debugging
-            NSLog(@"[Tasto] Factory methods:");
+            NSLog(@"[Ennio] Factory methods:");
             unsigned int count;
             Method *methods = class_copyMethodList([factory class], &count);
             for (unsigned int i = 0; i < count && i < 20; i++) {
-                NSLog(@"[Tasto]   - %@", NSStringFromSelector(method_getName(methods[i])));
+                NSLog(@"[Ennio]   - %@", NSStringFromSelector(method_getName(methods[i])));
             }
             free(methods);
         }
     }
 
     // Method 2: Search windows for RCTSurfaceHostingView
-    NSLog(@"[Tasto] Searching windows for RCTSurfaceHostingView...");
+    NSLog(@"[Ennio] Searching windows for RCTSurfaceHostingView...");
     for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
         if ([scene isKindOfClass:[UIWindowScene class]]) {
             UIWindowScene* windowScene = (UIWindowScene*)scene;
@@ -296,7 +296,7 @@ static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
                     // Look for RCTRootContentView or RCTSurfaceHostingView
                     for (UIView* subview in rootVC.view.subviews) {
                         NSString* className = NSStringFromClass([subview class]);
-                        NSLog(@"[Tasto] Found view: %@", className);
+                        NSLog(@"[Ennio] Found view: %@", className);
 
                         if ([className containsString:@"RCTSurface"] ||
                             [className containsString:@"RCTRoot"]) {
@@ -317,7 +317,7 @@ static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
                                         #pragma clang diagnostic pop
 
                                         if (presenter) {
-                                            NSLog(@"[Tasto] Found surfacePresenter via view: %@", presenter);
+                                            NSLog(@"[Ennio] Found surfacePresenter via view: %@", presenter);
                                             return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
                                         }
                                     }
@@ -330,12 +330,12 @@ static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
         }
     }
 
-    NSLog(@"[Tasto] Could not find surface presenter");
+    NSLog(@"[Ennio] Could not find surface presenter");
     return nil;
 }
 
-std::shared_ptr<facebook::react::UIManager> TastoRuntimeHelper::getUIManager() {
-    NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager called, cached=%p", surfacePresenter_);
+std::shared_ptr<facebook::react::UIManager> EnnioRuntimeHelper::getUIManager() {
+    NSLog(@"[Ennio] EnnioRuntimeHelper::getUIManager called, cached=%p", surfacePresenter_);
 
     __block std::shared_ptr<facebook::react::UIManager> result = nullptr;
 
@@ -346,7 +346,7 @@ std::shared_ptr<facebook::react::UIManager> TastoRuntimeHelper::getUIManager() {
             // First try cached presenter from swizzling
             if (surfacePresenter_) {
                 presenter = (__bridge RCTSurfacePresenter*)surfacePresenter_;
-                NSLog(@"[Tasto] Using cached surfacePresenter: %@", presenter);
+                NSLog(@"[Ennio] Using cached surfacePresenter: %@", presenter);
             }
 
             // If no cached, try runtime search
@@ -358,22 +358,22 @@ std::shared_ptr<facebook::react::UIManager> TastoRuntimeHelper::getUIManager() {
             }
 
             if (!presenter) {
-                NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: Could not find surface presenter");
+                NSLog(@"[Ennio] EnnioRuntimeHelper::getUIManager: Could not find surface presenter");
                 return;
             }
 
             RCTScheduler* scheduler = [presenter scheduler];
             if (!scheduler) {
-                NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: scheduler is null");
+                NSLog(@"[Ennio] EnnioRuntimeHelper::getUIManager: scheduler is null");
                 return;
             }
 
-            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: scheduler=%@", scheduler);
+            NSLog(@"[Ennio] EnnioRuntimeHelper::getUIManager: scheduler=%@", scheduler);
 
             result = [scheduler uiManager];
-            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: uiManager=%s", result ? "valid" : "null");
+            NSLog(@"[Ennio] EnnioRuntimeHelper::getUIManager: uiManager=%s", result ? "valid" : "null");
         } @catch (NSException *exception) {
-            NSLog(@"[Tasto] TastoRuntimeHelper::getUIManager: Exception: %@", exception);
+            NSLog(@"[Ennio] EnnioRuntimeHelper::getUIManager: Exception: %@", exception);
         }
     };
 
@@ -387,16 +387,16 @@ std::shared_ptr<facebook::react::UIManager> TastoRuntimeHelper::getUIManager() {
     return result;
 }
 
-std::shared_ptr<const facebook::react::ShadowNode> TastoRuntimeHelper::getShadowTreeRoot() {
-    NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot called, surfacePresenter_=%p", surfacePresenter_);
+std::shared_ptr<const facebook::react::ShadowNode> EnnioRuntimeHelper::getShadowTreeRoot() {
+    NSLog(@"[Ennio] EnnioRuntimeHelper::getShadowTreeRoot called, surfacePresenter_=%p", surfacePresenter_);
 
     auto uiManager = getUIManager();
     if (!uiManager) {
-        NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: UIManager is null");
+        NSLog(@"[Ennio] EnnioRuntimeHelper::getShadowTreeRoot: UIManager is null");
         return nullptr;
     }
 
-    NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: UIManager available");
+    NSLog(@"[Ennio] EnnioRuntimeHelper::getShadowTreeRoot: UIManager available");
 
     // Use a pointer wrapper to capture in lambda (since __block doesn't work with lambdas)
     auto rootNodePtr = std::make_shared<std::shared_ptr<const facebook::react::ShadowNode>>(nullptr);
@@ -410,11 +410,11 @@ std::shared_ptr<const facebook::react::ShadowNode> TastoRuntimeHelper::getShadow
             surfaceCount++;
             // Get the root from the first surface we find
             *rootNodePtr = shadowTree.getCurrentRevision().rootShadowNode;
-            NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: Found surface %d", surfaceCount);
+            NSLog(@"[Ennio] EnnioRuntimeHelper::getShadowTreeRoot: Found surface %d", surfaceCount);
             stop = true;
         });
 
-        NSLog(@"[Tasto] TastoRuntimeHelper::getShadowTreeRoot: Total surfaces=%d, rootNode=%s",
+        NSLog(@"[Ennio] EnnioRuntimeHelper::getShadowTreeRoot: Total surfaces=%d, rootNode=%s",
               surfaceCount, *rootNodePtr ? "valid" : "null");
     };
 
@@ -428,7 +428,7 @@ std::shared_ptr<const facebook::react::ShadowNode> TastoRuntimeHelper::getShadow
     return *rootNodePtr;
 }
 
-bool TastoRuntimeHelper::isInitialized() const {
+bool EnnioRuntimeHelper::isInitialized() const {
     return surfacePresenter_ != nullptr;
 }
 
@@ -464,7 +464,7 @@ static UIView* findTappableViewAtPoint(UIWindow* window, CGPoint point) {
 
     // If we hit a debugging overlay, search for the actual content beneath it
     if (isDebuggingOverlay(hitView) || isDebuggingOverlay(hitView.superview)) {
-        NSLog(@"[Tasto] findTappableViewAtPoint: Skipping debugging overlay %@",
+        NSLog(@"[Ennio] findTappableViewAtPoint: Skipping debugging overlay %@",
               NSStringFromClass([hitView class]));
 
         // Walk up to find the parent that contains non-debugging children
@@ -478,7 +478,7 @@ static UIView* findTappableViewAtPoint(UIWindow* window, CGPoint point) {
                     CGPoint siblingPoint = [container convertPoint:point toView:sibling];
                     UIView* siblingHit = [sibling hitTest:siblingPoint withEvent:nil];
                     if (siblingHit && !isDebuggingOverlay(siblingHit)) {
-                        NSLog(@"[Tasto] findTappableViewAtPoint: Found sibling hit: %@",
+                        NSLog(@"[Ennio] findTappableViewAtPoint: Found sibling hit: %@",
                               NSStringFromClass([siblingHit class]));
                         return siblingHit;
                     }
@@ -488,40 +488,40 @@ static UIView* findTappableViewAtPoint(UIWindow* window, CGPoint point) {
         }
 
         // Couldn't find non-debugging view, return nil
-        NSLog(@"[Tasto] findTappableViewAtPoint: No non-debugging view found");
+        NSLog(@"[Ennio] findTappableViewAtPoint: No non-debugging view found");
         return nil;
     }
 
     return hitView;
 }
 
-bool TastoRuntimeHelper::performTap(float x, float y) {
+bool EnnioRuntimeHelper::performTap(float x, float y) {
     __block bool success = false;
 
     void (^tapBlock)(void) = ^{
         CGPoint point = CGPointMake(x, y);
-        NSLog(@"[Tasto] performTap: Tapping at (%.1f, %.1f)", x, y);
+        NSLog(@"[Ennio] performTap: Tapping at (%.1f, %.1f)", x, y);
 
         // Find the window that contains the view at this point (handles modals)
         UIWindow* targetWindow = findWindowAtPoint(point);
         if (!targetWindow) {
-            NSLog(@"[Tasto] performTap: No window found at point");
+            NSLog(@"[Ennio] performTap: No window found at point");
             success = false;
             return;
         }
 
-        NSLog(@"[Tasto] performTap: Using window %@ (level %.0f)",
+        NSLog(@"[Ennio] performTap: Using window %@ (level %.0f)",
               NSStringFromClass([targetWindow class]), targetWindow.windowLevel);
 
         // Find the target view at this point, skipping debugging overlays
         UIView* hitView = findTappableViewAtPoint(targetWindow, point);
         if (!hitView) {
-            NSLog(@"[Tasto] performTap: No view at point (after skipping debugging overlays)");
+            NSLog(@"[Ennio] performTap: No view at point (after skipping debugging overlays)");
             success = false;
             return;
         }
 
-        NSLog(@"[Tasto] performTap: Hit view %@", NSStringFromClass([hitView class]));
+        NSLog(@"[Ennio] performTap: Hit view %@", NSStringFromClass([hitView class]));
 
         // Try Method 1: Use accessibilityActivate if available
         // This is the most reliable way to trigger onPress in React Native
@@ -531,14 +531,14 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
             if (activatableView.isAccessibilityElement ||
                 activatableView.accessibilityTraits != UIAccessibilityTraitNone) {
 
-                NSLog(@"[Tasto] performTap: Found accessible view: %@ (traits: %llu, identifier: %@)",
+                NSLog(@"[Ennio] performTap: Found accessible view: %@ (traits: %llu, identifier: %@)",
                       NSStringFromClass([activatableView class]),
                       (unsigned long long)activatableView.accessibilityTraits,
                       activatableView.accessibilityIdentifier ?: @"nil");
 
                 // Try accessibility activate
                 if ([activatableView accessibilityActivate]) {
-                    NSLog(@"[Tasto] performTap: accessibilityActivate succeeded!");
+                    NSLog(@"[Ennio] performTap: accessibilityActivate succeeded!");
                     success = true;
                     return;
                 }
@@ -546,14 +546,14 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
             activatableView = activatableView.superview;
         }
 
-        NSLog(@"[Tasto] performTap: accessibilityActivate didn't work, trying UIControl");
+        NSLog(@"[Ennio] performTap: accessibilityActivate didn't work, trying UIControl");
 
         // Try Method 2: For native UIControl (buttons, tab bar items), send control event
         UIView* controlView = hitView;
         while (controlView && controlView != targetWindow) {
             if ([controlView isKindOfClass:[UIControl class]]) {
                 UIControl* control = (UIControl*)controlView;
-                NSLog(@"[Tasto] performTap: Found UIControl: %@, sending touch event",
+                NSLog(@"[Ennio] performTap: Found UIControl: %@, sending touch event",
                       NSStringFromClass([control class]));
                 [control sendActionsForControlEvents:UIControlEventTouchUpInside];
                 success = true;
@@ -562,12 +562,12 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
             controlView = controlView.superview;
         }
 
-        NSLog(@"[Tasto] performTap: No UIControl found, trying touch handler");
+        NSLog(@"[Ennio] performTap: No UIControl found, trying touch handler");
 
         // Try Method 3: Find the RCTSurfaceTouchHandler and call its touch methods directly
         UIGestureRecognizer* touchHandler = findSurfaceTouchHandler(hitView);
         if (touchHandler) {
-            NSLog(@"[Tasto] performTap: Found touch handler: %@", NSStringFromClass([touchHandler class]));
+            NSLog(@"[Ennio] performTap: Found touch handler: %@", NSStringFromClass([touchHandler class]));
 
             // For RCTSurfaceTouchHandler, we need to simulate touches through it
             // The touch handler expects to receive touches from the window
@@ -600,7 +600,7 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
             [event _clearTouches];
             [event _addTouch:touch forDelayedDelivery:NO];
 
-            NSLog(@"[Tasto] performTap: Calling touchesBegan on touch handler");
+            NSLog(@"[Ennio] performTap: Calling touchesBegan on touch handler");
 
             // Call touchesBegan directly on the gesture recognizer
             [touchHandler touchesBegan:touches withEvent:event];
@@ -616,7 +616,7 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
             [event _clearTouches];
             [event _addTouch:touch forDelayedDelivery:NO];
 
-            NSLog(@"[Tasto] performTap: Calling touchesEnded on touch handler");
+            NSLog(@"[Ennio] performTap: Calling touchesEnded on touch handler");
 
             // Call touchesEnded directly on the gesture recognizer
             [touchHandler touchesEnded:touches withEvent:event];
@@ -625,7 +625,7 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
             return;
         }
 
-        NSLog(@"[Tasto] performTap: No touch handler found, falling back to synthetic touch event");
+        NSLog(@"[Ennio] performTap: No touch handler found, falling back to synthetic touch event");
 
         // Try Method 4: Fall back to synthetic UITouch via sendEvent (original approach)
         UIView* targetView = hitView;
@@ -682,7 +682,7 @@ bool TastoRuntimeHelper::performTap(float x, float y) {
     return success;
 }
 
-bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
+bool EnnioRuntimeHelper::performTapByTestID(const std::string& testID) {
     __block bool success = false;
     NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
 
@@ -703,7 +703,7 @@ bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
         }
 
         if (!keyWindow) {
-            NSLog(@"[Tasto] performTapByTestID: No key window found");
+            NSLog(@"[Ennio] performTapByTestID: No key window found");
             success = false;
             return;
         }
@@ -711,12 +711,12 @@ bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
         // Find the view by accessibilityIdentifier
         UIView* targetView = findViewByAccessibilityIdentifier(keyWindow, identifier);
         if (!targetView) {
-            NSLog(@"[Tasto] performTapByTestID: View with testID '%@' not found", identifier);
+            NSLog(@"[Ennio] performTapByTestID: View with testID '%@' not found", identifier);
             success = false;
             return;
         }
 
-        NSLog(@"[Tasto] performTapByTestID: Found view %@ with testID '%@'",
+        NSLog(@"[Ennio] performTapByTestID: Found view %@ with testID '%@'",
               NSStringFromClass([targetView class]), identifier);
 
         // Get the center point in window coordinates
@@ -726,13 +726,13 @@ bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
             CGRectGetMidY(frameInWindow)
         );
 
-        NSLog(@"[Tasto] performTapByTestID: View frame in window: (%.1f, %.1f, %.1fx%.1f), center: (%.1f, %.1f)",
+        NSLog(@"[Ennio] performTapByTestID: View frame in window: (%.1f, %.1f, %.1fx%.1f), center: (%.1f, %.1f)",
               frameInWindow.origin.x, frameInWindow.origin.y,
               frameInWindow.size.width, frameInWindow.size.height,
               centerPoint.x, centerPoint.y);
 
         // Now perform tap at this point
-        success = TastoRuntimeHelper::getInstance().performTap(centerPoint.x, centerPoint.y);
+        success = EnnioRuntimeHelper::getInstance().performTap(centerPoint.x, centerPoint.y);
     };
 
     if ([NSThread isMainThread]) {
@@ -744,12 +744,12 @@ bool TastoRuntimeHelper::performTapByTestID(const std::string& testID) {
     return success;
 }
 
-bool TastoRuntimeHelper::performTapByLabel(const std::string& label) {
+bool EnnioRuntimeHelper::performTapByLabel(const std::string& label) {
     __block bool success = false;
     NSString* labelStr = [NSString stringWithUTF8String:label.c_str()];
 
     void (^tapBlock)(void) = ^{
-        NSLog(@"[Tasto] performTapByLabel: Looking for element with label '%@'", labelStr);
+        NSLog(@"[Ennio] performTapByLabel: Looking for element with label '%@'", labelStr);
 
         // Collect ALL windows
         NSMutableArray<UIWindow*>* allWindows = [NSMutableArray array];
@@ -767,7 +767,7 @@ bool TastoRuntimeHelper::performTapByLabel(const std::string& label) {
             return NSOrderedSame;
         }];
 
-        NSLog(@"[Tasto] performTapByLabel: Searching %lu windows", (unsigned long)allWindows.count);
+        NSLog(@"[Ennio] performTapByLabel: Searching %lu windows", (unsigned long)allWindows.count);
 
         // Find view by accessibility label in all windows
         UIView* targetView = nil;
@@ -779,11 +779,11 @@ bool TastoRuntimeHelper::performTapByLabel(const std::string& label) {
                 NSMutableArray<UIView*>* allMatches = [NSMutableArray array];
                 findAllViewsByAccessibilityLabel(window, labelStr, allMatches);
                 if (allMatches.count > 0) {
-                    NSLog(@"[Tasto] performTapByLabel: Found %lu matches in window %@",
+                    NSLog(@"[Ennio] performTapByLabel: Found %lu matches in window %@",
                           (unsigned long)allMatches.count, NSStringFromClass([window class]));
                     for (UIView* match in allMatches) {
                         CGRect frame = [match convertRect:match.bounds toView:window];
-                        NSLog(@"[Tasto]   - %@ at (%.1f, %.1f, %.1fx%.1f) traits=%llu",
+                        NSLog(@"[Ennio]   - %@ at (%.1f, %.1f, %.1fx%.1f) traits=%llu",
                               NSStringFromClass([match class]),
                               frame.origin.x, frame.origin.y,
                               frame.size.width, frame.size.height,
@@ -802,12 +802,12 @@ bool TastoRuntimeHelper::performTapByLabel(const std::string& label) {
         }
 
         if (!targetView || !targetWindow) {
-            NSLog(@"[Tasto] performTapByLabel: No view with label '%@' found", labelStr);
+            NSLog(@"[Ennio] performTapByLabel: No view with label '%@' found", labelStr);
             success = false;
             return;
         }
 
-        NSLog(@"[Tasto] performTapByLabel: Found view %@ with label '%@' in window %@",
+        NSLog(@"[Ennio] performTapByLabel: Found view %@ with label '%@' in window %@",
               NSStringFromClass([targetView class]), labelStr, NSStringFromClass([targetWindow class]));
 
         // Get the center point in window coordinates
@@ -817,18 +817,18 @@ bool TastoRuntimeHelper::performTapByLabel(const std::string& label) {
             CGRectGetMidY(frameInWindow)
         );
 
-        NSLog(@"[Tasto] performTapByLabel: View frame: (%.1f, %.1f, %.1fx%.1f), center: (%.1f, %.1f)",
+        NSLog(@"[Ennio] performTapByLabel: View frame: (%.1f, %.1f, %.1fx%.1f), center: (%.1f, %.1f)",
               frameInWindow.origin.x, frameInWindow.origin.y,
               frameInWindow.size.width, frameInWindow.size.height,
               centerPoint.x, centerPoint.y);
 
         // Perform tap at this point
-        success = TastoRuntimeHelper::getInstance().performTap(centerPoint.x, centerPoint.y);
+        success = EnnioRuntimeHelper::getInstance().performTap(centerPoint.x, centerPoint.y);
 
         if (success) {
-            NSLog(@"[Tasto] performTapByLabel: Successfully tapped '%@'", labelStr);
+            NSLog(@"[Ennio] performTapByLabel: Successfully tapped '%@'", labelStr);
         } else {
-            NSLog(@"[Tasto] performTapByLabel: Failed to tap '%@'", labelStr);
+            NSLog(@"[Ennio] performTapByLabel: Failed to tap '%@'", labelStr);
         }
     };
 
@@ -852,7 +852,7 @@ static UIView* findViewByAccessibilityIdentifierInAllWindows(NSString* identifie
         }
     }
 
-    NSLog(@"[Tasto] findViewByAccessibilityIdentifierInAllWindows: Searching %lu windows for '%@'",
+    NSLog(@"[Ennio] findViewByAccessibilityIdentifierInAllWindows: Searching %lu windows for '%@'",
           (unsigned long)allWindows.count, identifier);
 
     // Sort by window level (highest first) to find views in modals first
@@ -866,7 +866,7 @@ static UIView* findViewByAccessibilityIdentifierInAllWindows(NSString* identifie
         if (!window.isHidden && window.alpha > 0) {
             UIView* found = findViewByAccessibilityIdentifier(window, identifier);
             if (found) {
-                NSLog(@"[Tasto] findViewByAccessibilityIdentifierInAllWindows: Found '%@' in window %@ (level: %.0f)",
+                NSLog(@"[Ennio] findViewByAccessibilityIdentifierInAllWindows: Found '%@' in window %@ (level: %.0f)",
                       identifier, NSStringFromClass([window class]), window.windowLevel);
                 return found;
             }
@@ -876,7 +876,7 @@ static UIView* findViewByAccessibilityIdentifierInAllWindows(NSString* identifie
     return nil;
 }
 
-bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::string& text) {
+bool EnnioRuntimeHelper::performTypeText(const std::string& testID, const std::string& text) {
     __block bool success = false;
     NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
     NSString* textToType = [NSString stringWithUTF8String:text.c_str()];
@@ -885,12 +885,12 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
         // Search ALL windows for the view by accessibilityIdentifier
         UIView* targetView = findViewByAccessibilityIdentifierInAllWindows(identifier);
         if (!targetView) {
-            NSLog(@"[Tasto] performTypeText: View with testID '%@' not found in any window", identifier);
+            NSLog(@"[Ennio] performTypeText: View with testID '%@' not found in any window", identifier);
             success = false;
             return;
         }
 
-        NSLog(@"[Tasto] performTypeText: Found view %@ with testID '%@'",
+        NSLog(@"[Ennio] performTypeText: Found view %@ with testID '%@'",
               NSStringFromClass([targetView class]), identifier);
 
         // Try to find a UITextField or UITextView in the view hierarchy
@@ -926,12 +926,12 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
 
         // Log the component view hierarchy
         if (componentView) {
-            NSLog(@"[Tasto] performTypeText: ComponentView is %@",
+            NSLog(@"[Ennio] performTypeText: ComponentView is %@",
                   NSStringFromClass([componentView class]));
         }
 
         if (textField) {
-            NSLog(@"[Tasto] performTypeText: Setting text on UITextField");
+            NSLog(@"[Ennio] performTypeText: Setting text on UITextField");
 
             // Make it first responder (focus)
             [textField becomeFirstResponder];
@@ -944,21 +944,21 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
                                                                           attributes:attributes];
             textField.attributedText = attrStr;
 
-            NSLog(@"[Tasto] performTypeText: Set attributed text, actual text now: '%@'", textField.text);
+            NSLog(@"[Ennio] performTypeText: Set attributed text, actual text now: '%@'", textField.text);
 
             // Try to find and call textInputDidChange on the component view
             // This is how React Native's Fabric TextInput handles text changes
             SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
             id delegate = textField.delegate;
 
-            NSLog(@"[Tasto] performTypeText: TextField delegate class: %@",
+            NSLog(@"[Ennio] performTypeText: TextField delegate class: %@",
                   delegate ? NSStringFromClass([delegate class]) : @"nil");
 
             // The component view (superview) should be RCTTextInputComponentView
             // which implements the textInputDidChange method
             UIView* parentView = componentView;
             if (parentView && [parentView respondsToSelector:textInputDidChangeSel]) {
-                NSLog(@"[Tasto] performTypeText: Calling textInputDidChange on parent view");
+                NSLog(@"[Ennio] performTypeText: Calling textInputDidChange on parent view");
 
                 // First, trigger the text field's editing changed action to notify any observers
                 [textField sendActionsForControlEvents:UIControlEventEditingChanged];
@@ -970,22 +970,22 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
 
                 // Allow React's async update to process
                 [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
-                NSLog(@"[Tasto] performTypeText: After delay, text field text: '%@'", textField.text);
+                NSLog(@"[Ennio] performTypeText: After delay, text field text: '%@'", textField.text);
             } else if (delegate && [delegate respondsToSelector:textInputDidChangeSel]) {
-                NSLog(@"[Tasto] performTypeText: Calling textInputDidChange on delegate");
+                NSLog(@"[Ennio] performTypeText: Calling textInputDidChange on delegate");
                 #pragma clang diagnostic push
                 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
                 [delegate performSelector:textInputDidChangeSel];
                 #pragma clang diagnostic pop
             } else {
-                NSLog(@"[Tasto] performTypeText: No textInputDidChange found, trying fallback");
+                NSLog(@"[Ennio] performTypeText: No textInputDidChange found, trying fallback");
                 // Fallback to sendActionsForControlEvents
                 [textField sendActionsForControlEvents:UIControlEventEditingChanged];
 
                 // Also try calling textFieldDidChange on the delegate
                 SEL textFieldDidChangeSel = NSSelectorFromString(@"textFieldDidChange:");
                 if (delegate && [delegate respondsToSelector:textFieldDidChangeSel]) {
-                    NSLog(@"[Tasto] performTypeText: Calling textFieldDidChange on delegate");
+                    NSLog(@"[Ennio] performTypeText: Calling textFieldDidChange on delegate");
                     #pragma clang diagnostic push
                     #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
                     [delegate performSelector:textFieldDidChangeSel withObject:textField];
@@ -995,7 +995,7 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
 
             success = true;
         } else if (textView) {
-            NSLog(@"[Tasto] performTypeText: Setting text on UITextView");
+            NSLog(@"[Ennio] performTypeText: Setting text on UITextView");
 
             // Make it first responder (focus)
             [textView becomeFirstResponder];
@@ -1007,7 +1007,7 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
             SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
             id delegate = textView.delegate;
             if (delegate && [delegate respondsToSelector:textInputDidChangeSel]) {
-                NSLog(@"[Tasto] performTypeText: Calling textInputDidChange on delegate");
+                NSLog(@"[Ennio] performTypeText: Calling textInputDidChange on delegate");
                 #pragma clang diagnostic push
                 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
                 [delegate performSelector:textInputDidChangeSel];
@@ -1018,7 +1018,7 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
 
             success = true;
         } else {
-            NSLog(@"[Tasto] performTypeText: No UITextField or UITextView found in view");
+            NSLog(@"[Ennio] performTypeText: No UITextField or UITextView found in view");
             success = false;
         }
     };
@@ -1032,7 +1032,7 @@ bool TastoRuntimeHelper::performTypeText(const std::string& testID, const std::s
     return success;
 }
 
-bool TastoRuntimeHelper::performClearText(const std::string& testID) {
+bool EnnioRuntimeHelper::performClearText(const std::string& testID) {
     return performTypeText(testID, "");
 }
 
@@ -1103,13 +1103,13 @@ static UIView* findFirstResponderInAllWindows() {
     return nil;
 }
 
-bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::string& text) {
+bool EnnioRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::string& text) {
     __block bool success = false;
     NSString* textToType = [NSString stringWithUTF8String:text.c_str()];
     CGPoint point = CGPointMake(x, y);
 
     void (^typeBlock)(void) = ^{
-        NSLog(@"[Tasto] performTypeTextAtPoint: point=(%.1f, %.1f) text='%@'", x, y, textToType);
+        NSLog(@"[Ennio] performTypeTextAtPoint: point=(%.1f, %.1f) text='%@'", x, y, textToType);
 
         UIView* textInputView = nil;
 
@@ -1117,23 +1117,23 @@ bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::str
         // This works when tap was already performed to focus the input
         UIView* focusedResponder = findFirstResponderInAllWindows();
         if (focusedResponder) {
-            NSLog(@"[Tasto] performTypeTextAtPoint: Found first responder: %@ (id: %@)",
+            NSLog(@"[Ennio] performTypeTextAtPoint: Found first responder: %@ (id: %@)",
                   NSStringFromClass([focusedResponder class]),
                   focusedResponder.accessibilityIdentifier ?: @"nil");
             textInputView = findTextInputInHierarchy(focusedResponder);
             if (textInputView) {
-                NSLog(@"[Tasto] performTypeTextAtPoint: Using focused text input");
+                NSLog(@"[Ennio] performTypeTextAtPoint: Using focused text input");
             }
         }
 
         // If no focused text input, fall back to hitTest at coordinates
         if (!textInputView) {
-            NSLog(@"[Tasto] performTypeTextAtPoint: No focused text input, trying hitTest");
+            NSLog(@"[Ennio] performTypeTextAtPoint: No focused text input, trying hitTest");
             UIWindow* targetWindow = findWindowAtPoint(point);
             if (targetWindow) {
                 UIView* hitView = [targetWindow hitTest:point withEvent:nil];
                 if (hitView) {
-                    NSLog(@"[Tasto] performTypeTextAtPoint: Hit view %@ (accessibilityIdentifier: %@)",
+                    NSLog(@"[Ennio] performTypeTextAtPoint: Hit view %@ (accessibilityIdentifier: %@)",
                           NSStringFromClass([hitView class]),
                           hitView.accessibilityIdentifier ?: @"nil");
                     textInputView = findTextInputInHierarchy(hitView);
@@ -1142,7 +1142,7 @@ bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::str
         }
 
         if (!textInputView) {
-            NSLog(@"[Tasto] performTypeTextAtPoint: No text input found via first responder or hitTest");
+            NSLog(@"[Ennio] performTypeTextAtPoint: No text input found via first responder or hitTest");
             success = false;
             return;
         }
@@ -1160,7 +1160,7 @@ bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::str
         }
 
         if (textField) {
-            NSLog(@"[Tasto] performTypeTextAtPoint: Found UITextField");
+            NSLog(@"[Ennio] performTypeTextAtPoint: Found UITextField");
 
             // Make it first responder (focus)
             [textField becomeFirstResponder];
@@ -1171,13 +1171,13 @@ bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::str
                                                                           attributes:attributes];
             textField.attributedText = attrStr;
 
-            NSLog(@"[Tasto] performTypeTextAtPoint: Set text, actual text now: '%@'", textField.text);
+            NSLog(@"[Ennio] performTypeTextAtPoint: Set text, actual text now: '%@'", textField.text);
 
             // Trigger text change notification
             SEL textInputDidChangeSel = NSSelectorFromString(@"textInputDidChange");
             UIView* parentView = componentView;
             if (parentView && [parentView respondsToSelector:textInputDidChangeSel]) {
-                NSLog(@"[Tasto] performTypeTextAtPoint: Calling textInputDidChange on parent view");
+                NSLog(@"[Ennio] performTypeTextAtPoint: Calling textInputDidChange on parent view");
                 [textField sendActionsForControlEvents:UIControlEventEditingChanged];
                 #pragma clang diagnostic push
                 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
@@ -1190,7 +1190,7 @@ bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::str
 
             success = true;
         } else if (textView) {
-            NSLog(@"[Tasto] performTypeTextAtPoint: Found UITextView");
+            NSLog(@"[Ennio] performTypeTextAtPoint: Found UITextView");
 
             [textView becomeFirstResponder];
             textView.text = textToType;
@@ -1208,7 +1208,7 @@ bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::str
 
             success = true;
         } else {
-            NSLog(@"[Tasto] performTypeTextAtPoint: No UITextField or UITextView found in hierarchy");
+            NSLog(@"[Ennio] performTypeTextAtPoint: No UITextField or UITextView found in hierarchy");
             success = false;
         }
     };
@@ -1222,7 +1222,7 @@ bool TastoRuntimeHelper::performTypeTextAtPoint(float x, float y, const std::str
     return success;
 }
 
-bool TastoRuntimeHelper::performClearTextAtPoint(float x, float y) {
+bool EnnioRuntimeHelper::performClearTextAtPoint(float x, float y) {
     return performTypeTextAtPoint(x, y, "");
 }
 
@@ -1246,7 +1246,7 @@ static UIScrollView* findScrollViewInView(UIView* view) {
     return nil;
 }
 
-bool TastoRuntimeHelper::performScroll(const std::string& testID, float deltaX, float deltaY) {
+bool EnnioRuntimeHelper::performScroll(const std::string& testID, float deltaX, float deltaY) {
     __block bool success = false;
     NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
 
@@ -1254,7 +1254,7 @@ bool TastoRuntimeHelper::performScroll(const std::string& testID, float deltaX, 
         // Search ALL windows for the view
         UIView* view = findViewByAccessibilityIdentifierInAllWindows(identifier);
         if (!view) {
-            NSLog(@"[Tasto] performScroll: View not found for testID: %@", identifier);
+            NSLog(@"[Ennio] performScroll: View not found for testID: %@", identifier);
             success = false;
             return;
         }
@@ -1268,12 +1268,12 @@ bool TastoRuntimeHelper::performScroll(const std::string& testID, float deltaX, 
         }
 
         if (!scrollView) {
-            NSLog(@"[Tasto] performScroll: No UIScrollView found for testID: %@", identifier);
+            NSLog(@"[Ennio] performScroll: No UIScrollView found for testID: %@", identifier);
             success = false;
             return;
         }
 
-        NSLog(@"[Tasto] performScroll: Found scroll view, current offset: (%.1f, %.1f)",
+        NSLog(@"[Ennio] performScroll: Found scroll view, current offset: (%.1f, %.1f)",
               scrollView.contentOffset.x, scrollView.contentOffset.y);
 
         // Calculate new offset
@@ -1289,7 +1289,7 @@ bool TastoRuntimeHelper::performScroll(const std::string& testID, float deltaX, 
         newOffset.x = MAX(0, MIN(newOffset.x, maxX));
         newOffset.y = MAX(0, MIN(newOffset.y, maxY));
 
-        NSLog(@"[Tasto] performScroll: Scrolling to offset: (%.1f, %.1f)", newOffset.x, newOffset.y);
+        NSLog(@"[Ennio] performScroll: Scrolling to offset: (%.1f, %.1f)", newOffset.x, newOffset.y);
 
         // Perform the scroll
         [scrollView setContentOffset:newOffset animated:YES];
@@ -1306,7 +1306,7 @@ bool TastoRuntimeHelper::performScroll(const std::string& testID, float deltaX, 
     return success;
 }
 
-bool TastoRuntimeHelper::performScrollTo(const std::string& testID, float x, float y, bool animated) {
+bool EnnioRuntimeHelper::performScrollTo(const std::string& testID, float x, float y, bool animated) {
     __block bool success = false;
     NSString* identifier = [NSString stringWithUTF8String:testID.c_str()];
 
@@ -1314,7 +1314,7 @@ bool TastoRuntimeHelper::performScrollTo(const std::string& testID, float x, flo
         // Search ALL windows for the view
         UIView* view = findViewByAccessibilityIdentifierInAllWindows(identifier);
         if (!view) {
-            NSLog(@"[Tasto] performScrollTo: View not found for testID: %@", identifier);
+            NSLog(@"[Ennio] performScrollTo: View not found for testID: %@", identifier);
             success = false;
             return;
         }
@@ -1328,12 +1328,12 @@ bool TastoRuntimeHelper::performScrollTo(const std::string& testID, float x, flo
         }
 
         if (!scrollView) {
-            NSLog(@"[Tasto] performScrollTo: No UIScrollView found for testID: %@", identifier);
+            NSLog(@"[Ennio] performScrollTo: No UIScrollView found for testID: %@", identifier);
             success = false;
             return;
         }
 
-        NSLog(@"[Tasto] performScrollTo: Scrolling to (%.1f, %.1f) animated=%d", x, y, animated);
+        NSLog(@"[Ennio] performScrollTo: Scrolling to (%.1f, %.1f) animated=%d", x, y, animated);
 
         // Clamp to valid bounds
         CGFloat maxX = MAX(0, scrollView.contentSize.width - scrollView.bounds.size.width);
@@ -1391,12 +1391,12 @@ static UIAlertController* findPresentedAlertController() {
     return nil;
 }
 
-bool TastoRuntimeHelper::isAlertPresent() {
+bool EnnioRuntimeHelper::isAlertPresent() {
     __block bool result = false;
 
     void (^block)(void) = ^{
         result = (findPresentedAlertController() != nil);
-        NSLog(@"[Tasto] isAlertPresent: %@", result ? @"YES" : @"NO");
+        NSLog(@"[Ennio] isAlertPresent: %@", result ? @"YES" : @"NO");
     };
 
     if ([NSThread isMainThread]) {
@@ -1408,7 +1408,7 @@ bool TastoRuntimeHelper::isAlertPresent() {
     return result;
 }
 
-std::string TastoRuntimeHelper::getAlertText() {
+std::string EnnioRuntimeHelper::getAlertText() {
     __block std::string result;
 
     void (^block)(void) = ^{
@@ -1425,9 +1425,9 @@ std::string TastoRuntimeHelper::getAlertText() {
                 [text appendString:alert.message];
             }
             result = [text UTF8String];
-            NSLog(@"[Tasto] getAlertText: %@", text);
+            NSLog(@"[Ennio] getAlertText: %@", text);
         } else {
-            NSLog(@"[Tasto] getAlertText: No alert found");
+            NSLog(@"[Ennio] getAlertText: No alert found");
         }
     };
 
@@ -1440,7 +1440,7 @@ std::string TastoRuntimeHelper::getAlertText() {
     return result;
 }
 
-std::vector<std::string> TastoRuntimeHelper::getAlertButtons() {
+std::vector<std::string> EnnioRuntimeHelper::getAlertButtons() {
     __block std::vector<std::string> result;
 
     void (^block)(void) = ^{
@@ -1449,11 +1449,11 @@ std::vector<std::string> TastoRuntimeHelper::getAlertButtons() {
             for (UIAlertAction* action in alert.actions) {
                 if (action.title) {
                     result.push_back([action.title UTF8String]);
-                    NSLog(@"[Tasto] getAlertButtons: Found button '%@'", action.title);
+                    NSLog(@"[Ennio] getAlertButtons: Found button '%@'", action.title);
                 }
             }
         } else {
-            NSLog(@"[Tasto] getAlertButtons: No alert found");
+            NSLog(@"[Ennio] getAlertButtons: No alert found");
         }
     };
 
@@ -1466,14 +1466,14 @@ std::vector<std::string> TastoRuntimeHelper::getAlertButtons() {
     return result;
 }
 
-bool TastoRuntimeHelper::tapAlertButton(const std::string& buttonText) {
+bool EnnioRuntimeHelper::tapAlertButton(const std::string& buttonText) {
     __block bool success = false;
     NSString* targetButtonText = [NSString stringWithUTF8String:buttonText.c_str()];
 
     void (^block)(void) = ^{
         UIAlertController* alert = findPresentedAlertController();
         if (!alert) {
-            NSLog(@"[Tasto] tapAlertButton: No alert found");
+            NSLog(@"[Ennio] tapAlertButton: No alert found");
             return;
         }
 
@@ -1487,18 +1487,18 @@ bool TastoRuntimeHelper::tapAlertButton(const std::string& buttonText) {
         }
 
         if (!targetAction) {
-            NSLog(@"[Tasto] tapAlertButton: Button '%@' not found", targetButtonText);
+            NSLog(@"[Ennio] tapAlertButton: Button '%@' not found", targetButtonText);
             return;
         }
 
-        NSLog(@"[Tasto] tapAlertButton: Found button '%@', triggering", targetButtonText);
+        NSLog(@"[Ennio] tapAlertButton: Found button '%@', triggering", targetButtonText);
 
         // Get the handler block using KVC (private API but reliable)
         void (^handler)(UIAlertAction*) = nil;
         @try {
             handler = [targetAction valueForKey:@"handler"];
         } @catch (NSException* e) {
-            NSLog(@"[Tasto] tapAlertButton: Could not get handler via KVC: %@", e);
+            NSLog(@"[Ennio] tapAlertButton: Could not get handler via KVC: %@", e);
         }
 
         // Dismiss the alert first, then call the handler
@@ -1506,7 +1506,7 @@ bool TastoRuntimeHelper::tapAlertButton(const std::string& buttonText) {
         [alert dismissViewControllerAnimated:NO completion:^{
             // Call the handler after dismissal
             if (handler) {
-                NSLog(@"[Tasto] tapAlertButton: Invoking handler for '%@'", targetButtonText);
+                NSLog(@"[Ennio] tapAlertButton: Invoking handler for '%@'", targetButtonText);
                 handler(targetAction);
             }
         }];
@@ -1523,17 +1523,17 @@ bool TastoRuntimeHelper::tapAlertButton(const std::string& buttonText) {
     return success;
 }
 
-bool TastoRuntimeHelper::dismissAlert() {
+bool EnnioRuntimeHelper::dismissAlert() {
     __block bool success = false;
 
     void (^block)(void) = ^{
         UIAlertController* alert = findPresentedAlertController();
         if (!alert) {
-            NSLog(@"[Tasto] dismissAlert: No alert found");
+            NSLog(@"[Ennio] dismissAlert: No alert found");
             return;
         }
 
-        NSLog(@"[Tasto] dismissAlert: Dismissing alert");
+        NSLog(@"[Ennio] dismissAlert: Dismissing alert");
 
         // Find a cancel-style action, or the first action
         UIAlertAction* targetAction = nil;
@@ -1555,14 +1555,14 @@ bool TastoRuntimeHelper::dismissAlert() {
             @try {
                 handler = [targetAction valueForKey:@"handler"];
             } @catch (NSException* e) {
-                NSLog(@"[Tasto] dismissAlert: Could not get handler via KVC: %@", e);
+                NSLog(@"[Ennio] dismissAlert: Could not get handler via KVC: %@", e);
             }
         }
 
         // Dismiss the alert first, then call the handler
         [alert dismissViewControllerAnimated:NO completion:^{
             if (handler && targetAction) {
-                NSLog(@"[Tasto] dismissAlert: Invoking handler");
+                NSLog(@"[Ennio] dismissAlert: Invoking handler");
                 handler(targetAction);
             }
         }];
@@ -1582,27 +1582,27 @@ bool TastoRuntimeHelper::dismissAlert() {
 // Keyboard Handling
 // ============================================
 
-bool TastoRuntimeHelper::hideKeyboard() {
+bool EnnioRuntimeHelper::hideKeyboard() {
     __block bool success = false;
 
     void (^block)(void) = ^{
-        NSLog(@"[Tasto] hideKeyboard: Resigning first responder");
+        NSLog(@"[Ennio] hideKeyboard: Resigning first responder");
 
         // Find and resign the current first responder
         UIView* firstResponder = findFirstResponderInAllWindows();
         if (firstResponder) {
             [firstResponder resignFirstResponder];
             success = true;
-            NSLog(@"[Tasto] hideKeyboard: Resigned first responder: %@", NSStringFromClass([firstResponder class]));
+            NSLog(@"[Ennio] hideKeyboard: Resigned first responder: %@", NSStringFromClass([firstResponder class]));
         } else {
             // Alternative: send endEditing to the key window
             UIWindow* keyWindow = findKeyWindow();
             if (keyWindow) {
                 [keyWindow endEditing:YES];
                 success = true;
-                NSLog(@"[Tasto] hideKeyboard: Called endEditing on key window");
+                NSLog(@"[Ennio] hideKeyboard: Called endEditing on key window");
             } else {
-                NSLog(@"[Tasto] hideKeyboard: No first responder or key window found");
+                NSLog(@"[Ennio] hideKeyboard: No first responder or key window found");
             }
         }
     };
@@ -1616,15 +1616,15 @@ bool TastoRuntimeHelper::hideKeyboard() {
     return success;
 }
 
-bool TastoRuntimeHelper::eraseText(int count) {
+bool EnnioRuntimeHelper::eraseText(int count) {
     __block bool success = false;
 
     void (^block)(void) = ^{
-        NSLog(@"[Tasto] eraseText: Erasing %d characters", count);
+        NSLog(@"[Ennio] eraseText: Erasing %d characters", count);
 
         UIView* firstResponder = findFirstResponderInAllWindows();
         if (!firstResponder) {
-            NSLog(@"[Tasto] eraseText: No first responder found");
+            NSLog(@"[Ennio] eraseText: No first responder found");
             return;
         }
 
@@ -1651,7 +1651,7 @@ bool TastoRuntimeHelper::eraseText(int count) {
                 }
 
                 success = true;
-                NSLog(@"[Tasto] eraseText: Erased %ld characters, new text: '%@'", (long)charsToRemove, newText);
+                NSLog(@"[Ennio] eraseText: Erased %ld characters, new text: '%@'", (long)charsToRemove, newText);
             }
         } else if ([firstResponder isKindOfClass:[UITextView class]]) {
             UITextView* textView = (UITextView*)firstResponder;
@@ -1668,10 +1668,10 @@ bool TastoRuntimeHelper::eraseText(int count) {
                 }
 
                 success = true;
-                NSLog(@"[Tasto] eraseText: Erased %ld characters from UITextView", (long)charsToRemove);
+                NSLog(@"[Ennio] eraseText: Erased %ld characters from UITextView", (long)charsToRemove);
             }
         } else {
-            NSLog(@"[Tasto] eraseText: First responder is not a text input: %@", NSStringFromClass([firstResponder class]));
+            NSLog(@"[Ennio] eraseText: First responder is not a text input: %@", NSStringFromClass([firstResponder class]));
         }
     };
 
@@ -1684,12 +1684,12 @@ bool TastoRuntimeHelper::eraseText(int count) {
     return success;
 }
 
-bool TastoRuntimeHelper::pressKey(const std::string& keyName) {
+bool EnnioRuntimeHelper::pressKey(const std::string& keyName) {
     __block bool success = false;
     NSString* keyNameStr = [NSString stringWithUTF8String:keyName.c_str()];
 
     void (^block)(void) = ^{
-        NSLog(@"[Tasto] pressKey: Pressing key '%@'", keyNameStr);
+        NSLog(@"[Ennio] pressKey: Pressing key '%@'", keyNameStr);
 
         UIView* firstResponder = findFirstResponderInAllWindows();
 
@@ -1724,9 +1724,9 @@ bool TastoRuntimeHelper::pressKey(const std::string& keyName) {
         } else if ([keyNameStr caseInsensitiveCompare:@"Backspace"] == NSOrderedSame ||
                    [keyNameStr caseInsensitiveCompare:@"Delete"] == NSOrderedSame) {
             // Delete one character
-            success = TastoRuntimeHelper::getInstance().eraseText(1);
+            success = EnnioRuntimeHelper::getInstance().eraseText(1);
         } else {
-            NSLog(@"[Tasto] pressKey: Unknown key '%@'", keyNameStr);
+            NSLog(@"[Ennio] pressKey: Unknown key '%@'", keyNameStr);
         }
     };
 
@@ -1743,12 +1743,12 @@ bool TastoRuntimeHelper::pressKey(const std::string& keyName) {
 // Clipboard Handling
 // ============================================
 
-bool TastoRuntimeHelper::copyToClipboard(const std::string& text) {
+bool EnnioRuntimeHelper::copyToClipboard(const std::string& text) {
     __block bool success = false;
     NSString* textStr = [NSString stringWithUTF8String:text.c_str()];
 
     void (^block)(void) = ^{
-        NSLog(@"[Tasto] copyToClipboard: Copying text to clipboard");
+        NSLog(@"[Ennio] copyToClipboard: Copying text to clipboard");
         UIPasteboard* pasteboard = [UIPasteboard generalPasteboard];
         pasteboard.string = textStr;
         success = YES;
@@ -1763,23 +1763,23 @@ bool TastoRuntimeHelper::copyToClipboard(const std::string& text) {
     return success;
 }
 
-bool TastoRuntimeHelper::pasteFromClipboard() {
+bool EnnioRuntimeHelper::pasteFromClipboard() {
     __block bool success = false;
 
     void (^block)(void) = ^{
-        NSLog(@"[Tasto] pasteFromClipboard: Pasting from clipboard");
+        NSLog(@"[Ennio] pasteFromClipboard: Pasting from clipboard");
 
         UIPasteboard* pasteboard = [UIPasteboard generalPasteboard];
         NSString* text = pasteboard.string;
 
         if (!text || text.length == 0) {
-            NSLog(@"[Tasto] pasteFromClipboard: Clipboard is empty");
+            NSLog(@"[Ennio] pasteFromClipboard: Clipboard is empty");
             return;
         }
 
         UIView* firstResponder = findFirstResponderInAllWindows();
         if (!firstResponder) {
-            NSLog(@"[Tasto] pasteFromClipboard: No first responder found");
+            NSLog(@"[Ennio] pasteFromClipboard: No first responder found");
             return;
         }
 
@@ -1802,7 +1802,7 @@ bool TastoRuntimeHelper::pasteFromClipboard() {
             }
 
             success = true;
-            NSLog(@"[Tasto] pasteFromClipboard: Pasted text into UITextField");
+            NSLog(@"[Ennio] pasteFromClipboard: Pasted text into UITextField");
         } else if ([firstResponder isKindOfClass:[UITextView class]]) {
             UITextView* textView = (UITextView*)firstResponder;
             NSString* currentText = textView.text ?: @"";
@@ -1814,7 +1814,7 @@ bool TastoRuntimeHelper::pasteFromClipboard() {
             }
 
             success = true;
-            NSLog(@"[Tasto] pasteFromClipboard: Pasted text into UITextView");
+            NSLog(@"[Ennio] pasteFromClipboard: Pasted text into UITextView");
         }
     };
 
@@ -1827,7 +1827,7 @@ bool TastoRuntimeHelper::pasteFromClipboard() {
     return success;
 }
 
-std::string TastoRuntimeHelper::getClipboardText() {
+std::string EnnioRuntimeHelper::getClipboardText() {
     __block std::string result;
 
     void (^block)(void) = ^{
@@ -1835,9 +1835,9 @@ std::string TastoRuntimeHelper::getClipboardText() {
         NSString* text = pasteboard.string;
         if (text) {
             result = [text UTF8String];
-            NSLog(@"[Tasto] getClipboardText: Got text from clipboard");
+            NSLog(@"[Ennio] getClipboardText: Got text from clipboard");
         } else {
-            NSLog(@"[Tasto] getClipboardText: Clipboard is empty");
+            NSLog(@"[Ennio] getClipboardText: Clipboard is empty");
         }
     };
 
@@ -1854,11 +1854,11 @@ std::string TastoRuntimeHelper::getClipboardText() {
 // Device Control
 // ============================================
 
-bool TastoRuntimeHelper::setOrientation(int orientation) {
+bool EnnioRuntimeHelper::setOrientation(int orientation) {
     __block bool success = false;
 
     void (^block)(void) = ^{
-        NSLog(@"[Tasto] setOrientation: Setting orientation to %d", orientation);
+        NSLog(@"[Ennio] setOrientation: Setting orientation to %d", orientation);
 
         UIInterfaceOrientation targetOrientation;
         switch (orientation) {
@@ -1875,7 +1875,7 @@ bool TastoRuntimeHelper::setOrientation(int orientation) {
                 targetOrientation = UIInterfaceOrientationLandscapeRight;
                 break;
             default:
-                NSLog(@"[Tasto] setOrientation: Invalid orientation %d", orientation);
+                NSLog(@"[Ennio] setOrientation: Invalid orientation %d", orientation);
                 return;
         }
 
@@ -1892,7 +1892,7 @@ bool TastoRuntimeHelper::setOrientation(int orientation) {
                     NSError* error = nil;
                     [windowScene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError* err) {
                         if (err) {
-                            NSLog(@"[Tasto] setOrientation: Error setting orientation: %@", err);
+                            NSLog(@"[Ennio] setOrientation: Error setting orientation: %@", err);
                         }
                     }];
 
@@ -1907,7 +1907,7 @@ bool TastoRuntimeHelper::setOrientation(int orientation) {
             success = YES;
         }
 
-        NSLog(@"[Tasto] setOrientation: Result = %@", success ? @"YES" : @"NO");
+        NSLog(@"[Ennio] setOrientation: Result = %@", success ? @"YES" : @"NO");
     };
 
     if ([NSThread isMainThread]) {
@@ -1919,11 +1919,11 @@ bool TastoRuntimeHelper::setOrientation(int orientation) {
     return success;
 }
 
-bool TastoRuntimeHelper::performSwipe(float startX, float startY, float endX, float endY, float durationMs) {
+bool EnnioRuntimeHelper::performSwipe(float startX, float startY, float endX, float endY, float durationMs) {
     __block bool success = false;
 
     void (^block)(void) = ^{
-        NSLog(@"[Tasto] performSwipe: (%.1f, %.1f) -> (%.1f, %.1f) duration=%.0fms",
+        NSLog(@"[Ennio] performSwipe: (%.1f, %.1f) -> (%.1f, %.1f) duration=%.0fms",
               startX, startY, endX, endY, durationMs);
 
         CGPoint startPoint = CGPointMake(startX, startY);
@@ -1931,7 +1931,7 @@ bool TastoRuntimeHelper::performSwipe(float startX, float startY, float endX, fl
 
         UIWindow* targetWindow = findWindowAtPoint(startPoint);
         if (!targetWindow) {
-            NSLog(@"[Tasto] performSwipe: No window found at start point");
+            NSLog(@"[Ennio] performSwipe: No window found at start point");
             return;
         }
 
@@ -1991,7 +1991,7 @@ bool TastoRuntimeHelper::performSwipe(float startX, float startY, float endX, fl
         [app sendEvent:event];
 
         success = true;
-        NSLog(@"[Tasto] performSwipe: Completed swipe gesture");
+        NSLog(@"[Ennio] performSwipe: Completed swipe gesture");
     };
 
     if ([NSThread isMainThread]) {
@@ -2003,8 +2003,8 @@ bool TastoRuntimeHelper::performSwipe(float startX, float startY, float endX, fl
     return success;
 }
 
-bool TastoRuntimeHelper::performBackGesture() {
-    NSLog(@"[Tasto] performBackGesture: Simulating edge swipe from left");
+bool EnnioRuntimeHelper::performBackGesture() {
+    NSLog(@"[Ennio] performBackGesture: Simulating edge swipe from left");
 
     // Get screen dimensions
     CGRect screenBounds = [[UIScreen mainScreen] bounds];
@@ -2021,14 +2021,14 @@ bool TastoRuntimeHelper::performBackGesture() {
     return performSwipe(startX, startY, endX, endY, duration);
 }
 
-} // namespace tasto
+} // namespace ennio
 
 // Objective-C helper for setting the surface presenter
-extern "C" void TastoSetSurfacePresenter(RCTSurfacePresenter* presenter) {
-    tasto::TastoRuntimeHelper::getInstance().setSurfacePresenter((__bridge void*)presenter);
+extern "C" void EnnioSetSurfacePresenter(RCTSurfacePresenter* presenter) {
+    ennio::EnnioRuntimeHelper::getInstance().setSurfacePresenter((__bridge void*)presenter);
 }
 
 // Logging helper for C++ code
-extern "C" void TastoLogMessage(const char* message) {
+extern "C" void EnnioLogMessage(const char* message) {
     NSLog(@"%s", message);
 }

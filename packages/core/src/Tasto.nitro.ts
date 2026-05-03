@@ -199,9 +199,9 @@ export interface Selector {
 }
 
 /**
- * Tasto HybridObject - Direct Fabric shadow tree access for E2E testing
+ * Ennio HybridObject - Direct Fabric shadow tree access for E2E testing
  */
-export interface Tasto extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
+export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   // ============================================
   // Server Management
   // ============================================

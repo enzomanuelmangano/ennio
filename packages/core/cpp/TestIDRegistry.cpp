@@ -3,7 +3,7 @@
 #include <react/renderer/components/view/ViewProps.h>
 #include <react/renderer/core/LayoutableShadowNode.h>
 
-namespace tasto {
+namespace ennio {
 
 TestIDRegistry& TestIDRegistry::getInstance() {
     static TestIDRegistry instance;
@@ -105,4 +105,4 @@ void TestIDRegistry::traverseAndRegister(ShadowNodePtr node) {
     }
 }
 
-} // namespace tasto
+} // namespace ennio

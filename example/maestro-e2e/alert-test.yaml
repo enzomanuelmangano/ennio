@@ -1,7 +1,7 @@
 # Alert Test
 # Tests native iOS Alert handling with login/logout flow
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Native Alert Test"
 
 ---

@@ -15,7 +15,7 @@ def getExtOrDefault(name, defaultValue) {
 apply plugin: 'com.android.library'
 
 android {
-    namespace 'com.tasto.nitro'
+    namespace 'com.ennio.nitro'
     compileSdkVersion getExtOrDefault('compileSdkVersion', 34)
 
     defaultConfig {

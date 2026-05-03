@@ -1,7 +1,7 @@
 # Test: Cart Management Flow
 # Tests add/remove items, quantity updates, cart summary
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Cart Management"
 tags:
   - cart

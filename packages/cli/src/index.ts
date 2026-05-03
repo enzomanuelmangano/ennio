@@ -1,26 +1,26 @@
 #!/usr/bin/env bun
 /**
- * Tasto CLI
+ * Ennio CLI
  *
  * Runs E2E tests by connecting to the app.
  * Supports two connection modes:
- * 1. WebSocket (preferred) - connects to app's Tasto server on port 9876
+ * 1. WebSocket (preferred) - connects to app's Ennio server on port 9876
  * 2. CDP (fallback) - connects to Metro's debugger on port 8081
  *
  * Supports test file formats:
- * - TypeScript (.test.ts) - Tasto native tests
- * - Maestro YAML (.yaml) - Maestro tests executed via Tasto internals
+ * - TypeScript (.test.ts) - Ennio native tests
+ * - Maestro YAML (.yaml) - Maestro tests executed via Ennio internals
  *
  * Usage:
- *   npx tasto e2e/test.ts        # Run TypeScript test
- *   npx tasto e2e/flow.yaml      # Run Maestro YAML test
- *   npx tasto e2e/               # Runs all *.test.ts and *.yaml files
+ *   npx ennio e2e/test.ts        # Run TypeScript test
+ *   npx ennio e2e/flow.yaml      # Run Maestro YAML test
+ *   npx ennio e2e/               # Runs all *.test.ts and *.yaml files
  */
 
 import { existsSync, statSync } from 'fs';
 import { resolve, basename, join } from 'path';
 import { glob } from 'glob';
-import { TastoClient } from './client';
+import { EnnioClient } from './client';
 import { runTests } from './runner';
 import { runMaestroTests } from './maestro-runner';
 
@@ -35,10 +35,10 @@ interface TestFileResult {
 
 
 /**
- * Try to connect via WebSocket to Tasto server
+ * Try to connect via WebSocket to Ennio server
  */
-async function tryWebSocketConnection(port: number): Promise<TastoClient | null> {
-  const client = new TastoClient(port);
+async function tryWebSocketConnection(port: number): Promise<EnnioClient | null> {
+  const client = new EnnioClient(port);
   try {
     await Promise.race([
       client.connect(),
@@ -65,14 +65,14 @@ function isTestTsFile(filePath: string): boolean {
 }
 
 interface TestFileResultWithClient extends TestFileResult {
-  client?: TastoClient;  // Potentially updated client from launchApp/clearState
+  client?: EnnioClient;  // Potentially updated client from launchApp/clearState
 }
 
 /**
  * Run a test file (TypeScript or Maestro YAML)
  */
 async function runTestFile(
-  client: TastoClient,
+  client: EnnioClient,
   filePath: string,
   options: { verbose?: boolean; port?: number } = {}
 ): Promise<TestFileResultWithClient> {
@@ -121,8 +121,8 @@ async function main() {
   const verbose = process.argv.includes('--verbose') || process.argv.includes('-v');
 
   if (args.length === 0) {
-    console.log('Usage: tasto <test-file.ts|flow.yaml> [options]');
-    console.log('       tasto e2e/           # Runs all *.test.ts and *.yaml files');
+    console.log('Usage: ennio <test-file.ts|flow.yaml> [options]');
+    console.log('       ennio e2e/           # Runs all *.test.ts and *.yaml files');
     console.log('\nOptions:');
     console.log('  --port=9876    WebSocket port (default: 9876)');
     console.log('  --verbose, -v  Show detailed command execution');
@@ -166,7 +166,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('\n🧪 Tasto\n');
+  console.log('\n🧪 Ennio\n');
 
   // Try to connect via WebSocket first
   const client = await tryWebSocketConnection(port);

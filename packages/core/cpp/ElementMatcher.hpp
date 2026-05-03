@@ -12,7 +12,7 @@
 
 #include <react/renderer/core/ShadowNode.h>
 
-namespace tasto {
+namespace ennio {
 
 /**
  * Extended element info with additional state properties
@@ -241,4 +241,4 @@ private:
     );
 };
 
-} // namespace tasto
+} // namespace ennio

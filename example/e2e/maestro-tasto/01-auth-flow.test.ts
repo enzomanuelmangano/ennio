@@ -2,7 +2,7 @@
  * Authentication Flow Tests
  * Equivalent to maestro-e2e/01-auth-flow.yaml
  */
-import { element, runTest } from '@tasto/test';
+import { element, runTest } from '@ennio/test';
 import { goHome, goProfile, ensureLoggedOut } from './shared';
 
 // ============================================

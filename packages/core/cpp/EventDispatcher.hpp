@@ -6,7 +6,7 @@
 #include <react/renderer/core/ShadowNode.h>
 #include <react/renderer/core/EventEmitter.h>
 
-namespace tasto {
+namespace ennio {
 
 /**
  * Scroll direction for swipe/scroll operations
@@ -175,4 +175,4 @@ private:
     static std::pair<float, float> getCenterPoint(ShadowNodePtr node);
 };
 
-} // namespace tasto
+} // namespace ennio

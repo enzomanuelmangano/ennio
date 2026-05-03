@@ -7,7 +7,7 @@
 
 #include <react/renderer/core/ShadowNode.h>
 
-namespace tasto {
+namespace ennio {
 
 /**
  * TestIDRegistry provides O(1) lookup of ShadowNodes by testID.
@@ -77,4 +77,4 @@ private:
     void traverseAndRegister(ShadowNodePtr node);
 };
 
-} // namespace tasto
+} // namespace ennio

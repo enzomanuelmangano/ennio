@@ -1,10 +1,10 @@
-import '@tasto/nitro'; // Initialize Tasto for E2E testing
+import '@ennio/core'; // Initialize Ennio for E2E testing
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox } from 'react-native';
 import { useSettingsStore } from '../store';
 
-// Ignore Tasto's synthetic touch warnings (taps still work, this is just a RN internal warning)
+// Ignore Ennio's synthetic touch warnings (taps still work, this is just a RN internal warning)
 LogBox.ignoreLogs(['Cannot find single active touch']);
 
 export default function RootLayout() {

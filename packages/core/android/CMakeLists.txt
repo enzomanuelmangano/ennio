@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(TastoNitro)
+project(EnnioCore)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,15 +17,15 @@ file(GLOB_RECURSE CPP_SOURCES
 )
 
 # Create library
-add_library(TastoNitro SHARED ${CPP_SOURCES})
+add_library(EnnioCore SHARED ${CPP_SOURCES})
 
-target_include_directories(TastoNitro PRIVATE
+target_include_directories(EnnioCore PRIVATE
     ../cpp
     ../nitrogen/generated/android
     ../nitrogen/generated/shared
 )
 
-target_link_libraries(TastoNitro
+target_link_libraries(EnnioCore
     ReactAndroid::react_nativemodule_core
     ReactAndroid::runtimeexecutor
     ReactAndroid::fabricjni

@@ -1,8 +1,8 @@
 # Full App Test Suite
 # Comprehensive E2E test covering all app functionality
-# Run with: npx tasto maestro-e2e/00-full-suite.yaml
+# Run with: npx ennio maestro-e2e/00-full-suite.yaml
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Full App Test Suite"
 tags:
   - suite

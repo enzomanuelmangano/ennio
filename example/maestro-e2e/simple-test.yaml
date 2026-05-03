@@ -1,4 +1,4 @@
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Simple Test"
 ---
 - tapOn:

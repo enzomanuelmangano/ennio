@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace tasto {
+namespace ennio {
 
 /**
  * Text matching mode for text selectors
@@ -278,4 +278,4 @@ struct SelectorCriteria {
     }
 };
 
-} // namespace tasto
+} // namespace ennio

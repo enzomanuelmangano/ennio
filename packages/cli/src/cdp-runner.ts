@@ -74,7 +74,7 @@ function processFile(filePath: string, processed = new Set<string>()): string {
     }
   }
 
-  code = code.replace(/^import\s+\{[^}]+\}\s+from\s+['"]@tasto\/test['"]\s*;?\s*$/gm, '');
+  code = code.replace(/^import\s+\{[^}]+\}\s+from\s+['"]@ennio\/test['"]\s*;?\s*$/gm, '');
   code = code.replace(/^export\s+default\s+/gm, '');
   code = code.replace(/^export\s+/gm, '');
 
@@ -83,11 +83,11 @@ function processFile(filePath: string, processed = new Set<string>()): string {
 
 const RUNTIME_HELPERS = `
 var g = typeof globalThis !== 'undefined' ? globalThis : this;
-g.__TASTO_RESULTS__ = { passed: 0, failed: 0, tests: [] };
-var __results = g.__TASTO_RESULTS__;
+g.__ENNIO_RESULTS__ = { passed: 0, failed: 0, tests: [] };
+var __results = g.__ENNIO_RESULTS__;
 
-var Tasto = g.__TASTO_MODULE__;
-if (!Tasto) throw new Error('Tasto not initialized.');
+var Ennio = g.__ENNIO_MODULE__;
+if (!Ennio) throw new Error('Ennio not initialized.');
 
 function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
@@ -97,38 +97,38 @@ function element(testID) {
   return {
     tap: function() {
       return new Promise(function(resolve, reject) {
-        var ok = Tasto.tap(testID);
+        var ok = Ennio.tap(testID);
         if (!ok) reject(new Error('Tap failed: ' + testID));
         else resolve();
       }).then(function() { return sleep(50); });
     },
     typeText: function(text) {
       return new Promise(function(resolve, reject) {
-        var ok = Tasto.typeText(testID, text);
+        var ok = Ennio.typeText(testID, text);
         if (!ok) reject(new Error('TypeText failed: ' + testID));
         else resolve();
       }).then(function() { return sleep(50); });
     },
     clearText: function() {
       return new Promise(function(resolve, reject) {
-        var ok = Tasto.clearText(testID);
+        var ok = Ennio.clearText(testID);
         if (!ok) reject(new Error('ClearText failed: ' + testID));
         else resolve();
       }).then(function() { return sleep(50); });
     },
-    exists: function() { return Promise.resolve(Tasto.exists(testID)); },
-    isVisible: function() { return Promise.resolve(Tasto.isVisible(testID)); },
+    exists: function() { return Promise.resolve(Ennio.exists(testID)); },
+    isVisible: function() { return Promise.resolve(Ennio.isVisible(testID)); },
     toBeVisible: function() {
       return new Promise(function(resolve, reject) {
-        if (!Tasto.isVisible(testID)) reject(new Error('Not visible: ' + testID));
+        if (!Ennio.isVisible(testID)) reject(new Error('Not visible: ' + testID));
         else resolve();
       });
     },
-    getText: function() { return Promise.resolve(Tasto.getText(testID)); },
+    getText: function() { return Promise.resolve(Ennio.getText(testID)); },
     scroll: function(direction, amount) {
       var dx = direction === 'left' ? -(amount||200) : direction === 'right' ? (amount||200) : 0;
       var dy = direction === 'up' ? -(amount||200) : direction === 'down' ? (amount||200) : 0;
-      Tasto.scroll(testID, dx, dy);
+      Ennio.scroll(testID, dx, dy);
       return sleep(100);
     }
   };
@@ -140,7 +140,7 @@ function waitForElement(testID, opts) {
   var start = Date.now();
   return new Promise(function(resolve, reject) {
     function check() {
-      if (Tasto.exists(testID)) return resolve();
+      if (Ennio.exists(testID)) return resolve();
       if (Date.now() - start > timeout) return reject(new Error('Timeout: ' + testID));
       setTimeout(check, 100);
     }
@@ -154,7 +154,7 @@ function waitForVisible(testID, opts) {
   var start = Date.now();
   return new Promise(function(resolve, reject) {
     function check() {
-      if (Tasto.isVisible(testID)) return resolve();
+      if (Ennio.isVisible(testID)) return resolve();
       if (Date.now() - start > timeout) return reject(new Error('Timeout visible: ' + testID));
       setTimeout(check, 100);
     }
@@ -163,15 +163,15 @@ function waitForVisible(testID, opts) {
 }
 
 var Alert = {
-  isPresent: function() { return Promise.resolve(Tasto.isAlertPresent ? Tasto.isAlertPresent() : false); },
-  getText: function() { return Promise.resolve(Tasto.getAlertText ? Tasto.getAlertText() : ''); },
+  isPresent: function() { return Promise.resolve(Ennio.isAlertPresent ? Ennio.isAlertPresent() : false); },
+  getText: function() { return Promise.resolve(Ennio.getAlertText ? Ennio.getAlertText() : ''); },
   tap: function(btn) {
-    var ok = Tasto.tapAlertButton ? Tasto.tapAlertButton(btn) : false;
+    var ok = Ennio.tapAlertButton ? Ennio.tapAlertButton(btn) : false;
     if (!ok) throw new Error('Alert tap failed: ' + btn);
     return sleep(100);
   },
   dismiss: function() {
-    if (Tasto.dismissAlert) Tasto.dismissAlert();
+    if (Ennio.dismissAlert) Ennio.dismissAlert();
     return sleep(100);
   }
 };
@@ -288,7 +288,7 @@ export async function runTestsViaCDP(testFilePath: string): Promise<Results> {
 
         while (Date.now() - startTime < timeout) {
           const check = await send('Runtime.evaluate', {
-            expression: '(typeof globalThis !== "undefined" ? globalThis : this).__TASTO_RESULTS__',
+            expression: '(typeof globalThis !== "undefined" ? globalThis : this).__ENNIO_RESULTS__',
             returnByValue: true,
           }) as { result?: { value?: Results } };
 
@@ -299,7 +299,7 @@ export async function runTestsViaCDP(testFilePath: string): Promise<Results> {
         }
 
         const result = await send('Runtime.evaluate', {
-          expression: '(typeof globalThis !== "undefined" ? globalThis : this).__TASTO_RESULTS__',
+          expression: '(typeof globalThis !== "undefined" ? globalThis : this).__ENNIO_RESULTS__',
           returnByValue: true,
         }) as { result?: { value?: Results } };
 

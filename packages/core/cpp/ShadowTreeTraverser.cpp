@@ -4,7 +4,7 @@
 #include <react/renderer/components/text/RawTextProps.h>
 #include <react/renderer/core/LayoutableShadowNode.h>
 
-namespace tasto {
+namespace ennio {
 
 ShadowTreeTraverser::ShadowNodePtr ShadowTreeTraverser::findByTestID(
     ShadowNodePtr root,
@@ -266,4 +266,4 @@ std::pair<float, float> ShadowTreeTraverser::calculateAccumulatedOffset(
     return {offsetX, offsetY};
 }
 
-} // namespace tasto
+} // namespace ennio

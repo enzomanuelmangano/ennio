@@ -23,7 +23,7 @@
 #error NitroModules cannot be found! Are you sure you installed NitroModules properly?
 #endif
 
-namespace margelo::nitro::tasto {
+namespace margelo::nitro::ennio {
 
   /**
    * An enum which can be represented as a JavaScript union (ScrollDirection).
@@ -35,30 +35,30 @@ namespace margelo::nitro::tasto {
     RIGHT      SWIFT_NAME(right) = 3,
   } CLOSED_ENUM;
 
-} // namespace margelo::nitro::tasto
+} // namespace margelo::nitro::ennio
 
 namespace margelo::nitro {
 
   // C++ ScrollDirection <> JS ScrollDirection (union)
   template <>
-  struct JSIConverter<margelo::nitro::tasto::ScrollDirection> final {
-    static inline margelo::nitro::tasto::ScrollDirection fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
+  struct JSIConverter<margelo::nitro::ennio::ScrollDirection> final {
+    static inline margelo::nitro::ennio::ScrollDirection fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
       std::string unionValue = JSIConverter<std::string>::fromJSI(runtime, arg);
       switch (hashString(unionValue.c_str(), unionValue.size())) {
-        case hashString("up"): return margelo::nitro::tasto::ScrollDirection::UP;
-        case hashString("down"): return margelo::nitro::tasto::ScrollDirection::DOWN;
-        case hashString("left"): return margelo::nitro::tasto::ScrollDirection::LEFT;
-        case hashString("right"): return margelo::nitro::tasto::ScrollDirection::RIGHT;
+        case hashString("up"): return margelo::nitro::ennio::ScrollDirection::UP;
+        case hashString("down"): return margelo::nitro::ennio::ScrollDirection::DOWN;
+        case hashString("left"): return margelo::nitro::ennio::ScrollDirection::LEFT;
+        case hashString("right"): return margelo::nitro::ennio::ScrollDirection::RIGHT;
         default: [[unlikely]]
           throw std::invalid_argument("Cannot convert \"" + unionValue + "\" to enum ScrollDirection - invalid value!");
       }
     }
-    static inline jsi::Value toJSI(jsi::Runtime& runtime, margelo::nitro::tasto::ScrollDirection arg) {
+    static inline jsi::Value toJSI(jsi::Runtime& runtime, margelo::nitro::ennio::ScrollDirection arg) {
       switch (arg) {
-        case margelo::nitro::tasto::ScrollDirection::UP: return JSIConverter<std::string>::toJSI(runtime, "up");
-        case margelo::nitro::tasto::ScrollDirection::DOWN: return JSIConverter<std::string>::toJSI(runtime, "down");
-        case margelo::nitro::tasto::ScrollDirection::LEFT: return JSIConverter<std::string>::toJSI(runtime, "left");
-        case margelo::nitro::tasto::ScrollDirection::RIGHT: return JSIConverter<std::string>::toJSI(runtime, "right");
+        case margelo::nitro::ennio::ScrollDirection::UP: return JSIConverter<std::string>::toJSI(runtime, "up");
+        case margelo::nitro::ennio::ScrollDirection::DOWN: return JSIConverter<std::string>::toJSI(runtime, "down");
+        case margelo::nitro::ennio::ScrollDirection::LEFT: return JSIConverter<std::string>::toJSI(runtime, "left");
+        case margelo::nitro::ennio::ScrollDirection::RIGHT: return JSIConverter<std::string>::toJSI(runtime, "right");
         default: [[unlikely]]
           throw std::invalid_argument("Cannot convert ScrollDirection to JS - invalid value: "
                                     + std::to_string(static_cast<int>(arg)) + "!");

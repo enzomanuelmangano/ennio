@@ -1,7 +1,7 @@
 # Test: Simple Authentication Flow
 # Tests demo login only
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Authentication Flow"
 tags:
   - auth

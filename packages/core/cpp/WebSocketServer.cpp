@@ -12,11 +12,11 @@
 #include <arpa/inet.h>
 #include <CommonCrypto/CommonDigest.h>
 // Use NSLog for iOS logging
-extern "C" void TastoLogMessage(const char* message);
+extern "C" void EnnioLogMessage(const char* message);
 #define WS_LOG(fmt, ...) do { \
     char buf[512]; \
-    snprintf(buf, sizeof(buf), "[Tasto WS] " fmt, ##__VA_ARGS__); \
-    TastoLogMessage(buf); \
+    snprintf(buf, sizeof(buf), "[Ennio WS] " fmt, ##__VA_ARGS__); \
+    EnnioLogMessage(buf); \
 } while(0)
 #elif defined(__ANDROID__)
 #include <sys/socket.h>
@@ -26,12 +26,12 @@ extern "C" void TastoLogMessage(const char* message);
 // Android: use OpenSSL
 #include <openssl/sha.h>
 #include <android/log.h>
-#define WS_LOG(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "Tasto WS", fmt, ##__VA_ARGS__)
+#define WS_LOG(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "Ennio WS", fmt, ##__VA_ARGS__)
 #else
-#define WS_LOG(fmt, ...) fprintf(stderr, "[Tasto WS] " fmt "\n", ##__VA_ARGS__)
+#define WS_LOG(fmt, ...) fprintf(stderr, "[Ennio WS] " fmt "\n", ##__VA_ARGS__)
 #endif
 
-namespace tasto {
+namespace ennio {
 
 // Base64 encoding table
 static const char base64Chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -578,4 +578,4 @@ double parseDouble(const std::string& json, const std::string& key) {
 
 } // namespace json
 
-} // namespace tasto
+} // namespace ennio

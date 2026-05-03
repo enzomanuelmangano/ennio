@@ -11,7 +11,7 @@
 #include <gtest/gtest.h>
 #include "SelectorCriteria.hpp"
 
-namespace tasto {
+namespace ennio {
 namespace {
 
 // ============================================
@@ -117,4 +117,4 @@ TEST(SelectorCriteriaTest, HasDimensionCriteriaWithWidth) {
 // ============================================
 
 } // namespace
-} // namespace tasto
+} // namespace ennio

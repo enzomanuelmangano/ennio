@@ -1,4 +1,4 @@
-import { element, sleep, runTest } from '@tasto/test';
+import { element, sleep, runTest } from '@ennio/test';
 import { goProducts } from './shared';
 
 await goProducts();

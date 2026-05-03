@@ -1,7 +1,7 @@
 # Subflow: Authentication helpers
 # Reusable authentication flows for other tests
 
-appId: com.tasto.example
+appId: com.ennio.example
 
 ---
 

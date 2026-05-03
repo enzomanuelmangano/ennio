@@ -1,7 +1,7 @@
 /**
- * Tasto WebSocket Client
+ * Ennio WebSocket Client
  *
- * Connects directly to the native Tasto WebSocket server
+ * Connects directly to the native Ennio WebSocket server
  * running in the app. Works in both debug and release builds.
  *
  * Supports full Maestro selector parity.
@@ -9,13 +9,13 @@
 
 const DEFAULT_PORT = 9876;
 
-interface TastoRequest {
+interface EnnioRequest {
   id: string;
   type: string;
   payload: Record<string, unknown>;
 }
 
-interface TastoResponse {
+interface EnnioResponse {
   id: string;
   success: boolean;
   data?: unknown;
@@ -112,9 +112,9 @@ export interface Selector {
   traits?: Trait[];
 }
 
-export class TastoClient {
+export class EnnioClient {
   private ws: WebSocket | null = null;
-  private pending = new Map<string, { resolve: (r: TastoResponse) => void; reject: (e: Error) => void }>();
+  private pending = new Map<string, { resolve: (r: EnnioResponse) => void; reject: (e: Error) => void }>();
   private messageId = 0;
   private port: number;
 
@@ -128,11 +128,11 @@ export class TastoClient {
       this.ws = new WebSocket(url);
 
       this.ws.onopen = () => resolve();
-      this.ws.onerror = () => reject(new Error(`Failed to connect to Tasto server on port ${this.port}`));
+      this.ws.onerror = () => reject(new Error(`Failed to connect to Ennio server on port ${this.port}`));
 
       this.ws.onmessage = (event) => {
         try {
-          const response: TastoResponse = JSON.parse(event.data as string);
+          const response: EnnioResponse = JSON.parse(event.data as string);
           const handler = this.pending.get(response.id);
           if (handler) {
             this.pending.delete(response.id);
@@ -160,13 +160,13 @@ export class TastoClient {
     }
   }
 
-  private async send(type: string, payload: Record<string, unknown> = {}): Promise<TastoResponse> {
+  private async send(type: string, payload: Record<string, unknown> = {}): Promise<EnnioResponse> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('Not connected to Tasto server');
+      throw new Error('Not connected to Ennio server');
     }
 
     const id = String(++this.messageId);
-    const request: TastoRequest = { id, type, payload };
+    const request: EnnioRequest = { id, type, payload };
 
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });

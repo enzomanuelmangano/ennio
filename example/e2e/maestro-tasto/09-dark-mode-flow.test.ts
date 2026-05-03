@@ -2,7 +2,7 @@
  * Dark Mode Flow Tests
  * Equivalent to maestro-e2e/09-dark-mode-flow.yaml
  */
-import { element, sleep, runTest } from '@tasto/test';
+import { element, sleep, runTest } from '@ennio/test';
 import { goHome, goProducts, goCart, goProfile, loginWithDemo } from './shared';
 
 // ============================================

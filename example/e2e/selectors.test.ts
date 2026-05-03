@@ -6,7 +6,7 @@
  *
  * Uses built-in flakiness handling - no manual retries needed.
  */
-import { element, elements, sleep, runTest } from '@tasto/test';
+import { element, elements, sleep, runTest } from '@ennio/test';
 import { goHome, goProducts } from './shared';
 
 await goHome();

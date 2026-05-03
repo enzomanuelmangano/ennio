@@ -6,7 +6,7 @@
 #include <functional>
 #include <mutex>
 
-namespace tasto {
+namespace ennio {
 
 /**
  * IdleMonitor tracks pending work to determine when the UI is idle.
@@ -274,4 +274,4 @@ private:
     std::condition_variable cv_;
 };
 
-} // namespace tasto
+} // namespace ennio

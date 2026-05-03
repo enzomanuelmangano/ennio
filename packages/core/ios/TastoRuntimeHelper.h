@@ -1,6 +1,6 @@
 //
-// TastoRuntimeHelper.h
-// Provides access to React Native runtime and UIManager for Tasto
+// EnnioRuntimeHelper.h
+// Provides access to React Native runtime and UIManager for Ennio
 //
 
 #pragma once
@@ -22,17 +22,17 @@ namespace react {
 } // namespace react
 } // namespace facebook
 
-namespace tasto {
+namespace ennio {
 
 /**
- * TastoRuntimeHelper - Singleton for accessing React Native's UIManager
+ * EnnioRuntimeHelper - Singleton for accessing React Native's UIManager
  *
  * This class bridges iOS's RCTSurfacePresenter to C++ code that needs
  * access to the shadow tree.
  */
-class TastoRuntimeHelper {
+class EnnioRuntimeHelper {
 public:
-    static TastoRuntimeHelper& getInstance();
+    static EnnioRuntimeHelper& getInstance();
 
     /**
      * Set the surface presenter (called from Objective-C during app startup)
@@ -201,15 +201,15 @@ public:
     bool performBackGesture();
 
 private:
-    TastoRuntimeHelper() = default;
-    ~TastoRuntimeHelper() = default;
-    TastoRuntimeHelper(const TastoRuntimeHelper&) = delete;
-    TastoRuntimeHelper& operator=(const TastoRuntimeHelper&) = delete;
+    EnnioRuntimeHelper() = default;
+    ~EnnioRuntimeHelper() = default;
+    EnnioRuntimeHelper(const EnnioRuntimeHelper&) = delete;
+    EnnioRuntimeHelper& operator=(const EnnioRuntimeHelper&) = delete;
 
     void* surfacePresenter_ = nullptr;
 };
 
-} // namespace tasto
+} // namespace ennio
 
 #endif // __cplusplus
 
@@ -219,7 +219,7 @@ extern "C" {
 #endif
 
 #ifdef __OBJC__
-void TastoSetSurfacePresenter(RCTSurfacePresenter* _Nonnull presenter);
+void EnnioSetSurfacePresenter(RCTSurfacePresenter* _Nonnull presenter);
 #endif
 
 #ifdef __cplusplus

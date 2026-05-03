@@ -1,7 +1,7 @@
 /**
- * Utility functions for Tasto tests
+ * Utility functions for Ennio tests
  */
-import { getTastoModule } from '@tasto/nitro';
+import { getEnnioModule } from '@ennio/core';
 import { element } from './element';
 
 /**
@@ -27,7 +27,7 @@ export async function waitForElement(
     await sleep(interval);
   }
 
-  throw new Error(`[Tasto] Timeout waiting for element with testID: ${testID}`);
+  throw new Error(`[Ennio] Timeout waiting for element with testID: ${testID}`);
 }
 
 /**
@@ -46,7 +46,7 @@ export async function waitForVisible(
     await sleep(interval);
   }
 
-  throw new Error(`[Tasto] Timeout waiting for element to be visible: ${testID}`);
+  throw new Error(`[Ennio] Timeout waiting for element to be visible: ${testID}`);
 }
 
 /**
@@ -65,16 +65,16 @@ export async function waitForElementToDisappear(
     await sleep(interval);
   }
 
-  throw new Error(`[Tasto] Timeout waiting for element to disappear: ${testID}`);
+  throw new Error(`[Ennio] Timeout waiting for element to disappear: ${testID}`);
 }
 
 /**
  * Wait for app to be idle (no pending updates)
  */
 export async function waitForIdle(timeout: number = 5000): Promise<void> {
-  const tasto = getTastoModule();
-  if (!tasto) {
-    throw new Error('[Tasto] Native module not available');
+  const ennio = getEnnioModule();
+  if (!ennio) {
+    throw new Error('[Ennio] Native module not available');
   }
 
   // For now, just a small delay - could be enhanced with actual idle detection
@@ -89,40 +89,40 @@ export const Alert = {
    * Check if an alert is currently visible
    */
   async isPresent(): Promise<boolean> {
-    const tasto = getTastoModule();
-    if (!tasto) return false;
-    return tasto.isAlertPresent();
+    const ennio = getEnnioModule();
+    if (!ennio) return false;
+    return ennio.isAlertPresent();
   },
 
   /**
    * Get the alert text (title + message)
    */
   async getText(): Promise<string> {
-    const tasto = getTastoModule();
-    if (!tasto) return '';
-    return tasto.getAlertText();
+    const ennio = getEnnioModule();
+    if (!ennio) return '';
+    return ennio.getAlertText();
   },
 
   /**
    * Get the list of button titles
    */
   async getButtons(): Promise<string[]> {
-    const tasto = getTastoModule();
-    if (!tasto) return [];
-    return tasto.getAlertButtons();
+    const ennio = getEnnioModule();
+    if (!ennio) return [];
+    return ennio.getAlertButtons();
   },
 
   /**
    * Tap a button by its text
    */
   async tap(buttonText: string): Promise<void> {
-    const tasto = getTastoModule();
-    if (!tasto) {
-      throw new Error('[Tasto] Native module not available');
+    const ennio = getEnnioModule();
+    if (!ennio) {
+      throw new Error('[Ennio] Native module not available');
     }
-    const success = tasto.tapAlertButton(buttonText);
+    const success = ennio.tapAlertButton(buttonText);
     if (!success) {
-      throw new Error(`[Tasto] Failed to tap alert button: ${buttonText}`);
+      throw new Error(`[Ennio] Failed to tap alert button: ${buttonText}`);
     }
     await sleep(100);
   },
@@ -131,13 +131,13 @@ export const Alert = {
    * Dismiss the alert (tap cancel or last button)
    */
   async dismiss(): Promise<void> {
-    const tasto = getTastoModule();
-    if (!tasto) {
-      throw new Error('[Tasto] Native module not available');
+    const ennio = getEnnioModule();
+    if (!ennio) {
+      throw new Error('[Ennio] Native module not available');
     }
-    const success = tasto.dismissAlert();
+    const success = ennio.dismissAlert();
     if (!success) {
-      throw new Error('[Tasto] Failed to dismiss alert');
+      throw new Error('[Ennio] Failed to dismiss alert');
     }
     await sleep(100);
   },
@@ -154,6 +154,6 @@ export const Alert = {
       await sleep(100);
     }
 
-    throw new Error('[Tasto] Timeout waiting for alert');
+    throw new Error('[Ennio] Timeout waiting for alert');
   },
 };

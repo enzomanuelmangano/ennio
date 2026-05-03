@@ -1,7 +1,7 @@
 # Test: Complete Checkout Flow
 # Tests multi-step checkout: shipping, payment, review, order
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Checkout Flow"
 tags:
   - checkout

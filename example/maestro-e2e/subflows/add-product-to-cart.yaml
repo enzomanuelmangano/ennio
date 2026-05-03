@@ -1,7 +1,7 @@
 # Subflow: Add first available product to cart from products screen
 # Assumes already on products screen
 
-appId: com.tasto.example
+appId: com.ennio.example
 
 ---
 

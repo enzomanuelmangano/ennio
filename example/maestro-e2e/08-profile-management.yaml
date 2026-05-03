@@ -1,7 +1,7 @@
 # Test: Profile Management Flow
 # Tests profile view, edit, menu navigation
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Profile Management"
 tags:
   - profile

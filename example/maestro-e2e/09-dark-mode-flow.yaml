@@ -1,7 +1,7 @@
 # Test: Dark Mode Flow
 # Tests dark mode toggle and persistence across screens
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Dark Mode Flow"
 tags:
   - dark-mode

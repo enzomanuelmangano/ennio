@@ -1,5 +1,5 @@
 /**
- * @tasto/test - Simple E2E testing for React Native
+ * @ennio/test - Simple E2E testing for React Native
  *
  * Uses Nitro for direct shadow tree access.
  */
@@ -27,7 +27,7 @@ export type {
   TextMatchMode,
   Point,
   Trait,
-} from '@tasto/nitro';
+} from '@ennio/core';
 
 /**
  * Test results tracker

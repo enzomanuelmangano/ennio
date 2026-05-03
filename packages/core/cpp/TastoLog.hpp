@@ -6,10 +6,10 @@
 #include <chrono>
 #include <iomanip>
 
-namespace tasto {
+namespace ennio {
 
 /**
- * Log levels for Tasto debugging
+ * Log levels for Ennio debugging
  */
 enum class LogLevel {
     Error = 0,
@@ -20,31 +20,31 @@ enum class LogLevel {
 };
 
 /**
- * TastoLog provides structured logging for the native module.
+ * EnnioLog provides structured logging for the native module.
  *
- * Logging is controlled by the TASTO_DEBUG environment variable:
+ * Logging is controlled by the ENNIO_DEBUG environment variable:
  * - Not set or "0": No logging
  * - "1": Error and Warn only
  * - "2": Info level
  * - "3": Debug level
  * - "4": Trace level (verbose)
  *
- * In a compiled app, use TASTO_DEBUG preprocessor flag.
+ * In a compiled app, use ENNIO_DEBUG preprocessor flag.
  */
-class TastoLog {
+class EnnioLog {
 public:
     /**
      * Get the current log level
      */
     static LogLevel getLevel() {
-#ifdef TASTO_DEBUG
-#if TASTO_DEBUG >= 4
+#ifdef ENNIO_DEBUG
+#if ENNIO_DEBUG >= 4
         return LogLevel::Trace;
-#elif TASTO_DEBUG >= 3
+#elif ENNIO_DEBUG >= 3
         return LogLevel::Debug;
-#elif TASTO_DEBUG >= 2
+#elif ENNIO_DEBUG >= 2
         return LogLevel::Info;
-#elif TASTO_DEBUG >= 1
+#elif ENNIO_DEBUG >= 1
         return LogLevel::Warn;
 #else
         return LogLevel::Error;
@@ -123,60 +123,60 @@ public:
 // Logging Macros
 // ============================================
 
-// These macros are completely compiled out when TASTO_DEBUG is not defined
+// These macros are completely compiled out when ENNIO_DEBUG is not defined
 // or when the level is higher than the configured level
 
-#ifdef TASTO_DEBUG
+#ifdef ENNIO_DEBUG
 
-#define TASTO_LOG_ERROR(tag, msg) ::tasto::TastoLog::error(tag, msg)
-#define TASTO_LOG_WARN(tag, msg)  ::tasto::TastoLog::warn(tag, msg)
+#define ENNIO_LOG_ERROR(tag, msg) ::ennio::EnnioLog::error(tag, msg)
+#define ENNIO_LOG_WARN(tag, msg)  ::ennio::EnnioLog::warn(tag, msg)
 
-#if TASTO_DEBUG >= 2
-#define TASTO_LOG_INFO(tag, msg)  ::tasto::TastoLog::info(tag, msg)
+#if ENNIO_DEBUG >= 2
+#define ENNIO_LOG_INFO(tag, msg)  ::ennio::EnnioLog::info(tag, msg)
 #else
-#define TASTO_LOG_INFO(tag, msg)  do {} while(0)
+#define ENNIO_LOG_INFO(tag, msg)  do {} while(0)
 #endif
 
-#if TASTO_DEBUG >= 3
-#define TASTO_LOG_DEBUG(tag, msg) ::tasto::TastoLog::debug(tag, msg)
+#if ENNIO_DEBUG >= 3
+#define ENNIO_LOG_DEBUG(tag, msg) ::ennio::EnnioLog::debug(tag, msg)
 #else
-#define TASTO_LOG_DEBUG(tag, msg) do {} while(0)
+#define ENNIO_LOG_DEBUG(tag, msg) do {} while(0)
 #endif
 
-#if TASTO_DEBUG >= 4
-#define TASTO_LOG_TRACE(tag, msg) ::tasto::TastoLog::trace(tag, msg)
+#if ENNIO_DEBUG >= 4
+#define ENNIO_LOG_TRACE(tag, msg) ::ennio::EnnioLog::trace(tag, msg)
 #else
-#define TASTO_LOG_TRACE(tag, msg) do {} while(0)
+#define ENNIO_LOG_TRACE(tag, msg) do {} while(0)
 #endif
 
 // Format helper for building messages with stream syntax
-#define TASTO_LOG_FMT(...) ([]() { \
+#define ENNIO_LOG_FMT(...) ([]() { \
     std::ostringstream _oss; \
     _oss << __VA_ARGS__; \
     return _oss.str(); \
 }())
 
 // Printf-style format helper for DEBUG level (used by legacy code)
-#if TASTO_DEBUG >= 3
-#define TASTO_LOG_DEBUG_F(tag, fmt, ...) do { \
+#if ENNIO_DEBUG >= 3
+#define ENNIO_LOG_DEBUG_F(tag, fmt, ...) do { \
     char _buf[512]; \
     snprintf(_buf, sizeof(_buf), fmt, ##__VA_ARGS__); \
-    ::tasto::TastoLog::debug(tag, _buf); \
+    ::ennio::EnnioLog::debug(tag, _buf); \
 } while(0)
 #else
-#define TASTO_LOG_DEBUG_F(tag, fmt, ...) do {} while(0)
+#define ENNIO_LOG_DEBUG_F(tag, fmt, ...) do {} while(0)
 #endif
 
-#else // TASTO_DEBUG not defined
+#else // ENNIO_DEBUG not defined
 
-#define TASTO_LOG_ERROR(tag, msg) do {} while(0)
-#define TASTO_LOG_WARN(tag, msg)  do {} while(0)
-#define TASTO_LOG_INFO(tag, msg)  do {} while(0)
-#define TASTO_LOG_DEBUG(tag, msg) do {} while(0)
-#define TASTO_LOG_TRACE(tag, msg) do {} while(0)
-#define TASTO_LOG_FMT(...)        std::string()
-#define TASTO_LOG_DEBUG_F(tag, fmt, ...) do {} while(0)
+#define ENNIO_LOG_ERROR(tag, msg) do {} while(0)
+#define ENNIO_LOG_WARN(tag, msg)  do {} while(0)
+#define ENNIO_LOG_INFO(tag, msg)  do {} while(0)
+#define ENNIO_LOG_DEBUG(tag, msg) do {} while(0)
+#define ENNIO_LOG_TRACE(tag, msg) do {} while(0)
+#define ENNIO_LOG_FMT(...)        std::string()
+#define ENNIO_LOG_DEBUG_F(tag, fmt, ...) do {} while(0)
 
-#endif // TASTO_DEBUG
+#endif // ENNIO_DEBUG
 
-} // namespace tasto
+} // namespace ennio

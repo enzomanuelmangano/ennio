@@ -1,5 +1,5 @@
 #include "EventDispatcher.hpp"
-#include "TastoLog.hpp"
+#include "EnnioLog.hpp"
 
 #include <thread>
 #include <chrono>
@@ -10,16 +10,16 @@
 
 // iOS-specific native tap support
 #if defined(__APPLE__)
-#include "../ios/TastoRuntimeHelper.h"
+#include "../ios/EnnioRuntimeHelper.h"
 #endif
 
-namespace tasto {
+namespace ennio {
 
 static const char* LOG_TAG = "EventDispatcher";
 
 bool EventDispatcher::tap(ShadowNodePtr node) {
     if (!node) {
-        TASTO_LOG_WARN(LOG_TAG, "tap: node is null");
+        ENNIO_LOG_WARN(LOG_TAG, "tap: node is null");
         return false;
     }
 
@@ -27,7 +27,7 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
     // This dispatches events directly through React's event system
     auto emitter = getEventEmitter(node);
     if (!emitter) {
-        TASTO_LOG_WARN(LOG_TAG, TASTO_LOG_FMT("tap: emitter is null for tag=" << node->getTag()));
+        ENNIO_LOG_WARN(LOG_TAG, ENNIO_LOG_FMT("tap: emitter is null for tag=" << node->getTag()));
         return false;
     }
 
@@ -44,7 +44,7 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
         ).count()
     );
 
-    TASTO_LOG_DEBUG(LOG_TAG, TASTO_LOG_FMT("tap: tag=" << nodeTag << " center=(" << centerX << "," << centerY << ")"));
+    ENNIO_LOG_DEBUG(LOG_TAG, ENNIO_LOG_FMT("tap: tag=" << nodeTag << " center=(" << centerX << "," << centerY << ")"));
 
     // Dispatch touch and click events through the event emitter
     // This directly triggers the React Native event handlers
@@ -55,19 +55,19 @@ bool EventDispatcher::tap(ShadowNodePtr node) {
     // Dispatch click event - this is what triggers onPress in Pressable
     dispatchClickEvent(emitter, centerX, centerY);
 
-    TASTO_LOG_TRACE(LOG_TAG, "tap: completed");
+    ENNIO_LOG_TRACE(LOG_TAG, "tap: completed");
     return true;
 }
 
 bool EventDispatcher::doubleTap(ShadowNodePtr node) {
     if (!node) {
-        TASTO_LOG_WARN(LOG_TAG, "doubleTap: node is null");
+        ENNIO_LOG_WARN(LOG_TAG, "doubleTap: node is null");
         return false;
     }
 
     auto emitter = getEventEmitter(node);
     if (!emitter) {
-        TASTO_LOG_WARN(LOG_TAG, "doubleTap: emitter is null");
+        ENNIO_LOG_WARN(LOG_TAG, "doubleTap: emitter is null");
         return false;
     }
 
@@ -81,7 +81,7 @@ bool EventDispatcher::doubleTap(ShadowNodePtr node) {
         ).count()
     );
 
-    TASTO_LOG_DEBUG(LOG_TAG, TASTO_LOG_FMT("doubleTap: tag=" << nodeTag << " center=(" << centerX << "," << centerY << ")"));
+    ENNIO_LOG_DEBUG(LOG_TAG, ENNIO_LOG_FMT("doubleTap: tag=" << nodeTag << " center=(" << centerX << "," << centerY << ")"));
 
     // First tap
     dispatchTouchEvent(emitter, "touchStart", centerX, centerY, nodeTag, timestamp);
@@ -105,7 +105,7 @@ bool EventDispatcher::doubleTap(ShadowNodePtr node) {
     dispatchTouchEvent(emitter, "touchEnd", centerX, centerY, nodeTag, timestamp2);
     dispatchClickEvent(emitter, centerX, centerY);
 
-    TASTO_LOG_TRACE(LOG_TAG, "doubleTap: completed");
+    ENNIO_LOG_TRACE(LOG_TAG, "doubleTap: completed");
     return true;
 }
 
@@ -146,7 +146,7 @@ bool EventDispatcher::typeText(ShadowNodePtr node, const std::string& text) {
     // race conditions with React Native's UIManagerBinding.
     // typeText should use native iOS APIs instead.
     // This is kept as a stub for cross-platform fallback.
-    TASTO_LOG_DEBUG(LOG_TAG, "typeText: using native approach");
+    ENNIO_LOG_DEBUG(LOG_TAG, "typeText: using native approach");
 
     // Return false to signal native approach should handle this
     return false;
@@ -174,7 +174,7 @@ bool EventDispatcher::replaceText(ShadowNodePtr node, const std::string& text) {
 
 bool EventDispatcher::scroll(ShadowNodePtr node, float deltaX, float deltaY) {
     if (!node) {
-        TASTO_LOG_WARN(LOG_TAG, "scroll: node is null");
+        ENNIO_LOG_WARN(LOG_TAG, "scroll: node is null");
         return false;
     }
 
@@ -183,7 +183,7 @@ bool EventDispatcher::scroll(ShadowNodePtr node, float deltaX, float deltaY) {
     // Get the testID from the node's props
     auto viewProps = std::dynamic_pointer_cast<const facebook::react::ViewProps>(node->getProps());
     if (viewProps && !viewProps->testId.empty()) {
-        auto& helper = ::tasto::TastoRuntimeHelper::getInstance();
+        auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
         bool result = helper.performScroll(viewProps->testId, deltaX, deltaY);
         if (result) {
             return true;
@@ -194,7 +194,7 @@ bool EventDispatcher::scroll(ShadowNodePtr node, float deltaX, float deltaY) {
 
     auto emitter = getEventEmitter(node);
     if (!emitter) {
-        TASTO_LOG_WARN(LOG_TAG, "scroll: emitter is null");
+        ENNIO_LOG_WARN(LOG_TAG, "scroll: emitter is null");
         return false;
     }
 
@@ -591,4 +591,4 @@ std::pair<float, float> EventDispatcher::getCenterPoint(ShadowNodePtr node) {
     return {centerX, centerY};
 }
 
-} // namespace tasto
+} // namespace ennio

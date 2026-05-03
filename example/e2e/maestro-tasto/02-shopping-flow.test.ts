@@ -2,7 +2,7 @@
  * Shopping Flow Tests
  * Equivalent to maestro-e2e/02-shopping-flow.yaml
  */
-import { element, elements, sleep, runTest } from '@tasto/test';
+import { element, elements, sleep, runTest } from '@ennio/test';
 import { goHome, goProducts } from './shared';
 
 // ============================================

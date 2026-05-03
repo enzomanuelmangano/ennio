@@ -1,11 +1,11 @@
 /**
  * Maestro YAML Runner
  *
- * Executes Maestro YAML test files using Tasto's WebSocket client.
+ * Executes Maestro YAML test files using Ennio's WebSocket client.
  * Full Maestro command parity with built-in flakiness handling.
  */
 
-import { TastoClient } from './client';
+import { EnnioClient } from './client';
 import { dirname, basename, resolve } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { execSync, spawn } from 'child_process';
@@ -18,7 +18,7 @@ import {
   RunFlowCommand,
   parseMaestroFile,
   normalizeSelector,
-  toTastoSelector,
+  toEnnioSelector,
   resolveSubflowPath,
 } from './maestro-parser';
 import {
@@ -134,14 +134,14 @@ interface RunResults {
 // ============================================
 
 interface MaestroTestsResult extends RunResults {
-  client: TastoClient; // Return potentially updated client
+  client: EnnioClient; // Return potentially updated client
 }
 
 /**
  * Run a Maestro YAML test file
  */
 export async function runMaestroTests(
-  client: TastoClient,
+  client: EnnioClient,
   testFilePath: string,
   options: { verbose?: boolean; port?: number } = {}
 ): Promise<MaestroTestsResult> {
@@ -152,8 +152,8 @@ export async function runMaestroTests(
   const port = options.port ?? DEFAULT_WS_PORT;
 
   // Create reconnect function for launchApp/clearState
-  const reconnectClient = async (): Promise<TastoClient> => {
-    const newClient = new TastoClient(port);
+  const reconnectClient = async (): Promise<EnnioClient> => {
+    const newClient = new EnnioClient(port);
     await newClient.connect();
     return newClient;
   };
@@ -193,24 +193,24 @@ export async function runMaestroTests(
  * Maestro command executor
  */
 class MaestroExecutor {
-  private client: TastoClient;
+  private client: EnnioClient;
   private currentFlowPath: string;
   private executedFlows = new Set<string>();
   private lastTappedSelector: MaestroSelector | null = null;
   private verbose: boolean;
   private appId: string | null;
   private port: number;
-  private reconnectClient: () => Promise<TastoClient>;
+  private reconnectClient: () => Promise<EnnioClient>;
   private jsContext: JsContext;
 
   constructor(
-    client: TastoClient,
+    client: EnnioClient,
     flowPath: string,
     options: {
       verbose?: boolean;
       appId?: string;
       port?: number;
-      reconnectClient?: () => Promise<TastoClient>;
+      reconnectClient?: () => Promise<EnnioClient>;
     } = {}
   ) {
     this.client = client;
@@ -235,7 +235,7 @@ class MaestroExecutor {
   /**
    * Get current client (may have been replaced by launchApp/clearState)
    */
-  getClient(): TastoClient {
+  getClient(): EnnioClient {
     return this.client;
   }
 
@@ -267,7 +267,7 @@ class MaestroExecutor {
    * Also checks native alerts for text-based selectors
    */
   private async selectorExists(selector: MaestroSelector): Promise<boolean> {
-    const tastoSelector = toTastoSelector(selector);
+    const ennioSelector = toEnnioSelector(selector);
 
     // Check native alert for text-based selectors
     if (selector.text && !selector.id) {
@@ -285,10 +285,10 @@ class MaestroExecutor {
       }
     }
 
-    if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
-      return this.client.exists(tastoSelector.id as string);
+    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
+      return this.client.exists(ennioSelector.id as string);
     }
-    return this.client.existsBySelector(tastoSelector);
+    return this.client.existsBySelector(ennioSelector);
   }
 
   /**
@@ -296,7 +296,7 @@ class MaestroExecutor {
    * Also checks native alerts for text-based selectors
    */
   private async selectorVisible(selector: MaestroSelector): Promise<boolean> {
-    const tastoSelector = toTastoSelector(selector);
+    const ennioSelector = toEnnioSelector(selector);
 
     // Check native alert for text-based selectors
     if (selector.text && !selector.id) {
@@ -314,10 +314,10 @@ class MaestroExecutor {
       }
     }
 
-    if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
-      return this.client.isVisible(tastoSelector.id as string);
+    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
+      return this.client.isVisible(ennioSelector.id as string);
     }
-    return this.client.isVisibleBySelector(tastoSelector);
+    return this.client.isVisibleBySelector(ennioSelector);
   }
 
   /**
@@ -325,7 +325,7 @@ class MaestroExecutor {
    * Also handles tapping native alert buttons for text-based selectors
    */
   private async tap(selector: MaestroSelector): Promise<void> {
-    const tastoSelector = toTastoSelector(selector);
+    const ennioSelector = toEnnioSelector(selector);
 
     // Check if this is an alert button tap (text-only selector)
     if (selector.text && !selector.id) {
@@ -352,10 +352,10 @@ class MaestroExecutor {
     );
 
     let ok: boolean;
-    if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
-      ok = await this.client.tap(tastoSelector.id as string);
+    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
+      ok = await this.client.tap(ennioSelector.id as string);
     } else {
-      ok = await this.client.tapBySelector(tastoSelector);
+      ok = await this.client.tapBySelector(ennioSelector);
     }
 
     if (!ok) {
@@ -370,7 +370,7 @@ class MaestroExecutor {
    * Double tap on element
    */
   private async doubleTap(selector: MaestroSelector): Promise<void> {
-    const tastoSelector = toTastoSelector(selector);
+    const ennioSelector = toEnnioSelector(selector);
 
     // Wait for element to exist
     await this.waitFor(
@@ -380,10 +380,10 @@ class MaestroExecutor {
     );
 
     let ok: boolean;
-    if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
-      ok = await this.client.doubleTap(tastoSelector.id as string);
+    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
+      ok = await this.client.doubleTap(ennioSelector.id as string);
     } else {
-      ok = await this.client.doubleTapBySelector(tastoSelector);
+      ok = await this.client.doubleTapBySelector(ennioSelector);
     }
 
     if (!ok) {
@@ -399,7 +399,7 @@ class MaestroExecutor {
     const targetSelector = selector || this.lastTappedSelector;
 
     if (targetSelector) {
-      const tastoSelector = toTastoSelector(targetSelector);
+      const ennioSelector = toEnnioSelector(targetSelector);
       await this.waitFor(
         () => this.selectorExists(targetSelector),
         DEFAULT_VISIBLE_TIMEOUT,
@@ -407,10 +407,10 @@ class MaestroExecutor {
       );
 
       let ok: boolean;
-      if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
-        ok = await this.client.typeText(tastoSelector.id as string, text);
+      if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
+        ok = await this.client.typeText(ennioSelector.id as string, text);
       } else {
-        ok = await this.client.typeTextBySelector(tastoSelector, text);
+        ok = await this.client.typeTextBySelector(ennioSelector, text);
       }
 
       if (!ok) {
@@ -434,7 +434,7 @@ class MaestroExecutor {
    * Clear text from element
    */
   private async clearText(selector: MaestroSelector): Promise<void> {
-    const tastoSelector = toTastoSelector(selector);
+    const ennioSelector = toEnnioSelector(selector);
 
     await this.waitFor(
       () => this.selectorExists(selector),
@@ -443,10 +443,10 @@ class MaestroExecutor {
     );
 
     let ok: boolean;
-    if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
-      ok = await this.client.clearText(tastoSelector.id as string);
+    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
+      ok = await this.client.clearText(ennioSelector.id as string);
     } else {
-      ok = await this.client.clearTextBySelector(tastoSelector);
+      ok = await this.client.clearTextBySelector(ennioSelector);
     }
 
     if (!ok) {
@@ -458,7 +458,7 @@ class MaestroExecutor {
    * Long press on element
    */
   private async longPress(selector: MaestroSelector, duration = 500): Promise<void> {
-    const tastoSelector = toTastoSelector(selector);
+    const ennioSelector = toEnnioSelector(selector);
 
     await this.waitFor(
       () => this.selectorExists(selector),
@@ -467,10 +467,10 @@ class MaestroExecutor {
     );
 
     let ok: boolean;
-    if (tastoSelector.id && Object.keys(tastoSelector).length === 1) {
-      ok = await this.client.longPress(tastoSelector.id as string, duration);
+    if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
+      ok = await this.client.longPress(ennioSelector.id as string, duration);
     } else {
-      ok = await this.client.longPressBySelector(tastoSelector, duration);
+      ok = await this.client.longPressBySelector(ennioSelector, duration);
     }
 
     if (!ok) {
@@ -964,7 +964,7 @@ class MaestroExecutor {
       const target = cmd.copyTextFrom as MaestroSelector;
       this.log(`copyTextFrom: ${JSON.stringify(target)}`);
       // Get text from element and copy to clipboard
-      const selector = toTastoSelector(target);
+      const selector = toEnnioSelector(target);
       const text = await this.client.getTextBySelector(selector);
       if (text) {
         await this.client.copyToClipboard(text);

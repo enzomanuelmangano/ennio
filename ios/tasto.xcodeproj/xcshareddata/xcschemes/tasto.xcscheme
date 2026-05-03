@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-               BuildableName = "tasto.app"
-               BlueprintName = "tasto"
-               ReferencedContainer = "container:tasto.xcodeproj">
+               BuildableName = "ennio.app"
+               BlueprintName = "ennio"
+               ReferencedContainer = "container:ennio.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "tastoTests.xctest"
-               BlueprintName = "tastoTests"
-               ReferencedContainer = "container:tasto.xcodeproj">
+               BuildableName = "ennioTests.xctest"
+               BlueprintName = "ennioTests"
+               ReferencedContainer = "container:ennio.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -55,9 +55,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "tasto.app"
-            BlueprintName = "tasto"
-            ReferencedContainer = "container:tasto.xcodeproj">
+            BuildableName = "ennio.app"
+            BlueprintName = "ennio"
+            ReferencedContainer = "container:ennio.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -72,9 +72,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "tasto.app"
-            BlueprintName = "tasto"
-            ReferencedContainer = "container:tasto.xcodeproj">
+            BuildableName = "ennio.app"
+            BlueprintName = "ennio"
+            ReferencedContainer = "container:ennio.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

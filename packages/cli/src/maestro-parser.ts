@@ -139,9 +139,9 @@ export function normalizeSelector(selector: MaestroSelector | string): MaestroSe
 }
 
 /**
- * Convert Maestro selector to Tasto selector format
+ * Convert Maestro selector to Ennio selector format
  */
-export function toTastoSelector(selector: MaestroSelector): Record<string, unknown> {
+export function toEnnioSelector(selector: MaestroSelector): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
   if (selector.id !== undefined) result.id = selector.id;
@@ -167,16 +167,16 @@ export function toTastoSelector(selector: MaestroSelector): Record<string, unkno
   if (selector.selected !== undefined) result.selected = selector.selected;
 
   // Spatial selectors (recursive)
-  if (selector.below) result.below = toTastoSelector(selector.below);
-  if (selector.above) result.above = toTastoSelector(selector.above);
-  if (selector.leftOf) result.leftOf = toTastoSelector(selector.leftOf);
-  if (selector.rightOf) result.rightOf = toTastoSelector(selector.rightOf);
+  if (selector.below) result.below = toEnnioSelector(selector.below);
+  if (selector.above) result.above = toEnnioSelector(selector.above);
+  if (selector.leftOf) result.leftOf = toEnnioSelector(selector.leftOf);
+  if (selector.rightOf) result.rightOf = toEnnioSelector(selector.rightOf);
 
   // Hierarchical selectors
-  if (selector.containsChild) result.containsChild = toTastoSelector(selector.containsChild);
-  if (selector.childOf) result.childOf = toTastoSelector(selector.childOf);
+  if (selector.containsChild) result.containsChild = toEnnioSelector(selector.containsChild);
+  if (selector.childOf) result.childOf = toEnnioSelector(selector.childOf);
   if (selector.containsDescendants) {
-    result.containsDescendants = selector.containsDescendants.map(toTastoSelector);
+    result.containsDescendants = selector.containsDescendants.map(toEnnioSelector);
   }
 
   // Dimension selectors

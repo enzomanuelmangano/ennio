@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-namespace tasto {
+namespace ennio {
 
 /**
  * Request from the test runner
@@ -153,4 +153,4 @@ namespace json {
     double parseDouble(const std::string& json, const std::string& key);
 }
 
-} // namespace tasto
+} // namespace ennio

@@ -1,7 +1,7 @@
 # Test: Orders Management Flow
 # Tests order history, order details, tracking
 
-appId: com.tasto.example
+appId: com.ennio.example
 name: "Orders Management"
 tags:
   - orders

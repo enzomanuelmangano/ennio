@@ -1,55 +1,55 @@
 //
-// TastoAutoInit.mm
-// Automatic initialization of Tasto by hooking into React Native setup
+// EnnioAutoInit.mm
+// Automatic initialization of Ennio by hooking into React Native setup
 //
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import "TastoRuntimeHelper.h"
+#import "EnnioRuntimeHelper.h"
 
 #if __has_include(<React/RCTSurfacePresenter.h>)
 #import <React/RCTSurfacePresenter.h>
 #endif
 
-// Flag to track if Tasto has been initialized
-static BOOL _tastoInitialized = NO;
+// Flag to track if Ennio has been initialized
+static BOOL _ennioInitialized = NO;
 
 /**
  * Hook into RCTHost's start method to capture the surface presenter
  */
-@interface TastoAutoInit : NSObject
+@interface EnnioAutoInit : NSObject
 @end
 
-@implementation TastoAutoInit
+@implementation EnnioAutoInit
 
 + (void)load {
-    NSLog(@"[Tasto] TastoAutoInit +load called");
+    NSLog(@"[Ennio] EnnioAutoInit +load called");
 
     // Try to swizzle RCTHost's start method
     Class hostClass = NSClassFromString(@"RCTHost");
     if (!hostClass) {
-        NSLog(@"[Tasto] RCTHost class not found, trying alternative...");
+        NSLog(@"[Ennio] RCTHost class not found, trying alternative...");
 
         // Try RCTFabricSurface's start method as alternative
         Class surfaceClass = NSClassFromString(@"RCTFabricSurface");
         if (surfaceClass) {
             [self swizzleFabricSurfaceStart:surfaceClass];
         } else {
-            NSLog(@"[Tasto] No suitable class found for auto-init");
+            NSLog(@"[Ennio] No suitable class found for auto-init");
         }
         return;
     }
 
-    NSLog(@"[Tasto] Found RCTHost class, setting up swizzling...");
+    NSLog(@"[Ennio] Found RCTHost class, setting up swizzling...");
 
     SEL originalSelector = @selector(start);
-    SEL swizzledSelector = @selector(tasto_start);
+    SEL swizzledSelector = @selector(ennio_start);
 
     Method originalMethod = class_getInstanceMethod(hostClass, originalSelector);
     Method swizzledMethod = class_getInstanceMethod(self, swizzledSelector);
 
     if (!originalMethod) {
-        NSLog(@"[Tasto] Could not find RCTHost start method");
+        NSLog(@"[Ennio] Could not find RCTHost start method");
         return;
     }
 
@@ -62,25 +62,25 @@ static BOOL _tastoInitialized = NO;
     );
 
     if (!didAddMethod) {
-        NSLog(@"[Tasto] Could not add swizzled method to RCTHost");
+        NSLog(@"[Ennio] Could not add swizzled method to RCTHost");
         return;
     }
 
     // Exchange implementations
     Method newSwizzledMethod = class_getInstanceMethod(hostClass, swizzledSelector);
     method_exchangeImplementations(originalMethod, newSwizzledMethod);
-    NSLog(@"[Tasto] RCTHost.start swizzle installed successfully");
+    NSLog(@"[Ennio] RCTHost.start swizzle installed successfully");
 }
 
 + (void)swizzleFabricSurfaceStart:(Class)surfaceClass {
     SEL originalSelector = @selector(start);
-    SEL swizzledSelector = @selector(tasto_surfaceStart);
+    SEL swizzledSelector = @selector(ennio_surfaceStart);
 
     Method originalMethod = class_getInstanceMethod(surfaceClass, originalSelector);
     Method swizzledMethod = class_getInstanceMethod(self, swizzledSelector);
 
     if (!originalMethod) {
-        NSLog(@"[Tasto] Could not find RCTFabricSurface start method");
+        NSLog(@"[Ennio] Could not find RCTFabricSurface start method");
         return;
     }
 
@@ -94,19 +94,19 @@ static BOOL _tastoInitialized = NO;
     if (didAddMethod) {
         Method newSwizzledMethod = class_getInstanceMethod(surfaceClass, swizzledSelector);
         method_exchangeImplementations(originalMethod, newSwizzledMethod);
-        NSLog(@"[Tasto] RCTFabricSurface.start swizzle installed successfully");
+        NSLog(@"[Ennio] RCTFabricSurface.start swizzle installed successfully");
     }
 }
 
 // Swizzled RCTHost start method
-- (void)tasto_start {
-    NSLog(@"[Tasto] RCTHost.start called");
+- (void)ennio_start {
+    NSLog(@"[Ennio] RCTHost.start called");
 
     // Call original implementation
-    [self tasto_start];
+    [self ennio_start];
 
     // Get surface presenter from RCTHost
-    if (!_tastoInitialized) {
+    if (!_ennioInitialized) {
         // Use performSelector to avoid compile-time dependency
         SEL surfacePresenterSel = @selector(surfacePresenter);
         if ([self respondsToSelector:surfacePresenterSel]) {
@@ -116,30 +116,30 @@ static BOOL _tastoInitialized = NO;
             #pragma clang diagnostic pop
 
             if (surfacePresenter) {
-                TastoSetSurfacePresenter((__bridge RCTSurfacePresenter *)(__bridge void *)surfacePresenter);
-                _tastoInitialized = YES;
-                NSLog(@"[Tasto] Surface presenter captured from RCTHost");
+                EnnioSetSurfacePresenter((__bridge RCTSurfacePresenter *)(__bridge void *)surfacePresenter);
+                _ennioInitialized = YES;
+                NSLog(@"[Ennio] Surface presenter captured from RCTHost");
             } else {
-                NSLog(@"[Tasto] RCTHost.surfacePresenter returned nil");
+                NSLog(@"[Ennio] RCTHost.surfacePresenter returned nil");
             }
         } else {
-            NSLog(@"[Tasto] RCTHost does not respond to surfacePresenter");
+            NSLog(@"[Ennio] RCTHost does not respond to surfacePresenter");
         }
     }
 }
 
 // Swizzled RCTFabricSurface start method (alternative path)
-- (void)tasto_surfaceStart {
-    NSLog(@"[Tasto] RCTFabricSurface.start called");
+- (void)ennio_surfaceStart {
+    NSLog(@"[Ennio] RCTFabricSurface.start called");
 
     // Call original implementation
-    [self tasto_surfaceStart];
+    [self ennio_surfaceStart];
 
     // Try to get surface presenter from the surface
-    if (!_tastoInitialized) {
+    if (!_ennioInitialized) {
         // The surface should have access to its presenter
         // This is a fallback - not all surfaces expose this
-        NSLog(@"[Tasto] Attempting to find surface presenter from RCTFabricSurface...");
+        NSLog(@"[Ennio] Attempting to find surface presenter from RCTFabricSurface...");
 
         // Check if there's a presenter property
         SEL presenterSel = @selector(surfacePresenter);
@@ -150,9 +150,9 @@ static BOOL _tastoInitialized = NO;
             #pragma clang diagnostic pop
 
             if (presenter) {
-                TastoSetSurfacePresenter((__bridge RCTSurfacePresenter *)(__bridge void *)presenter);
-                _tastoInitialized = YES;
-                NSLog(@"[Tasto] Surface presenter captured from RCTFabricSurface");
+                EnnioSetSurfacePresenter((__bridge RCTSurfacePresenter *)(__bridge void *)presenter);
+                _ennioInitialized = YES;
+                NSLog(@"[Ennio] Surface presenter captured from RCTFabricSurface");
             }
         }
     }

@@ -2,7 +2,7 @@
  * Advanced Search, Filter & Sort Tests
  * Equivalent to maestro-e2e/07-search-filter-sort.yaml
  */
-import { element, sleep, runTest } from '@tasto/test';
+import { element, sleep, runTest } from '@ennio/test';
 import { goHome, goProducts } from './shared';
 
 // ============================================

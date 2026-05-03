@@ -1,4 +1,4 @@
-import { element, sleep, runTest, waitForVisible, Alert } from '@tasto/test';
+import { element, sleep, runTest, waitForVisible, Alert } from '@ennio/test';
 import { goProfile, goProducts, goCart } from './shared';
 
 await runTest('should login with demo account', async () => {

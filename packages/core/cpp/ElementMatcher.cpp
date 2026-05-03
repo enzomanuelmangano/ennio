@@ -7,13 +7,13 @@
 
 // Logging for ElementMatcher
 #ifdef __APPLE__
-extern "C" void TastoLogMessage(const char* message);
-#define EM_LOG(fmt, ...) do { char buf[512]; snprintf(buf, sizeof(buf), "[Tasto EM] " fmt, ##__VA_ARGS__); TastoLogMessage(buf); } while(0)
+extern "C" void EnnioLogMessage(const char* message);
+#define EM_LOG(fmt, ...) do { char buf[512]; snprintf(buf, sizeof(buf), "[Ennio EM] " fmt, ##__VA_ARGS__); EnnioLogMessage(buf); } while(0)
 #else
 #define EM_LOG(fmt, ...) ((void)0)
 #endif
 
-namespace tasto {
+namespace ennio {
 
 // Helper to check if a node is likely a button (interactive element)
 static bool isLikelyButton(const ShadowTreeTraverser::ShadowNodePtr& node) {
@@ -661,4 +661,4 @@ void ElementMatcher::collectMatches(
     ctx.parentChain.pop_back();
 }
 
-} // namespace tasto
+} // namespace ennio

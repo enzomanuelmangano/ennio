@@ -2,7 +2,7 @@
  * Settings Flow Tests
  * Equivalent to maestro-e2e/06-settings-flow.yaml
  */
-import { element, sleep, runTest } from '@tasto/test';
+import { element, sleep, runTest } from '@ennio/test';
 import { goHome, goProfile, loginWithDemo } from './shared';
 
 // ============================================

@@ -7,7 +7,7 @@
  * Built-in flakiness handling with configurable retries and timeouts.
  */
 
-import { TastoClient } from './client';
+import { EnnioClient } from './client';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { existsSync } from 'fs';
@@ -68,8 +68,8 @@ function processFile(filePath: string, processed = new Set<string>()): string {
     }
   }
 
-  // Remove @tasto/test imports (we provide these)
-  code = code.replace(/^import\s+\{[^}]+\}\s+from\s+['"]@tasto\/test['"]\s*;?\s*$/gm, '');
+  // Remove @ennio/test imports (we provide these)
+  code = code.replace(/^import\s+\{[^}]+\}\s+from\s+['"]@ennio\/test['"]\s*;?\s*$/gm, '');
 
   // Remove export keywords
   code = code.replace(/^export\s+default\s+/gm, '');
@@ -82,7 +82,7 @@ function processFile(filePath: string, processed = new Set<string>()): string {
  * Run tests from a test file using the WebSocket client
  */
 export async function runTests(
-  client: TastoClient,
+  client: EnnioClient,
   testFilePath: string
 ): Promise<RunResults> {
   const results: RunResults = { passed: 0, failed: 0, tests: [] };
@@ -156,7 +156,7 @@ function getSelectorDescription(selector: string | Record<string, unknown>): str
  * Create the test context with API functions bound to the client
  * Includes built-in flakiness handling with retries and waits
  */
-function createTestContext(client: TastoClient, results: RunResults) {
+function createTestContext(client: EnnioClient, results: RunResults) {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   /**

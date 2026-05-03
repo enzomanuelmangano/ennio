@@ -46,7 +46,7 @@ function HomeScreen({ onNavigate }: HomeScreenProps) {
   return (
     <View style={styles.screen} testID="home-screen">
       <Text style={styles.title} testID="home-title">
-        Welcome to Tasto
+        Welcome to Ennio
       </Text>
 
       <Text style={styles.subtitle} testID="home-subtitle">
@@ -81,7 +81,7 @@ function HomeScreen({ onNavigate }: HomeScreenProps) {
 
       <View style={styles.infoBox} testID="info-box">
         <Text style={styles.infoText}>
-          This example app demonstrates all the E2E testing capabilities of Tasto.
+          This example app demonstrates all the E2E testing capabilities of Ennio.
         </Text>
       </View>
     </View>

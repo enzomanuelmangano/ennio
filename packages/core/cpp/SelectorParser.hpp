@@ -3,7 +3,7 @@
 #include "SelectorCriteria.hpp"
 #include <string>
 
-namespace tasto {
+namespace ennio {
 
 /**
  * SelectorParser - Parse JSON selector strings into SelectorCriteria
@@ -91,4 +91,4 @@ private:
     static Point parsePoint(const std::string& value);
 };
 
-} // namespace tasto
+} // namespace ennio
