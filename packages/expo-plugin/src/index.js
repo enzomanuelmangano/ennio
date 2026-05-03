@@ -45,8 +45,8 @@ function withEnnioIOS(config) {
   # Set ENNIO_ENABLED=0 to disable
   if ENV['ENNIO_ENABLED'] != '0'
     # Try standard layout first, then monorepo layout
-    ennio_path = File.join(__dir__, '..', 'node_modules', '@ennio', 'nitro')
-    ennio_path = File.join(__dir__, '..', '..', 'node_modules', '@ennio', 'nitro') unless File.exist?(ennio_path)
+    ennio_path = File.join(__dir__, '..', 'node_modules', '@ennio', 'core')
+    ennio_path = File.join(__dir__, '..', '..', 'node_modules', '@ennio', 'core') unless File.exist?(ennio_path)
     pod 'EnnioCore', :path => ennio_path if File.exist?(ennio_path)
   end
 
@@ -105,7 +105,7 @@ function withEnnioAndroid(config) {
     // Ennio E2E Testing - conditionally included
     // Set ENNIO_ENABLED=false to disable
     if (findProperty("ENNIO_ENABLED") != "false") {
-        implementation project(':ennio-nitro')
+        implementation project(':ennio-core')
     }
 `;
 
