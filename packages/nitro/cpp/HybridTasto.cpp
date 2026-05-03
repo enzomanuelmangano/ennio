@@ -295,17 +295,11 @@ bool HybridTasto::isVisible(const std::string& testID) {
         return ::tasto::ShadowTreeTraverser::isVisible(root, testID, width, height);
     }
 
-    // Fallback: testID not found in shadow tree, try native accessibility with derived label
-#if defined(__APPLE__)
-    std::string derivedLabel = deriveLabel(testID);
-    TASTO_LOG_DEBUG_F(LOG_TAG, "isVisible: testID=%s not in shadow tree, assuming native '%s' is visible",
-        testID.c_str(), derivedLabel.c_str());
-    // For native elements, optimistically return true - tap will verify
-    return true;
-#else
-    TASTO_LOG_DEBUG_F(LOG_TAG, "isVisible: testID=%s - no metrics", testID.c_str());
+    // Fallback: testID not found in shadow tree
+    // For isVisible checks (used by condition checking), return FALSE
+    // The tap/exists functions handle native element fallback separately
+    TASTO_LOG_DEBUG_F(LOG_TAG, "isVisible: testID=%s not in shadow tree, returning false", testID.c_str());
     return false;
-#endif
 }
 
 std::variant<nitro::NullType, std::string> HybridTasto::getText(const std::string& testID) {
@@ -1540,24 +1534,9 @@ bool HybridTasto::isVisibleBySelector(const std::string& selectorJson) {
         auto node = findNodeBySelector(criteria);
         TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: findNodeBySelector returned %s", node ? "node" : "null");
         if (!node) {
-            // For id selectors that failed in shadow tree, check native accessibility
-#if defined(__APPLE__)
-            if (criteria.id.has_value() && !criteria.text.has_value()) {
-                std::string derivedLabel = deriveLabel(*criteria.id);
-                TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: id '%s' not in shadow tree, checking native label '%s'",
-                    criteria.id->c_str(), derivedLabel.c_str());
-                // Native elements visible by default if they exist with that label
-                // performTapByLabel will verify at tap time
-                return true;  // Optimistic - native accessibility elements are visible
-            }
-            // For text selectors, also assume visible if native element exists
-            if (criteria.text.has_value() && !criteria.id.has_value()) {
-                TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: text '%s' not in shadow tree, assuming native visible",
-                    criteria.text->pattern.c_str());
-                return true;
-            }
-#endif
-            TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: node not found, returning false");
+            // Node not found in shadow tree - return FALSE
+            // Tap/exists functions handle native element fallback separately
+            TASTO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: node not found in shadow tree, returning false");
             return false;
         }
 

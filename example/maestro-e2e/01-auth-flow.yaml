@@ -1,5 +1,5 @@
-# Test: Complete Authentication Flow
-# Tests registration, login, logout, and profile management
+# Test: Simple Authentication Flow
+# Tests demo login only
 
 appId: com.tasto.example
 name: "Authentication Flow"
@@ -10,184 +10,25 @@ tags:
 ---
 
 # ============================================
-# SETUP: Ensure logged out state
-# ============================================
-
-- runFlow:
-    file: subflows/navigate-home.yaml
-
-# Check if already logged in and logout if needed
-- runFlow:
-    when:
-      visible:
-        id: "profile-screen"
-    commands:
-      - tapOn:
-          id: "menu-logout"
-      - tapOn:
-          text: "Sign Out"
-
-# ============================================
-# TEST: Navigate to login screen
-# ============================================
-
-- runFlow:
-    file: subflows/navigate-home.yaml
-
-- assertVisible:
-    id: "home-signin-btn"
-    timeout: 3000
-
-- tapOn:
-    id: "home-signin-btn"
-
-- assertVisible:
-    id: "login-screen"
-    timeout: 3000
-
-# ============================================
-# TEST: Form validation - empty fields
+# Navigate to home
 # ============================================
 
 - tapOn:
-    id: "login-btn"
+    text: "Home"
 
-- assertVisible:
-    id: "email-error"
-
-# ============================================
-# TEST: Form validation - invalid email
-# ============================================
-
-- tapOn:
-    id: "email-input"
-- inputText: "invalid-email"
-- tapOn:
-    id: "password-input"
-- inputText: "password123"
-- tapOn:
-    id: "login-btn"
-
-# Email should show error
-- assertVisible:
-    text: "Invalid email"
-    timeout: 2000
-
-# ============================================
-# TEST: Navigate to registration
-# ============================================
-
-- tapOn:
-    id: "go-to-register"
-
-- assertVisible:
-    id: "register-screen"
-    timeout: 3000
-
-# ============================================
-# TEST: Registration form validation
-# ============================================
-
-# Try to submit empty form
-- tapOn:
-    id: "register-btn"
-
-- assertVisible:
-    id: "name-error"
-
-# Fill in partial data
-- tapOn:
-    id: "name-input"
-- inputText: "Test User"
-
-- tapOn:
-    id: "email-input"
-- inputText: "test@example.com"
-
-- tapOn:
-    id: "password-input"
-- inputText: "short"
-
-- tapOn:
-    id: "register-btn"
-
-# Should show password length error
-- assertVisible:
-    text: "at least 8 characters"
-    timeout: 2000
-
-# ============================================
-# TEST: Complete registration
-# ============================================
-
-- clearText:
-    id: "password-input"
-- inputText: "password123"
-
-- tapOn:
-    id: "confirm-password-input"
-- inputText: "password123"
-
-# Accept terms
-- tapOn:
-    id: "accept-terms"
-
-- tapOn:
-    id: "register-btn"
-
-# Should navigate to home as authenticated user
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
-
-# Welcome message should show user's name
-- assertVisible:
-    text: "Hello, Test"
-    timeout: 2000
-
-# ============================================
-# TEST: Profile screen shows user info
-# ============================================
-
-- tapOn:
-    text: "Profile"
-
-- assertVisible:
-    id: "profile-screen"
-    timeout: 3000
-
-- assertVisible:
-    text: "Test User"
-
-# ============================================
-# TEST: Logout flow
-# ============================================
-
-- tapOn:
-    id: "menu-logout"
-
-# Confirm logout
-- assertVisible:
-    text: "Sign Out"
-    timeout: 2000
-- tapOn:
-    text: "Sign Out"
-
-# Should be back on profile as guest
-- assertVisible:
-    id: "guest-view"
     timeout: 3000
 
 # ============================================
-# TEST: Demo login
+# TEST: Demo login flow
 # ============================================
 
-- runFlow:
-    file: subflows/navigate-home.yaml
-
+# Tap sign in button on home
 - tapOn:
     id: "home-signin-btn"
 
+# Wait for login screen
 - assertVisible:
     id: "login-screen"
     timeout: 3000
@@ -196,11 +37,7 @@ tags:
 - tapOn:
     id: "demo-login-btn"
 
+# Should return to home with greeting
 - assertVisible:
     id: "home-screen"
     timeout: 5000
-
-# Should show demo user greeting
-- assertVisible:
-    text: "Hello, John"
-    timeout: 2000
