@@ -143,7 +143,7 @@ interface MaestroTestsResult extends RunResults {
 export async function runMaestroTests(
   client: EnnioClient,
   testFilePath: string,
-  options: { verbose?: boolean; port?: number } = {}
+  options: { verbose?: boolean; trace?: boolean; port?: number } = {}
 ): Promise<MaestroTestsResult> {
   const results: MaestroTestsResult = { passed: 0, failed: 0, tests: [], client };
   const flow = parseMaestroFile(testFilePath);
@@ -160,6 +160,7 @@ export async function runMaestroTests(
 
   const executor = new MaestroExecutor(client, testFilePath, {
     verbose: options.verbose,
+    trace: options.trace,
     appId: flow.appId,
     port,
     reconnectClient,
@@ -198,6 +199,7 @@ class MaestroExecutor {
   private executedFlows = new Set<string>();
   private lastTappedSelector: MaestroSelector | null = null;
   private verbose: boolean;
+  private trace: boolean;
   private appId: string | null;
   private port: number;
   private reconnectClient: () => Promise<EnnioClient>;
@@ -208,6 +210,7 @@ class MaestroExecutor {
     flowPath: string,
     options: {
       verbose?: boolean;
+      trace?: boolean;
       appId?: string;
       port?: number;
       reconnectClient?: () => Promise<EnnioClient>;
@@ -216,6 +219,7 @@ class MaestroExecutor {
     this.client = client;
     this.currentFlowPath = flowPath;
     this.verbose = options.verbose ?? false;
+    this.trace = options.trace ?? false;
     this.appId = options.appId ?? null;
     this.port = options.port ?? DEFAULT_WS_PORT;
     this.reconnectClient = options.reconnectClient ?? (async () => this.client);
@@ -829,18 +833,19 @@ class MaestroExecutor {
       // Disconnect current WebSocket
       this.client.disconnect();
 
-      // Clear state if requested
+      // Clear state if requested. clearAppState already terminates the app.
       if (shouldClearState) {
         clearAppState(deviceId, targetAppId);
+      } else {
+        terminateApp(deviceId, targetAppId);
       }
 
-      // Terminate and relaunch
-      terminateApp(deviceId, targetAppId);
-      await this.sleep(500);
+      // Launch immediately. simctl launch is synchronous-ish; the app is
+      // running by the time it returns. No fixed pre-sleep needed.
       launchAppOnSimulator(deviceId, targetAppId);
 
-      // Wait for app to boot and reconnect
-      await this.sleep(2000);
+      // Tight reconnect loop. Native auto-init binds WS once the JS bundle
+      // boots and RCTHost.start fires. With a warm Metro this is ~1-2s.
       let connected = false;
       const startTime = Date.now();
       while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
@@ -848,7 +853,7 @@ class MaestroExecutor {
           this.client = await this.reconnectClient();
           connected = true;
         } catch {
-          await this.sleep(500);
+          await this.sleep(100);
         }
       }
 
@@ -856,8 +861,7 @@ class MaestroExecutor {
         throw new Error('launchApp: Failed to reconnect to app after restart');
       }
 
-      // Wait for UI to stabilize after app launch
-      await this.sleep(1000);
+      // Settle: wait for shadow tree to commit at least once.
       try {
         await this.client.waitForIdle(3000);
       } catch {
@@ -884,18 +888,10 @@ class MaestroExecutor {
 
       this.log(`clearState: ${targetAppId}`);
 
-      // Disconnect current WebSocket
       this.client.disconnect();
-
-      // Clear state (terminates app and resets privacy)
       clearAppState(deviceId, targetAppId);
-
-      // Relaunch
-      await this.sleep(500);
       launchAppOnSimulator(deviceId, targetAppId);
 
-      // Wait for app to boot and reconnect
-      await this.sleep(2000);
       let connected = false;
       const startTime = Date.now();
       while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
@@ -903,16 +899,12 @@ class MaestroExecutor {
           this.client = await this.reconnectClient();
           connected = true;
         } catch {
-          await this.sleep(500);
+          await this.sleep(100);
         }
       }
-
       if (!connected) {
         throw new Error('clearState: Failed to reconnect to app after restart');
       }
-
-      // Wait for UI to stabilize after app launch
-      await this.sleep(1000);
       try {
         await this.client.waitForIdle(3000);
       } catch {
@@ -1228,6 +1220,44 @@ class MaestroExecutor {
   async executeCommands(commands: MaestroCommand[]): Promise<void> {
     for (const cmd of commands) {
       await this.executeCommand(cmd);
+      if (this.trace) {
+        await this.snapshotState(cmd);
+      }
+    }
+  }
+
+  /**
+   * Capture the booted-simulator accessibility tree via the `argent` CLI and
+   * print a one-line summary of the top labels. Used in --trace mode so the
+   * runner makes its expectations of state explicit between every step,
+   * letting us catch state drift the moment it happens (instead of waiting
+   * for the next assertVisible to time out).
+   */
+  private async snapshotState(cmd: MaestroCommand): Promise<void> {
+    try {
+      const udid = getBootedSimulatorId();
+      if (!udid) return;
+      const out = execSync(`argent run describe --udid ${udid} --json`, {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 8000,
+      });
+      const tree = JSON.parse(out);
+      const labels: string[] = [];
+      const walk = (node: { label?: string; value?: string; children?: unknown[] }) => {
+        if (labels.length >= 12) return;
+        const txt = node.label ?? node.value;
+        if (txt) labels.push(String(txt).slice(0, 30));
+        if (Array.isArray(node.children)) {
+          for (const c of node.children) walk(c as never);
+        }
+      };
+      if (tree && typeof tree === 'object' && 'tree' in tree) walk(tree.tree as never);
+      else if (tree && typeof tree === 'object') walk(tree as never);
+      const cmdName = typeof cmd === 'string' ? cmd : Object.keys(cmd)[0];
+      console.log(`    [trace ${cmdName}] ${labels.join(' | ')}`);
+    } catch {
+      // Trace is best-effort; never break a flow.
     }
   }
 }

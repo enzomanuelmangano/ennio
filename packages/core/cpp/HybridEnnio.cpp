@@ -314,49 +314,37 @@ std::variant<nitro::NullType, std::string> HybridEnnio::getText(const std::strin
 bool HybridEnnio::tap(const std::string& testID) {
     ENNIO_LOG_DEBUG_F(LOG_TAG, "tap called for testID=%s", testID.c_str());
 
+    // 1. Shadow tree event dispatch first (covers all RN Pressable / Touchable
+    //    components on Fabric). React's event emitter is the path the gesture
+    //    system actually listens on.
+    auto node = findNode(testID);
+    if (node) {
+        if (::ennio::EventDispatcher::tap(node)) {
+            ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: dispatched via shadow node emitter");
+            return true;
+        }
+    }
+
 #if defined(__APPLE__)
     auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
 
-    // Prefer native UIView search by accessibilityIdentifier. This routes through
-    // the real UIKit responder chain on the main thread, which is safer than
-    // queuing events from the WS thread (we've seen RN's
-    // UIManagerBinding::dispatchEventToJS assert when target becomes stale by
-    // the time the event beat flushes).
+    // 2. UIView search by accessibilityIdentifier - good for native iOS chrome
+    //    that's outside the shadow tree (UITabBar items, alerts, etc.).
     if (helper.performTapByTestID(testID)) {
         ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: native accessibilityIdentifier match");
         return true;
     }
 
-    // Try shadow-tree layout to tap by absolute coords.
-    auto root = getShadowTreeRoot();
-    if (root) {
-        auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
-        if (metrics && metrics->width > 0 && metrics->height > 0) {
-            float centerX = metrics->screenX + (metrics->width / 2.0f);
-            float centerY = metrics->screenY + (metrics->height / 2.0f);
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: native coord tap at (%.1f, %.1f)", centerX, centerY);
-            if (helper.performTap(centerX, centerY)) {
-                return true;
-            }
-        }
-    }
-
-    // Last resort: derive an accessibility label from the testID (e.g.
-    // tab-home -> "Home") and search the UIKit tree.
+    // 3. Last resort: derive an accessibility label and search by label
+    //    (e.g. tab-home -> "Home" for tab bar fallback).
     std::string derivedLabel = deriveLabel(testID);
-    ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: native coord tap failed; trying label '%s'", derivedLabel.c_str());
     if (helper.performTapByLabel(derivedLabel)) {
+        ENNIO_LOG_DEBUG_F(LOG_TAG, "tap: native label match '%s'", derivedLabel.c_str());
         return true;
     }
 #endif
 
-    // Cross-platform fallback: dispatch events directly to the shadow node's
-    // event emitter. Used on Android and as a last resort on iOS.
-    auto node = findNode(testID);
-    if (!node) {
-        return false;
-    }
-    return ::ennio::EventDispatcher::tap(node);
+    return false;
 }
 
 bool HybridEnnio::longPress(const std::string& testID, double durationMs) {

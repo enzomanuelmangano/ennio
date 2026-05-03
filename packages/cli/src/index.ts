@@ -74,7 +74,7 @@ interface TestFileResultWithClient extends TestFileResult {
 async function runTestFile(
   client: EnnioClient,
   filePath: string,
-  options: { verbose?: boolean; port?: number } = {}
+  options: { verbose?: boolean; trace?: boolean; port?: number } = {}
 ): Promise<TestFileResultWithClient> {
   const fileName = basename(filePath);
   const isMaestro = isMaestroFile(filePath);
@@ -83,7 +83,7 @@ async function runTestFile(
 
   try {
     const results = isMaestro
-      ? await runMaestroTests(client, filePath, { verbose: options.verbose, port: options.port })
+      ? await runMaestroTests(client, filePath, { verbose: options.verbose, trace: options.trace, port: options.port })
       : await runTests(client, filePath);
 
     for (const test of results.tests) {
@@ -119,6 +119,7 @@ async function main() {
   const portArg = process.argv.find((a) => a.startsWith('--port='));
   const port = portArg ? parseInt(portArg.split('=')[1], 10) : DEFAULT_WS_PORT;
   const verbose = process.argv.includes('--verbose') || process.argv.includes('-v');
+  const trace = process.argv.includes('--trace');
 
   if (args.length === 0) {
     console.log('Usage: ennio <test-file.ts|flow.yaml> [options]');
@@ -234,7 +235,7 @@ async function main() {
 
   try {
     for (const file of files) {
-      const result = await runTestFile(currentClient, file, { verbose, port });
+      const result = await runTestFile(currentClient, file, { verbose, trace, port });
       totalPassed += result.passed;
       totalFailed += result.failed;
       // Update client if it was replaced by launchApp/clearState

@@ -584,72 +584,17 @@ bool EnnioRuntimeHelper::performTap(float x, float y) {
             controlView = controlView.superview;
         }
 
-        NSLog(@"[Ennio] performTap: No UIControl found, trying touch handler");
+        NSLog(@"[Ennio] performTap: No UIControl found, dispatching synthetic touch via sendEvent");
 
-        // Try Method 3: Find the RCTSurfaceTouchHandler and call its touch methods directly
-        UIGestureRecognizer* touchHandler = findSurfaceTouchHandler(hitView);
-        if (touchHandler) {
-            NSLog(@"[Ennio] performTap: Found touch handler: %@", NSStringFromClass([touchHandler class]));
-
-            // For RCTSurfaceTouchHandler, we need to simulate touches through it
-            // The touch handler expects to receive touches from the window
-            // We'll create synthetic touches and send them through the gesture recognizer
-
-            UITouch* touch = [[UITouch alloc] init];
-            NSTimeInterval timestamp = [[NSProcessInfo processInfo] systemUptime];
-
-            // Find the view that the touch handler is attached to (usually the surface view)
-            UIView* touchHandlerView = touchHandler.view;
-            if (!touchHandlerView) {
-                touchHandlerView = hitView;
-            }
-
-            // Set up touch for began phase
-            [touch setWindow:targetWindow];
-            [touch setView:touchHandlerView];  // Use the touch handler's view
-            [touch setPhase:UITouchPhaseBegan];
-            [touch setTapCount:1];
-            [touch _setLocationInWindow:point resetPrevious:YES];
-            [touch setTimestamp:timestamp];
-            [touch _setIsFirstTouchForView:YES];
-
-            // Create touch set
-            NSSet<UITouch*>* touches = [NSSet setWithObject:touch];
-
-            // Get the application's touch event
-            UIApplication* app = [UIApplication sharedApplication];
-            UIEvent* event = [app _touchesEvent];
-            [event _clearTouches];
-            [event _addTouch:touch forDelayedDelivery:NO];
-
-            NSLog(@"[Ennio] performTap: Calling touchesBegan on touch handler");
-
-            // Call touchesBegan directly on the gesture recognizer
-            [touchHandler touchesBegan:touches withEvent:event];
-
-            // Wait a bit for processing
-            usleep(60000); // 60ms
-
-            // Update touch for ended phase
-            [touch setPhase:UITouchPhaseEnded];
-            [touch setTimestamp:[[NSProcessInfo processInfo] systemUptime]];
-            [touch _setLocationInWindow:point resetPrevious:NO];
-
-            [event _clearTouches];
-            [event _addTouch:touch forDelayedDelivery:NO];
-
-            NSLog(@"[Ennio] performTap: Calling touchesEnded on touch handler");
-
-            // Call touchesEnded directly on the gesture recognizer
-            [touchHandler touchesEnded:touches withEvent:event];
-
-            success = true;
-            return;
-        }
-
-        NSLog(@"[Ennio] performTap: No touch handler found, falling back to synthetic touch event");
-
-        // Try Method 4: Fall back to synthetic UITouch via sendEvent (original approach)
+        // Synthetic UITouch routed through UIApplication.sendEvent. This is the
+        // path UIKit uses for real touches - the responder system + gesture
+        // recognizers + RCTSurfaceTouchHandler all see it the same way as a
+        // user touch, so RN's gesture state machine stays consistent.
+        //
+        // We deliberately do NOT call touchesBegan: on the gesture recognizer
+        // directly: on iOS 26 + RN 0.83 that bypasses UIKit's recognizer
+        // arbitration and corrupts internal state, causing the app process to
+        // exit silently after the second nav-driving tap.
         UIView* targetView = hitView;
 
         // Walk up to find a view with gesture recognizers
