@@ -4,7 +4,8 @@
  * Connects directly to the native Ennio WebSocket server
  * running in the app. Works in both debug and release builds.
  *
- * Supports full Maestro selector parity.
+ * Read-only surface: queries, selectors, alert state, and synchronization.
+ * Write/HID operations live in the XCTest helper (see xctest-client.ts).
  */
 
 const DEFAULT_PORT = 9876;
@@ -241,39 +242,6 @@ export class EnnioClient {
     return typeof response.data === 'string' ? response.data.replace(/^"|"$/g, '') : null;
   }
 
-  // Actions
-  async tap(testID: string): Promise<boolean> {
-    const response = await this.send('tap', { testID });
-    return response.success;
-  }
-
-  async typeText(testID: string, text: string): Promise<boolean> {
-    const response = await this.send('typeText', { testID, text });
-    return response.success;
-  }
-
-  async clearText(testID: string): Promise<boolean> {
-    const response = await this.send('clearText', { testID });
-    return response.success;
-  }
-
-  async scroll(testID: string, direction: string, amount: number): Promise<boolean> {
-    const deltaX = direction === 'left' ? -amount : direction === 'right' ? amount : 0;
-    const deltaY = direction === 'up' ? -amount : direction === 'down' ? amount : 0;
-    const response = await this.send('scroll', { testID, deltaX, deltaY });
-    return response.success;
-  }
-
-  async longPress(testID: string, duration: number = 500): Promise<boolean> {
-    const response = await this.send('longPress', { testID, duration });
-    return response.success;
-  }
-
-  async doubleTap(testID: string): Promise<boolean> {
-    const response = await this.send('doubleTap', { testID });
-    return response.success;
-  }
-
   async getElementInfo(testID: string): Promise<ExtendedElementInfo | null> {
     const response = await this.send('getElementInfo', { testID });
     if (!response.success || !response.data) return null;
@@ -290,7 +258,7 @@ export class EnnioClient {
     await this.send('synchronize', {});
   }
 
-  // Alert handling
+  // Alert handling (read-only)
   async isAlertPresent(): Promise<boolean> {
     const response = await this.send('isAlertPresent', {});
     return response.data === true || response.data === 'true';
@@ -299,16 +267,6 @@ export class EnnioClient {
   async getAlertText(): Promise<string> {
     const response = await this.send('getAlertText', {});
     return typeof response.data === 'string' ? response.data.replace(/^"|"$/g, '') : '';
-  }
-
-  async tapAlertButton(buttonText: string): Promise<boolean> {
-    const response = await this.send('tapAlertButton', { buttonText });
-    return response.success;
-  }
-
-  async dismissAlert(): Promise<boolean> {
-    const response = await this.send('dismissAlert', {});
-    return response.success;
   }
 
   async getAlertButtons(): Promise<string[]> {
@@ -434,51 +392,6 @@ export class EnnioClient {
   }
 
   /**
-   * Tap element by selector
-   */
-  async tapBySelector(selector: Selector): Promise<boolean> {
-    const selectorJson = this.selectorToJson(selector);
-    const response = await this.send('tapBySelector', { selector: selectorJson });
-    return response.success;
-  }
-
-  /**
-   * Type text into element by selector
-   */
-  async typeTextBySelector(selector: Selector, text: string): Promise<boolean> {
-    const selectorJson = this.selectorToJson(selector);
-    const response = await this.send('typeTextBySelector', { selector: selectorJson, text });
-    return response.success;
-  }
-
-  /**
-   * Clear text from element by selector
-   */
-  async clearTextBySelector(selector: Selector): Promise<boolean> {
-    const selectorJson = this.selectorToJson(selector);
-    const response = await this.send('clearTextBySelector', { selector: selectorJson });
-    return response.success;
-  }
-
-  /**
-   * Long press element by selector
-   */
-  async longPressBySelector(selector: Selector, duration: number = 500): Promise<boolean> {
-    const selectorJson = this.selectorToJson(selector);
-    const response = await this.send('longPressBySelector', { selector: selectorJson, duration });
-    return response.success;
-  }
-
-  /**
-   * Double tap element by selector
-   */
-  async doubleTapBySelector(selector: Selector): Promise<boolean> {
-    const selectorJson = this.selectorToJson(selector);
-    const response = await this.send('doubleTapBySelector', { selector: selectorJson });
-    return response.success;
-  }
-
-  /**
    * Get text from element by selector
    */
   async getTextBySelector(selector: Selector): Promise<string | null> {
@@ -499,105 +412,5 @@ export class EnnioClient {
     const selectorJson = this.selectorToJson(selector);
     const response = await this.send('isVisibleBySelector', { selector: selectorJson });
     return response.data === true || response.data === 'true';
-  }
-
-  // ============================================
-  // Keyboard Handling
-  // ============================================
-
-  /**
-   * Hide the keyboard by resigning first responder
-   */
-  async hideKeyboard(): Promise<boolean> {
-    const response = await this.send('hideKeyboard', {});
-    return response.success;
-  }
-
-  /**
-   * Erase text by sending backspace key events
-   * @param count Number of characters to erase
-   */
-  async eraseText(count: number): Promise<boolean> {
-    const response = await this.send('eraseText', { count });
-    return response.success;
-  }
-
-  /**
-   * Press a key by name (e.g., "Enter", "Tab", "Escape")
-   * @param keyName The key to press
-   */
-  async pressKey(keyName: string): Promise<boolean> {
-    const response = await this.send('pressKey', { keyName });
-    return response.success;
-  }
-
-  // ============================================
-  // Clipboard Handling
-  // ============================================
-
-  /**
-   * Copy text to clipboard
-   * @param text Text to copy
-   */
-  async copyToClipboard(text: string): Promise<boolean> {
-    const response = await this.send('copyToClipboard', { text });
-    return response.success;
-  }
-
-  /**
-   * Paste from clipboard into the focused text field
-   */
-  async pasteFromClipboard(): Promise<boolean> {
-    const response = await this.send('pasteFromClipboard', {});
-    return response.success;
-  }
-
-  /**
-   * Get current clipboard contents
-   */
-  async getClipboardText(): Promise<string> {
-    const response = await this.send('getClipboardText', {});
-    return typeof response.data === 'string' ? response.data.replace(/^"|"$/g, '') : '';
-  }
-
-  // ============================================
-  // Device Control
-  // ============================================
-
-  /**
-   * Set device orientation
-   * @param orientation 0=portrait, 1=portraitUpsideDown, 2=landscapeLeft, 3=landscapeRight
-   */
-  async setOrientation(orientation: number): Promise<boolean> {
-    const response = await this.send('setOrientation', { orientation });
-    return response.success;
-  }
-
-  /**
-   * Perform a swipe gesture between coordinates
-   */
-  async swipeCoordinates(
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number,
-    durationMs: number = 300
-  ): Promise<boolean> {
-    const response = await this.send('swipeCoordinates', {
-      startX,
-      startY,
-      endX,
-      endY,
-      durationMs,
-    });
-    return response.success;
-  }
-
-  /**
-   * Simulate back gesture (swipe from left edge on iOS)
-   */
-  async backGesture(): Promise<boolean> {
-    const response = await this.send('backGesture', {});
-    return response.success;
   }
 }
