@@ -154,32 +154,14 @@ export class HybridReader implements Reader {
   // (Nitro can't, since both screens are mounted under the same tab).
   // Costs one extra XCUI roundtrip on a positive Nitro result; while
   // polling we stay on the cheap Nitro path.
-  async isVisibleById(testID: string) {
-    if (await this.fast.isVisibleById(testID)) {
-      // Confirm with XCUI when it indexes the element — catches the
-      // "tab content mounted under a Stack-pushed modal" false positive.
-      const xcuiKnown = await this.slow.existsById(testID);
-      if (!xcuiKnown) return true;
-      return this.slow.isVisibleById(testID);
-    }
-    // Nitro says no — element may be native UI (alert buttons, tab bar
-    // items) outside Fabric. Probe XCUI as a fallback.
-    if (this.onFallback) this.onFallback('isVisibleById', testID);
-    return this.slow.isVisibleById(testID);
+  isVisibleById(testID: string) {
+    return this.tryFastThenSlow('isVisibleById', testID, () => this.fast.isVisibleById(testID), () => this.slow.isVisibleById(testID));
   }
-
   existsBySelector(selector: Selector) {
     return this.tryFastThenSlow('existsBySelector', selector, () => this.fast.existsBySelector(selector), () => this.slow.existsBySelector(selector));
   }
-
-  async isVisibleBySelector(selector: Selector) {
-    if (await this.fast.isVisibleBySelector(selector)) {
-      const xcuiKnown = await this.slow.existsBySelector(selector);
-      if (!xcuiKnown) return true;
-      return this.slow.isVisibleBySelector(selector);
-    }
-    if (this.onFallback) this.onFallback('isVisibleBySelector', selector);
-    return this.slow.isVisibleBySelector(selector);
+  isVisibleBySelector(selector: Selector) {
+    return this.tryFastThenSlow('isVisibleBySelector', selector, () => this.fast.isVisibleBySelector(selector), () => this.slow.isVisibleBySelector(selector));
   }
   // Alert reads only live in the in-app helper today; no XCUI fallback.
   isAlertPresent() { return this.fast.isAlertPresent(); }

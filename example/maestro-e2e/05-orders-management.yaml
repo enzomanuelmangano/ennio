@@ -28,6 +28,11 @@ tags:
           id: "home-signin-btn"
       - tapOn:
           id: "demo-login-btn"
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertNotVisible:
+          id: "demo-login-btn"
+          timeout: 5000
       - assertVisible:
           id: "home-screen"
           timeout: 5000

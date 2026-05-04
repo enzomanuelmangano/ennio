@@ -468,14 +468,14 @@ static BOOL synthesizeTouchAtViewCenter(UIView* view) {
         }
         [app sendEvent:event];
 
-        // Spin the runloop briefly so RN's RCTSurfaceTouchHandler picks
-        // up the Began event and starts its press timer before we send
-        // the Ended phase. Without this gap the press is treated as
-        // touchCancelled and onPress doesn't fire.
-        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        // Tiny runloop iteration so RN's touch handler registers Began
+        // before Ended arrives. Too long and the runloop runs unrelated
+        // timers; too short and Pressable's gesture system flags it as
+        // touchCancelled. 15ms hits the sweet spot in practice.
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.015]];
 
         [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
-        [touch setValue:@(beganAt + 0.05) forKey:@"timestamp"];
+        [touch setValue:@(beganAt + 0.015) forKey:@"timestamp"];
         [app sendEvent:event];
         return YES;
     } @catch (NSException* e) {

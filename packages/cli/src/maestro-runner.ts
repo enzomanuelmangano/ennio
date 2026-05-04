@@ -412,12 +412,12 @@ class MaestroExecutor {
     if (!ok) throw new Error(`Tap failed: ${JSON.stringify(selector)}`);
     this.log(`tap: ${JSON.stringify(selector)} via ${this.writer.describe('tap')}`);
     this.lastTappedSelector = selector;
-    // Short settle so React commits the onPress side effect before the
-    // next read/write fires. Long async chains (login that awaits a
-    // network call before navigating) should be guarded by an explicit
+    // Tiny settle: lets React commit the synchronous onPress side
+    // effect (state update, immediate router.push). Async chains that
+    // wait on network / setTimeout / Promise need an explicit
     // `waitForAnimationToEnd` in the flow YAML — auto-waiting on every
     // tap punishes flows that don't need it.
-    await this.sleep(120);
+    await this.sleep(60);
   }
 
   private async doubleTap(selector: MaestroSelector): Promise<void> {
