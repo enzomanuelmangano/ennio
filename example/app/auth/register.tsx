@@ -151,7 +151,7 @@ export default function RegisterScreen() {
                 ]}
                 placeholder="John Doe"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
-                value={name}
+                defaultValue={name}
                 onChangeText={text => {
                   setName(text);
                   if (errors.name) setErrors(prev => ({ ...prev, name: undefined }));
@@ -174,7 +174,7 @@ export default function RegisterScreen() {
                 ]}
                 placeholder="your@email.com"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
-                value={email}
+                defaultValue={email}
                 onChangeText={text => {
                   setEmail(text);
                   if (errors.email) setErrors(prev => ({ ...prev, email: undefined }));
@@ -199,7 +199,7 @@ export default function RegisterScreen() {
                 ]}
                 placeholder="Min. 6 characters"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
-                value={password}
+                defaultValue={password}
                 onChangeText={text => {
                   setPassword(text);
                   if (errors.password) setErrors(prev => ({ ...prev, password: undefined }));
@@ -247,7 +247,7 @@ export default function RegisterScreen() {
                 ]}
                 placeholder="Re-enter your password"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
-                value={confirmPassword}
+                defaultValue={confirmPassword}
                 onChangeText={text => {
                   setConfirmPassword(text);
                   if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: undefined }));

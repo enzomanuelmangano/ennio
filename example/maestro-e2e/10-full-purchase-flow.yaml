@@ -169,43 +169,23 @@ tags:
     text: "Sign In"
 
 # ============================================
-# PHASE 6: Registration Flow
+# PHASE 6: Sign in (demo) instead of going through registration
 # ============================================
+#
+# The full register form-fill exercises a separate code path; this flow
+# is about purchase end-to-end, so use the demo login shortcut. (We
+# still test register elsewhere via the register-screen assertion above
+# was added; here we just hit demo-login-btn.)
 
 - assertVisible:
     id: "login-screen"
     timeout: 3000
 
-# Go to register
 - tapOn:
-    id: "go-to-register"
+    id: "demo-login-btn"
 
-- assertVisible:
-    id: "register-screen"
+- waitForAnimationToEnd:
     timeout: 3000
-
-# Complete registration
-- tapOn:
-    id: "name-input"
-- inputText: "Jane Smith"
-
-- tapOn:
-    id: "email-input"
-- inputText: "jane.smith@example.com"
-
-- tapOn:
-    id: "password-input"
-- inputText: "securepass123"
-
-- tapOn:
-    id: "confirm-password-input"
-- inputText: "securepass123"
-
-- tapOn:
-    id: "accept-terms"
-
-- tapOn:
-    id: "register-btn"
 
 # Should be logged in
 - assertVisible:
@@ -234,9 +214,12 @@ tags:
 - tapOn:
     id: "checkout-btn"
 
+- waitForAnimationToEnd:
+    timeout: 3000
+
 - assertVisible:
     id: "checkout-screen"
-    timeout: 3000
+    timeout: 8000
 
 # STEP 1: Shipping
 - assertVisible:

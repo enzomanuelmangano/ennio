@@ -780,32 +780,37 @@ bool EnnioRuntimeHelper::longPress(const std::string& testID, int durationMs) {
     return tap(testID);
 }
 
+// Recursively look for a UITextInput descendant. RN often nests the
+// actual UITextField several levels under the testID-bearing wrapper.
+static UIView* findTextInputDescendant(UIView* root) {
+    if (!root) return nil;
+    if ([root conformsToProtocol:@protocol(UITextInput)]) return root;
+    for (UIView* sub in root.subviews) {
+        UIView* hit = findTextInputDescendant(sub);
+        if (hit) return hit;
+    }
+    return nil;
+}
+
 bool EnnioRuntimeHelper::typeText(const std::string& testID, const std::string& text) {
     NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
     NSString* str = [NSString stringWithUTF8String:text.c_str()];
     __block bool ok = false;
     void (^block)(void) = ^{
         UIView* view = findViewByTestIDInAllWindows(tid);
-        if (!view) return;
-        // RN's TextInput maps to RCTBackedTextInputView, which conforms
-        // to UITextInput. insertText: at the current selection appends
-        // and fires the change delegate so React's onChangeText runs.
-        if ([view conformsToProtocol:@protocol(UITextInput)]) {
-            id<UITextInput> input = (id<UITextInput>)view;
-            if (![view isFirstResponder]) [view becomeFirstResponder];
-            [input insertText:str];
-            ok = true;
+        if (!view) {
+            NSLog(@"[Ennio] typeText: testID '%@' not found", tid);
             return;
         }
-        // RN sometimes wraps the actual UITextField a level deeper.
-        for (UIView* sub in view.subviews) {
-            if ([sub conformsToProtocol:@protocol(UITextInput)]) {
-                if (![sub isFirstResponder]) [sub becomeFirstResponder];
-                [(id<UITextInput>)sub insertText:str];
-                ok = true;
-                return;
-            }
+        UIView* input = findTextInputDescendant(view);
+        if (!input) {
+            NSLog(@"[Ennio] typeText: '%@' has no UITextInput descendant (class=%@)",
+                  tid, NSStringFromClass([view class]));
+            return;
         }
+        if (![input isFirstResponder]) [input becomeFirstResponder];
+        [(id<UITextInput>)input insertText:str];
+        ok = true;
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return ok;
