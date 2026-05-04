@@ -27,7 +27,7 @@ import { resolve, basename, join } from 'path';
 import { glob } from 'glob';
 import { EnnioClient, type Selector } from './client';
 import { XCTestClient } from './xctest-client';
-import { launchHelper, teardownHelper, type HelperHandle } from './xctest-helper';
+import { launchHelper, teardownHelper, isPortBound, killHelperDaemon, HELPER_TCP_PORT, type HelperHandle } from './xctest-helper';
 import { runMaestroTests } from './maestro-runner';
 import { NitroWriter, XCTestWriter, HybridWriter, type Writer, type StableContext } from './writer';
 import { NitroReader, XCTestReader, HybridReader, type Reader } from './reader';
@@ -126,6 +126,39 @@ function buildStableContext(client: EnnioClient, xctest: XCTestClient): StableCo
   };
 }
 
+async function handleDaemonSubcommand(sub: string, verbose: boolean): Promise<boolean> {
+  if (sub === 'start') {
+    if (await isPortBound(HELPER_TCP_PORT)) {
+      console.log(`xctest helper already running on :${HELPER_TCP_PORT}`);
+      return true;
+    }
+    console.log('Spawning XCTest helper as daemon...');
+    try {
+      const h = await launchHelper({ verbose, detach: true });
+      console.log(`xctest helper running on :${h.port}. Stop with \`ennio stop\`.`);
+    } catch (err) {
+      console.error(`Failed to start: ${err}`);
+      process.exit(1);
+    }
+    return true;
+  }
+  if (sub === 'stop') {
+    const killed = killHelperDaemon();
+    if (killed.length === 0) {
+      console.log('No xctest helper running.');
+    } else {
+      console.log(`Stopped xctest helper (pid ${killed.join(', ')})`);
+    }
+    return true;
+  }
+  if (sub === 'status') {
+    const bound = await isPortBound(HELPER_TCP_PORT);
+    console.log(bound ? `xctest helper RUNNING on :${HELPER_TCP_PORT}` : 'xctest helper NOT running');
+    return true;
+  }
+  return false;
+}
+
 async function main() {
   const args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
   const portArg = process.argv.find((a) => a.startsWith('--port='));
@@ -137,9 +170,20 @@ async function main() {
   // --fast is the default; --stable opts in to the XCTest helper path.
   const mode: 'fast' | 'stable' = stable && !fastFlag ? 'stable' : 'fast';
 
+  // Daemon subcommands. `ennio start | stop | status` manage a long-
+  // lived helper so subsequent flow runs skip the ~15s xcodebuild
+  // cold-start.
+  if (args.length === 1 && ['start', 'stop', 'status'].includes(args[0])) {
+    const handled = await handleDaemonSubcommand(args[0], verbose);
+    if (handled) process.exit(0);
+  }
+
   if (args.length === 0) {
     console.log('Usage: ennio <flow.yaml> [options]');
     console.log('       ennio e2e/           # runs every *.yaml under the directory');
+    console.log('       ennio start          # spawn helper daemon (one-time ~15s cost)');
+    console.log('       ennio stop           # kill daemon');
+    console.log('       ennio status         # is daemon running?');
     console.log('\nOptions:');
     console.log('  --fast         (default) in-app writes via accessibilityActivate / UIKit');
     console.log('  --stable       writes through the bundled XCTest helper (slower, more thorough)');
@@ -269,8 +313,14 @@ async function main() {
     }
   } finally {
     currentClient.disconnect();
-    if (xctest) {
+    // Only send `quit` to the helper if WE spawned it. A pre-existing
+    // daemon (started via `ennio start`) keeps running across many CLI
+    // invocations; quitting it would force a 15s cold-start on the
+    // next flow.
+    if (xctest && helper && !helper.preExisting) {
       try { await xctest.quit(); } catch { /* noop */ }
+    } else if (xctest) {
+      xctest.disconnect();
     }
     if (helper) await teardownHelper(helper);
   }

@@ -25,9 +25,10 @@ export interface HelperHandle {
   port: number;
   proc: ChildProcess | null;
   preExisting: boolean;
+  daemonized?: boolean;
 }
 
-async function isPortBound(port: number, host = '127.0.0.1'): Promise<boolean> {
+export async function isPortBound(port: number, host = '127.0.0.1'): Promise<boolean> {
   return new Promise((res) => {
     const s = new Socket();
     let settled = false;
@@ -42,6 +43,8 @@ async function isPortBound(port: number, host = '127.0.0.1'): Promise<boolean> {
     s.connect(port, host);
   });
 }
+
+export const HELPER_TCP_PORT = HELPER_PORT;
 
 function findWorkspace(): string {
   if (process.env.ENNIO_XCWORKSPACE) return process.env.ENNIO_XCWORKSPACE;
@@ -72,8 +75,9 @@ function getBundleId(): string {
   return process.env.ENNIO_BUNDLE_ID ?? 'com.ennio.example';
 }
 
-export async function launchHelper(opts: { verbose?: boolean } = {}): Promise<HelperHandle> {
+export async function launchHelper(opts: { verbose?: boolean; detach?: boolean } = {}): Promise<HelperHandle> {
   const verbose = opts.verbose ?? false;
+  const detach = opts.detach ?? false;
   if (await isPortBound(HELPER_PORT)) {
     if (verbose) console.log(`(xctest-helper: already running on :${HELPER_PORT})`);
     return { port: HELPER_PORT, proc: null, preExisting: true };
@@ -97,9 +101,12 @@ export async function launchHelper(opts: { verbose?: boolean } = {}): Promise<He
   if (verbose) console.log(`(xctest-helper: spawning xcodebuild ${args.join(' ')})`);
   const proc = spawn('xcodebuild', args, {
     env,
-    stdio: verbose ? 'inherit' : 'ignore',
-    detached: false,
+    // Detached daemon: own session group + ignore stdio so the helper
+    // outlives the spawning CLI and tail-runs without blocking.
+    stdio: detach ? 'ignore' : (verbose ? 'inherit' : 'ignore'),
+    detached: detach,
   });
+  if (detach) proc.unref();
 
   const start = Date.now();
   const TIMEOUT_MS = 60_000;
@@ -109,7 +116,7 @@ export async function launchHelper(opts: { verbose?: boolean } = {}): Promise<He
     }
     if (await isPortBound(HELPER_PORT)) {
       if (verbose) console.log(`(xctest-helper: bound :${HELPER_PORT} after ${Date.now() - start}ms)`);
-      return { port: HELPER_PORT, proc, preExisting: false };
+      return { port: HELPER_PORT, proc, preExisting: false, daemonized: detach };
     }
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -117,8 +124,29 @@ export async function launchHelper(opts: { verbose?: boolean } = {}): Promise<He
   throw new Error(`xctest-helper: timed out waiting for TCP :${HELPER_PORT} to bind`);
 }
 
+/**
+ * Find and SIGTERM any xcodebuild test process bound to HELPER_PORT.
+ * Used by `ennio stop` to take down a daemonized helper from a
+ * different CLI invocation. Returns the killed PIDs (empty if none).
+ */
+export function killHelperDaemon(): number[] {
+  const killed: number[] = [];
+  try {
+    // lsof -t prints PIDs only.
+    const out = execSync(`lsof -nP -tiTCP:${HELPER_PORT} 2>/dev/null || true`, { encoding: 'utf-8' });
+    const pids = out.split(/\s+/).map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n) && n > 0);
+    for (const pid of pids) {
+      try {
+        process.kill(pid, 'SIGTERM');
+        killed.push(pid);
+      } catch { /* already gone */ }
+    }
+  } catch { /* lsof not available; nothing to do */ }
+  return killed;
+}
+
 export async function teardownHelper(h: HelperHandle): Promise<void> {
-  if (!h.proc || h.preExisting) return;
+  if (!h.proc || h.preExisting || h.daemonized) return;
   if (h.proc.exitCode !== null) return;
   // After the helper receives `quit`, xcodebuild's test session finishes
   // gracefully and the process exits on its own. SIGTERM during that
