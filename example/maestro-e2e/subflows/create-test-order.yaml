@@ -94,19 +94,14 @@ appId: com.ennio.example
 - tapOn:
     id: "place-order-btn"
 
-# Wait for confirmation / navigation back to orders
+# Wait for the confirmation alert to appear, then tap through it.
 - assertVisible:
-    anyOf:
-      - id: "orders-screen"
-      - id: "orders-list"
-      - text: "Order Placed"
+    text: "Order Placed"
     timeout: 10000
+- tapOn:
+    text: "View Orders"
 
-# Ensure we end on orders screen
-- runFlow:
-    when:
-      notVisible:
-        id: "orders-screen"
-    commands:
-      - tapOn:
-          id: "quick-action-orders"
+# Ensure we end on the orders screen.
+- assertVisible:
+    id: "orders-screen"
+    timeout: 5000

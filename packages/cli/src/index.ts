@@ -255,8 +255,15 @@ async function main() {
   const ctx = buildStableContext(client, xctest!);
   let reader: Reader;
   if (mode === 'stable') {
+    // Stable = HID-driven writes (XCUI) but reads still come from
+    // Fabric's shadow tree. RN Text and similar nodes aren't always
+    // exposed in the iOS accessibility tree, so XCUI alone misses
+    // visibility checks that the runner relies on.
     writer = new XCTestWriter(xctest!, ctx);
-    reader = new XCTestReader(xctest!);
+    reader = new HybridReader(
+      new NitroReader(client),
+      new XCTestReader(xctest!)
+    );
   } else {
     const onWriterFallback = (op: string, sel: unknown) => {
       if (verbose) console.log(`    (fallback to xctest: ${op} ${JSON.stringify(sel)})`);

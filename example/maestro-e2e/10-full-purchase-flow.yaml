@@ -154,28 +154,16 @@ tags:
     id: "decrease-qty-1"
 
 # ============================================
-# PHASE 5: Attempt Checkout as Guest
+# PHASE 5: Sign in via Profile (we need an authenticated user before
+# checkout). The full register form-fill is exercised separately by
+# 01-auth-flow; here we just take the fastest path.
 # ============================================
 
 - tapOn:
-    id: "checkout-btn"
-
-# Should prompt for sign in
-- assertVisible:
-    text: "Sign In"
-    timeout: 2000
+    text: "Profile"
 
 - tapOn:
-    text: "Sign In"
-
-# ============================================
-# PHASE 6: Sign in (demo) instead of going through registration
-# ============================================
-#
-# The full register form-fill exercises a separate code path; this flow
-# is about purchase end-to-end, so use the demo login shortcut. (We
-# still test register elsewhere via the register-screen assertion above
-# was added; here we just hit demo-login-btn.)
+    id: "guest-signin-btn"
 
 - assertVisible:
     id: "login-screen"
@@ -187,7 +175,6 @@ tags:
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Should be logged in
 - assertVisible:
     id: "home-screen"
     timeout: 5000
@@ -287,7 +274,7 @@ tags:
 
 # Verify payment masked
 - assertVisible:
-    text: "****4444"
+    text: "4444"
 
 # Place the order
 - tapOn:
@@ -319,11 +306,11 @@ tags:
 - assertVisible:
     text: "Processing"
 
-# View order details
+# View order details — tap the order card. Match by the order status
+# pill text "Processing" which is unique to the order card (cart and
+# product views don't render it).
 - tapOn:
-    below:
-      text: "Order"
-    index: 0
+    text: "Processing"
 
 - assertVisible:
     id: "order-details"

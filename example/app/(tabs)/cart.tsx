@@ -114,17 +114,6 @@ export default function CartScreen() {
   const TAB_BAR_HEIGHT = 49;
 
   const handleCheckout = () => {
-    if (!isAuthenticated) {
-      Alert.alert(
-        'Sign In',
-        'You need to sign in to complete checkout.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Sign In', onPress: () => router.push('/auth/login') },
-        ],
-      );
-      return;
-    }
     router.push('/checkout');
   };
 

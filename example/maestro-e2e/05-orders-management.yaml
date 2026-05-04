@@ -132,11 +132,11 @@ tags:
       visible:
         id: "orders-list"
     commands:
-      # Tap first order
+      # Tap the order card. The status pill text "Processing" is unique
+      # to the order card so the runner can find it without guessing
+      # the auto-generated order id.
       - tapOn:
-          below:
-            text: "Order"
-          index: 0
+          text: "Processing"
 
       # Order details modal should open
       - assertVisible:
