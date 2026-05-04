@@ -16,6 +16,17 @@ import { dirname, resolve } from 'path';
 export interface MaestroSelector {
   id?: string;
   text?: string;
+  /**
+   * Maestro alias for text — accessibility label match. We treat it as
+   * text-equivalent when forwarding to the writer/reader.
+   */
+  label?: string;
+  /**
+   * Maestro point selector. Accepts "X%,Y%" string or {x,y} as percentage
+   * (0..100) or pixels. We carry the raw string here and resolve to
+   * normalised screen coords inside the runner.
+   */
+  point?: string | { x: number | string; y: number | string };
   index?: number;
   enabled?: boolean;
   checked?: boolean;
@@ -84,6 +95,12 @@ export interface MaestroFlow {
   appId?: string;
   name?: string;
   tags?: string[];
+  /**
+   * Maestro top-level `env:` block — string values become available
+   * inside YAML as `${KEY}` substitutions and are passed to runScript
+   * commands as their default env.
+   */
+  env?: Record<string, string>;
   commands: MaestroCommand[];
   filePath: string;
 }
@@ -123,17 +140,28 @@ export function parseMaestroFile(filePath: string): MaestroFlow {
     appId: metadata.appId as string | undefined,
     name: metadata.name as string | undefined,
     tags: metadata.tags as string[] | undefined,
+    env: metadata.env as Record<string, string> | undefined,
     commands,
     filePath: absolutePath,
   };
 }
 
 /**
- * Normalize a selector - handle string shorthand
+ * Normalize a selector - handle string shorthand.
+ * Maestro shorthand `tapOn: "Some String"` is a TEXT match (not id), so
+ * the bare string becomes `{ text: str }`. The runner falls back to id
+ * lookup if the text match fails.
+ *
+ * `label:` is a Maestro alias for `text:` (accessibility label) — fold it
+ * into `text` so downstream selectors are simpler.
  */
 export function normalizeSelector(selector: MaestroSelector | string): MaestroSelector {
   if (typeof selector === 'string') {
-    return { id: selector };
+    return { text: selector };
+  }
+  if (selector.label && !selector.text) {
+    const { label, ...rest } = selector;
+    return { ...rest, text: label };
   }
   return selector;
 }

@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, ScrollView, Pressable, Switch, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Switch, Alert } from 'react-native';
+import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useSettingsStore, useAuthStore, useCartStore } from '../store';
 import * as Haptics from 'expo-haptics';
@@ -60,7 +61,7 @@ function SettingButton({
   danger?: boolean;
 }) {
   return (
-    <Pressable
+    <PressableScale
       style={[styles.settingRow, darkMode && styles.settingRowDark]}
       onPress={onPress}
       testID={testID}
@@ -77,7 +78,7 @@ function SettingButton({
       </View>
       {value && <Text style={[styles.settingValue, darkMode && styles.subtitleDark]}>{value}</Text>}
       <Text style={styles.chevron}>›</Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 

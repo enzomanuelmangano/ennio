@@ -503,29 +503,18 @@ static BOOL synthesizeTouchAtViewCenter(UIView* view) {
 // catches a handful of RN cases where the recognizer is attached but
 // the touch processor isn't (e.g. paper architecture, some 3rd-party
 // libs).
-static BOOL fireActivation(UIView* view) {
+// Walks the gesture-recognizer list and invokes the target/action of any
+// tap gesture recognizer attached to the view. Returns YES if at least
+// one action fired. This is the most reliable trigger for RN Pressable
+// because Pressable installs a gesture recognizer whose action is the
+// onPress handler — synthesised UITouch events go through the touch
+// processor and may be filtered (e.g. on third-party RN setups where
+// UITouch private API doesn't reach the Pressability state machine).
+static BOOL invokeTapGestureRecognizers(UIView* view) {
     if (!view) return NO;
-
-    // 1. Synthesized UITouch through UIApplication.sendEvent — best for
-    //    RN Pressable / Touchable* on Fabric.
-    if (synthesizeTouchAtViewCenter(view)) return YES;
-
-    // 2. UIControl: sendActionsForControlEvents fires every connected target.
-    if ([view isKindOfClass:[UIControl class]]) {
-        UIControl* ctrl = (UIControl*)view;
-        if (ctrl.enabled) {
-            [ctrl sendActionsForControlEvents:UIControlEventTouchUpInside];
-            return YES;
-        }
-    }
-
-    // 3. accessibilityActivate (native controls, VoiceOver-wired widgets).
-    if ([view accessibilityActivate]) return YES;
-
-    // 4. Tap gesture recognizer fallback.
+    BOOL fired = NO;
     for (UIGestureRecognizer* gr in view.gestureRecognizers) {
         if (!gr.enabled) continue;
-        if (![gr isKindOfClass:[UITapGestureRecognizer class]]) continue;
         @try {
             NSArray* targets = [gr valueForKey:@"_targets"];
             for (id target in targets) {
@@ -538,12 +527,44 @@ static BOOL fireActivation(UIView* view) {
                 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
                 [realTarget performSelector:action withObject:gr];
                 #pragma clang diagnostic pop
+                fired = YES;
             }
-            return YES;
         } @catch (NSException* e) {
-            NSLog(@"[Ennio] fireActivation: gesture-recognizer KVC failed: %@", e.reason);
+            NSLog(@"[Ennio] invokeTapGestureRecognizers: %@", e.reason);
         }
     }
+    return fired;
+}
+
+/**
+ * Try the activation paths that have a verifiable signal of success:
+ * UIControl.sendActions (RNGH BaseButton), tap gesture-recognizer KVC
+ * (RN Pressable on the legacy bridge), accessibilityActivate. Returns NO
+ * if none apply — caller falls back to synthesizeTouch which always
+ * "succeeds" but may not actually fire onPress.
+ */
+static BOOL tryDefiniteActivation(UIView* view) {
+    if (!view) return NO;
+    if ([view isKindOfClass:[UIControl class]]) {
+        UIControl* ctrl = (UIControl*)view;
+        if (ctrl.enabled) {
+            [ctrl sendActionsForControlEvents:UIControlEventTouchUpInside];
+            return YES;
+        }
+    }
+    if (invokeTapGestureRecognizers(view)) return YES;
+    if ([view accessibilityActivate]) return YES;
+    return NO;
+}
+
+static BOOL fireActivation(UIView* view) {
+    if (!view) return NO;
+    if (tryDefiniteActivation(view)) return YES;
+    // Fallback: synthesised UITouch via UIApplication.sendEvent. Reaches
+    // RCTSurfaceTouchHandler / RN Fabric's touchesBegan-Ended overrides.
+    // Always returns YES (event was dispatched), so caller has no way to
+    // tell if onPress actually fired — kept as a last resort.
+    if (synthesizeTouchAtViewCenter(view)) return YES;
     return NO;
 }
 
@@ -673,24 +694,29 @@ bool EnnioRuntimeHelper::tap(const std::string& testID) {
             NSLog(@"[Ennio] tap: testID '%@' not found in view tree", tid);
             return;
         }
-        if (fireActivation(view)) { ok = true; return; }
+        // Phase 1: walk view + descendants + ancestors looking for a
+        // definite activation target (UIControl, gesture recogniser,
+        // accessibilityActivate). This handles RNGH BaseButton (which is
+        // a UIControl subview wrapped by an RN view that holds the
+        // testID) without triggering synthesise on the wrapper.
+        if (tryDefiniteActivation(view)) { ok = true; return; }
         NSMutableArray* queue = [NSMutableArray arrayWithArray:view.subviews];
         while (queue.count > 0) {
             UIView* next = queue.firstObject;
             [queue removeObjectAtIndex:0];
-            if (fireActivation(next)) { ok = true; return; }
+            if (tryDefiniteActivation(next)) { ok = true; return; }
             [queue addObjectsFromArray:next.subviews];
         }
         UIView* cursor = view.superview;
         while (cursor) {
-            if (fireActivation(cursor)) { ok = true; return; }
+            if (tryDefiniteActivation(cursor)) { ok = true; return; }
             cursor = cursor.superview;
         }
-        // Last resort: synthesize a tap at the view's centre via private
-        // UITouch / UIApplication selectors. RN Fabric's
-        // RCTViewComponentView intercepts touches through its
-        // touchesBegan/Ended overrides — the only path that actually fires
-        // Pressable onPress without a real HID event.
+        // Phase 2: no UIControl / GR found anywhere in the subtree —
+        // synthesise a UITouch on the original view. Reaches vanilla RN
+        // Pressable via RCTSurfaceTouchHandler. We treat this as the
+        // last-resort fallback because synthesizeTouchAtViewCenter
+        // always returns YES even when no responder picks the touch up.
         if (synthesizeTouchAtViewCenter(view)) { ok = true; return; }
         NSLog(@"[Ennio] tap: '%@' has no activation path (class=%@, traits=0x%llx, isAccessibilityElement=%d)",
               tid, NSStringFromClass([view class]), (unsigned long long)view.accessibilityTraits, view.isAccessibilityElement);

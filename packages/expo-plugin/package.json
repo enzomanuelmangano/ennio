@@ -5,8 +5,5 @@
   "main": "src/index.js",
   "dependencies": {
     "@expo/config-plugins": "^9.0.0"
-  },
-  "peerDependencies": {
-    "@ennio/core": "*"
   }
 }

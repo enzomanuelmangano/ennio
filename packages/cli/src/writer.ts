@@ -31,6 +31,11 @@ export interface Writer {
 
   // ---- core actions ----
   tap(testID: string): Promise<boolean>;
+  /**
+   * Tap at a normalised screen coordinate (0..1 fractions of the app
+   * window). Used by Maestro's `tapOn: { point: "X%,Y%" }`.
+   */
+  tapAt(x: number, y: number): Promise<boolean>;
   doubleTap(testID: string): Promise<boolean>;
   longPress(testID: string, durationMs: number): Promise<boolean>;
   typeText(testID: string | null, text: string): Promise<boolean>;
@@ -75,6 +80,13 @@ export class NitroWriter implements Writer {
 
   async tap(testID: string): Promise<boolean> {
     const r = await (this.client as any).send('tap', { testID });
+    return r.success === true;
+  }
+  async tapAt(x: number, y: number): Promise<boolean> {
+    // Nitro doesn't synthesize HID events at arbitrary screen coords —
+    // its tap path resolves a testID to a UIView and calls
+    // accessibilityActivate. Coordinate taps must go through XCUI.
+    const r = await (this.client as any).send('tapAtPoint', { x, y });
     return r.success === true;
   }
   async doubleTap(testID: string): Promise<boolean> {
@@ -189,6 +201,13 @@ export interface StableContext {
   getLayoutMetrics(testID: string): Promise<{ x: number; y: number; width: number; height: number; screenX: number; screenY: number } | null>;
   /** Nitro selector → element info (for compound id+state lookups). */
   findBySelectorLayout(selector: Selector): Promise<{ x: number; y: number; width: number; height: number; screenX: number; screenY: number } | null>;
+  /**
+   * In-app keyboard dismiss via Nitro. XCTest runs in a separate
+   * process so its UIApplication.shared cannot reach the user app's
+   * responder chain. RN TextInputs ignore tap-outside, so we route
+   * the dismiss through Nitro's resignFirstResponder helper.
+   */
+  hideKeyboardViaNitro(): Promise<boolean>;
 }
 
 export class XCTestWriter implements Writer {
@@ -197,6 +216,11 @@ export class XCTestWriter implements Writer {
 
   describe(action: string): string {
     return `xcui ${action}`;
+  }
+
+  async tapAt(x: number, y: number): Promise<boolean> {
+    await this.xctest.tap(x, y);
+    return true;
   }
 
   // Tap-by-id flow: prefer XCUI findById (uses hittablePoint on the
@@ -270,9 +294,7 @@ export class XCTestWriter implements Writer {
     return true;
   }
   async hideKeyboard(): Promise<boolean> {
-    // Best-effort tap a corner outside any focused field.
-    await this.xctest.tap(0.95, 0.05);
-    return true;
+    return this.ctx.hideKeyboardViaNitro();
   }
   async tapBySelector(selector: Selector): Promise<boolean> {
     if (selector.text && !selector.id) {
@@ -311,13 +333,16 @@ export class XCTestWriter implements Writer {
     return false;
   }
   async tapByText(text: string): Promise<boolean> {
-    const f = await this.ctx.resolveByLabel(text);
-    if (!f) return false;
-    const screen = await this.ctx.getScreen();
-    const cx = (f.x + f.width / 2) / screen.width;
-    const cy = (f.y + f.height / 2) / screen.height;
-    await this.xctest.tap(cx, cy);
-    return true;
+    // Use XCUI's element-relative tap (tapByLabel resolves to a Button or
+    // Text and calls el.tap()). Coord-only taps at the static text's frame
+    // center sometimes miss the Pressable's onPress, even when the touch
+    // is within the wrapper's bounds.
+    try {
+      await this.xctest.tapByLabel(text, false);
+      return true;
+    } catch {
+      return false;
+    }
   }
   async tapAlertButton(buttonText: string): Promise<boolean> {
     await this.xctest.tapAlertButton(buttonText);
@@ -381,6 +406,7 @@ export class HybridWriter implements Writer {
   constructor(
     private fast: NitroWriter,
     private slow: XCTestWriter,
+    private slowCtx: StableContext,
     private onFallback?: (op: string, selector: unknown) => void
   ) {}
 
@@ -407,6 +433,10 @@ export class HybridWriter implements Writer {
 
   tap(testID: string) {
     return this.tryFastThenSlow('tap', { id: testID }, () => this.fast.tap(testID), () => this.slow.tap(testID));
+  }
+  tapAt(x: number, y: number) {
+    // Fast (Nitro) has no HID at-coord path; go straight to XCUI.
+    return this.slow.tapAt(x, y);
   }
   doubleTap(testID: string) {
     return this.tryFastThenSlow('doubleTap', { id: testID }, () => this.fast.doubleTap(testID), () => this.slow.doubleTap(testID));
@@ -457,7 +487,18 @@ export class HybridWriter implements Writer {
     return this.tryFastThenSlow('clearTextBySelector', selector, () => this.fast.clearTextBySelector(selector), () => this.slow.clearTextBySelector(selector));
   }
   tapByText(text: string) {
-    return this.tryFastThenSlow('tapByText', { text }, () => this.fast.tapByText(text), () => this.slow.tapByText(text));
+    // Nitro fast-path: in-app C++ EventDispatcher walks the Fabric shadow
+    // tree, finds the matching node, walks up to the nearest View with a
+    // TouchEventEmitter, and dispatches a synthetic touchStart + touchEnd
+    // through RN's responder chain. Pressability fires onPress in ~1ms.
+    // Falls back to XCUI HID injection only when no Fabric node matches
+    // (native tab-bar items, system alert buttons).
+    return this.tryFastThenSlow(
+      'tapByText',
+      { text },
+      () => this.fast.tapByText(text),
+      () => this.slow.tapByText(text),
+    );
   }
   tapAlertButton(buttonText: string) {
     return this.tryFastThenSlow('tapAlertButton', { text: buttonText }, () => this.fast.tapAlertButton(buttonText), () => this.slow.tapAlertButton(buttonText));

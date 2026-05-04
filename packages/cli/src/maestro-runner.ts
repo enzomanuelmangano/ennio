@@ -34,10 +34,32 @@ import {
 // Configuration
 // ============================================
 
+/**
+ * Parse a Maestro point spec — either "X%,Y%" / "X,Y" string or
+ * { x, y } object — into normalised 0..1 screen coords. Percentages
+ * map directly. Bare numbers are treated as percentages too (Maestro
+ * convention).
+ */
+function parseMaestroPoint(p: string | { x: number | string; y: number | string }): { x: number; y: number } {
+  const parseFrac = (v: string | number): number => {
+    if (typeof v === 'number') return v > 1 ? v / 100 : v;
+    const m = String(v).trim().replace('%', '');
+    const n = parseFloat(m);
+    if (!Number.isFinite(n)) throw new Error(`tapOn point: invalid value "${v}"`);
+    return n > 1 ? n / 100 : n;
+  };
+  if (typeof p === 'string') {
+    const parts = p.split(',');
+    if (parts.length !== 2) throw new Error(`tapOn point: expected "X%,Y%", got "${p}"`);
+    return { x: parseFrac(parts[0]), y: parseFrac(parts[1]) };
+  }
+  return { x: parseFrac(p.x), y: parseFrac(p.y) };
+}
+
 const DEFAULT_TIMEOUT = 3000;
 const DEFAULT_VISIBLE_TIMEOUT = 5000;
 const DEFAULT_RETRY_INTERVAL = 30;
-const DEFAULT_RECONNECT_TIMEOUT = 10000;
+const DEFAULT_RECONNECT_TIMEOUT = 30000;
 const DEFAULT_WS_PORT = 9876;
 
 // ============================================
@@ -93,6 +115,12 @@ function clearAppState(deviceId: string, appId: string): void {
   try {
     // Terminate first
     terminateApp(deviceId, appId);
+    // simctl terminate returns before the process is fully reaped — the
+    // app can still hold open handles on its sandbox for ~150ms. Wait
+    // long enough that AsyncStorage's last flush completes before we
+    // wipe its files; otherwise the next launch reads stale demo-user
+    // state from a half-truncated manifest.
+    execSync('sleep 0.4', { stdio: 'pipe' });
 
     // Get app data container path
     const dataContainer = execSync(
@@ -171,6 +199,7 @@ export async function runMaestroTests(
     appId: flow.appId,
     port,
     reconnectClient,
+    env: flow.env,
   });
 
   const start = Date.now();
@@ -225,7 +254,7 @@ class MaestroExecutor {
   private appId: string | null;
   private reconnectClient: () => Promise<EnnioClient>;
   private jsContext: JsContext;
-  private cachedScreenSize: ScreenSize | null = null;
+  private flowEnv: Record<string, string> = {};
 
   constructor(
     client: EnnioClient,
@@ -239,6 +268,7 @@ class MaestroExecutor {
       appId?: string;
       port?: number;
       reconnectClient?: () => Promise<EnnioClient>;
+      env?: Record<string, string>;
     } = {}
   ) {
     this.client = client;
@@ -250,16 +280,24 @@ class MaestroExecutor {
     this.trace = options.trace ?? false;
     this.appId = options.appId ?? null;
     this.reconnectClient = options.reconnectClient ?? (async () => this.client);
+    this.flowEnv = { ...(options.env || {}) };
     this.jsContext = createContext({
       platform: 'ios',
       appId: options.appId,
       isSimulator: true,
     });
+    // Expose flow env vars in the JS context so `${VAR}` interpolation
+    // resolves them inline.
+    for (const [key, value] of Object.entries(this.flowEnv)) {
+      (this.jsContext as Record<string, unknown>)[key] = value;
+    }
   }
 
+  private logStart = Date.now();
   private log(msg: string): void {
     if (this.verbose) {
-      console.log(`    ${msg}`);
+      const ms = Date.now() - this.logStart;
+      console.log(`    [+${ms}ms] ${msg}`);
     }
   }
 
@@ -365,6 +403,16 @@ class MaestroExecutor {
   }
 
   private async tap(selector: MaestroSelector): Promise<void> {
+    // Point selector — Maestro `tapOn: { point: "X%,Y%" }`. Resolve to a
+    // normalised window coordinate and dispatch directly via the writer.
+    if (selector.point) {
+      const { x, y } = parseMaestroPoint(selector.point);
+      this.log(`tap: point ${(x * 100).toFixed(1)}%,${(y * 100).toFixed(1)}%`);
+      await this.writer.tapAt(x, y);
+      this.lastTappedSelector = selector;
+      await this.sleep(60);
+      return;
+    }
     // Text-only selectors: try alert button tap first. Polls long enough
     // (2s) for Alert.alert's presentation animation to finish — the
     // dialog typically appears 300-1500ms after the triggering tap.
@@ -588,6 +636,15 @@ class MaestroExecutor {
         await this.writer.pasteToFocused();
         return;
       }
+      if (processedCmd === 'waitForAnimationToEnd') {
+        // Bare string `- waitForAnimationToEnd`. Maestro's default is 5s
+        // but most RN transitions settle in 200-400ms — the long tail is
+        // network spinners that the test isn't waiting on anyway. Cap
+        // at 500ms so flows on apps that never fully idle (Reanimated at
+        // 60Hz, looped springs, polling timers) don't pay 5s per step.
+        try { await this.client.waitForIdle(500); } catch { /* timeouts ignored */ }
+        return;
+      }
       throw new Error(`Unknown string command: ${processedCmd}`);
     }
     if (typeof processedCmd !== 'object') {
@@ -606,7 +663,9 @@ class MaestroExecutor {
     if ('runScript' in processedCmd) {
       const runCmd = (processedCmd as { runScript: { file: string; env?: Record<string, string> } }).runScript;
       this.log(`runScript: ${runCmd.file}`);
-      jsRunScript(runCmd.file, runCmd.env || {}, this.jsContext, this.currentFlowPath);
+      // Merge flow-level env with per-command env (per-command wins).
+      const mergedEnv = { ...this.flowEnv, ...(runCmd.env || {}) };
+      jsRunScript(runCmd.file, mergedEnv, this.jsContext, this.currentFlowPath);
       return;
     }
 
@@ -1175,7 +1234,7 @@ class MaestroExecutor {
     // waitForAnimationToEnd
     if ('waitForAnimationToEnd' in cmd) {
       const waitCmd = cmd.waitForAnimationToEnd;
-      const timeout = typeof waitCmd === 'object' && waitCmd.timeout ? waitCmd.timeout : 5000;
+      const timeout = typeof waitCmd === 'object' && waitCmd.timeout ? waitCmd.timeout : 500;
       this.log(`waitForAnimationToEnd: timeout=${timeout}ms`);
       try {
         await this.client.waitForIdle(timeout);

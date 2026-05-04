@@ -86,6 +86,15 @@ export async function launchHelper(opts: { verbose?: boolean; detach?: boolean }
   const ws = findWorkspace();
   const udid = getUDID();
   const bundleId = getBundleId();
+  // The test runner runs as a sim app launched by testmanagerd, which does
+  // not see host-shell env nor SIMCTL_CHILD_*. simctl `launchctl setenv`
+  // sets a launchd env var that IS inherited by apps launched on this sim.
+  try {
+    execSync(`xcrun simctl spawn ${udid} launchctl setenv ENNIO_BUNDLE_ID ${bundleId}`, { stdio: 'pipe' });
+    execSync(`xcrun simctl spawn ${udid} launchctl setenv ENNIO_XCTEST_PORT ${HELPER_PORT}`, { stdio: 'pipe' });
+  } catch (err) {
+    if (verbose) console.warn(`(xctest-helper: could not set sim env: ${err})`);
+  }
   const args = [
     'test-without-building',
     '-workspace', ws,
@@ -93,10 +102,16 @@ export async function launchHelper(opts: { verbose?: boolean; detach?: boolean }
     '-destination', `id=${udid}`,
     `-only-testing:${TEST_TARGET}`,
   ];
+  // SIMCTL_CHILD_* env vars are propagated by simctl into the launched
+  // simulator app (the XCTest "test runner" .app). Plain env on xcodebuild
+  // does NOT reach the runner — it stops at the host xcodebuild process.
+  // The Swift side reads ProcessInfo.environment, so use the prefixed form.
   const env = {
     ...process.env,
     ENNIO_BUNDLE_ID: bundleId,
     ENNIO_XCTEST_PORT: String(HELPER_PORT),
+    SIMCTL_CHILD_ENNIO_BUNDLE_ID: bundleId,
+    SIMCTL_CHILD_ENNIO_XCTEST_PORT: String(HELPER_PORT),
   };
   if (verbose) console.log(`(xctest-helper: spawning xcodebuild ${args.join(' ')})`);
   const proc = spawn('xcodebuild', args, {

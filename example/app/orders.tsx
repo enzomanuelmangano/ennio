@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, FlatList, Pressable, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image } from 'react-native';
+import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useCartStore, useSettingsStore, useAuthStore } from '../store';
 import { useState } from 'react';
@@ -49,7 +50,7 @@ function OrderCard({
   const status = order.status as OrderStatus;
 
   return (
-    <Pressable
+    <PressableScale
       style={[styles.orderCard, darkMode && styles.cardDark]}
       onPress={onPress}
       testID={`order-${order.id}`}
@@ -104,7 +105,7 @@ function OrderCard({
         </View>
         <Text style={styles.chevron}>›</Text>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -124,9 +125,9 @@ function OrderDetails({
       <View style={[styles.detailsContent, darkMode && styles.cardDark]}>
         <View style={styles.detailsHeader}>
           <Text style={[styles.detailsTitle, darkMode && styles.textLight]}>Order Details</Text>
-          <Pressable onPress={onClose} testID="close-details">
+          <PressableScale onPress={onClose} testID="close-details">
             <Text style={styles.closeBtn}>✕</Text>
-          </Pressable>
+          </PressableScale>
         </View>
 
         <View style={[styles.detailsSection]}>
@@ -174,13 +175,13 @@ function OrderDetails({
           <Text style={styles.detailsTotalValue}>${order.total.toFixed(2)}</Text>
         </View>
 
-        <Pressable
+        <PressableScale
           style={styles.trackButton}
           onPress={onClose}
           testID="track-order"
         >
           <Text style={styles.trackButtonText}>Track Order</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </View>
   );
@@ -194,9 +195,9 @@ function EmptyOrders({ darkMode, onBrowse }: { darkMode: boolean; onBrowse: () =
       <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
         Start shopping to see your orders here
       </Text>
-      <Pressable style={styles.browseButton} onPress={onBrowse} testID="browse-products">
+      <PressableScale style={styles.browseButton} onPress={onBrowse} testID="browse-products">
         <Text style={styles.browseButtonText}>Browse Products</Text>
-      </Pressable>
+      </PressableScale>
     </View>
   );
 }
@@ -229,13 +230,13 @@ export default function OrdersScreen() {
           <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
             You need to be signed in to view your order history
           </Text>
-          <Pressable
+          <PressableScale
             style={styles.browseButton}
             onPress={() => router.push('/auth/login')}
             testID="sign-in-btn"
           >
             <Text style={styles.browseButtonText}>Sign In</Text>
-          </Pressable>
+          </PressableScale>
         </View>
       </>
     );

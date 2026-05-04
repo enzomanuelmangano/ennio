@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, FlatList, Pressable, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, Alert } from 'react-native';
+import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCartStore, useAuthStore, useSettingsStore } from '../../store';
@@ -32,9 +33,9 @@ function CartItem({ item }: { item: ReturnType<typeof useCartStore.getState>['it
 
   return (
     <View style={[styles.cartItem, darkMode && styles.cardDark]} testID={`cart-item-${item.product.id}`}>
-      <Pressable onPress={() => router.push(`/product/${item.product.id}`)}>
+      <PressableScale onPress={() => router.push(`/product/${item.product.id}`)}>
         <Image source={{ uri: item.product.image }} style={styles.itemImage} />
-      </Pressable>
+      </PressableScale>
       <View style={styles.itemContent}>
         <Text style={[styles.itemName, darkMode && styles.textLight]} numberOfLines={2}>
           {item.product.name}
@@ -47,31 +48,31 @@ function CartItem({ item }: { item: ReturnType<typeof useCartStore.getState>['it
         </Text>
       </View>
       <View style={styles.quantityContainer}>
-        <Pressable
+        <PressableScale
           style={styles.quantityBtn}
           onPress={() => handleQuantityChange(-1)}
           testID={`decrease-qty-${item.product.id}`}
         >
           <Text style={styles.quantityBtnText}>−</Text>
-        </Pressable>
+        </PressableScale>
         <Text style={[styles.quantity, darkMode && styles.textLight]} testID={`qty-${item.product.id}`}>
           {item.quantity}
         </Text>
-        <Pressable
+        <PressableScale
           style={styles.quantityBtn}
           onPress={() => handleQuantityChange(1)}
           testID={`increase-qty-${item.product.id}`}
         >
           <Text style={styles.quantityBtnText}>+</Text>
-        </Pressable>
+        </PressableScale>
       </View>
-      <Pressable
+      <PressableScale
         style={styles.removeBtn}
         onPress={handleRemove}
         testID={`remove-item-${item.product.id}`}
       >
         <Text style={styles.removeText}>🗑️</Text>
-      </Pressable>
+      </PressableScale>
     </View>
   );
 }
@@ -136,13 +137,13 @@ export default function CartScreen() {
         <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
           Add some products to get started
         </Text>
-        <Pressable
+        <PressableScale
           style={styles.shopButton}
           onPress={() => router.push('/products')}
           testID="browse-products-btn"
         >
           <Text style={styles.shopButtonText}>Browse Products</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     );
   }
@@ -153,9 +154,9 @@ export default function CartScreen() {
         <Text style={[styles.headerTitle, darkMode && styles.textLight]}>
           {items.length} {items.length === 1 ? 'item' : 'items'}
         </Text>
-        <Pressable onPress={handleClearCart} testID="clear-cart-btn">
+        <PressableScale onPress={handleClearCart} testID="clear-cart-btn">
           <Text style={styles.clearText}>Clear All</Text>
-        </Pressable>
+        </PressableScale>
       </View>
 
       <FlatList
@@ -168,13 +169,13 @@ export default function CartScreen() {
 
       <View style={styles.footer}>
         <CartSummary />
-        <Pressable
+        <PressableScale
           style={styles.checkoutButton}
           onPress={handleCheckout}
           testID="checkout-btn"
         >
           <Text style={styles.checkoutText}>Proceed to Checkout</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </View>
   );

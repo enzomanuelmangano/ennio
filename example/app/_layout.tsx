@@ -2,6 +2,8 @@ import '@ennio/core'; // Initialize Ennio for E2E testing
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { PressablesConfig } from 'pressto';
 import { useSettingsStore } from '../store';
 
 // Ignore Ennio's synthetic touch warnings (taps still work, this is just a RN internal warning)
@@ -11,7 +13,8 @@ export default function RootLayout() {
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
 
   return (
-    <>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <PressablesConfig>
       <StatusBar style={darkMode ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
@@ -65,6 +68,7 @@ export default function RootLayout() {
           }}
         />
       </Stack>
-    </>
+      </PressablesConfig>
+    </GestureHandlerRootView>
   );
 }

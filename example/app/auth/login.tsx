@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   TextInput,
-  Pressable,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { PressableScale } from 'pressto';
 import { Link, useRouter, Stack } from 'expo-router';
 import { useAuthStore, useSettingsStore } from '../../store';
 import * as Haptics from 'expo-haptics';
@@ -151,27 +151,27 @@ export default function LoginScreen() {
                   secureTextEntry={!showPassword}
                   testID="password-input"
                 />
-                <Pressable
+                <PressableScale
                   style={styles.showPasswordBtn}
                   onPress={() => setShowPassword(!showPassword)}
                   testID="toggle-password"
                 >
                   <Text style={styles.showPasswordText}>{showPassword ? '🙈' : '👁️'}</Text>
-                </Pressable>
+                </PressableScale>
               </View>
               {errors.password && (
                 <Text style={styles.errorText} testID="password-error">{errors.password}</Text>
               )}
             </View>
 
-            <Pressable style={styles.forgotPassword} testID="forgot-password">
+            <PressableScale style={styles.forgotPassword} testID="forgot-password">
               <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-            </Pressable>
+            </PressableScale>
 
-            <Pressable
+            <PressableScale
               style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
               onPress={handleLogin}
-              disabled={isLoading}
+              enabled={!isLoading}
               testID="login-btn"
             >
               {isLoading ? (
@@ -179,7 +179,7 @@ export default function LoginScreen() {
               ) : (
                 <Text style={styles.loginButtonText}>Sign In</Text>
               )}
-            </Pressable>
+            </PressableScale>
 
             <View style={styles.divider}>
               <View style={[styles.dividerLine, darkMode && styles.dividerLineDark]} />
@@ -187,7 +187,7 @@ export default function LoginScreen() {
               <View style={[styles.dividerLine, darkMode && styles.dividerLineDark]} />
             </View>
 
-            <Pressable
+            <PressableScale
               style={[styles.demoButton, darkMode && styles.demoButtonDark]}
               onPress={handleDemoLogin}
               testID="demo-login-btn"
@@ -195,23 +195,23 @@ export default function LoginScreen() {
               <Text style={[styles.demoButtonText, darkMode && styles.textLight]}>
                 Continue with Demo Account
               </Text>
-            </Pressable>
+            </PressableScale>
 
             <View style={styles.socialButtons}>
-              <Pressable
+              <PressableScale
                 style={[styles.socialButton, darkMode && styles.socialButtonDark]}
                 testID="google-login"
               >
                 <Text style={styles.socialIcon}>🔵</Text>
                 <Text style={[styles.socialText, darkMode && styles.textLight]}>Google</Text>
-              </Pressable>
-              <Pressable
+              </PressableScale>
+              <PressableScale
                 style={[styles.socialButton, darkMode && styles.socialButtonDark]}
                 testID="apple-login"
               >
                 <Text style={styles.socialIcon}>🍎</Text>
                 <Text style={[styles.socialText, darkMode && styles.textLight]}>Apple</Text>
-              </Pressable>
+              </PressableScale>
             </View>
           </View>
 
@@ -220,9 +220,9 @@ export default function LoginScreen() {
               Don't have an account?{' '}
             </Text>
             <Link href="/auth/register" asChild>
-              <Pressable testID="go-to-register">
+              <PressableScale testID="go-to-register">
                 <Text style={styles.signUpLink}>Sign Up</Text>
-              </Pressable>
+              </PressableScale>
             </Link>
           </View>
         </ScrollView>

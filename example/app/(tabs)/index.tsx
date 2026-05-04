@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, ScrollView, Pressable, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, Alert } from 'react-native';
+import { PressableScale } from 'pressto';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore, useProductsStore, useCartStore, useSettingsStore } from '../../store';
@@ -17,7 +18,7 @@ function FeaturedProduct({ product }: { product: ReturnType<typeof useProductsSt
   };
 
   return (
-    <Pressable
+    <PressableScale
       style={styles.featuredCard}
       onPress={() => router.push(`/product/${product.id}`)}
       testID={`featured-product-${product.id}`}
@@ -30,15 +31,15 @@ function FeaturedProduct({ product }: { product: ReturnType<typeof useProductsSt
           <Text style={styles.rating}>⭐ {product.rating}</Text>
           <Text style={styles.reviews}>({product.reviews})</Text>
         </View>
-        <Pressable
+        <PressableScale
           style={styles.addButton}
           onPress={handleAddToCart}
           testID={`add-to-cart-featured-${product.id}`}
         >
           <Text style={styles.addButtonText}>Add to Cart</Text>
-        </Pressable>
+        </PressableScale>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -49,10 +50,10 @@ function QuickAction({ icon, label, onPress, testID }: {
   testID: string;
 }) {
   return (
-    <Pressable style={styles.quickAction} onPress={onPress} testID={testID}>
+    <PressableScale style={styles.quickAction} onPress={onPress} testID={testID}>
       <Text style={styles.quickActionIcon}>{icon}</Text>
       <Text style={styles.quickActionLabel}>{label}</Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -87,11 +88,18 @@ export default function HomeScreen() {
         </View>
         {!isAuthenticated && (
           <Link href="/auth/login" asChild>
-            <Pressable style={styles.signInButton} testID="home-signin-btn">
+            <PressableScale style={styles.signInButton} testID="home-signin-btn">
               <Text style={styles.signInText}>Sign In</Text>
-            </Pressable>
+            </PressableScale>
           </Link>
         )}
+        <PressableScale
+          style={[styles.signInButton, { backgroundColor: '#10b981' }]}
+          onPress={() => Alert.alert('pressto fired', 'PressableScale onPress invoked')}
+          testID="pressto-test-btn"
+        >
+          <Text style={styles.signInText}>Pressto Test</Text>
+        </PressableScale>
       </View>
 
       {/* Quick Actions */}
@@ -127,9 +135,9 @@ export default function HomeScreen() {
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Featured Products</Text>
           <Link href="/products" asChild>
-            <Pressable testID="see-all-featured">
+            <PressableScale testID="see-all-featured">
               <Text style={styles.seeAll}>See All</Text>
-            </Pressable>
+            </PressableScale>
           </Link>
         </View>
         <ScrollView
@@ -147,7 +155,7 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Trending Now</Text>
         {trendingProducts.map(product => (
-          <Pressable
+          <PressableScale
             key={product.id}
             style={[styles.trendingItem, darkMode && styles.cardDark]}
             onPress={() => router.push(`/product/${product.id}`)}
@@ -162,7 +170,7 @@ export default function HomeScreen() {
                 <Text style={styles.trendingRating}>⭐ {product.rating}</Text>
               </View>
             </View>
-          </Pressable>
+          </PressableScale>
         ))}
       </View>
 
@@ -171,7 +179,7 @@ export default function HomeScreen() {
         <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Shop by Category</Text>
         <View style={styles.categoriesGrid}>
           {['Electronics', 'Sports', 'Home', 'Accessories'].map(category => (
-            <Pressable
+            <PressableScale
               key={category}
               style={[styles.categoryCard, darkMode && styles.cardDark]}
               onPress={() => {
@@ -186,7 +194,7 @@ export default function HomeScreen() {
                  category === 'Home' ? '🏠' : '👜'}
               </Text>
               <Text style={[styles.categoryLabel, darkMode && styles.textLight]}>{category}</Text>
-            </Pressable>
+            </PressableScale>
           ))}
         </View>
       </View>
@@ -196,9 +204,9 @@ export default function HomeScreen() {
         <Text style={styles.promoTitle}>🎉 Summer Sale!</Text>
         <Text style={styles.promoSubtitle}>Up to 50% off on selected items</Text>
         <Link href="/products" asChild>
-          <Pressable style={styles.promoButton} testID="promo-shop-now">
+          <PressableScale style={styles.promoButton} testID="promo-shop-now">
             <Text style={styles.promoButtonText}>Shop Now</Text>
-          </Pressable>
+          </PressableScale>
         </Link>
       </View>
 

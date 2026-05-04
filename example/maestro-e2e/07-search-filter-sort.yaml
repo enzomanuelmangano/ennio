@@ -73,6 +73,7 @@ tags:
 - tapOn:
     id: "search-input"
 - inputText: "xyznonexistent123"
+- hideKeyboard
 
 - assertVisible:
     id: "no-products"

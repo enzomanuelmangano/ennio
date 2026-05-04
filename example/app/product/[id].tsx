@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, ScrollView, Pressable, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, Alert } from 'react-native';
+import { PressableScale } from 'pressto';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useProductsStore, useCartStore, useSettingsStore } from '../../store';
 import * as Haptics from 'expo-haptics';
@@ -23,9 +24,9 @@ export default function ProductDetailScreen() {
     return (
       <View style={[styles.container, styles.centered, darkMode && styles.containerDark]}>
         <Text style={[styles.errorText, darkMode && styles.textLight]}>Product not found</Text>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
+        <PressableScale style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Go Back</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     );
   }
@@ -101,30 +102,30 @@ export default function ProductDetailScreen() {
           <View style={[styles.quantitySection, darkMode && styles.cardDark]}>
             <Text style={[styles.quantityLabel, darkMode && styles.textLight]}>Quantity:</Text>
             <View style={styles.quantityControls}>
-              <Pressable
+              <PressableScale
                 style={styles.quantityBtn}
                 onPress={() => handleQuantityChange(-1)}
                 testID="decrease-quantity"
               >
                 <Text style={styles.quantityBtnText}>−</Text>
-              </Pressable>
+              </PressableScale>
               <Text style={[styles.quantityValue, darkMode && styles.textLight]} testID="quantity-value">
                 {quantity}
               </Text>
-              <Pressable
+              <PressableScale
                 style={styles.quantityBtn}
                 onPress={() => handleQuantityChange(1)}
                 testID="increase-quantity"
               >
                 <Text style={styles.quantityBtnText}>+</Text>
-              </Pressable>
+              </PressableScale>
             </View>
           </View>
 
           {/* Tab Navigation */}
           <View style={styles.tabContainer}>
             {(['description', 'specs', 'reviews'] as const).map(tab => (
-              <Pressable
+              <PressableScale
                 key={tab}
                 style={[styles.tab, selectedTab === tab && styles.tabActive]}
                 onPress={() => setSelectedTab(tab)}
@@ -137,7 +138,7 @@ export default function ProductDetailScreen() {
                 ]}>
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </Text>
-              </Pressable>
+              </PressableScale>
             ))}
           </View>
 
@@ -200,16 +201,16 @@ export default function ProductDetailScreen() {
           <Text style={[styles.bottomPriceLabel, darkMode && styles.subtitleDark]}>Total:</Text>
           <Text style={styles.bottomPrice}>${(product.price * quantity).toFixed(2)}</Text>
         </View>
-        <Pressable
+        <PressableScale
           style={[styles.addToCartButton, !product.inStock && styles.addToCartButtonDisabled]}
           onPress={handleAddToCart}
-          disabled={!product.inStock}
+          enabled={product.inStock}
           testID="add-to-cart-btn"
         >
           <Text style={styles.addToCartText}>
             {product.inStock ? 'Add to Cart' : 'Out of Stock'}
           </Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </>
   );

@@ -24,6 +24,10 @@ final class EnnioActionsTest: XCTestCase {
         // XCUI's recordFailure can mark the test failed but the method keeps
         // running so the helper TCP server stays alive across many flows.
         continueAfterFailure = true
+        // The CLI sets ENNIO_BUNDLE_ID / ENNIO_XCTEST_PORT on the booted
+        // simulator's launchd before spawning xcodebuild. testmanagerd does
+        // not forward host shell env to the runner app, but apps launched
+        // on the sim DO inherit launchd env, so this reaches us here.
         let port = ProcessInfo.processInfo.environment["ENNIO_XCTEST_PORT"]
             .flatMap { Int($0) } ?? 9877
 

@@ -44,10 +44,15 @@ function withEnnioIOS(config) {
   # Ennio E2E Testing - conditionally included
   # Set ENNIO_ENABLED=0 to disable
   if ENV['ENNIO_ENABLED'] != '0'
-    # Try standard layout first, then monorepo layout
-    ennio_path = File.join(__dir__, '..', 'node_modules', '@ennio', 'core')
-    ennio_path = File.join(__dir__, '..', '..', 'node_modules', '@ennio', 'core') unless File.exist?(ennio_path)
-    pod 'EnnioCore', :path => ennio_path if File.exist?(ennio_path)
+    # Try standard layout, monorepo (1 level up), and bun workspace
+    # (2 levels up — apps/<app>/node_modules empty, root has hoisted dep).
+    candidate_paths = [
+      File.join(__dir__, '..', 'node_modules', '@ennio', 'core'),
+      File.join(__dir__, '..', '..', 'node_modules', '@ennio', 'core'),
+      File.join(__dir__, '..', '..', '..', 'node_modules', '@ennio', 'core'),
+    ]
+    ennio_path = candidate_paths.find { |p| File.exist?(p) }
+    pod 'EnnioCore', :path => ennio_path if ennio_path
   end
 
 `;

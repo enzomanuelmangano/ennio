@@ -34,6 +34,9 @@ Pod::Spec.new do |s|
       '"$(PODS_ROOT)/boost"',
       '"$(PODS_ROOT)/Headers/Private/React-Core"',
       '"$(PODS_ROOT)/Headers/Public/React-Core"',
+      '"$(PODS_ROOT)/Headers/Public/React-Fabric"',
+      '"$(PODS_ROOT)/Headers/Private/React-Fabric"',
+      '"$(PODS_ROOT)/Headers/Public/React-Core-prebuilt/React_Fabric"',
     ].join(' ')
   }
 

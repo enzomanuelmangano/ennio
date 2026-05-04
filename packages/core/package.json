@@ -1,6 +1,6 @@
 {
   "name": "@ennio/core",
-  "version": "0.1.0",
+  "version": "0.1.8",
   "description": "Fast React Native E2E testing via direct Fabric shadow tree access",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

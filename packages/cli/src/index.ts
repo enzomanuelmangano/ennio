@@ -123,6 +123,11 @@ function buildStableContext(client: EnnioClient, xctest: XCTestClient): StableCo
       const found = await client.findBySelector(selector);
       return found?.layout ?? null;
     },
+    async hideKeyboardViaNitro() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const r: any = await (client as any).send('hideKeyboard', {});
+      return r?.success === true;
+    },
   };
 }
 
@@ -252,6 +257,17 @@ async function main() {
     process.exit(1);
   }
 
+  // Auto-respawn: when the helper dies mid-suite (testmanagerd reaps the
+  // runner after a hard XCUI failure), the client triggers a relaunch.
+  // Without this every flow after the death would fail with
+  // "xctest-client: not connected" until the user restarts the daemon.
+  xctest.setRespawnHandler(async () => {
+    if (verbose) console.log('(xctest helper died — respawning...)');
+    if (helper) await teardownHelper(helper);
+    helper = await launchHelper({ verbose });
+    if (verbose) console.log(`(xctest helper respawned on :${helper.port})`);
+  });
+
   const ctx = buildStableContext(client, xctest!);
   let reader: Reader;
   if (mode === 'stable') {
@@ -274,6 +290,7 @@ async function main() {
     writer = new HybridWriter(
       new NitroWriter(client),
       new XCTestWriter(xctest!, ctx),
+      ctx,
       onWriterFallback
     );
     reader = new HybridReader(
@@ -308,6 +325,7 @@ async function main() {
           writer = new HybridWriter(
             new NitroWriter(currentClient),
             new XCTestWriter(xctest!, newCtx),
+            newCtx,
             onWriterFallback
           );
           reader = new HybridReader(

@@ -91,8 +91,15 @@ export class XCTestReader implements Reader {
     return r.frame.width > 0 && r.frame.height > 0;
   }
   async existsBySelector(selector: Selector) {
-    if (selector.text && typeof selector.text === 'string') {
-      const r = await this.xctest.findByLabel(selector.text);
+    // Maestro text-pattern selectors arrive as { pattern, mode } objects.
+    // Pull out the literal pattern so XCUI label search has something to
+    // match against — XCUI doesn't take regex predicates here, but
+    // `contains` is good enough for the Maestro semantics.
+    const textPattern = typeof selector.text === 'string'
+      ? selector.text
+      : (selector.text as { pattern?: string } | undefined)?.pattern;
+    if (textPattern) {
+      const r = await this.xctest.findByLabel(textPattern);
       if (r.found) return true;
     }
     if (selector.id) {

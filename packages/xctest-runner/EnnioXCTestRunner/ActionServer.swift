@@ -158,6 +158,39 @@ final class ActionServer {
         case "ping":
             return ["pong": true]
 
+        case "describeAccessibility":
+            // Diagnostic: list every text field XCUI sees, with its label
+            // and placeholderValue. Quick way to figure out why a Maestro
+            // text-tap on a placeholder fails.
+            var items: [[String: Any]] = []
+            let textFields = app.textFields.allElementsBoundByIndex
+            for el in textFields.prefix(20) {
+                items.append([
+                    "kind": "textField",
+                    "label": el.label,
+                    "placeholderValue": el.placeholderValue ?? "",
+                    "identifier": el.identifier,
+                ])
+            }
+            let secureFields = app.secureTextFields.allElementsBoundByIndex
+            for el in secureFields.prefix(20) {
+                items.append([
+                    "kind": "secureTextField",
+                    "label": el.label,
+                    "placeholderValue": el.placeholderValue ?? "",
+                    "identifier": el.identifier,
+                ])
+            }
+            let buttons = app.buttons.allElementsBoundByIndex
+            for el in buttons.prefix(40) {
+                items.append([
+                    "kind": "button",
+                    "label": el.label,
+                    "identifier": el.identifier,
+                ])
+            }
+            return ["items": items]
+
         case "getScreenSize":
             let screen = XCUIScreen.main
             let size = screen.screenshot().image.size
@@ -223,6 +256,22 @@ final class ActionServer {
             app.typeText(text)
             return [:]
 
+        case "hideKeyboard":
+            // RN TextInput does not auto-dismiss on tap-outside. Walk
+            // the responder chain via resignFirstResponder, which is
+            // the standard iOS dismiss path; works regardless of which
+            // text field is focused.
+            DispatchQueue.main.async {
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil,
+                    from: nil,
+                    for: nil
+                )
+            }
+            _ = app.keyboards.firstMatch.waitForNonExistence(timeout: 1.0)
+            return ["dismissed": !app.keyboards.firstMatch.exists]
+
         case "pressKey":
             guard let name = payload["name"] as? String else {
                 throw ActionError.badPayload("pressKey: missing name")
@@ -241,18 +290,19 @@ final class ActionServer {
                 throw ActionError.badPayload("findByLabel: missing text")
             }
             let exact = (payload["exact"] as? Bool) ?? false
-            // Try tab-bar buttons first - the iOS native UITabBar items are
-            // the most common text-only target in flows ("Home" / "Settings"
-            // / etc.) and a generic descendants query can match the wrong
-            // text node further up the tree.
-            let exactPred = NSPredicate(format: "label == %@", text)
-            let containsPred = NSPredicate(format: "label CONTAINS %@", text)
-            let pred = exact ? exactPred : containsPred
+            // Single compound predicate — see tapByLabel for rationale on
+            // why specialised queries are too slow.
+            let pred: NSPredicate
+            if exact {
+                pred = NSPredicate(format:
+                    "label == %@ OR placeholderValue == %@ OR identifier == %@",
+                    text, text, text)
+            } else {
+                pred = NSPredicate(format:
+                    "label CONTAINS %@ OR placeholderValue CONTAINS %@ OR identifier CONTAINS %@",
+                    text, text, text)
+            }
             let queries: [XCUIElementQuery] = [
-                app.tabBars.buttons.matching(exactPred),
-                app.tabBars.buttons.matching(pred),
-                app.buttons.matching(pred),
-                app.staticTexts.matching(pred),
                 app.descendants(matching: .any).matching(pred),
             ]
             var found: XCUIElement? = nil
@@ -276,10 +326,6 @@ final class ActionServer {
             ]
 
         case "tapById":
-            // Direct XCUIElement.tap on a matched accessibility identifier.
-            // Uses XCUI's own hit-point resolution (the element's
-            // hittablePoint), which handles wrapper-vs-content frame
-            // mismatches RN produces around TextInputs and the like.
             guard let id = payload["id"] as? String else {
                 throw ActionError.badPayload("tapById: missing id")
             }
@@ -301,6 +347,32 @@ final class ActionServer {
             }
             guard let el = hit else { throw ActionError.notFound("tapById: \(id)") }
             el.tap()
+            return [:]
+
+        case "tapByLabel":
+            // Find by accessibility label OR placeholderValue OR identifier
+            // in a single descendants sweep. Each XCUI predicate query
+            // costs ~150-200ms because it walks the snapshot tree, so
+            // running 8 specialised queries serially adds 1-2s per tap.
+            // Collapsing to one compound predicate keeps tap latency at
+            // ~250ms.
+            guard let text = payload["text"] as? String else {
+                throw ActionError.badPayload("tapByLabel: missing text")
+            }
+            let exact = (payload["exact"] as? Bool) ?? false
+            let pred: NSPredicate
+            if exact {
+                pred = NSPredicate(format:
+                    "label == %@ OR placeholderValue == %@ OR identifier == %@",
+                    text, text, text)
+            } else {
+                pred = NSPredicate(format:
+                    "label CONTAINS %@ OR placeholderValue CONTAINS %@ OR identifier CONTAINS %@",
+                    text, text, text)
+            }
+            let candidate = app.descendants(matching: .any).matching(pred).firstMatch
+            guard candidate.exists else { throw ActionError.notFound("tapByLabel: \(text)") }
+            candidate.tap()
             return [:]
 
         case "findById":
@@ -395,8 +467,6 @@ final class ActionServer {
             // (drag often hangs the test runner) and requires a very
             // specific velocity profile.
             let navBackButtons = app.navigationBars.buttons
-            // Most common labels: the screen we came from ("(tabs)" /
-            // "Home" / "Cart") or the system "Back" string.
             for label in ["Back"] {
                 let btn = navBackButtons[label]
                 if btn.exists && btn.isHittable {
@@ -411,10 +481,15 @@ final class ActionServer {
                 firstNavBtn.tap()
                 return [:]
             }
-            // Fallback: edge swipe.
-            let from = coordinate(x: 0.005, y: 0.5)
-            let to = coordinate(x: 0.95, y: 0.5)
-            from.press(forDuration: 0.02, thenDragTo: to)
+            // Modal screens (Expo Router presentation: 'modal') have no
+            // navigation bar back button — they're dismissed by a swipe-
+            // down gesture on the sheet body. XCUIElement.swipeDown drives
+            // a velocity profile that the system recognises as the modal
+            // drag-to-dismiss interaction.
+            let window = app.windows.firstMatch
+            if window.exists {
+                window.swipeDown(velocity: .fast)
+            }
             return [:]
 
         case "quit":

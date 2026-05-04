@@ -4,11 +4,11 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  Pressable,
   TextInput,
   Image,
   Modal,
 } from 'react-native';
+import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../store';
@@ -32,7 +32,7 @@ function ProductCard({ product }: { product: ReturnType<typeof useProductsStore.
   };
 
   return (
-    <Pressable
+    <PressableScale
       style={[styles.productCard, darkMode && styles.cardDark]}
       onPress={() => router.push(`/product/${product.id}`)}
       testID={`product-card-${product.id}`}
@@ -54,17 +54,17 @@ function ProductCard({ product }: { product: ReturnType<typeof useProductsStore.
         </View>
         <View style={styles.productFooter}>
           <Text style={styles.productPrice}>${product.price.toFixed(2)}</Text>
-          <Pressable
+          <PressableScale
             style={[styles.addToCartBtn, !product.inStock && styles.addToCartBtnDisabled]}
             onPress={handleAddToCart}
-            disabled={!product.inStock}
+            enabled={product.inStock}
             testID={`add-to-cart-${product.id}`}
           >
             <Text style={styles.addToCartText}>+</Text>
-          </Pressable>
+          </PressableScale>
         </View>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -82,7 +82,7 @@ function CategoryFilter() {
         keyExtractor={item => item}
         contentContainerStyle={styles.categoryList}
         renderItem={({ item }) => (
-          <Pressable
+          <PressableScale
             style={[
               styles.categoryChip,
               selectedCategory === item && styles.categoryChipActive,
@@ -99,7 +99,7 @@ function CategoryFilter() {
             >
               {item}
             </Text>
-          </Pressable>
+          </PressableScale>
         )}
       />
     </View>
@@ -139,27 +139,27 @@ function SortDropdown({
 
   return (
     <>
-      <Pressable
+      <PressableScale
         style={[styles.sortButton, darkMode && styles.sortButtonDark]}
         onPress={handleOpen}
         testID="sort-dropdown"
       >
         <Text style={[styles.sortButtonText, darkMode && styles.textLight]}>{selectedLabel}</Text>
         <Text style={styles.sortArrow}>▼</Text>
-      </Pressable>
+      </PressableScale>
       <Modal
         visible={open}
         transparent
         animationType="fade"
         onRequestClose={() => setOpen(false)}
       >
-        <Pressable style={styles.sortBackdrop} onPress={() => setOpen(false)}>
+        <PressableScale style={styles.sortBackdrop} onPress={() => setOpen(false)}>
           <View
             style={[styles.sortMenu, darkMode && styles.sortMenuDark]}
             testID="sort-options"
           >
             {options.map(o => (
-              <Pressable
+              <PressableScale
                 key={o.value}
                 style={[styles.sortOption, value === o.value && styles.sortOptionActive]}
                 onPress={() => handleSelect(o.value)}
@@ -168,10 +168,10 @@ function SortDropdown({
                 <Text style={[styles.sortOptionText, darkMode && styles.textLight]}>
                   {o.label}
                 </Text>
-              </Pressable>
+              </PressableScale>
             ))}
           </View>
-        </Pressable>
+        </PressableScale>
       </Modal>
     </>
   );
@@ -234,16 +234,19 @@ export default function ProductsScreen() {
           placeholderTextColor={darkMode ? '#888' : '#999'}
           value={searchQuery}
           onChangeText={setSearchQuery}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
           testID="search-input"
         />
         {searchQuery.length > 0 && (
-          <Pressable
+          <PressableScale
             style={styles.clearSearch}
             onPress={() => setSearchQuery('')}
             testID="clear-search"
           >
             <Text style={styles.clearSearchText}>✕</Text>
-          </Pressable>
+          </PressableScale>
         )}
       </View>
 
@@ -263,7 +266,7 @@ export default function ProductsScreen() {
           the empty state) so flows that conditionally check the empty
           state still work. */}
       {(searchQuery.length > 0 || selectedCategory !== 'All') && (
-        <Pressable
+        <PressableScale
           style={[styles.resetTopButton, darkMode && styles.resetTopButtonDark]}
           onPress={() => {
             setSearchQuery('');
@@ -274,7 +277,7 @@ export default function ProductsScreen() {
           <Text style={[styles.resetTopButtonText, darkMode && styles.textLight]}>
             Reset Filters
           </Text>
-        </Pressable>
+        </PressableScale>
       )}
 
       {/* Products Grid */}
@@ -295,7 +298,7 @@ export default function ProductsScreen() {
           <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
             Try adjusting your search or filters
           </Text>
-          <Pressable
+          <PressableScale
             style={styles.resetButton}
             onPress={() => {
               setSearchQuery('');
@@ -304,7 +307,7 @@ export default function ProductsScreen() {
             testID="reset-filters"
           >
             <Text style={styles.resetButtonText}>Reset Filters</Text>
-          </Pressable>
+          </PressableScale>
         </View>
       )}
     </View>

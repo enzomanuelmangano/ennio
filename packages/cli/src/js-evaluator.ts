@@ -13,6 +13,46 @@
 import * as vm from 'vm';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
+import { execSync } from 'child_process';
+
+/**
+ * Maestro-compatible synchronous http helper.
+ * Maestro runScripts run in a sync context — there's no top-level await,
+ * so callers expect `http.get(url)` to return the response inline. We
+ * shell out to curl, which is universally present, instead of pulling in
+ * a sync-fetch shim.
+ */
+function createSyncHttp() {
+  function send(method: string, url: string, opts: { headers?: Record<string, string>; body?: string } = {}) {
+    const args = ['-sS', '-X', method, '-w', '\n%{http_code}', url];
+    for (const [k, v] of Object.entries(opts.headers || {})) {
+      args.push('-H', `${k}: ${v}`);
+    }
+    if (opts.body !== undefined) {
+      args.push('--data-binary', opts.body);
+    }
+    const cmd = ['curl', ...args.map((a) => `'${String(a).replace(/'/g, `'\\''`)}'`)].join(' ');
+    let stdout = '';
+    try {
+      stdout = execSync(cmd, { encoding: 'utf-8', timeout: 30_000 });
+    } catch (err: unknown) {
+      const e = err as { stdout?: string };
+      stdout = e.stdout || '';
+    }
+    const idx = stdout.lastIndexOf('\n');
+    const body = idx >= 0 ? stdout.slice(0, idx) : stdout;
+    const codeStr = idx >= 0 ? stdout.slice(idx + 1).trim() : '0';
+    const status = parseInt(codeStr, 10) || 0;
+    return { status, body };
+  }
+  return {
+    get: (url: string, opts?: { headers?: Record<string, string> }) => send('GET', url, opts),
+    post: (url: string, opts?: { headers?: Record<string, string>; body?: string }) => send('POST', url, opts),
+    put: (url: string, opts?: { headers?: Record<string, string>; body?: string }) => send('PUT', url, opts),
+    delete: (url: string, opts?: { headers?: Record<string, string>; body?: string }) => send('DELETE', url, opts),
+    patch: (url: string, opts?: { headers?: Record<string, string>; body?: string }) => send('PATCH', url, opts),
+  };
+}
 
 // ============================================
 // Types
@@ -63,6 +103,11 @@ export function createContext(options: {
       copiedText: '',
     },
     output: {},
+    // Maestro provides a synchronous `http` global to scripts. We
+    // implement the same surface (get / post / put / delete) backed by
+    // Bun's fetch, blocking the script via Atomics.wait so the runner
+    // doesn't drift forward before the request resolves.
+    http: createSyncHttp(),
     // Common utilities
     Date,
     Math,

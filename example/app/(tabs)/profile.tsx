@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, ScrollView, Pressable, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, Alert } from 'react-native';
+import { PressableScale } from 'pressto';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore, useCartStore, useSettingsStore } from '../../store';
@@ -22,7 +23,7 @@ function MenuItem({
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
 
   return (
-    <Pressable
+    <PressableScale
       style={[styles.menuItem, darkMode && styles.menuItemDark]}
       onPress={onPress}
       testID={testID}
@@ -37,7 +38,7 @@ function MenuItem({
         {value && <Text style={[styles.menuValue, darkMode && styles.subtitleDark]}>{value}</Text>}
         <Text style={styles.chevron}>›</Text>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -56,9 +57,9 @@ function ProfileHeader() {
         <Text style={[styles.profileEmail, darkMode && styles.subtitleDark]}>{user?.email}</Text>
       </View>
       <Link href="/settings" asChild>
-        <Pressable style={styles.editButton} testID="edit-profile-btn">
+        <PressableScale style={styles.editButton} testID="edit-profile-btn">
           <Text style={styles.editButtonText}>Edit</Text>
-        </Pressable>
+        </PressableScale>
       </Link>
     </View>
   );
@@ -103,14 +104,14 @@ function GuestView() {
         Sign in to access your profile, view orders, and more
       </Text>
       <Link href="/auth/login" asChild>
-        <Pressable style={styles.signInBtn} testID="guest-signin-btn">
+        <PressableScale style={styles.signInBtn} testID="guest-signin-btn">
           <Text style={styles.signInBtnText}>Sign In</Text>
-        </Pressable>
+        </PressableScale>
       </Link>
       <Link href="/auth/register" asChild>
-        <Pressable style={styles.createAccountBtn} testID="guest-register-btn">
+        <PressableScale style={styles.createAccountBtn} testID="guest-register-btn">
           <Text style={[styles.createAccountText, darkMode && styles.textLight]}>Create Account</Text>
-        </Pressable>
+        </PressableScale>
       </Link>
     </View>
   );

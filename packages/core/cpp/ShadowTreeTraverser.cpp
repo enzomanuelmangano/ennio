@@ -2,6 +2,7 @@
 
 #include <react/renderer/components/view/ViewProps.h>
 #include <react/renderer/components/text/RawTextProps.h>
+#include <react/renderer/components/textinput/TextInputProps.h>
 #include <react/renderer/core/LayoutableShadowNode.h>
 
 namespace ennio {
@@ -153,6 +154,24 @@ std::optional<std::string> ShadowTreeTraverser::getText(ShadowNodePtr node) {
 
     if (rawTextProps) {
         return rawTextProps->text;
+    }
+
+    // TextInput: expose placeholder as the matchable text. Maestro flows
+    // commonly use `tapOn: text: "Email"` to focus a field whose only
+    // visible label is the placeholder, so without this we'd miss every
+    // form field.
+    auto textInputProps = std::dynamic_pointer_cast<const facebook::react::TextInputProps>(
+        node->getProps()
+    );
+    if (textInputProps) {
+        // Prefer the current value if set (matches typed-in text), else
+        // fall back to the placeholder hint shown when the field is empty.
+        if (!textInputProps->text.empty()) {
+            return textInputProps->text;
+        }
+        if (!textInputProps->placeholder.empty()) {
+            return textInputProps->placeholder;
+        }
     }
 
     // For Text components, traverse children to find RawText

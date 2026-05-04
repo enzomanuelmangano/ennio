@@ -5,12 +5,12 @@ import {
   StyleSheet,
   ScrollView,
   TextInput,
-  Pressable,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useCartStore, useSettingsStore } from '../store';
 import * as Haptics from 'expo-haptics';
@@ -430,22 +430,22 @@ export default function CheckoutScreen() {
 
         <View style={[styles.footer, darkMode && styles.footerDark]}>
           {currentStep !== 'shipping' && (
-            <Pressable
+            <PressableScale
               style={[styles.backButton, darkMode && styles.backButtonDark]}
               onPress={handleBack}
               testID="back-btn"
             >
               <Text style={[styles.backButtonText, darkMode && styles.textLight]}>Back</Text>
-            </Pressable>
+            </PressableScale>
           )}
-          <Pressable
+          <PressableScale
             style={[
               styles.nextButton,
               currentStep === 'shipping' && styles.nextButtonFull,
               isProcessing && styles.nextButtonDisabled,
             ]}
             onPress={currentStep === 'review' ? handlePlaceOrder : handleNext}
-            disabled={isProcessing}
+            enabled={!isProcessing}
             testID={currentStep === 'review' ? 'place-order-btn' : 'next-btn'}
           >
             {isProcessing ? (
@@ -455,7 +455,7 @@ export default function CheckoutScreen() {
                 {currentStep === 'review' ? 'Place Order' : 'Continue'}
               </Text>
             )}
-          </Pressable>
+          </PressableScale>
         </View>
         </View>
       </KeyboardAvoidingView>

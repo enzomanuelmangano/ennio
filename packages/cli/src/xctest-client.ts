@@ -50,10 +50,20 @@ export class XCTestClient {
   private port: number;
   private host: string;
   private connected = false;
+  /**
+   * Called when the helper process needs to be respawned (the test
+   * runner died mid-flow). Set by the CLI bootstrap so the client can
+   * relaunch without coupling to launchHelper directly.
+   */
+  private respawn: (() => Promise<void>) | null = null;
 
   constructor(port: number = DEFAULT_PORT, host: string = DEFAULT_HOST) {
     this.port = port;
     this.host = host;
+  }
+
+  setRespawnHandler(fn: () => Promise<void>): void {
+    this.respawn = fn;
   }
 
   async connect(timeoutMs: number = 30_000): Promise<void> {
@@ -142,14 +152,23 @@ export class XCTestClient {
 
   private async send(type: string, payload: Record<string, unknown> = {}): Promise<XCTestResponse> {
     if (!this.socket || !this.connected) {
-      // Helper test bundle can die mid-flow if a single XCUI command fails
-      // hard (synth event failures kill the whole test session). Try a
-      // single transparent reconnect: the helper xcodebuild process may
-      // still be alive and have re-bound the port for the next test.
+      // Helper test bundle can die mid-flow if a single XCUI command
+      // fails hard (synth event failures kill the whole test session,
+      // testmanagerd reaps the runner). Reconnect first; if that fails
+      // and a respawn handler is registered, spawn a fresh helper
+      // process and connect to it.
       try {
-        await this.connect(8_000);
+        await this.connect(2_000);
       } catch {
-        throw new Error('xctest-client: not connected');
+        if (!this.respawn) {
+          throw new Error('xctest-client: not connected');
+        }
+        try {
+          await this.respawn();
+          await this.connect(30_000);
+        } catch (err) {
+          throw new Error(`xctest-client: not connected (respawn failed: ${err})`);
+        }
       }
     }
     const id = String(++this.messageId);
@@ -230,6 +249,14 @@ export class XCTestClient {
 
   async clearText(): Promise<void> {
     await this.expectOk('clearText');
+  }
+
+  async hideKeyboard(): Promise<void> {
+    await this.expectOk('hideKeyboard');
+  }
+
+  async tapByLabel(text: string, exact: boolean = false): Promise<void> {
+    await this.expectOk('tapByLabel', { text, exact });
   }
 
   async eraseText(count: number): Promise<void> {

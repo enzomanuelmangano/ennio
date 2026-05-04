@@ -1,6 +1,7 @@
 #include "HybridEnnio.hpp"
 #include "IdleMonitor.hpp"
 #include "EnnioLog.hpp"
+#include "SelectorParser.hpp"
 
 #include <thread>
 #include <chrono>
@@ -938,6 +939,10 @@ const char* scrollDirectionToString(ScrollDirection direction) {
 } // namespace
 
 bool HybridEnnio::tap(const std::string& testID) {
+    // Walk the UIView tree by accessibilityIdentifier and run the
+    // fireActivation chain on the matched view: UIControl.sendActions
+    // (RNGH BaseButton), synthesised UITouch (vanilla RN Pressable),
+    // accessibilityActivate (native widgets), gesture-recognizer KVC.
     return ::ennio::EnnioRuntimeHelper::getInstance().tap(testID);
 }
 bool HybridEnnio::tapByLabel(const std::string& text) {
@@ -1046,8 +1051,22 @@ std::optional<std::string> resolveSelectorToTestID(
 } // namespace
 
 bool HybridEnnio::tapBySelector(const std::string& selectorJson) {
+    // Resolve selector → testID via Fabric shadow tree. If matched node
+    // has a testID, dispatch through tap(testID) which walks the UIView
+    // tree and runs fireActivation (UIControl.sendActions for RNGH
+    // BaseButton, synthesise for vanilla Pressable, accessibilityActivate
+    // last). For text-only selectors with no testID, fall through to
+    // tapByLabel which walks the view hierarchy by accessibility label.
     auto id = resolveSelectorToTestID(*this, selectorJson);
-    return id ? tap(*id) : false;
+    if (id) return tap(*id);
+    // Try text fallback if the selector carries plain text.
+    try {
+        auto criteria = ::ennio::SelectorParser::parse(selectorJson);
+        if (criteria.text) {
+            return ::ennio::EnnioRuntimeHelper::getInstance().tapByLabel(criteria.text->pattern);
+        }
+    } catch (...) { /* swallow */ }
+    return false;
 }
 bool HybridEnnio::doubleTapBySelector(const std::string& selectorJson) {
     auto id = resolveSelectorToTestID(*this, selectorJson);
