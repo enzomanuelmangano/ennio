@@ -363,6 +363,116 @@ function clamp(n: number): number {
   return Math.max(0.02, Math.min(0.98, n));
 }
 
+// =============================================================
+// Hybrid writer: try fast Nitro first, fall back to XCTest helper
+//
+// Most production flows touch only Pressable / TextInput / ScrollView /
+// alert / native-tab paths the in-app fast writer can handle. The few
+// gestures it can't (RNGH pan/pinch/swipe-to-dismiss, deep modal taps,
+// freshly-mounted views before the touch handler attaches) silently
+// escalate to XCUI HID injection — slower but bulletproof. Verbose
+// output flags every fallback so flaky targets are obvious.
+// =============================================================
+
+export class HybridWriter implements Writer {
+  readonly mode = 'fast' as const;
+  private lastUsed: 'nitro' | 'xctest' = 'nitro';
+
+  constructor(
+    private fast: NitroWriter,
+    private slow: XCTestWriter,
+    private onFallback?: (op: string, selector: unknown) => void
+  ) {}
+
+  describe(action: string): string {
+    return this.lastUsed === 'nitro' ? `nitro ${action}` : `xctest-fallback ${action}`;
+  }
+
+  private async tryFastThenSlow<T extends unknown[]>(
+    op: string,
+    selectorForLog: unknown,
+    fastFn: () => Promise<boolean>,
+    slowFn: () => Promise<boolean>,
+    ..._args: T
+  ): Promise<boolean> {
+    if (await fastFn()) {
+      this.lastUsed = 'nitro';
+      return true;
+    }
+    if (this.onFallback) this.onFallback(op, selectorForLog);
+    const ok = await slowFn();
+    this.lastUsed = ok ? 'xctest' : 'nitro';
+    return ok;
+  }
+
+  tap(testID: string) {
+    return this.tryFastThenSlow('tap', { id: testID }, () => this.fast.tap(testID), () => this.slow.tap(testID));
+  }
+  doubleTap(testID: string) {
+    return this.tryFastThenSlow('doubleTap', { id: testID }, () => this.fast.doubleTap(testID), () => this.slow.doubleTap(testID));
+  }
+  longPress(testID: string, durationMs: number) {
+    return this.tryFastThenSlow('longPress', { id: testID }, () => this.fast.longPress(testID, durationMs), () => this.slow.longPress(testID, durationMs));
+  }
+  typeText(testID: string | null, text: string) {
+    return this.tryFastThenSlow('typeText', { id: testID, text }, () => this.fast.typeText(testID, text), () => this.slow.typeText(testID, text));
+  }
+  clearText(testID: string) {
+    return this.tryFastThenSlow('clearText', { id: testID }, () => this.fast.clearText(testID), () => this.slow.clearText(testID));
+  }
+  eraseText(testID: string | null, count: number) {
+    return this.tryFastThenSlow('eraseText', { id: testID, count }, () => this.fast.eraseText(testID, count), () => this.slow.eraseText(testID, count));
+  }
+  pressKey(testID: string | null, keyName: string) {
+    return this.tryFastThenSlow('pressKey', { keyName }, () => this.fast.pressKey(testID, keyName), () => this.slow.pressKey(testID, keyName));
+  }
+  scroll(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number) {
+    return this.tryFastThenSlow('scroll', { direction }, () => this.fast.scroll(testID, direction, distance), () => this.slow.scroll(testID, direction, distance));
+  }
+  swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number) {
+    return this.tryFastThenSlow('swipe', { direction }, () => this.fast.swipe(testID, direction, distance), () => this.slow.swipe(testID, direction, distance));
+  }
+  scrollTo(scrollViewTestID: string, elementTestID: string) {
+    return this.tryFastThenSlow('scrollTo', { id: elementTestID }, () => this.fast.scrollTo(scrollViewTestID, elementTestID), () => this.slow.scrollTo(scrollViewTestID, elementTestID));
+  }
+  back() {
+    return this.tryFastThenSlow('back', null, () => this.fast.back(), () => this.slow.back());
+  }
+  hideKeyboard() {
+    return this.tryFastThenSlow('hideKeyboard', null, () => this.fast.hideKeyboard(), () => this.slow.hideKeyboard());
+  }
+  tapBySelector(selector: Selector) {
+    return this.tryFastThenSlow('tapBySelector', selector, () => this.fast.tapBySelector(selector), () => this.slow.tapBySelector(selector));
+  }
+  doubleTapBySelector(selector: Selector) {
+    return this.tryFastThenSlow('doubleTapBySelector', selector, () => this.fast.doubleTapBySelector(selector), () => this.slow.doubleTapBySelector(selector));
+  }
+  longPressBySelector(selector: Selector, durationMs: number) {
+    return this.tryFastThenSlow('longPressBySelector', selector, () => this.fast.longPressBySelector(selector, durationMs), () => this.slow.longPressBySelector(selector, durationMs));
+  }
+  typeTextBySelector(selector: Selector, text: string) {
+    return this.tryFastThenSlow('typeTextBySelector', selector, () => this.fast.typeTextBySelector(selector, text), () => this.slow.typeTextBySelector(selector, text));
+  }
+  clearTextBySelector(selector: Selector) {
+    return this.tryFastThenSlow('clearTextBySelector', selector, () => this.fast.clearTextBySelector(selector), () => this.slow.clearTextBySelector(selector));
+  }
+  tapByText(text: string) {
+    return this.tryFastThenSlow('tapByText', { text }, () => this.fast.tapByText(text), () => this.slow.tapByText(text));
+  }
+  tapAlertButton(buttonText: string) {
+    return this.tryFastThenSlow('tapAlertButton', { text: buttonText }, () => this.fast.tapAlertButton(buttonText), () => this.slow.tapAlertButton(buttonText));
+  }
+  dismissAlert() {
+    return this.tryFastThenSlow('dismissAlert', null, () => this.fast.dismissAlert(), () => this.slow.dismissAlert());
+  }
+  setClipboard(text: string) {
+    return this.tryFastThenSlow('setClipboard', null, () => this.fast.setClipboard(text), () => this.slow.setClipboard(text));
+  }
+  pasteToFocused() {
+    return this.tryFastThenSlow('pasteToFocused', null, () => this.fast.pasteToFocused(), () => this.slow.pasteToFocused());
+  }
+}
+
 // Mirror of EnnioClient.selectorToJson; lifted here so writer.ts has
 // no concrete EnnioClient dependency on its own selector encoder.
 function selectorToJson(selector: Selector): string {

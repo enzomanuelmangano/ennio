@@ -29,7 +29,7 @@ import { EnnioClient, type Selector } from './client';
 import { XCTestClient } from './xctest-client';
 import { launchHelper, teardownHelper, type HelperHandle } from './xctest-helper';
 import { runMaestroTests } from './maestro-runner';
-import { NitroWriter, XCTestWriter, type Writer, type StableContext } from './writer';
+import { NitroWriter, XCTestWriter, HybridWriter, type Writer, type StableContext } from './writer';
 
 const DEFAULT_WS_PORT = 9876;
 
@@ -187,23 +187,37 @@ async function main() {
   let xctest: XCTestClient | null = null;
   let writer: Writer;
 
+  // Both modes need the XCTest helper:
+  //   - stable: every write goes through it.
+  //   - fast (default): used as fallback when an in-app Nitro write
+  //     fails or a text-only selector hits a native UI element outside
+  //     the Fabric tree. Without it the runner can't recover.
+  console.log('(Launching XCTest helper...)');
+  try {
+    helper = await launchHelper({ verbose });
+    xctest = new XCTestClient(helper.port);
+    await xctest.connect(15_000);
+    await xctest.ping();
+    console.log(`(XCTest helper ready on :${helper.port})\n`);
+  } catch (err) {
+    console.error(`Failed to launch XCTest helper: ${err}`);
+    if (helper) await teardownHelper(helper);
+    client.disconnect();
+    process.exit(1);
+  }
+
+  const ctx = buildStableContext(client, xctest!);
   if (mode === 'stable') {
-    console.log('(Launching XCTest helper...)');
-    try {
-      helper = await launchHelper({ verbose });
-      xctest = new XCTestClient(helper.port);
-      await xctest.connect(15_000);
-      await xctest.ping();
-      console.log(`(XCTest helper ready on :${helper.port})\n`);
-    } catch (err) {
-      console.error(`Failed to launch XCTest helper: ${err}`);
-      if (helper) await teardownHelper(helper);
-      client.disconnect();
-      process.exit(1);
-    }
-    writer = new XCTestWriter(xctest!, buildStableContext(client, xctest!));
+    writer = new XCTestWriter(xctest!, ctx);
   } else {
-    writer = new NitroWriter(client);
+    const onFallback = (op: string, sel: unknown) => {
+      if (verbose) console.log(`    (fallback to xctest: ${op} ${JSON.stringify(sel)})`);
+    };
+    writer = new HybridWriter(
+      new NitroWriter(client),
+      new XCTestWriter(xctest!, ctx),
+      onFallback
+    );
   }
 
   let totalPassed = 0;
@@ -217,11 +231,18 @@ async function main() {
       totalFailed += result.failed;
       if (result.client) {
         currentClient = result.client;
-        // Re-bind writer if it depends on the WS client.
-        if (mode === 'fast') {
-          writer = new NitroWriter(currentClient);
-        } else if (xctest) {
-          writer = new XCTestWriter(xctest, buildStableContext(currentClient, xctest));
+        const newCtx = buildStableContext(currentClient, xctest!);
+        if (mode === 'stable') {
+          writer = new XCTestWriter(xctest!, newCtx);
+        } else {
+          const onFallback = (op: string, sel: unknown) => {
+            if (verbose) console.log(`    (fallback to xctest: ${op} ${JSON.stringify(sel)})`);
+          };
+          writer = new HybridWriter(
+            new NitroWriter(currentClient),
+            new XCTestWriter(xctest!, newCtx),
+            onFallback
+          );
         }
       }
     }

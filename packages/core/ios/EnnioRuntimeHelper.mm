@@ -952,27 +952,58 @@ bool EnnioRuntimeHelper::tapTab(int index) {
     return ok;
 }
 
+// DFS the VC hierarchy looking for the deepest UINavigationController
+// whose stack has > 1 controllers. react-native-screens nests its
+// RNSScreenStackHostController several levels deep, so we can't just walk
+// up from the topmost VC — we have to scan everything.
+static UINavigationController* findPoppableNavController(UIViewController* root) {
+    if (!root) return nil;
+    NSMutableArray<UIViewController*>* queue = [NSMutableArray arrayWithObject:root];
+    UINavigationController* deepest = nil;
+    while (queue.count > 0) {
+        UIViewController* vc = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([vc isKindOfClass:[UINavigationController class]]) {
+            UINavigationController* nav = (UINavigationController*)vc;
+            if (nav.viewControllers.count > 1) {
+                deepest = nav;  // Keep the last (deepest) match.
+            }
+        }
+        for (UIViewController* child in vc.childViewControllers) [queue addObject:child];
+        if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
+    }
+    return deepest;
+}
+
 bool EnnioRuntimeHelper::backGesture() {
     __block bool ok = false;
     void (^block)(void) = ^{
-        UIViewController* top = topMostViewControllerForKeyWindow();
-        UIViewController* cursor = top;
-        while (cursor) {
-            if ([cursor isKindOfClass:[UINavigationController class]]) {
-                UINavigationController* nav = (UINavigationController*)cursor;
-                if (nav.viewControllers.count > 1) {
-                    [nav popViewControllerAnimated:NO];
-                    ok = true;
-                    return;
-                }
+        // Walk every connected window. The poppable nav controller may
+        // live in a window other than the keyWindow (e.g. modal sheet
+        // hosted in its own UIWindow on newer iOS).
+        UINavigationController* nav = nil;
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+                UINavigationController* candidate = findPoppableNavController(win.rootViewController);
+                if (candidate) { nav = candidate; break; }
             }
-            cursor = cursor.parentViewController ?: cursor.presentingViewController;
+            if (nav) break;
         }
-        // Last-resort: dismiss whatever is presented modally.
-        if (top.presentingViewController) {
-            [top dismissViewControllerAnimated:NO completion:nil];
+        if (nav) {
+            [nav popViewControllerAnimated:NO];
             ok = true;
+            return;
         }
+        // No nav stack to pop — fall back to dismissing whatever is
+        // presented modally on top.
+        UIViewController* top = topMostViewControllerForKeyWindow();
+        if (top && top.presentingViewController) {
+            [top.presentingViewController dismissViewControllerAnimated:NO completion:nil];
+            ok = true;
+            return;
+        }
+        NSLog(@"[Ennio] backGesture: no navigation stack to pop and no presented VC to dismiss");
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return ok;
