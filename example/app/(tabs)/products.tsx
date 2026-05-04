@@ -258,6 +258,25 @@ export default function ProductsScreen() {
         <SortDropdown value={sortBy} onChange={setSortBy} />
       </View>
 
+      {/* Reset all filters / search — visible whenever either is active.
+          Distinct testID from `reset-filters` (which only renders inside
+          the empty state) so flows that conditionally check the empty
+          state still work. */}
+      {(searchQuery.length > 0 || selectedCategory !== 'All') && (
+        <Pressable
+          style={[styles.resetTopButton, darkMode && styles.resetTopButtonDark]}
+          onPress={() => {
+            setSearchQuery('');
+            useProductsStore.getState().setCategory('All');
+          }}
+          testID="reset-all"
+        >
+          <Text style={[styles.resetTopButtonText, darkMode && styles.textLight]}>
+            Reset Filters
+          </Text>
+        </Pressable>
+      )}
+
       {/* Products Grid */}
       {products.length > 0 ? (
         <FlatList
@@ -562,5 +581,22 @@ const styles = StyleSheet.create({
   resetButtonText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  resetTopButton: {
+    marginHorizontal: 15,
+    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-start',
+    borderRadius: 16,
+    backgroundColor: '#eef2ff',
+  },
+  resetTopButtonDark: {
+    backgroundColor: '#1f2740',
+  },
+  resetTopButtonText: {
+    color: '#1a1a2e',
+    fontWeight: '600',
+    fontSize: 13,
   },
 });

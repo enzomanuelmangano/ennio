@@ -347,6 +347,15 @@ class MaestroExecutor {
           this.log(`(tapping alert button: "${buttonText}")`);
           await this.writer.tapAlertButton(buttonText);
           await this.sleep(150);
+          // Drain any queued / re-presented alerts. A synthesized
+          // touch can occasionally double-fire the trigger handler,
+          // queueing a second alert behind the first one. Dismiss in
+          // a tight loop until the stack clears or we hit the cap.
+          for (let i = 0; i < 8; i++) {
+            if (!(await this.client.isAlertPresent())) return true;
+            await this.writer.dismissAlert();
+            await this.sleep(120);
+          }
           return true;
         }
       }

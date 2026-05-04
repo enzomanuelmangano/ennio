@@ -414,8 +414,8 @@ export default function CheckoutScreen() {
         style={[styles.container, darkMode && styles.containerDark]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-        testID="checkout-screen"
       >
+        <View style={styles.flex1} testID="checkout-screen">
         {renderStepIndicator()}
 
         <ScrollView
@@ -456,6 +456,7 @@ export default function CheckoutScreen() {
               </Text>
             )}
           </Pressable>
+        </View>
         </View>
       </KeyboardAvoidingView>
     </>

@@ -216,9 +216,10 @@ tags:
 # TEST: Reset filters button
 # ============================================
 
-# Should have filters applied
+# Should have filters applied — top reset button visible whenever a
+# filter or search is active.
 - tapOn:
-    id: "reset-filters"
+    id: "reset-all"
 
 # After reset, should show all products with default sort
 - assertVisible:

@@ -145,6 +145,11 @@ tags:
           id: "home-signin-btn"
       - tapOn:
           id: "demo-login-btn"
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertNotVisible:
+          id: "demo-login-btn"
+          timeout: 5000
 
 - tapOn:
     id: "quick-action-settings"
@@ -167,14 +172,13 @@ tags:
 - assertVisible:
     id: "change-password"
 
-# Scroll a bit more to make sign-out visible
-- scroll:
+# Scroll until sign-out is on screen (settings scroll length varies
+# with toggle states / dynamic island padding).
+- scrollUntilVisible:
+    element:
+      id: "sign-out"
     direction: DOWN
-    amount: 200
-
-# Sign out button
-- assertVisible:
-    id: "sign-out"
+    timeout: 8000
 
 # ============================================
 # TEST: App info and legal
@@ -203,6 +207,14 @@ tags:
 # ============================================
 # TEST: Danger zone actions
 # ============================================
+
+# Scroll the danger-zone section into view (it sits at the bottom of
+# the settings ScrollView).
+- scrollUntilVisible:
+    element:
+      id: "reset-settings"
+    direction: DOWN
+    timeout: 8000
 
 # Clear cart & orders
 - assertVisible:
@@ -256,6 +268,15 @@ tags:
 
 - tapOn:
     id: "toggle-dark-mode"
+
+# Defensive: dismiss any stray alert that may still be up before tab nav.
+- runFlow:
+    when:
+      visible:
+        text: "OK"
+    commands:
+      - tapOn:
+          text: "OK"
 
 # Navigate to other screens and verify dark mode
 - runFlow:

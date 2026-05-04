@@ -296,32 +296,22 @@ bool EnnioRuntimeHelper::isInitialized() const {
 
 // Helper to find the presented alert controller
 static UIAlertController* findPresentedAlertController() {
-    UIViewController* rootVC = nil;
-
+    // Walk EVERY connected window, not just the key window. The XCTest
+    // helper presents its own UIWindow when running, which can take key
+    // status away from the user app — so the alert lives on a non-key
+    // window and the old key-window-only lookup misses it entirely.
     for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
-        if ([scene isKindOfClass:[UIWindowScene class]]) {
-            UIWindowScene* windowScene = (UIWindowScene*)scene;
-            for (UIWindow* window in windowScene.windows) {
-                if (window.isKeyWindow) {
-                    rootVC = window.rootViewController;
-                    break;
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow* window in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+            UIViewController* currentVC = window.rootViewController;
+            while (currentVC) {
+                if ([currentVC isKindOfClass:[UIAlertController class]]) {
+                    return (UIAlertController*)currentVC;
                 }
+                currentVC = currentVC.presentedViewController;
             }
         }
-        if (rootVC) break;
     }
-
-    if (!rootVC) return nil;
-
-    // Walk up the presented view controller chain to find an alert
-    UIViewController* currentVC = rootVC;
-    while (currentVC.presentedViewController) {
-        currentVC = currentVC.presentedViewController;
-        if ([currentVC isKindOfClass:[UIAlertController class]]) {
-            return (UIAlertController*)currentVC;
-        }
-    }
-
     return nil;
 }
 
@@ -471,12 +461,26 @@ static BOOL synthesizeTouchAtViewCenter(UIView* view) {
         // Tiny runloop iteration so RN's touch handler registers Began
         // before Ended arrives. Too long and the runloop runs unrelated
         // timers; too short and Pressable's gesture system flags it as
-        // touchCancelled. 15ms hits the sweet spot in practice.
-        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.015]];
+        // touchCancelled. 30ms covers small Pressables (clear-X, switch
+        // toggles) reliably while still feeling instantaneous.
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.030]];
 
+        // Fresh UIEvent for the End phase. Reusing the Began event has
+        // been observed to drop the second sendEvent on iOS 26 — the
+        // touch handler dedupes by event hash and skips the second one.
+        UIEvent* endEvent = [app respondsToSelector:@selector(_touchesEvent)]
+            ? [app _touchesEvent] : event;
         [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
-        [touch setValue:@(beganAt + 0.015) forKey:@"timestamp"];
-        [app sendEvent:event];
+        [touch setValue:@(beganAt + 0.030) forKey:@"timestamp"];
+        if (endEvent != event) {
+            if ([endEvent respondsToSelector:@selector(_clearTouches)]) {
+                [endEvent _clearTouches];
+            }
+            if ([endEvent respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
+                [endEvent _addTouch:touch forDelayedDelivery:NO];
+            }
+        }
+        [app sendEvent:endEvent];
         return YES;
     } @catch (NSException* e) {
         NSLog(@"[Ennio] synthesizeTouchAtViewCenter: %@", e.reason);
@@ -634,6 +638,9 @@ static UIViewController* topMostViewControllerForKeyWindow() {
 
 // Pull a UIAlertAction's stored handler block via KVC. Apple keeps the
 // handler private but the ivar name is stable across iOS versions.
+// After invoking the handler, dismiss via the presenting controller —
+// `[alert dismiss...]` only dismisses anything alert presented (which
+// is nothing for a leaf alert), it doesn't dismiss alert itself.
 static void invokeAlertAction(UIAlertController* alert, UIAlertAction* action) {
     @try {
         id handler = [action valueForKey:@"handler"];
@@ -644,8 +651,14 @@ static void invokeAlertAction(UIAlertController* alert, UIAlertAction* action) {
     } @catch (NSException* e) {
         NSLog(@"[Ennio] invokeAlertAction: KVC handler lookup failed: %@", e.reason);
     }
-    if (alert.presentingViewController) {
-        [alert.presentingViewController dismissViewControllerAnimated:NO completion:nil];
+    // Try presenter, then alert's own dismiss as a fallback (some iOS
+    // versions wire the alert's window so [alert dismiss] does the
+    // right thing).
+    UIViewController* presenter = alert.presentingViewController;
+    if (presenter) {
+        [presenter dismissViewControllerAnimated:NO completion:nil];
+    } else {
+        [alert dismissViewControllerAnimated:NO completion:nil];
     }
 }
 
@@ -890,12 +903,47 @@ bool EnnioRuntimeHelper::pressKey(const std::string& testID, const std::string& 
     return ok;
 }
 
+// Find the topmost user-visible UIScrollView in a window tree. Used as a
+// "scroll something on this screen" fallback when the runner doesn't
+// hand us a testID — Maestro's `scroll: direction: DOWN` semantics.
+static UIScrollView* findTopmostScrollView(UIView* root) {
+    if (!root || root.hidden || root.alpha < 0.01) return nil;
+    if ([root isKindOfClass:[UIScrollView class]]) {
+        UIScrollView* sv = (UIScrollView*)root;
+        // Skip degenerate scroll views (zero content size, hidden).
+        if (sv.contentSize.height > sv.bounds.size.height || sv.contentSize.width > sv.bounds.size.width) {
+            return sv;
+        }
+    }
+    for (UIView* sub in [root.subviews reverseObjectEnumerator]) {
+        UIScrollView* hit = findTopmostScrollView(sub);
+        if (hit) return hit;
+    }
+    return nil;
+}
+
 static bool scrollImpl(NSString* tid, NSString* direction, double distance) {
     __block bool ok = false;
     void (^block)(void) = ^{
-        UIView* view = findViewByTestIDInAllWindows(tid);
-        if (!view) return;
-        UIScrollView* sv = [view isKindOfClass:[UIScrollView class]] ? (UIScrollView*)view : findEnclosingScrollView(view);
+        UIScrollView* sv = nil;
+        if (tid.length > 0) {
+            UIView* view = findViewByTestIDInAllWindows(tid);
+            if (view) {
+                sv = [view isKindOfClass:[UIScrollView class]] ? (UIScrollView*)view : findEnclosingScrollView(view);
+            }
+        }
+        if (!sv) {
+            // testID-less scroll: pick the deepest scrollable view on
+            // screen and scroll it. Mirrors what the user would do.
+            for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+                for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+                    sv = findTopmostScrollView(win);
+                    if (sv) break;
+                }
+                if (sv) break;
+            }
+        }
         if (!sv) return;
         CGPoint offset = sv.contentOffset;
         CGFloat dx = 0, dy = 0;

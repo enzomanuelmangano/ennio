@@ -390,10 +390,31 @@ final class ActionServer {
             return [:]
 
         case "back":
-            // Edge swipe from left to trigger interactive nav back.
-            let from = coordinate(x: 0.0, y: 0.5)
-            let to = coordinate(x: 0.5, y: 0.5)
-            from.press(forDuration: 0.05, thenDragTo: to)
+            // Prefer tapping the navigation bar back button. The
+            // edge-swipe gesture is unreliable on iOS 26 simulators
+            // (drag often hangs the test runner) and requires a very
+            // specific velocity profile.
+            let navBackButtons = app.navigationBars.buttons
+            // Most common labels: the screen we came from ("(tabs)" /
+            // "Home" / "Cart") or the system "Back" string.
+            for label in ["Back"] {
+                let btn = navBackButtons[label]
+                if btn.exists && btn.isHittable {
+                    btn.tap()
+                    return [:]
+                }
+            }
+            // First button on the navigation bar — usually the back
+            // chevron labelled with the previous screen's title.
+            let firstNavBtn = app.navigationBars.firstMatch.buttons.element(boundBy: 0)
+            if firstNavBtn.exists && firstNavBtn.isHittable {
+                firstNavBtn.tap()
+                return [:]
+            }
+            // Fallback: edge swipe.
+            let from = coordinate(x: 0.005, y: 0.5)
+            let to = coordinate(x: 0.95, y: 0.5)
+            from.press(forDuration: 0.02, thenDragTo: to)
             return [:]
 
         case "quit":

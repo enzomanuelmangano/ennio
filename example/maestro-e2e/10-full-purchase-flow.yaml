@@ -124,9 +124,9 @@ tags:
 - tapOn:
     id: "filter-category-sports"
 
-# Add another product from grid
+# Add another product from grid (id 5 = Running Shoes Elite, in Sports)
 - tapOn:
-    id: "add-to-cart-1"
+    id: "add-to-cart-5"
 
 # ============================================
 # PHASE 4: Review Cart

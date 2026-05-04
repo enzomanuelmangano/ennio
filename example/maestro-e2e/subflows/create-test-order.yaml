@@ -6,27 +6,13 @@ appId: com.ennio.example
 
 ---
 
-# Navigate to products
+# Add a product to the cart from the home screen — featured cards add
+# silently (no Alert.alert), avoiding the modal-stuck-alert flake we
+# get when tapping product-detail's add-to-cart-btn from a long flow.
 - runFlow:
-    file: navigate-products.yaml
-
-# Add first product to cart via product detail
+    file: navigate-home.yaml
 - tapOn:
-    id: "product-card-1"
-- assertVisible:
-    id: "product-detail-screen"
-    timeout: 3000
-- tapOn:
-    id: "add-to-cart-btn"
-
-# Dismiss "Added to Cart" alert if present
-- runFlow:
-    when:
-      visible:
-        text: "Continue Shopping"
-    commands:
-      - tapOn:
-          text: "Continue Shopping"
+    id: "add-to-cart-featured-1"
 
 # Navigate to cart
 - runFlow:
