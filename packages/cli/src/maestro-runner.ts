@@ -8,6 +8,7 @@
 import { EnnioClient } from './client';
 import { XCTestClient, type ScreenSize } from './xctest-client';
 import type { Writer, StableContext } from './writer';
+import type { Reader } from './reader';
 import { basename } from 'path';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
@@ -146,6 +147,7 @@ interface MaestroTestsResult extends RunResults {
 export async function runMaestroTests(
   client: EnnioClient,
   writer: Writer,
+  reader: Reader,
   xctest: XCTestClient | null,
   testFilePath: string,
   options: { verbose?: boolean; trace?: boolean; port?: number } = {}
@@ -163,7 +165,7 @@ export async function runMaestroTests(
     return newClient;
   };
 
-  const executor = new MaestroExecutor(client, writer, xctest, testFilePath, {
+  const executor = new MaestroExecutor(client, writer, reader, xctest, testFilePath, {
     verbose: options.verbose,
     trace: options.trace,
     appId: flow.appId,
@@ -213,6 +215,7 @@ export async function runMaestroTests(
 class MaestroExecutor {
   private client: EnnioClient;
   private writer: Writer;
+  private reader: Reader;
   private xctest: XCTestClient | null;
   private currentFlowPath: string;
   private executedFlows = new Set<string>();
@@ -227,6 +230,7 @@ class MaestroExecutor {
   constructor(
     client: EnnioClient,
     writer: Writer,
+    reader: Reader,
     xctest: XCTestClient | null,
     flowPath: string,
     options: {
@@ -239,6 +243,7 @@ class MaestroExecutor {
   ) {
     this.client = client;
     this.writer = writer;
+    this.reader = reader;
     this.xctest = xctest;
     this.currentFlowPath = flowPath;
     this.verbose = options.verbose ?? false;
@@ -295,56 +300,37 @@ class MaestroExecutor {
   private async selectorExists(selector: MaestroSelector): Promise<boolean> {
     const ennioSelector = toEnnioSelector(selector);
 
+    // Native alert check first — UIAlertController contents only the
+    // in-app helper sees (not Fabric, not XCUI's label search reliably).
     if (selector.text && !selector.id) {
-      const alertPresent = await this.client.isAlertPresent();
-      if (alertPresent) {
-        const alertText = await this.client.getAlertText();
+      if (await this.reader.isAlertPresent()) {
+        const alertText = await this.reader.getAlertText();
         if (alertText.includes(selector.text)) return true;
-        const buttons = await this.client.getAlertButtons();
+        const buttons = await this.reader.getAlertButtons();
         if (buttons.includes(selector.text)) return true;
       }
-      // Native UI elements outside the React shadow tree (UITabBar items,
-      // system date pickers, etc.) won't be visible to Fabric. In stable
-      // mode we have XCUI to probe as a fallback; in fast mode we don't —
-      // the writer.tapByText path is responsible for handling those.
-      if (this.xctest) {
-        const xcuiHit = await this.xctest.findByLabel(selector.text);
-        if (xcuiHit.found) return true;
-      }
     }
-
     if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-      return this.client.exists(ennioSelector.id as string);
+      return this.reader.existsById(ennioSelector.id as string);
     }
-    return this.client.existsBySelector(ennioSelector);
+    return this.reader.existsBySelector(ennioSelector);
   }
 
-  /**
-   * Check if selector is visible
-   * Also checks native alerts for text-based selectors
-   */
   private async selectorVisible(selector: MaestroSelector): Promise<boolean> {
     const ennioSelector = toEnnioSelector(selector);
 
     if (selector.text && !selector.id) {
-      const alertPresent = await this.client.isAlertPresent();
-      if (alertPresent) {
-        const alertText = await this.client.getAlertText();
+      if (await this.reader.isAlertPresent()) {
+        const alertText = await this.reader.getAlertText();
         if (alertText.includes(selector.text)) return true;
-        const buttons = await this.client.getAlertButtons();
+        const buttons = await this.reader.getAlertButtons();
         if (buttons.includes(selector.text)) return true;
       }
-      // Same fallback as selectorExists. XCUI probe only available in stable.
-      if (this.xctest) {
-        const xcuiHit = await this.xctest.findByLabel(selector.text);
-        if (xcuiHit.found) return true;
-      }
     }
-
     if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-      return this.client.isVisible(ennioSelector.id as string);
+      return this.reader.isVisibleById(ennioSelector.id as string);
     }
-    return this.client.isVisibleBySelector(ennioSelector);
+    return this.reader.isVisibleBySelector(ennioSelector);
   }
 
   /**
@@ -389,17 +375,32 @@ class MaestroExecutor {
       );
     }
 
+    const tryOnce = async (): Promise<boolean> => {
+      if (selector.id && !selector.text && Object.keys(toEnnioSelector(selector)).length === 1) {
+        return this.writer.tap(selector.id);
+      }
+      if (selector.text && !selector.id) {
+        return this.writer.tapByText(selector.text);
+      }
+      return this.writer.tapBySelector(toEnnioSelector(selector));
+    };
+
     const start = Date.now();
     let ok = false;
+    let backAttempts = 0;
     while (Date.now() - start < DEFAULT_VISIBLE_TIMEOUT) {
-      if (selector.id && !selector.text && Object.keys(toEnnioSelector(selector)).length === 1) {
-        ok = await this.writer.tap(selector.id);
-      } else if (selector.text && !selector.id) {
-        ok = await this.writer.tapByText(selector.text);
-      } else {
-        ok = await this.writer.tapBySelector(toEnnioSelector(selector));
-      }
+      ok = await tryOnce();
       if (ok) break;
+      // If a text-only selector keeps missing, we may be on a Stack
+      // screen pushed over the tab bar. Pop and retry. Cap at 3 pops
+      // so we don't drain a deep navigation stack chasing a typo.
+      if (!ok && selector.text && !selector.id && backAttempts < 3) {
+        backAttempts++;
+        this.log(`tap retry: popping stack (attempt ${backAttempts})`);
+        await this.writer.back();
+        await this.sleep(250);
+        continue;
+      }
       await this.sleep(DEFAULT_RETRY_INTERVAL);
     }
     if (!ok) throw new Error(`Tap failed: ${JSON.stringify(selector)}`);

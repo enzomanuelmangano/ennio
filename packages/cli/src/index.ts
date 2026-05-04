@@ -30,6 +30,7 @@ import { XCTestClient } from './xctest-client';
 import { launchHelper, teardownHelper, type HelperHandle } from './xctest-helper';
 import { runMaestroTests } from './maestro-runner';
 import { NitroWriter, XCTestWriter, HybridWriter, type Writer, type StableContext } from './writer';
+import { NitroReader, XCTestReader, HybridReader, type Reader } from './reader';
 
 const DEFAULT_WS_PORT = 9876;
 
@@ -63,6 +64,7 @@ interface TestFileResultWithClient extends TestFileResult {
 async function runTestFile(
   client: EnnioClient,
   writer: Writer,
+  reader: Reader,
   xctest: XCTestClient | null,
   filePath: string,
   options: { verbose?: boolean; trace?: boolean; port?: number } = {}
@@ -70,7 +72,7 @@ async function runTestFile(
   const fileName = basename(filePath);
   console.log(`▸ ${fileName}`);
   try {
-    const results = await runMaestroTests(client, writer, xctest, filePath, {
+    const results = await runMaestroTests(client, writer, reader, xctest, filePath, {
       verbose: options.verbose,
       trace: options.trace,
       port: options.port,
@@ -207,16 +209,26 @@ async function main() {
   }
 
   const ctx = buildStableContext(client, xctest!);
+  let reader: Reader;
   if (mode === 'stable') {
     writer = new XCTestWriter(xctest!, ctx);
+    reader = new XCTestReader(xctest!);
   } else {
-    const onFallback = (op: string, sel: unknown) => {
+    const onWriterFallback = (op: string, sel: unknown) => {
       if (verbose) console.log(`    (fallback to xctest: ${op} ${JSON.stringify(sel)})`);
+    };
+    const onReaderFallback = (op: string, arg: unknown) => {
+      if (verbose) console.log(`    (read fallback to xctest: ${op} ${JSON.stringify(arg)})`);
     };
     writer = new HybridWriter(
       new NitroWriter(client),
       new XCTestWriter(xctest!, ctx),
-      onFallback
+      onWriterFallback
+    );
+    reader = new HybridReader(
+      new NitroReader(client),
+      new XCTestReader(xctest!),
+      onReaderFallback
     );
   }
 
@@ -226,7 +238,7 @@ async function main() {
 
   try {
     for (const file of files) {
-      const result = await runTestFile(currentClient, writer, xctest, file, { verbose, trace, port });
+      const result = await runTestFile(currentClient, writer, reader, xctest, file, { verbose, trace, port });
       totalPassed += result.passed;
       totalFailed += result.failed;
       if (result.client) {
@@ -234,14 +246,23 @@ async function main() {
         const newCtx = buildStableContext(currentClient, xctest!);
         if (mode === 'stable') {
           writer = new XCTestWriter(xctest!, newCtx);
+          reader = new XCTestReader(xctest!);
         } else {
-          const onFallback = (op: string, sel: unknown) => {
+          const onWriterFallback = (op: string, sel: unknown) => {
             if (verbose) console.log(`    (fallback to xctest: ${op} ${JSON.stringify(sel)})`);
+          };
+          const onReaderFallback = (op: string, arg: unknown) => {
+            if (verbose) console.log(`    (read fallback to xctest: ${op} ${JSON.stringify(arg)})`);
           };
           writer = new HybridWriter(
             new NitroWriter(currentClient),
             new XCTestWriter(xctest!, newCtx),
-            onFallback
+            onWriterFallback
+          );
+          reader = new HybridReader(
+            new NitroReader(currentClient),
+            new XCTestReader(xctest!),
+            onReaderFallback
           );
         }
       }
