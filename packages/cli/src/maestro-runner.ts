@@ -356,17 +356,14 @@ class MaestroExecutor {
   }
 
   private async tap(selector: MaestroSelector): Promise<void> {
-    // Text-only selectors: try alert button tap first. Polls briefly because
-    // Alert.alert presentation has a small animation lag after the trigger tap.
+    // Text-only selectors: try alert button tap first. Polls long enough
+    // (2s) for Alert.alert's presentation animation to finish — the
+    // dialog typically appears 300-1500ms after the triggering tap.
     if (selector.text && !selector.id) {
-      const ok = await this.tryTapAlertButton(selector.text, 800);
+      const ok = await this.tryTapAlertButton(selector.text, 2000);
       if (ok) return;
     }
 
-    // For id-bearing selectors we wait for shadow-tree existence first;
-    // text-only targets may live entirely outside Fabric (native UITabBar
-    // items, system pickers, etc.) so there's no shadow-tree node to wait
-    // for — just retry the writer call until it lands.
     if (selector.id) {
       await this.waitFor(
         () => this.selectorExists(selector),
@@ -391,22 +388,36 @@ class MaestroExecutor {
     while (Date.now() - start < DEFAULT_VISIBLE_TIMEOUT) {
       ok = await tryOnce();
       if (ok) break;
-      // If a text-only selector keeps missing, we may be on a Stack
-      // screen pushed over the tab bar. Pop and retry. Cap at 3 pops
-      // so we don't drain a deep navigation stack chasing a typo.
-      if (!ok && selector.text && !selector.id && backAttempts < 3) {
+      // Stack-pushed-over-tab-bar recovery: if a text-only selector keeps
+      // missing AND no alert is sitting on top, pop the nav stack and
+      // retry. The alert check is critical — without it we'd dismiss an
+      // alert whose button we were trying to tap but couldn't see in the
+      // 2s window above (e.g. slow simulator).
+      const alertUp = !!selector.text && !selector.id && (await this.reader.isAlertPresent());
+      if (!ok && selector.text && !selector.id && !alertUp && backAttempts < 3) {
         backAttempts++;
         this.log(`tap retry: popping stack (attempt ${backAttempts})`);
         await this.writer.back();
         await this.sleep(250);
         continue;
       }
+      // If an alert IS up and we still can't tap it, retry the alert
+      // button path — XCUI may have missed the button on the first sweep.
+      if (alertUp) {
+        const alertOk = await this.tryTapAlertButton(selector.text!, 1500);
+        if (alertOk) return;
+      }
       await this.sleep(DEFAULT_RETRY_INTERVAL);
     }
     if (!ok) throw new Error(`Tap failed: ${JSON.stringify(selector)}`);
     this.log(`tap: ${JSON.stringify(selector)} via ${this.writer.describe('tap')}`);
     this.lastTappedSelector = selector;
-    await this.sleep(80);
+    // Short settle so React commits the onPress side effect before the
+    // next read/write fires. Long async chains (login that awaits a
+    // network call before navigating) should be guarded by an explicit
+    // `waitForAnimationToEnd` in the flow YAML — auto-waiting on every
+    // tap punishes flows that don't need it.
+    await this.sleep(120);
   }
 
   private async doubleTap(selector: MaestroSelector): Promise<void> {

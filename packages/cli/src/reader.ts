@@ -84,6 +84,10 @@ export class XCTestReader implements Reader {
   async isVisibleById(testID: string) {
     const r = await this.xctest.findById(testID);
     if (!r.found || !r.frame) return false;
+    // hittable (XCUI's "user can actually tap this point") is the
+    // right "visible-to-user" signal. A view that's mounted under a
+    // modal has frame > 0 but isn't hittable.
+    if (r.hittable !== undefined) return r.hittable;
     return r.frame.width > 0 && r.frame.height > 0;
   }
   async existsBySelector(selector: Selector) {
@@ -142,14 +146,40 @@ export class HybridReader implements Reader {
   existsById(testID: string) {
     return this.tryFastThenSlow('existsById', testID, () => this.fast.existsById(testID), () => this.slow.existsById(testID));
   }
-  isVisibleById(testID: string) {
-    return this.tryFastThenSlow('isVisibleById', testID, () => this.fast.isVisibleById(testID), () => this.slow.isVisibleById(testID));
+
+  // Visibility-on-screen: Nitro decides quickly (every 30ms during a
+  // poll loop) whether the element is in the shadow tree. Only when it
+  // says yes do we verify against XCUI's accessibility tree — which
+  // can tell whether the element is covered by a Stack-pushed modal
+  // (Nitro can't, since both screens are mounted under the same tab).
+  // Costs one extra XCUI roundtrip on a positive Nitro result; while
+  // polling we stay on the cheap Nitro path.
+  async isVisibleById(testID: string) {
+    if (await this.fast.isVisibleById(testID)) {
+      // Confirm with XCUI when it indexes the element — catches the
+      // "tab content mounted under a Stack-pushed modal" false positive.
+      const xcuiKnown = await this.slow.existsById(testID);
+      if (!xcuiKnown) return true;
+      return this.slow.isVisibleById(testID);
+    }
+    // Nitro says no — element may be native UI (alert buttons, tab bar
+    // items) outside Fabric. Probe XCUI as a fallback.
+    if (this.onFallback) this.onFallback('isVisibleById', testID);
+    return this.slow.isVisibleById(testID);
   }
+
   existsBySelector(selector: Selector) {
     return this.tryFastThenSlow('existsBySelector', selector, () => this.fast.existsBySelector(selector), () => this.slow.existsBySelector(selector));
   }
-  isVisibleBySelector(selector: Selector) {
-    return this.tryFastThenSlow('isVisibleBySelector', selector, () => this.fast.isVisibleBySelector(selector), () => this.slow.isVisibleBySelector(selector));
+
+  async isVisibleBySelector(selector: Selector) {
+    if (await this.fast.isVisibleBySelector(selector)) {
+      const xcuiKnown = await this.slow.existsBySelector(selector);
+      if (!xcuiKnown) return true;
+      return this.slow.isVisibleBySelector(selector);
+    }
+    if (this.onFallback) this.onFallback('isVisibleBySelector', selector);
+    return this.slow.isVisibleBySelector(selector);
   }
   // Alert reads only live in the in-app helper today; no XCUI fallback.
   isAlertPresent() { return this.fast.isAlertPresent(); }

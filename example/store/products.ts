@@ -59,7 +59,7 @@ export const mockProducts: Product[] = [
     category: 'Electronics',
     rating: 4.7,
     reviews: 2341,
-    inStock: false,
+    inStock: true,
     tags: ['gaming', 'mechanical', 'rgb'],
   },
   {

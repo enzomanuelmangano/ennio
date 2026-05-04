@@ -337,6 +337,7 @@ final class ActionServer {
             let f = el.frame
             return [
                 "found": true,
+                "hittable": el.isHittable,
                 "frame": [
                     "x": f.origin.x,
                     "y": f.origin.y,

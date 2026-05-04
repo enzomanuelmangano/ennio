@@ -425,16 +425,19 @@ std::vector<std::string> EnnioRuntimeHelper::getAlertButtons() {
 @end
 
 // Synthesize a Began -> Ended touch sequence at a view's centre. Returns
-// YES if the simulated event was actually delivered (sendEvent: never
-// throws, but we guard against window/runtime weirdness).
+// YES if the simulated event was actually delivered. RN Pressable's
+// gesture-progress timer expects a small gap between PressIn and
+// PressOut; sending both within the same runloop tick can leave the
+// touch in an indeterminate state, so we wait one runloop iteration
+// and reset the timestamp on the End phase.
 static BOOL synthesizeTouchAtViewCenter(UIView* view) {
     if (!view || !view.window) return NO;
     UIWindow* window = view.window;
     CGPoint center = CGPointMake(view.bounds.size.width / 2, view.bounds.size.height / 2);
     CGPoint locationInWindow = [view convertPoint:center toView:window];
 
-    UIEvent* event = nil;
     UIApplication* app = [UIApplication sharedApplication];
+    UIEvent* event = nil;
     if ([app respondsToSelector:@selector(_touchesEvent)]) {
         event = [app _touchesEvent];
     }
@@ -450,7 +453,8 @@ static BOOL synthesizeTouchAtViewCenter(UIView* view) {
     [touch setValue:window forKey:@"window"];
     [touch setValue:view forKey:@"view"];
     [touch setValue:@(1) forKey:@"tapCount"];
-    [touch setValue:@([[NSProcessInfo processInfo] systemUptime]) forKey:@"timestamp"];
+    NSTimeInterval beganAt = [[NSProcessInfo processInfo] systemUptime];
+    [touch setValue:@(beganAt) forKey:@"timestamp"];
     if ([touch respondsToSelector:@selector(_setIsFirstTouchForView:)]) {
         [touch _setIsFirstTouchForView:YES];
     }
@@ -464,9 +468,14 @@ static BOOL synthesizeTouchAtViewCenter(UIView* view) {
         }
         [app sendEvent:event];
 
-        // End phase (release).
+        // Spin the runloop briefly so RN's RCTSurfaceTouchHandler picks
+        // up the Began event and starts its press timer before we send
+        // the Ended phase. Without this gap the press is treated as
+        // touchCancelled and onPress doesn't fire.
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+
         [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
-        [touch setValue:@([[NSProcessInfo processInfo] systemUptime]) forKey:@"timestamp"];
+        [touch setValue:@(beganAt + 0.05) forKey:@"timestamp"];
         [app sendEvent:event];
         return YES;
     } @catch (NSException* e) {
@@ -476,14 +485,28 @@ static BOOL synthesizeTouchAtViewCenter(UIView* view) {
 }
 
 // Try every reasonable activation path on a view. Returns YES on the first
-// one that succeeds. RN Pressable/Touchable* don't accept accessibilityActivate
-// reliably — their onPress is wired through a UITapGestureRecognizer that we
-// have to invoke directly. UIControl subclasses (UITabBar buttons, UIButton)
-// respond to sendActionsForControlEvents.
+// one that succeeds.
+//
+// Order matters. The synthesized UITouch -> sendEvent: path fires RN
+// Fabric's RCTSurfaceTouchHandler, which is the only path that
+// reliably runs Pressable's onPress on iOS 26 (RN intercepts touches
+// inside its own touch processor, not through the standard responder
+// chain). Try it first.
+//
+// Falling back: UIControl.sendActionsForControlEvents covers UIKit
+// controls (UITabBarButton, UIButton). accessibilityActivate covers
+// VoiceOver-wired widgets. Direct gesture-recognizer invocation
+// catches a handful of RN cases where the recognizer is attached but
+// the touch processor isn't (e.g. paper architecture, some 3rd-party
+// libs).
 static BOOL fireActivation(UIView* view) {
     if (!view) return NO;
 
-    // 1. UIControl: sendActionsForControlEvents fires every connected target.
+    // 1. Synthesized UITouch through UIApplication.sendEvent — best for
+    //    RN Pressable / Touchable* on Fabric.
+    if (synthesizeTouchAtViewCenter(view)) return YES;
+
+    // 2. UIControl: sendActionsForControlEvents fires every connected target.
     if ([view isKindOfClass:[UIControl class]]) {
         UIControl* ctrl = (UIControl*)view;
         if (ctrl.enabled) {
@@ -492,11 +515,10 @@ static BOOL fireActivation(UIView* view) {
         }
     }
 
-    // 2. accessibilityActivate (works for some RN setups + native controls).
+    // 3. accessibilityActivate (native controls, VoiceOver-wired widgets).
     if ([view accessibilityActivate]) return YES;
 
-    // 3. Tap gesture recognizers: invoke each registered action directly.
-    //    This is what RN Pressable's onPress hangs off of.
+    // 4. Tap gesture recognizer fallback.
     for (UIGestureRecognizer* gr in view.gestureRecognizers) {
         if (!gr.enabled) continue;
         if (![gr isKindOfClass:[UITapGestureRecognizer class]]) continue;

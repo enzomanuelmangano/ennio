@@ -37,6 +37,8 @@ export interface ScreenSize {
 
 export interface FoundElement {
   found: boolean;
+  /** XCUI's isHittable — element is on screen and not covered. */
+  hittable?: boolean;
   frame?: { x: number; y: number; width: number; height: number };
 }
 
@@ -254,6 +256,7 @@ export class XCTestClient {
     const f = data.frame as Record<string, number>;
     return {
       found: true,
+      hittable: data.hittable === true,
       frame: { x: Number(f.x), y: Number(f.y), width: Number(f.width), height: Number(f.height) },
     };
   }

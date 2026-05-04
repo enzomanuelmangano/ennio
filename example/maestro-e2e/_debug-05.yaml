@@ -1,0 +1,20 @@
+appId: com.ennio.example
+name: "Debug 05"
+---
+- launchApp:
+    clearState: true
+- runFlow:
+    file: subflows/navigate-home.yaml
+- runFlow:
+    when:
+      visible:
+        id: "home-signin-btn"
+    commands:
+      - tapOn:
+          id: "home-signin-btn"
+      - tapOn:
+          id: "demo-login-btn"
+      - assertVisible:
+          id: "home-screen"
+          timeout: 5000
+- takeScreenshot: "/tmp/ennio-shots/probe-after-login.png"
