@@ -48,3 +48,9 @@ yarn-debug.log*
 yarn-error.log*
 *.tgz
 node_modules
+
+# Claude Code harness state
+.claude/scheduled_tasks.lock
+
+# Local debug screenshots
+packages/cli/probe-*
