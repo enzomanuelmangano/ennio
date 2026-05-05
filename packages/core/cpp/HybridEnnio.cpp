@@ -531,6 +531,51 @@ void HybridEnnio::synchronize() {
             std::string testID = ::ennio::json::parseString(payload, "testID");
             response.success = tap(testID);
         }
+        else if (type == "tapAtPoint") {
+            // Window-coordinate tap. CLI sends absolute logical points.
+            double x = ::ennio::json::parseDouble(payload, "x");
+            double y = ::ennio::json::parseDouble(payload, "y");
+            response.success = ::ennio::EnnioRuntimeHelper::getInstance()
+                .tapAtScreenPoint(x, y);
+        }
+        else if (type == "getSurfaceOffset") {
+            // React-surface origin in the user app's window. Lets the
+            // CLI translate Fabric's surface-relative `screenX/screenY`
+            // into idb's window-relative coords.
+            auto offset = ::ennio::EnnioRuntimeHelper::getInstance().getSurfaceOffset();
+            std::ostringstream oss;
+            oss << "{\"x\":" << offset.first << ",\"y\":" << offset.second << "}";
+            response.data = oss.str();
+            response.success = true;
+        }
+        else if (type == "getViewWindowFrameByLabel") {
+            std::string text = ::ennio::json::parseString(payload, "text");
+            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getViewWindowFrameByLabel(text);
+            std::ostringstream oss;
+            oss << "{\"x\":" << std::get<0>(frame)
+                << ",\"y\":" << std::get<1>(frame)
+                << ",\"width\":" << std::get<2>(frame)
+                << ",\"height\":" << std::get<3>(frame) << "}";
+            response.data = oss.str();
+            response.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+        }
+        else if (type == "getViewWindowFrame") {
+            // Window-relative UIView frame for a testID. Bypasses
+            // Fabric's surface-relative layout — the result already
+            // accounts for ScrollView contentInsetAdjustment, safe-area
+            // padding, modal presentations, and any other runtime offsets
+            // UIKit applies. Caller (idb-based tap) feeds the centre of
+            // this frame straight to `idb ui tap`.
+            std::string tid = ::ennio::json::parseString(payload, "testID");
+            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getViewWindowFrame(tid);
+            std::ostringstream oss;
+            oss << "{\"x\":" << std::get<0>(frame)
+                << ",\"y\":" << std::get<1>(frame)
+                << ",\"width\":" << std::get<2>(frame)
+                << ",\"height\":" << std::get<3>(frame) << "}";
+            response.data = oss.str();
+            response.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+        }
         else if (type == "tapByLabel") {
             std::string text = ::ennio::json::parseString(payload, "text");
             response.success = tapByLabel(text);
@@ -939,13 +984,44 @@ const char* scrollDirectionToString(ScrollDirection direction) {
 } // namespace
 
 bool HybridEnnio::tap(const std::string& testID) {
-    // Walk the UIView tree by accessibilityIdentifier and run the
-    // fireActivation chain on the matched view: UIControl.sendActions
-    // (RNGH BaseButton), synthesised UITouch (vanilla RN Pressable),
-    // accessibilityActivate (native widgets), gesture-recognizer KVC.
-    return ::ennio::EnnioRuntimeHelper::getInstance().tap(testID);
+    // Find the node in the Fabric shadow tree → grab its window-coord
+    // centre → synthesise a UITouch at that point. UIKit's hit-test
+    // routes the touch through the responder chain, so onPress fires
+    // for whatever view is on top: UIControl, Pressable, RNGH BaseButton.
+    // ~5 ms in-process, no UIView walk, no chain of activation guesses.
+    auto root = getShadowTreeRoot();
+    if (!root) return false;
+    auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
+    if (!metrics || metrics->width <= 0 || metrics->height <= 0) return false;
+    double cx = metrics->screenX + metrics->width / 2.0;
+    double cy = metrics->screenY + metrics->height / 2.0;
+    return ::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(cx, cy);
 }
 bool HybridEnnio::tapByLabel(const std::string& text) {
+    // Match by text in Fabric tree → tap at the matched node's
+    // window-coord centre. Covers Pressable inner Text, TextInput
+    // placeholder, custom card text.
+    ::ennio::SelectorCriteria criteria;
+    criteria.text = ::ennio::TextMatcher{text, ::ennio::TextMatchMode::Contains};
+    auto root = getShadowTreeRoot();
+    if (root) {
+        auto node = ::ennio::ElementMatcher::findFirst(root, criteria);
+        if (node) {
+            auto info = ::ennio::ElementMatcher::getExtendedElementInfo(root, node);
+            if (info && info->layout.width > 0 && info->layout.height > 0) {
+                double cx = info->layout.screenX + info->layout.width / 2.0;
+                double cy = info->layout.screenY + info->layout.height / 2.0;
+                if (::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(cx, cy)) {
+                    return true;
+                }
+            }
+        }
+    }
+    // Native widgets that don't show up in the Fabric shadow tree
+    // (UITabBar items, system alert buttons, RNScreens-presented stack
+    // headers) — walk the UIKit accessibility tree and fire the
+    // matched widget's activation. This is the ONLY remaining UIKit
+    // path; everything else goes through layout-coord.
     return ::ennio::EnnioRuntimeHelper::getInstance().tapByLabel(text);
 }
 bool HybridEnnio::doubleTap(const std::string& testID) {
@@ -1051,22 +1127,18 @@ std::optional<std::string> resolveSelectorToTestID(
 } // namespace
 
 bool HybridEnnio::tapBySelector(const std::string& selectorJson) {
-    // Resolve selector → testID via Fabric shadow tree. If matched node
-    // has a testID, dispatch through tap(testID) which walks the UIView
-    // tree and runs fireActivation (UIControl.sendActions for RNGH
-    // BaseButton, synthesise for vanilla Pressable, accessibilityActivate
-    // last). For text-only selectors with no testID, fall through to
-    // tapByLabel which walks the view hierarchy by accessibility label.
-    auto id = resolveSelectorToTestID(*this, selectorJson);
-    if (id) return tap(*id);
-    // Try text fallback if the selector carries plain text.
-    try {
-        auto criteria = ::ennio::SelectorParser::parse(selectorJson);
-        if (criteria.text) {
-            return ::ennio::EnnioRuntimeHelper::getInstance().tapByLabel(criteria.text->pattern);
-        }
-    } catch (...) { /* swallow */ }
-    return false;
+    // Resolve selector via Fabric shadow tree → tap at the matched
+    // node's window-coord centre. Single path, no UIView walk, no
+    // testID-resolution chain.
+    auto& mutSelf = *this;
+    auto found = mutSelf.findBySelector(selectorJson);
+    if (std::holds_alternative<nitro::NullType>(found)) return false;
+    const auto info = std::get<ExtendedElementInfo>(found);
+    const auto& layout = info.layout;
+    if (layout.width <= 0 || layout.height <= 0) return false;
+    double cx = layout.screenX + layout.width / 2.0;
+    double cy = layout.screenY + layout.height / 2.0;
+    return ::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(cx, cy);
 }
 bool HybridEnnio::doubleTapBySelector(const std::string& selectorJson) {
     auto id = resolveSelectorToTestID(*this, selectorJson);

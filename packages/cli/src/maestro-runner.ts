@@ -6,8 +6,7 @@
  */
 
 import { EnnioClient } from './client';
-import { XCTestClient, type ScreenSize } from './xctest-client';
-import type { Writer, StableContext } from './writer';
+import type { Writer } from './writer';
 import type { Reader } from './reader';
 import { basename } from 'path';
 import { existsSync } from 'fs';
@@ -176,7 +175,6 @@ export async function runMaestroTests(
   client: EnnioClient,
   writer: Writer,
   reader: Reader,
-  xctest: XCTestClient | null,
   testFilePath: string,
   options: { verbose?: boolean; trace?: boolean; port?: number } = {}
 ): Promise<MaestroTestsResult> {
@@ -193,7 +191,7 @@ export async function runMaestroTests(
     return newClient;
   };
 
-  const executor = new MaestroExecutor(client, writer, reader, xctest, testFilePath, {
+  const executor = new MaestroExecutor(client, writer, reader, testFilePath, {
     verbose: options.verbose,
     trace: options.trace,
     appId: flow.appId,
@@ -245,7 +243,6 @@ class MaestroExecutor {
   private client: EnnioClient;
   private writer: Writer;
   private reader: Reader;
-  private xctest: XCTestClient | null;
   private currentFlowPath: string;
   private executedFlows = new Set<string>();
   private lastTappedSelector: MaestroSelector | null = null;
@@ -260,7 +257,6 @@ class MaestroExecutor {
     client: EnnioClient,
     writer: Writer,
     reader: Reader,
-    xctest: XCTestClient | null,
     flowPath: string,
     options: {
       verbose?: boolean;
@@ -274,7 +270,6 @@ class MaestroExecutor {
     this.client = client;
     this.writer = writer;
     this.reader = reader;
-    this.xctest = xctest;
     this.currentFlowPath = flowPath;
     this.verbose = options.verbose ?? false;
     this.trace = options.trace ?? false;
@@ -803,23 +798,6 @@ class MaestroExecutor {
       if (swipeCmd.direction) {
         const amount = swipeCmd.duration || 400;
         await this.scroll(swipeCmd.direction.toLowerCase(), amount);
-      } else if (swipeCmd.start && swipeCmd.end && this.xctest) {
-        // Coordinate-form swipe is only meaningful with the XCTest helper
-        // (drag from absolute (x,y) to absolute (x,y) requires HID injection).
-        // In fast mode, fall back to a directional scroll guess.
-        const screen = await this.xctest.getScreenSize();
-        const toNorm = (p: string | { x: number; y: number }): { x: number; y: number } => {
-          if (typeof p === 'string') {
-            const [xs, ys] = p.split(',').map((s) => s.trim());
-            const x = xs.endsWith('%') ? parseFloat(xs) / 100 : parseFloat(xs) / screen.width;
-            const y = ys.endsWith('%') ? parseFloat(ys) / 100 : parseFloat(ys) / screen.height;
-            return { x, y };
-          }
-          return { x: p.x / screen.width, y: p.y / screen.height };
-        };
-        const from = toNorm(swipeCmd.start);
-        const to = toNorm(swipeCmd.end);
-        await this.xctest.swipe(from.x, from.y, to.x, to.y, swipeCmd.duration ?? 300);
       } else if (swipeCmd.start && swipeCmd.end) {
         // Fast mode: best-effort vertical scroll inferred from y-delta.
         const dy = (typeof swipeCmd.end === 'object' ? swipeCmd.end.y : 0) - (typeof swipeCmd.start === 'object' ? swipeCmd.start.y : 0);

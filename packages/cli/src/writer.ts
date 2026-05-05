@@ -1,31 +1,20 @@
 /**
  * Writer abstraction
  *
- * The maestro runner doesn't care HOW a tap or a typeText reaches the app —
- * it just needs a target identified by a Maestro selector or a coordinate.
- * Two implementations follow:
- *
- *   - NitroWriter (--fast)    -> dispatches every action to the in-app
- *                                @ennio/core module over the WebSocket.
- *                                Uses accessibilityActivate / UITextInput /
- *                                UIScrollView APIs in-process. ~5ms per call.
- *
- *   - XCTestWriter (--stable) -> dispatches every action to the bundled
- *                                EnnioXCTestRunner.xctest helper over TCP.
- *                                Uses XCUI HID injection. ~30ms per call.
- *                                Reliable for gesture-handler-driven flows.
+ * Single backend: NitroWriter. Reads route through @ennio/core's Fabric
+ * shadow tree over WebSocket. Writes route through `idb` — real HID
+ * injection at the simulator's input layer. The split:
+ *   - Nitro answers "where is testID `home-signin-btn`?" → window-coord
+ *     centre (x, y).
+ *   - idb answers "tap at (x, y)" → real finger touch through HID.
+ * One mechanism per concern. ~50 ms per write, ~5 ms per read, no
+ * xcodebuild cold-start, no in-app touch synthesis.
  */
 
 import type { EnnioClient, Selector } from './client';
-import type { XCTestClient, ScreenSize } from './xctest-client';
+import * as idb from './idb';
 
 export interface Writer {
-  /**
-   * What kind of writer this is. The runner uses the kind to enable
-   * mode-specific shortcuts (e.g. coord resolution against XCUI).
-   */
-  readonly mode: 'fast' | 'stable';
-
   /** Diagnostic / verbose-log description of how a tap was routed. */
   describe(action: string): string;
 
@@ -54,7 +43,7 @@ export interface Writer {
   longPressBySelector(selector: Selector, durationMs: number): Promise<boolean>;
   typeTextBySelector(selector: Selector, text: string): Promise<boolean>;
   clearTextBySelector(selector: Selector): Promise<boolean>;
-  /** Tap any element whose visible label matches `text` (covers iOS native tab bar items). */
+  /** Tap any element whose visible label matches `text`. */
   tapByText(text: string): Promise<boolean>;
 
   // ---- alerts ----
@@ -66,60 +55,135 @@ export interface Writer {
   pasteToFocused(): Promise<boolean>;
 }
 
-// =============================================================
-// Fast writer: in-app via Nitro WebSocket
-// =============================================================
-
 export class NitroWriter implements Writer {
-  readonly mode = 'fast' as const;
+  /**
+   * React surface origin in window coords. Cached per-instance — the
+   * surface doesn't move once the app is mounted.
+   */
+  private surfaceOffset: { x: number; y: number } | null = null;
+
   constructor(private client: EnnioClient) {}
 
   describe(action: string): string {
     return `nitro ${action}`;
   }
 
+  private async getSurfaceOffset(): Promise<{ x: number; y: number }> {
+    if (this.surfaceOffset) return this.surfaceOffset;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const r: any = await (this.client as any).send('getSurfaceOffset', {});
+      const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
+      if (data && typeof data.x === 'number' && typeof data.y === 'number') {
+        this.surfaceOffset = { x: data.x, y: data.y };
+        return this.surfaceOffset;
+      }
+    } catch { /* fall through */ }
+    this.surfaceOffset = { x: 0, y: 0 };
+    return this.surfaceOffset;
+  }
+
   async tap(testID: string): Promise<boolean> {
-    const r = await (this.client as any).send('tap', { testID });
-    return r.success === true;
+    const center = await this.layoutCenter({ id: testID });
+    if (!center) return false;
+    await idb.tap(center.x, center.y);
+    return true;
   }
   async tapAt(x: number, y: number): Promise<boolean> {
-    // Nitro doesn't synthesize HID events at arbitrary screen coords —
-    // its tap path resolves a testID to a UIView and calls
-    // accessibilityActivate. Coordinate taps must go through XCUI.
-    const r = await (this.client as any).send('tapAtPoint', { x, y });
-    return r.success === true;
+    await idb.tap(x, y);
+    return true;
+  }
+  /**
+   * Resolve a selector to its window-coord centre via Fabric. Returns
+   * null when no match, or the match has zero size (off-screen).
+   */
+  private async layoutCenter(selector: Selector): Promise<{ x: number; y: number } | null> {
+    // testID-only selectors: ask iOS for the UIView's window frame
+    // directly. UIKit's convertRect accounts for everything Fabric's
+    // surface-relative layout misses (ScrollView contentInsetAdjustment,
+    // safe-area padding, modal presentations). One round-trip, exact.
+    if (selector.id && !selector.text && !selector.point) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const r: any = await (this.client as any).send('getViewWindowFrame', { testID: selector.id });
+      const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
+      if (data && data.width > 0 && data.height > 0) {
+        if (process.env.ENNIO_DEBUG_IDB) {
+          console.error(`[layout] id=${selector.id} → window=(${data.x},${data.y},${data.width},${data.height})`);
+        }
+        return { x: data.x + data.width / 2, y: data.y + data.height / 2 };
+      }
+    }
+    // Compound / text-only selectors: walk the Fabric shadow tree, then
+    // add the React surface's window offset.
+    const found = await this.client.findBySelector(selector);
+    const layout = (found as { layout?: { screenX: number; screenY: number; width: number; height: number } } | null | undefined)?.layout;
+    if (!layout || layout.width <= 0 || layout.height <= 0) return null;
+    const offset = await this.getSurfaceOffset();
+    if (process.env.ENNIO_DEBUG_IDB) {
+      console.error(`[layout] ${JSON.stringify(selector)} → frame=(${layout.screenX},${layout.screenY},${layout.width},${layout.height}) offset=(${offset.x},${offset.y})`);
+    }
+    return {
+      x: layout.screenX + layout.width / 2 + offset.x,
+      y: layout.screenY + layout.height / 2 + offset.y,
+    };
   }
   async doubleTap(testID: string): Promise<boolean> {
-    const r = await (this.client as any).send('doubleTap', { testID });
-    return r.success === true;
+    const c = await this.layoutCenter({ id: testID });
+    if (!c) return false;
+    await idb.tap(c.x, c.y);
+    await new Promise((r) => setTimeout(r, 80));
+    await idb.tap(c.x, c.y);
+    return true;
   }
   async longPress(testID: string, durationMs: number): Promise<boolean> {
-    const r = await (this.client as any).send('longPress', { testID, duration: durationMs });
-    return r.success === true;
+    const c = await this.layoutCenter({ id: testID });
+    if (!c) return false;
+    await idb.tap(c.x, c.y, durationMs);
+    return true;
   }
   async typeText(testID: string | null, text: string): Promise<boolean> {
-    const r = await (this.client as any).send('typeText', { testID: testID ?? '', text });
-    return r.success === true;
+    if (testID) {
+      const c = await this.layoutCenter({ id: testID });
+      if (!c) return false;
+      await idb.tap(c.x, c.y);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await idb.typeText(text);
+    return true;
   }
   async clearText(testID: string): Promise<boolean> {
-    const r = await (this.client as any).send('clearText', { testID });
-    return r.success === true;
+    if (!(await this.tap(testID))) return false;
+    // 100 backspaces is enough for any normal input; idb's key-sequence
+    // is faster than typing each backspace as a character.
+    for (let i = 0; i < 100; i++) {
+      try { await idb.pressKey(42); } catch { break; } // 42 = backspace
+    }
+    return true;
   }
   async eraseText(testID: string | null, count: number): Promise<boolean> {
-    const r = await (this.client as any).send('eraseText', { testID: testID ?? '', count });
-    return r.success === true;
+    if (testID) {
+      const c = await this.layoutCenter({ id: testID });
+      if (c) await idb.tap(c.x, c.y);
+    }
+    for (let i = 0; i < count; i++) await idb.pressKey(42);
+    return true;
   }
-  async pressKey(testID: string | null, keyName: string): Promise<boolean> {
-    const r = await (this.client as any).send('pressKey', { testID: testID ?? '', keyName });
-    return r.success === true;
+  async pressKey(_testID: string | null, _keyName: string): Promise<boolean> {
+    // Map keyName → HID keycode; not implemented for the migration cut.
+    // Most maestro flows use enter/tab/escape — wire up as needed.
+    return false;
   }
-  async scroll(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
-    const r = await (this.client as any).send('scroll', { testID: testID ?? '', direction, distance });
-    return r.success === true;
+  async scroll(_testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
+    // Scroll = swipe at the viewport centre. Direction inverts because
+    // a swipe up = scroll down (content moves up).
+    const cx = 200, cy = 450; // safe-area-ish centre for 402x874 sims
+    const dx = direction === 'left' ? distance : direction === 'right' ? -distance : 0;
+    const dy = direction === 'up' ? distance : direction === 'down' ? -distance : 0;
+    await idb.swipe(cx, cy, cx - dx, cy - dy, 200);
+    return true;
   }
   async swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
-    const r = await (this.client as any).send('swipe', { testID: testID ?? '', direction, distance });
-    return r.success === true;
+    return this.scroll(testID, direction, distance);
   }
   async scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean> {
     const r = await (this.client as any).send('scrollTo', { scrollViewTestID, elementTestID });
@@ -134,39 +198,66 @@ export class NitroWriter implements Writer {
     return r.success === true;
   }
   async tapBySelector(selector: Selector): Promise<boolean> {
-    const r = await (this.client as any).send('tapBySelector', { selector: selectorToJson(selector) });
-    return r.success === true;
+    const c = await this.layoutCenter(selector);
+    if (!c) return false;
+    await idb.tap(c.x, c.y);
+    return true;
   }
   async doubleTapBySelector(selector: Selector): Promise<boolean> {
-    const r = await (this.client as any).send('doubleTapBySelector', { selector: selectorToJson(selector) });
-    return r.success === true;
+    const c = await this.layoutCenter(selector);
+    if (!c) return false;
+    await idb.tap(c.x, c.y);
+    await new Promise((r) => setTimeout(r, 80));
+    await idb.tap(c.x, c.y);
+    return true;
   }
   async longPressBySelector(selector: Selector, durationMs: number): Promise<boolean> {
-    const r = await (this.client as any).send('longPressBySelector', {
-      selector: selectorToJson(selector),
-      duration: durationMs,
-    });
-    return r.success === true;
+    const c = await this.layoutCenter(selector);
+    if (!c) return false;
+    await idb.tap(c.x, c.y, durationMs);
+    return true;
   }
   async typeTextBySelector(selector: Selector, text: string): Promise<boolean> {
-    const r = await (this.client as any).send('typeTextBySelector', {
-      selector: selectorToJson(selector),
-      text,
-    });
-    return r.success === true;
+    const c = await this.layoutCenter(selector);
+    if (!c) return false;
+    await idb.tap(c.x, c.y);
+    await new Promise((r) => setTimeout(r, 100));
+    await idb.typeText(text);
+    return true;
   }
   async clearTextBySelector(selector: Selector): Promise<boolean> {
-    const r = await (this.client as any).send('clearTextBySelector', { selector: selectorToJson(selector) });
-    return r.success === true;
+    const c = await this.layoutCenter(selector);
+    if (!c) return false;
+    await idb.tap(c.x, c.y);
+    for (let i = 0; i < 100; i++) {
+      try { await idb.pressKey(42); } catch { break; }
+    }
+    return true;
   }
   async tapByText(text: string): Promise<boolean> {
-    // Try the Fabric shadow tree first (covers Pressable / Touchable* with
-    // matching text content), then fall back to a UIKit accessibility
-    // walk via tapByLabel — that's how we hit native UITabBar items,
-    // alert buttons, system sheets, etc.
-    if (await this.tapBySelector({ text })) return true;
-    const r = await (this.client as any).send('tapByLabel', { text });
-    return r.success === true;
+    // UIKit accessibility-label walk first. Tab bars, alert buttons,
+    // navigation back buttons, and most native widgets carry a clean
+    // accessibilityLabel that matches the user-visible text exactly,
+    // so this finds the right one even when the same word appears
+    // multiple times in the React tree (e.g. "Cart" in a product card
+    // AND in the tab bar). Fabric's text match is a substring scan,
+    // so it grabs the first hit regardless of tap-ability.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r: any = await (this.client as any).send('getViewWindowFrameByLabel', { text });
+    const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
+    if (data && data.width > 0 && data.height > 0) {
+      await idb.tap(data.x + data.width / 2, data.y + data.height / 2);
+      return true;
+    }
+    // Fallback: Fabric shadow tree text match, idb tap at the centre.
+    // Used for components that have on-screen text but no
+    // accessibilityLabel (custom buttons, decorative cards).
+    const c = await this.layoutCenter({ text });
+    if (c) {
+      await idb.tap(c.x, c.y);
+      return true;
+    }
+    return false;
   }
   async tapAlertButton(buttonText: string): Promise<boolean> {
     const r = await (this.client as any).send('tapAlertButton', { buttonText });
@@ -186,338 +277,11 @@ export class NitroWriter implements Writer {
   }
 }
 
-// =============================================================
-// Stable writer: out-of-process via XCTest helper
-// =============================================================
-
-export interface StableContext {
-  /** Resolve a testID to absolute window-coords via XCUI findById. */
-  resolveByIdViaXCUI(testID: string): Promise<{ x: number; y: number; width: number; height: number } | null>;
-  /** Resolve a label to absolute window-coords via XCUI findByLabel. */
-  resolveByLabel(text: string): Promise<{ x: number; y: number; width: number; height: number } | null>;
-  /** Read screen / safe-area metadata once and cache. */
-  getScreen(): Promise<ScreenSize>;
-  /** Fabric layout (React-surface coords + safe-area inset added in caller). */
-  getLayoutMetrics(testID: string): Promise<{ x: number; y: number; width: number; height: number; screenX: number; screenY: number } | null>;
-  /** Nitro selector → element info (for compound id+state lookups). */
-  findBySelectorLayout(selector: Selector): Promise<{ x: number; y: number; width: number; height: number; screenX: number; screenY: number } | null>;
-  /**
-   * In-app keyboard dismiss via Nitro. XCTest runs in a separate
-   * process so its UIApplication.shared cannot reach the user app's
-   * responder chain. RN TextInputs ignore tap-outside, so we route
-   * the dismiss through Nitro's resignFirstResponder helper.
-   */
-  hideKeyboardViaNitro(): Promise<boolean>;
-}
-
-export class XCTestWriter implements Writer {
-  readonly mode = 'stable' as const;
-  constructor(private xctest: XCTestClient, private ctx: StableContext) {}
-
-  describe(action: string): string {
-    return `xcui ${action}`;
-  }
-
-  async tapAt(x: number, y: number): Promise<boolean> {
-    await this.xctest.tap(x, y);
-    return true;
-  }
-
-  // Tap-by-id flow: prefer XCUI findById (uses hittablePoint on the
-  // matched accessible element); fall back to Fabric layout + safe-area
-  // adjusted coord tap.
-  async tap(testID: string): Promise<boolean> {
-    try {
-      await this.xctest.tapById(testID);
-      return true;
-    } catch {
-      const coords = await this.coordsFromFabric(testID);
-      if (!coords) return false;
-      await this.xctest.tap(coords.x, coords.y);
-      return true;
-    }
-  }
-  async doubleTap(testID: string): Promise<boolean> {
-    const c = await this.coords(testID);
-    if (!c) return false;
-    await this.xctest.doubleTap(c.x, c.y);
-    return true;
-  }
-  async longPress(testID: string, durationMs: number): Promise<boolean> {
-    const c = await this.coords(testID);
-    if (!c) return false;
-    await this.xctest.longPress(c.x, c.y, durationMs);
-    return true;
-  }
-  async typeText(_testID: string | null, text: string): Promise<boolean> {
-    await this.xctest.typeText(text);
-    return true;
-  }
-  async clearText(testID: string): Promise<boolean> {
-    if (!(await this.tap(testID))) return false;
-    for (let i = 0; i < 100; i++) {
-      try { await this.xctest.pressKey('backspace'); } catch { break; }
-    }
-    return true;
-  }
-  async eraseText(_testID: string | null, count: number): Promise<boolean> {
-    for (let i = 0; i < count; i++) {
-      try { await this.xctest.pressKey('backspace'); } catch { return i > 0; }
-    }
-    return true;
-  }
-  async pressKey(_testID: string | null, keyName: string): Promise<boolean> {
-    await this.xctest.pressKey(keyName);
-    return true;
-  }
-  async scroll(_testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
-    const screen = await this.ctx.getScreen();
-    const cx = 0.5;
-    const cy = 0.5;
-    const dx = (direction === 'left' ? distance : direction === 'right' ? -distance : 0) / screen.width;
-    const dy = (direction === 'up' ? distance : direction === 'down' ? -distance : 0) / screen.height;
-    await this.xctest.swipe(cx, cy, clamp(cx + dx), clamp(cy + dy), 250);
-    return true;
-  }
-  async swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
-    return this.scroll(testID, direction, distance);
-  }
-  async scrollTo(_scrollViewTestID: string, elementTestID: string): Promise<boolean> {
-    // XCUI's tapById scrolls the element into view internally; reuse to
-    // bring the element above the keyboard / fold. We don't actually tap.
-    // Simplest path: call findById which makes the element key-visible.
-    const f = await this.ctx.resolveByIdViaXCUI(elementTestID);
-    return f != null;
-  }
-  async back(): Promise<boolean> {
-    await this.xctest.back();
-    return true;
-  }
-  async hideKeyboard(): Promise<boolean> {
-    return this.ctx.hideKeyboardViaNitro();
-  }
-  async tapBySelector(selector: Selector): Promise<boolean> {
-    if (selector.text && !selector.id) {
-      const t = typeof selector.text === 'string' ? selector.text : selector.text.pattern;
-      return this.tapByText(t);
-    }
-    if (selector.id && !selector.text) return this.tap(selector.id);
-    const layout = await this.ctx.findBySelectorLayout(selector);
-    if (!layout) return false;
-    const screen = await this.ctx.getScreen();
-    const cx = (layout.screenX + layout.width / 2) / screen.width;
-    const cy = (layout.screenY + layout.height / 2 + screen.safeAreaTop) / screen.height;
-    await this.xctest.tap(cx, cy);
-    return true;
-  }
-  async doubleTapBySelector(selector: Selector): Promise<boolean> {
-    if (selector.id && !selector.text) return this.doubleTap(selector.id);
-    return false;
-  }
-  async longPressBySelector(selector: Selector, durationMs: number): Promise<boolean> {
-    if (selector.id && !selector.text) return this.longPress(selector.id, durationMs);
-    return false;
-  }
-  async typeTextBySelector(selector: Selector, text: string): Promise<boolean> {
-    if (selector.id) {
-      if (!(await this.tap(selector.id))) return false;
-    } else if (selector.text) {
-      const t = typeof selector.text === 'string' ? selector.text : selector.text.pattern;
-      if (!(await this.tapByText(t))) return false;
-    }
-    await this.xctest.typeText(text);
-    return true;
-  }
-  async clearTextBySelector(selector: Selector): Promise<boolean> {
-    if (selector.id) return this.clearText(selector.id);
-    return false;
-  }
-  async tapByText(text: string): Promise<boolean> {
-    // Use XCUI's element-relative tap (tapByLabel resolves to a Button or
-    // Text and calls el.tap()). Coord-only taps at the static text's frame
-    // center sometimes miss the Pressable's onPress, even when the touch
-    // is within the wrapper's bounds.
-    try {
-      await this.xctest.tapByLabel(text, false);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  async tapAlertButton(buttonText: string): Promise<boolean> {
-    await this.xctest.tapAlertButton(buttonText);
-    return true;
-  }
-  async dismissAlert(): Promise<boolean> {
-    await this.xctest.dismissAlert();
-    return true;
-  }
-  async setClipboard(text: string): Promise<boolean> {
-    await this.xctest.setPasteboard(text);
-    return true;
-  }
-  async pasteToFocused(): Promise<boolean> {
-    await this.xctest.paste();
-    return true;
-  }
-
-  private async coords(testID: string): Promise<{ x: number; y: number } | null> {
-    const xcui = await this.ctx.resolveByIdViaXCUI(testID);
-    const screen = await this.ctx.getScreen();
-    if (xcui) {
-      return {
-        x: (xcui.x + xcui.width / 2) / screen.width,
-        y: (xcui.y + xcui.height / 2) / screen.height,
-      };
-    }
-    return this.coordsFromFabric(testID);
-  }
-
-  private async coordsFromFabric(testID: string): Promise<{ x: number; y: number } | null> {
-    const layout = await this.ctx.getLayoutMetrics(testID);
-    if (!layout) return null;
-    const screen = await this.ctx.getScreen();
-    return {
-      x: (layout.screenX + layout.width / 2) / screen.width,
-      y: (layout.screenY + layout.height / 2 + screen.safeAreaTop) / screen.height,
-    };
-  }
-}
-
-function clamp(n: number): number {
-  return Math.max(0.02, Math.min(0.98, n));
-}
-
-// =============================================================
-// Hybrid writer: try fast Nitro first, fall back to XCTest helper
-//
-// Most production flows touch only Pressable / TextInput / ScrollView /
-// alert / native-tab paths the in-app fast writer can handle. The few
-// gestures it can't (RNGH pan/pinch/swipe-to-dismiss, deep modal taps,
-// freshly-mounted views before the touch handler attaches) silently
-// escalate to XCUI HID injection — slower but bulletproof. Verbose
-// output flags every fallback so flaky targets are obvious.
-// =============================================================
-
-export class HybridWriter implements Writer {
-  readonly mode = 'fast' as const;
-  private lastUsed: 'nitro' | 'xctest' = 'nitro';
-
-  constructor(
-    private fast: NitroWriter,
-    private slow: XCTestWriter,
-    private slowCtx: StableContext,
-    private onFallback?: (op: string, selector: unknown) => void
-  ) {}
-
-  describe(action: string): string {
-    return this.lastUsed === 'nitro' ? `nitro ${action}` : `xctest-fallback ${action}`;
-  }
-
-  private async tryFastThenSlow<T extends unknown[]>(
-    op: string,
-    selectorForLog: unknown,
-    fastFn: () => Promise<boolean>,
-    slowFn: () => Promise<boolean>,
-    ..._args: T
-  ): Promise<boolean> {
-    if (await fastFn()) {
-      this.lastUsed = 'nitro';
-      return true;
-    }
-    if (this.onFallback) this.onFallback(op, selectorForLog);
-    const ok = await slowFn();
-    this.lastUsed = ok ? 'xctest' : 'nitro';
-    return ok;
-  }
-
-  tap(testID: string) {
-    return this.tryFastThenSlow('tap', { id: testID }, () => this.fast.tap(testID), () => this.slow.tap(testID));
-  }
-  tapAt(x: number, y: number) {
-    // Fast (Nitro) has no HID at-coord path; go straight to XCUI.
-    return this.slow.tapAt(x, y);
-  }
-  doubleTap(testID: string) {
-    return this.tryFastThenSlow('doubleTap', { id: testID }, () => this.fast.doubleTap(testID), () => this.slow.doubleTap(testID));
-  }
-  longPress(testID: string, durationMs: number) {
-    return this.tryFastThenSlow('longPress', { id: testID }, () => this.fast.longPress(testID, durationMs), () => this.slow.longPress(testID, durationMs));
-  }
-  typeText(testID: string | null, text: string) {
-    return this.tryFastThenSlow('typeText', { id: testID, text }, () => this.fast.typeText(testID, text), () => this.slow.typeText(testID, text));
-  }
-  clearText(testID: string) {
-    return this.tryFastThenSlow('clearText', { id: testID }, () => this.fast.clearText(testID), () => this.slow.clearText(testID));
-  }
-  eraseText(testID: string | null, count: number) {
-    return this.tryFastThenSlow('eraseText', { id: testID, count }, () => this.fast.eraseText(testID, count), () => this.slow.eraseText(testID, count));
-  }
-  pressKey(testID: string | null, keyName: string) {
-    return this.tryFastThenSlow('pressKey', { keyName }, () => this.fast.pressKey(testID, keyName), () => this.slow.pressKey(testID, keyName));
-  }
-  scroll(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number) {
-    return this.tryFastThenSlow('scroll', { direction }, () => this.fast.scroll(testID, direction, distance), () => this.slow.scroll(testID, direction, distance));
-  }
-  swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number) {
-    return this.tryFastThenSlow('swipe', { direction }, () => this.fast.swipe(testID, direction, distance), () => this.slow.swipe(testID, direction, distance));
-  }
-  scrollTo(scrollViewTestID: string, elementTestID: string) {
-    return this.tryFastThenSlow('scrollTo', { id: elementTestID }, () => this.fast.scrollTo(scrollViewTestID, elementTestID), () => this.slow.scrollTo(scrollViewTestID, elementTestID));
-  }
-  back() {
-    return this.tryFastThenSlow('back', null, () => this.fast.back(), () => this.slow.back());
-  }
-  hideKeyboard() {
-    return this.tryFastThenSlow('hideKeyboard', null, () => this.fast.hideKeyboard(), () => this.slow.hideKeyboard());
-  }
-  tapBySelector(selector: Selector) {
-    return this.tryFastThenSlow('tapBySelector', selector, () => this.fast.tapBySelector(selector), () => this.slow.tapBySelector(selector));
-  }
-  doubleTapBySelector(selector: Selector) {
-    return this.tryFastThenSlow('doubleTapBySelector', selector, () => this.fast.doubleTapBySelector(selector), () => this.slow.doubleTapBySelector(selector));
-  }
-  longPressBySelector(selector: Selector, durationMs: number) {
-    return this.tryFastThenSlow('longPressBySelector', selector, () => this.fast.longPressBySelector(selector, durationMs), () => this.slow.longPressBySelector(selector, durationMs));
-  }
-  typeTextBySelector(selector: Selector, text: string) {
-    return this.tryFastThenSlow('typeTextBySelector', selector, () => this.fast.typeTextBySelector(selector, text), () => this.slow.typeTextBySelector(selector, text));
-  }
-  clearTextBySelector(selector: Selector) {
-    return this.tryFastThenSlow('clearTextBySelector', selector, () => this.fast.clearTextBySelector(selector), () => this.slow.clearTextBySelector(selector));
-  }
-  tapByText(text: string) {
-    // Nitro fast-path: in-app C++ EventDispatcher walks the Fabric shadow
-    // tree, finds the matching node, walks up to the nearest View with a
-    // TouchEventEmitter, and dispatches a synthetic touchStart + touchEnd
-    // through RN's responder chain. Pressability fires onPress in ~1ms.
-    // Falls back to XCUI HID injection only when no Fabric node matches
-    // (native tab-bar items, system alert buttons).
-    return this.tryFastThenSlow(
-      'tapByText',
-      { text },
-      () => this.fast.tapByText(text),
-      () => this.slow.tapByText(text),
-    );
-  }
-  tapAlertButton(buttonText: string) {
-    return this.tryFastThenSlow('tapAlertButton', { text: buttonText }, () => this.fast.tapAlertButton(buttonText), () => this.slow.tapAlertButton(buttonText));
-  }
-  dismissAlert() {
-    return this.tryFastThenSlow('dismissAlert', null, () => this.fast.dismissAlert(), () => this.slow.dismissAlert());
-  }
-  setClipboard(text: string) {
-    return this.tryFastThenSlow('setClipboard', null, () => this.fast.setClipboard(text), () => this.slow.setClipboard(text));
-  }
-  pasteToFocused() {
-    return this.tryFastThenSlow('pasteToFocused', null, () => this.fast.pasteToFocused(), () => this.slow.pasteToFocused());
-  }
-}
-
-// Mirror of EnnioClient.selectorToJson; lifted here so writer.ts has
-// no concrete EnnioClient dependency on its own selector encoder.
+/**
+ * Encode a Maestro selector for the in-app SelectorParser. Strips
+ * undefined keys so the native side parses cleanly.
+ */
 function selectorToJson(selector: Selector): string {
-  // Strip undefined keys so the native side parses cleanly.
   const out: Record<string, unknown> = {};
   if (selector.id !== undefined) out.id = selector.id;
   if (selector.text !== undefined) {

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, Alert, Pressable } from 'react-native';
 import { PressableScale } from 'pressto';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -87,11 +87,16 @@ export default function HomeScreen() {
           </Text>
         </View>
         {!isAuthenticated && (
-          <Link href="/auth/login" asChild>
-            <PressableScale style={styles.signInButton} testID="home-signin-btn">
-              <Text style={styles.signInText}>Sign In</Text>
-            </PressableScale>
-          </Link>
+          <Pressable
+            style={styles.signInButton}
+            onPress={() => {
+              Alert.alert('signin tap', 'home-signin-btn onPress fired');
+              router.push('/auth/login');
+            }}
+            testID="home-signin-btn"
+          >
+            <Text style={styles.signInText}>Sign In</Text>
+          </Pressable>
         )}
         <PressableScale
           style={[styles.signInButton, { backgroundColor: '#10b981' }]}

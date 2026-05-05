@@ -420,6 +420,105 @@ std::vector<std::string> EnnioRuntimeHelper::getAlertButtons() {
 // PressOut; sending both within the same runloop tick can leave the
 // touch in an indeterminate state, so we wait one runloop iteration
 // and reset the timestamp on the End phase.
+/**
+ * Synthesise a UITouch (Began + Ended) at an absolute window-coordinate
+ * point. UIKit's hit-test routes the touch through the responder chain,
+ * which fires Pressable / UIControl / accessibilityActivate handlers
+ * regardless of which view owns the gesture. ~5 ms in-process, no HID,
+ * no XCTest.
+ */
+static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
+    UIApplication* app = [UIApplication sharedApplication];
+    UIWindow* window = nil;
+    for (UIScene* scene in app.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        UIWindowScene* ws = (UIWindowScene*)scene;
+        for (UIWindow* w in ws.windows) {
+            if (w.isKeyWindow) { window = w; break; }
+        }
+        if (window) break;
+        if (ws.windows.count > 0) window = ws.windows.firstObject;
+    }
+    if (!window) return NO;
+
+    UIView* hit = [window hitTest:locationInWindow withEvent:nil];
+    if (!hit) hit = window;
+    // RN Pressable's touch processor inspects touch.view to decide which
+    // shadow node owns the gesture. Hit-test can return an inner Text /
+    // Image leaf that has no React responder; walk up to the nearest
+    // RCTViewComponentView so the touch is attributed to the wrapper
+    // React renders.
+    UIView* reactView = hit;
+    while (reactView && ![NSStringFromClass([reactView class]) hasPrefix:@"RCT"]) {
+        reactView = reactView.superview;
+    }
+    if (reactView) hit = reactView;
+    NSLog(@"[Ennio] tapAtPoint window=(%.1f,%.1f) hit=%@",
+          locationInWindow.x, locationInWindow.y, NSStringFromClass([hit class]));
+
+    // UIControl subclasses (UIButton, RNGestureHandlerButton from RNGH /
+    // pressto, etc.) wire their onPress to UIControlEvent.touchUpInside,
+    // not to the UIWindow.sendEvent → touchesBegan responder chain.
+    // Walk up to find the nearest enabled UIControl and fire its actions
+    // directly. Falls through to synthesised touches for pure RN
+    // Pressable / TouchableNativeFeedback that do listen on the
+    // responder chain.
+    for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
+        if ([cursor isKindOfClass:[UIControl class]]) {
+            UIControl* ctrl = (UIControl*)cursor;
+            if (ctrl.enabled) {
+                [ctrl sendActionsForControlEvents:UIControlEventTouchUpInside];
+                return YES;
+            }
+        }
+    }
+
+    UIEvent* event = nil;
+    if ([app respondsToSelector:@selector(_touchesEvent)]) {
+        event = [app _touchesEvent];
+    }
+    if (!event) return NO;
+
+    UITouch* touch = [[UITouch alloc] init];
+    if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
+        [touch _setLocationInWindow:locationInWindow resetPrevious:NO];
+    } else {
+        [touch setValue:[NSValue valueWithCGPoint:locationInWindow] forKey:@"locationInWindow"];
+    }
+    [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
+    [touch setValue:window forKey:@"window"];
+    [touch setValue:hit forKey:@"view"];
+    [touch setValue:@(1) forKey:@"tapCount"];
+    NSTimeInterval beganAt = [[NSProcessInfo processInfo] systemUptime];
+    [touch setValue:@(beganAt) forKey:@"timestamp"];
+    if ([touch respondsToSelector:@selector(_setIsFirstTouchForView:)]) {
+        [touch _setIsFirstTouchForView:YES];
+    }
+    @try {
+        if ([event respondsToSelector:@selector(_clearTouches)]) [event _clearTouches];
+        if ([event respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
+            [event _addTouch:touch forDelayedDelivery:NO];
+        }
+        [app sendEvent:event];
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.030]];
+
+        UIEvent* endEvent = [app respondsToSelector:@selector(_touchesEvent)] ? [app _touchesEvent] : event;
+        [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
+        [touch setValue:@(beganAt + 0.030) forKey:@"timestamp"];
+        if (endEvent != event) {
+            if ([endEvent respondsToSelector:@selector(_clearTouches)]) [endEvent _clearTouches];
+            if ([endEvent respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
+                [endEvent _addTouch:touch forDelayedDelivery:NO];
+            }
+        }
+        [app sendEvent:endEvent];
+        return YES;
+    } @catch (NSException* e) {
+        NSLog(@"[Ennio] synthesizeTouchAtPoint: %@", e.reason);
+        return NO;
+    }
+}
+
 static BOOL synthesizeTouchAtViewCenter(UIView* view) {
     if (!view || !view.window) return NO;
     UIWindow* window = view.window;
@@ -725,6 +824,82 @@ bool EnnioRuntimeHelper::tap(const std::string& testID) {
     return ok;
 }
 
+std::tuple<double, double, double, double>
+EnnioRuntimeHelper::getViewWindowFrame(const std::string& testID) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block double rx = 0, ry = 0, rw = 0, rh = 0;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view || !view.window) return;
+        CGRect inWindow = [view convertRect:view.bounds toView:view.window];
+        rx = inWindow.origin.x;
+        ry = inWindow.origin.y;
+        rw = inWindow.size.width;
+        rh = inWindow.size.height;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return {rx, ry, rw, rh};
+}
+
+std::pair<double, double> EnnioRuntimeHelper::getSurfaceOffset() {
+    __block double ox = 0, oy = 0;
+    void (^block)(void) = ^{
+        UIWindow* window = nil;
+        UIApplication* app = [UIApplication sharedApplication];
+        for (UIScene* scene in app.connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            UIWindowScene* ws = (UIWindowScene*)scene;
+            for (UIWindow* w in ws.windows) {
+                if (w.isKeyWindow) { window = w; break; }
+            }
+            if (window) break;
+            if (ws.windows.count > 0) window = ws.windows.firstObject;
+        }
+        if (!window) return;
+        UIView* root = window.rootViewController.view;
+        if (!root) return;
+        CGRect inWindow = [root convertRect:root.bounds toView:window];
+        ox = inWindow.origin.x;
+        oy = inWindow.origin.y;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return {ox, oy};
+}
+
+bool EnnioRuntimeHelper::tapAtScreenPoint(double x, double y) {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        // Fabric layout is React-surface-relative — origin (0,0) sits
+        // below the system status bar / notch. UIWindow.sendEvent
+        // expects window coords, so add the surface's offset within
+        // its window before synthesising the touch.
+        UIWindow* keyWindow = nil;
+        UIApplication* app = [UIApplication sharedApplication];
+        for (UIScene* scene in app.connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            UIWindowScene* ws = (UIWindowScene*)scene;
+            for (UIWindow* w in ws.windows) {
+                if (w.isKeyWindow) { keyWindow = w; break; }
+            }
+            if (keyWindow) break;
+        }
+        CGPoint point = CGPointMake((CGFloat)x, (CGFloat)y);
+        if (keyWindow) {
+            // The React surface is the first non-trivial child of the
+            // window's root. Find it and convert.
+            UIView* surface = keyWindow.rootViewController.view;
+            if (surface) {
+                CGRect inWindow = [surface convertRect:surface.bounds toView:keyWindow];
+                point.x += inWindow.origin.x;
+                point.y += inWindow.origin.y;
+            }
+        }
+        ok = synthesizeTouchAtPoint(point);
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
 bool EnnioRuntimeHelper::doubleTap(const std::string& testID) {
     if (!tap(testID)) return false;
     [NSThread sleepForTimeInterval:0.12];
@@ -764,6 +939,29 @@ static UIView* findLabelMatch(UIView* root, NSString* text, UIView* best) {
         best = findLabelMatch(sub, text, best);
     }
     return best;
+}
+
+std::tuple<double, double, double, double>
+EnnioRuntimeHelper::getViewWindowFrameByLabel(const std::string& text) {
+    NSString* label = [NSString stringWithUTF8String:text.c_str()];
+    __block double rx = 0, ry = 0, rw = 0, rh = 0;
+    void (^block)(void) = ^{
+        UIView* hit = nil;
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+                hit = findLabelMatch(win, label, hit);
+            }
+        }
+        if (!hit || !hit.window) return;
+        CGRect inWindow = [hit convertRect:hit.bounds toView:hit.window];
+        rx = inWindow.origin.x;
+        ry = inWindow.origin.y;
+        rw = inWindow.size.width;
+        rh = inWindow.size.height;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return {rx, ry, rw, rh};
 }
 
 bool EnnioRuntimeHelper::tapByLabel(const std::string& text) {

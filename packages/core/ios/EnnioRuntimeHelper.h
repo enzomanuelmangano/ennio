@@ -86,6 +86,35 @@ public:
 
     bool tap(const std::string& testID);
     bool tapByLabel(const std::string& text);
+    /**
+     * Tap at an absolute window-coordinate point (logical pt, not pixels).
+     * Synthesises a UITouch sequence so UIKit's hit-test routes the
+     * gesture through the responder chain. Used by tapBySelector when a
+     * shadow-tree match resolves to a layout instead of a UIView with a
+     * testID.
+     */
+    bool tapAtScreenPoint(double x, double y);
+    /**
+     * Origin of the React surface inside the user app's window, in
+     * logical points. Adds to Fabric's surface-relative screenX/screenY
+     * to get window-relative coords idb can tap on.
+     */
+    std::pair<double, double> getSurfaceOffset();
+    /**
+     * Window-relative frame of the UIView with the given testID. Returns
+     * (x, y, w, h) all in logical points. Width/height = 0 when not
+     * found. This bypasses Fabric's surface-relative layout entirely:
+     * the value already accounts for ScrollView contentInsetAdjustment,
+     * safe-area padding, and any other UIKit-runtime offsets.
+     */
+    std::tuple<double, double, double, double> getViewWindowFrame(const std::string& testID);
+    /**
+     * Window-relative frame for the first UIView whose accessibilityLabel
+     * matches `text` (substring). Used for native widgets that don't show
+     * up in the Fabric tree — UITabBar items, alert buttons, system
+     * sheets, RNScreens stack headers.
+     */
+    std::tuple<double, double, double, double> getViewWindowFrameByLabel(const std::string& text);
     bool doubleTap(const std::string& testID);
     bool longPress(const std::string& testID, int durationMs);
     bool typeText(const std::string& testID, const std::string& text);
