@@ -32,8 +32,22 @@ export class NitroReader implements Reader {
   existsById(testID: string) {
     return this.client.exists(testID);
   }
-  isVisibleById(testID: string) {
-    return this.client.isVisible(testID);
+  async isVisibleById(testID: string) {
+    // Fabric's isVisible compares the shadow node's screenX/Y (offset
+    // inside the React surface) against a hardcoded screen size — when
+    // the element lives in a Stack-pushed screen its surface origin
+    // differs from the window's, and the comparison rejects elements
+    // that are clearly on screen. Trust UIKit's window-frame instead.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r: any = await (this.client as any).send('getViewWindowFrame', { testID });
+    const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
+    if (!data || data.width <= 0 || data.height <= 0) return false;
+    // iPhone 17 Pro logical viewport. Generous-enough for any iPhone
+    // tested; anything past this is unambiguously off-screen.
+    const w = 440, h = 956;
+    if (data.x + data.width < 0 || data.y + data.height < 0) return false;
+    if (data.x > w || data.y > h) return false;
+    return true;
   }
   existsBySelector(selector: Selector) {
     return this.client.existsBySelector(selector);

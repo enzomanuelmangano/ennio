@@ -83,14 +83,82 @@ export class NitroWriter implements Writer {
     return this.surfaceOffset;
   }
 
+  private screenSize: { width: number; height: number } | null = null;
+  private async getScreenSize(): Promise<{ width: number; height: number }> {
+    if (this.screenSize) return this.screenSize;
+    try {
+      // The "home" / first scene's window-frame doubles as the app
+      // viewport — we use it to decide if a tap centre is on-screen.
+      // Falling back to an iPhone-sized default keeps things safe if
+      // Nitro hasn't surfaced a key window yet.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const r: any = await (this.client as any).send('getViewWindowFrame', { testID: '__ennio_screen__' });
+      const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
+      if (data && data.width > 0 && data.height > 0) {
+        this.screenSize = { width: data.width, height: data.height };
+        return this.screenSize;
+      }
+    } catch { /* fall through */ }
+    this.screenSize = { width: 402, height: 874 };
+    return this.screenSize;
+  }
+
+  private async scrollAuto(direction: 'up' | 'down' | 'left' | 'right', distance: number, testID = ''): Promise<void> {
+    // Vertical scrolls work well via Nitro (it walks up to find the
+    // enclosing UIScrollView and adjusts contentOffset). Horizontal
+    // scrolls inside a vertical-host page (featured carousel under a
+    // ScrollView) fool the topmost-scrollable heuristic, so use idb
+    // gesture swipes for those — the swipe lands wherever the finger
+    // is, and UIKit hands it to whichever recogniser claims it. Finger
+    // direction inverts vs content direction.
+    if (direction === 'left' || direction === 'right') {
+      const cx = 200, cy = 450;
+      const endX = direction === 'right' ? cx - distance : cx + distance;
+      try {
+        await idb.swipe(cx, cy, endX, cy, 200);
+      } catch { /* best effort */ }
+      return;
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (this.client as any).send('scroll', { testID, direction, distance });
+    } catch { /* best effort */ }
+  }
+
   async tap(testID: string): Promise<boolean> {
+    // Direct onPress invocation. The native WebSocketServer forwards
+    // this to `@ennio/core`'s in-app JS handler, which walks the React
+    // Fiber tree, finds the testID, and calls its onPress prop. Skips
+    // iOS HID, gesture coordinator, UIPresentationController gating,
+    // and recogniser arming entirely. Library-agnostic — works for any
+    // touchable that surfaces an `onPress` prop on its React node
+    // (Pressable, TouchableOpacity, RNGH BaseButton, pressto). Returns
+    // false when the JS handler isn't connected, the testID isn't in
+    // the live fiber tree, or onPress threw — caller falls through to
+    // idb HID for native widgets / alert buttons / unmounted views.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const direct: any = await (this.client as any).send('invokeOnPress', { testID });
+    if (direct?.success === true) return true;
     const center = await this.layoutCenter({ id: testID });
     if (!center) return false;
-    await idb.tap(center.x, center.y);
+    // The fiber walk found the testID but no onPress — typically a
+    // TextInput. If a keyboard is up from a previously-focused field,
+    // the next idb tap lands on the keyboard window (which sits over
+    // the field), focus stays on the prior input, and a subsequent
+    // typeText injects characters into the wrong place. Drop the
+    // keyboard first so the target field is hit-testable.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (this.client as any).send('hideKeyboard', {});
+      await new Promise((r) => setTimeout(r, 120));
+    } catch { /* best effort */ }
+    const fresh = await this.layoutCenter({ id: testID });
+    const target = fresh ?? center;
+    await idb.tap(target.x, target.y, 150);
     return true;
   }
   async tapAt(x: number, y: number): Promise<boolean> {
-    await idb.tap(x, y);
+    await idb.tap(x, y, 150);
     return true;
   }
   /**
@@ -101,17 +169,65 @@ export class NitroWriter implements Writer {
     // testID-only selectors: ask iOS for the UIView's window frame
     // directly. UIKit's convertRect accounts for everything Fabric's
     // surface-relative layout misses (ScrollView contentInsetAdjustment,
-    // safe-area padding, modal presentations). One round-trip, exact.
+    // safe-area padding, modal presentations). Retry briefly if the view
+    // exists in Fabric but isn't yet attached to a window (window=nil → 0
+    // frame); this happens on the first tap after a layout-causing prop
+    // update like useSafeAreaInsets's 0→real value transition.
     if (selector.id && !selector.text && !selector.point) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const r: any = await (this.client as any).send('getViewWindowFrame', { testID: selector.id });
-      const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
-      if (data && data.width > 0 && data.height > 0) {
-        if (process.env.ENNIO_DEBUG_IDB) {
-          console.error(`[layout] id=${selector.id} → window=(${data.x},${data.y},${data.width},${data.height})`);
+      const screen = await this.getScreenSize();
+      for (let i = 0; i < 8; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r: any = await (this.client as any).send('getViewWindowFrame', { testID: selector.id });
+        const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
+        if (data && data.width > 0 && data.height > 0) {
+          // Element is in Fabric tree and attached to a window, but the
+          // tap centre might still be off the visible screen if the host
+          // FlatList / ScrollView is positioned past the viewport.
+          // Maestro auto-scrolls in this case; do the same so flows that
+          // rely on second-row product cards (etc.) don't have to add
+          // explicit scroll commands.
+          const cx = data.x + data.width / 2;
+          const cy = data.y + data.height / 2;
+          const onScreen = cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height;
+          if (onScreen) {
+            if (process.env.ENNIO_DEBUG_IDB) {
+              console.error(`[layout] id=${selector.id} → window=(${data.x},${data.y},${data.width},${data.height})`);
+            }
+            return { x: cx, y: cy };
+          }
+          // Try to scroll the host into view, then re-measure. Pick
+          // axis based on which side of the screen the centre is past;
+          // horizontal carousels (featured products row) need a "right"
+          // scroll, vertical lists need "down".
+          const dx = cx < 0 ? cx - 100 : cx > screen.width ? cx - screen.width + 100 : 0;
+          const dy = cy < 0 ? cy - 100 : cy > screen.height ? cy - screen.height + 200 : 0;
+          if (Math.abs(dx) > Math.abs(dy) && dx !== 0) {
+            await this.scrollAuto(dx > 0 ? 'right' : 'left', Math.abs(dx), selector.id);
+          } else if (dy !== 0) {
+            await this.scrollAuto(dy > 0 ? 'down' : 'up', Math.abs(dy), selector.id);
+          }
+          await new Promise((res) => setTimeout(res, 200));
+          continue;
         }
-        return { x: data.x + data.width / 2, y: data.y + data.height / 2 };
+        // No UIView (window=nil) — element exists in Fabric tree but is
+        // virtualised below the FlatList's render window. Use Fabric's
+        // accumulated offset to figure out which way to scroll, then let
+        // the next iteration pick it up via getViewWindowFrame.
+        const found = await this.client.findBySelector(selector);
+        const layout = (found as { layout?: { screenX: number; screenY: number; width: number; height: number } } | null | undefined)?.layout;
+        if (layout && layout.height > 0) {
+          const offset = await this.getSurfaceOffset();
+          const cy = layout.screenY + layout.height / 2 + offset.y;
+          const dy = cy < 0 ? cy - 100 : cy - screen.height + 200;
+          if (Math.abs(dy) > 50) {
+            await this.scrollAuto(dy > 0 ? 'down' : 'up', Math.abs(dy));
+            await new Promise((res) => setTimeout(res, 200));
+            continue;
+          }
+        }
+        await new Promise((res) => setTimeout(res, 100));
       }
+      return null;
     }
     // Compound / text-only selectors: walk the Fabric shadow tree, then
     // add the React surface's window offset.
@@ -174,12 +290,17 @@ export class NitroWriter implements Writer {
     return false;
   }
   async scroll(_testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
-    // Scroll = swipe at the viewport centre. Direction inverts because
-    // a swipe up = scroll down (content moves up).
+    // Scroll = swipe at the viewport centre. Finger direction inverts
+    // versus content direction: scrolling DOWN (revealing content
+    // further down the list) requires swiping the finger UP. Likewise
+    // scrolling RIGHT requires swiping LEFT.
     const cx = 200, cy = 450; // safe-area-ish centre for 402x874 sims
-    const dx = direction === 'left' ? distance : direction === 'right' ? -distance : 0;
-    const dy = direction === 'up' ? distance : direction === 'down' ? -distance : 0;
-    await idb.swipe(cx, cy, cx - dx, cy - dy, 200);
+    let endX = cx, endY = cy;
+    if (direction === 'down') endY = cy - distance;
+    else if (direction === 'up') endY = cy + distance;
+    else if (direction === 'right') endX = cx - distance;
+    else if (direction === 'left') endX = cx + distance;
+    await idb.swipe(cx, cy, endX, endY, 200);
     return true;
   }
   async swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
@@ -191,6 +312,7 @@ export class NitroWriter implements Writer {
   }
   async back(): Promise<boolean> {
     const r = await (this.client as any).send('backGesture', {});
+    if (process.env.ENNIO_DEBUG_IDB) console.error(`[back] success=${r?.success}`);
     return r.success === true;
   }
   async hideKeyboard(): Promise<boolean> {
@@ -200,7 +322,7 @@ export class NitroWriter implements Writer {
   async tapBySelector(selector: Selector): Promise<boolean> {
     const c = await this.layoutCenter(selector);
     if (!c) return false;
-    await idb.tap(c.x, c.y);
+    await idb.tap(c.x, c.y, 150);
     return true;
   }
   async doubleTapBySelector(selector: Selector): Promise<boolean> {
@@ -235,26 +357,24 @@ export class NitroWriter implements Writer {
     return true;
   }
   async tapByText(text: string): Promise<boolean> {
-    // UIKit accessibility-label walk first. Tab bars, alert buttons,
-    // navigation back buttons, and most native widgets carry a clean
-    // accessibilityLabel that matches the user-visible text exactly,
-    // so this finds the right one even when the same word appears
-    // multiple times in the React tree (e.g. "Cart" in a product card
-    // AND in the tab bar). Fabric's text match is a substring scan,
-    // so it grabs the first hit regardless of tap-ability.
+    // expo-router NativeTabs renders tab bar items via UIKit/SwiftUI hosts
+    // whose UIView subtree isn't surfaced for accessibility-label walks
+    // (UITabBarButton stays opaque). Drive the UITabBarController directly
+    // before falling back to coordinate taps.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tab: any = await (this.client as any).send('tapTabByName', { name: text });
+    if (process.env.ENNIO_DEBUG_IDB) console.error(`[tapByText] '${text}' tabSwitch=${tab?.success}`);
+    if (tab?.success === true) return true;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r: any = await (this.client as any).send('getViewWindowFrameByLabel', { text });
     const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
     if (data && data.width > 0 && data.height > 0) {
-      await idb.tap(data.x + data.width / 2, data.y + data.height / 2);
+      await idb.tap(data.x + data.width / 2, data.y + data.height / 2, 150);
       return true;
     }
-    // Fallback: Fabric shadow tree text match, idb tap at the centre.
-    // Used for components that have on-screen text but no
-    // accessibilityLabel (custom buttons, decorative cards).
     const c = await this.layoutCenter({ text });
     if (c) {
-      await idb.tap(c.x, c.y);
+      await idb.tap(c.x, c.y, 150);
       return true;
     }
     return false;

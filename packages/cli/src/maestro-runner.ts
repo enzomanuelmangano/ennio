@@ -417,6 +417,16 @@ class MaestroExecutor {
     }
 
     if (selector.id) {
+      // id-based taps target an in-tree React view, not a native alert
+      // button. If a native alert is sitting on top from a prior step
+      // (Alert.alert(...) inside an onPress that the test didn't tap
+      // through) it blocks every touch. Dismiss it first so the next
+      // step doesn't get stuck on it forever.
+      if (await this.reader.isAlertPresent()) {
+        this.log('(auto-dismissing stale alert before id-tap)');
+        await this.writer.dismissAlert();
+        await this.sleep(200);
+      }
       await this.waitFor(
         () => this.selectorExists(selector),
         DEFAULT_VISIBLE_TIMEOUT,
@@ -464,13 +474,21 @@ class MaestroExecutor {
     if (!ok) throw new Error(`Tap failed: ${JSON.stringify(selector)}`);
     this.log(`tap: ${JSON.stringify(selector)} via ${this.writer.describe('tap')}`);
     this.lastTappedSelector = selector;
-    // Tiny settle: lets React commit the synchronous onPress side
-    // effect (state update, immediate router.push). Async chains that
-    // wait on network / setTimeout / Promise need an explicit
-    // `waitForAnimationToEnd` in the flow YAML — auto-waiting on every
-    // tap punishes flows that don't need it.
-    await this.sleep(60);
+    // Direct onPress dispatch (writer's primary path) is synchronous, but
+    // the resulting React work — setState, transition commit, native tab
+    // switch animation — is not. Tab-switching taps and Link navigation
+    // need ~150-250 ms before the destination surface is queryable.
+    await this.sleep(200);
   }
+
+  /**
+   * waitFor with exponential-backoff retry. If `predicate` returns false
+   * for `maxMs` total, re-runs `recover` and tries again. Used by
+   * assertVisible/assertNotVisible-after-tap so a missed idb gesture
+   * (RNGH coordinator race on a fresh modal Pressable) gets the tap
+   * re-fired automatically instead of failing the flow.
+   */
+
 
   private async doubleTap(selector: MaestroSelector): Promise<void> {
     await this.waitFor(
@@ -513,7 +531,10 @@ class MaestroExecutor {
     } else {
       await this.writer.typeText(null, text);
     }
-    await this.sleep(60);
+    // Allow the iOS bridge to flush onChangeText for the last few keys —
+    // RN commits text input asynchronously and a tight subsequent button
+    // tap (e.g. submit) reads stale state otherwise.
+    await this.sleep(250);
   }
 
   private async clearText(selector: MaestroSelector): Promise<void> {
@@ -619,6 +640,13 @@ class MaestroExecutor {
     if (processedCmd == null) return;
     if (typeof processedCmd === 'string') {
       if (processedCmd === 'back') {
+        // Dismiss any native alert first — backGesture's nav-pop path
+        // can race with a presented UIAlertController and silently
+        // become a no-op, leaving a stale alert blocking subsequent taps.
+        if (await this.reader.isAlertPresent()) {
+          await this.writer.dismissAlert();
+          await this.sleep(150);
+        }
         await this.writer.back();
         await this.sleep(120);
         return;
@@ -810,14 +838,6 @@ class MaestroExecutor {
     if ('longPress' in cmd) {
       const selector = normalizeSelector(cmd.longPress as MaestroSelector | string);
       await this.longPress(selector);
-      return;
-    }
-
-    // back (hardware back button)
-    if ('back' in cmd) {
-      // Send back command - this may need native implementation
-      console.log('  (back command - simulating)');
-      await this.sleep(100);
       return;
     }
 
