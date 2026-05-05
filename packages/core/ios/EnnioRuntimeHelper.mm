@@ -930,9 +930,31 @@ static UIView* findLabelMatch(UIView* root, NSString* text, UIView* best) {
         }
     }
     if (matches) {
-        if (!best || root.bounds.size.width * root.bounds.size.height
-                     < best.bounds.size.width * best.bounds.size.height) {
-            best = root;
+        // Verify the match is actually hittable — a Stack-pushed screen
+        // leaves its predecessor's UIViews in the tree but covers them
+        // with a new top-level view. accessibility-label finder still
+        // walks the predecessor and would tap a hidden tab bar item.
+        // Hit-test at the centre and confirm the candidate (or one of
+        // its descendants) is the topmost view.
+        BOOL hittable = YES;
+        UIWindow* win = root.window;
+        if (win) {
+            CGRect inWindow = [root convertRect:root.bounds toView:win];
+            CGPoint centre = CGPointMake(CGRectGetMidX(inWindow), CGRectGetMidY(inWindow));
+            UIView* topMost = [win hitTest:centre withEvent:nil];
+            UIView* cursor = topMost;
+            BOOL contains = NO;
+            while (cursor) {
+                if (cursor == root) { contains = YES; break; }
+                cursor = cursor.superview;
+            }
+            hittable = contains;
+        }
+        if (hittable) {
+            if (!best || root.bounds.size.width * root.bounds.size.height
+                         < best.bounds.size.width * best.bounds.size.height) {
+                best = root;
+            }
         }
     }
     for (UIView* sub in root.subviews) {
@@ -1220,6 +1242,79 @@ bool EnnioRuntimeHelper::scrollTo(const std::string& scrollViewTestID, const std
     return ok;
 }
 
+bool EnnioRuntimeHelper::tapTabByName(const std::string& name) {
+    NSString* needle = [NSString stringWithUTF8String:name.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in ((UIWindowScene*)scene).windows) {
+                UIViewController* root = win.rootViewController;
+                __block UITabBarController* tab = nil;
+                __block __weak void (^findWeak)(UIViewController*) = nil;
+                void (^find)(UIViewController*) = ^(UIViewController* vc) {
+                    if (!vc || tab) return;
+                    if ([vc isKindOfClass:[UITabBarController class]]) {
+                        tab = (UITabBarController*)vc;
+                        return;
+                    }
+                    for (UIViewController* child in vc.childViewControllers) findWeak(child);
+                    if (vc.presentedViewController) findWeak(vc.presentedViewController);
+                };
+                findWeak = find;
+                find(root);
+                if (!tab) continue;
+                NSUInteger idx = 0;
+                for (UIViewController* vc in tab.viewControllers) {
+                    NSString* title = vc.tabBarItem.title.length > 0 ? vc.tabBarItem.title : vc.title;
+                    if (title && [title compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                        // expo-router top-level routes (e.g. /product/[id],
+                        // /orders, /checkout) push over the tab bar via the
+                        // root Stack. A tab tap while one of those is on
+                        // top would only swap tabs *behind* the pushed VC —
+                        // visually nothing changes. Walk up the parent
+                        // chain and pop any nav stack that has more than
+                        // its root so the tab controller becomes visible.
+                        UIViewController* ancestor = tab.parentViewController;
+                        while (ancestor) {
+                            if ([ancestor isKindOfClass:[UINavigationController class]]) {
+                                UINavigationController* nav = (UINavigationController*)ancestor;
+                                if (nav.viewControllers.count > 1) {
+                                    [nav popToRootViewControllerAnimated:NO];
+                                }
+                            }
+                            ancestor = ancestor.parentViewController;
+                        }
+                        // Programmatic setSelectedIndex: never fires the
+                        // delegates. RNScreens emits onNativeFocusChange
+                        // from shouldSelect — so call shouldSelect first to
+                        // give expo-router NativeTabs a chance to update
+                        // its React state. Then set selectedIndex so the
+                        // native tabbar visually switches even in
+                        // controlled mode (React state will catch up via
+                        // the emitted event). Finally call didSelect so
+                        // RNScreens' stack-push child of the destination
+                        // tab is shown rather than the previous tab's
+                        // stale content.
+                        if ([tab.delegate respondsToSelector:@selector(tabBarController:shouldSelectViewController:)]) {
+                            [tab.delegate tabBarController:tab shouldSelectViewController:vc];
+                        }
+                        tab.selectedIndex = idx;
+                        if ([tab.delegate respondsToSelector:@selector(tabBarController:didSelectViewController:)]) {
+                            [tab.delegate tabBarController:tab didSelectViewController:vc];
+                        }
+                        ok = true;
+                        return;
+                    }
+                    idx++;
+                }
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
 bool EnnioRuntimeHelper::tapTab(int index) {
     __block bool ok = false;
     void (^block)(void) = ^{
@@ -1240,7 +1335,14 @@ bool EnnioRuntimeHelper::tapTab(int index) {
                 findWeak = find;
                 find(root);
                 if (tab && index >= 0 && index < (int)tab.viewControllers.count) {
+                    UIViewController* vc = tab.viewControllers[index];
+                    if ([tab.delegate respondsToSelector:@selector(tabBarController:shouldSelectViewController:)]) {
+                        [tab.delegate tabBarController:tab shouldSelectViewController:vc];
+                    }
                     tab.selectedIndex = (NSUInteger)index;
+                    if ([tab.delegate respondsToSelector:@selector(tabBarController:didSelectViewController:)]) {
+                        [tab.delegate tabBarController:tab didSelectViewController:vc];
+                    }
                     ok = true;
                     return;
                 }
@@ -1272,6 +1374,204 @@ static UINavigationController* findPoppableNavController(UIViewController* root)
         if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
     }
     return deepest;
+}
+
+std::tuple<double, double, double, double>
+EnnioRuntimeHelper::getReadyCoord(const std::string& testID, int maxWaitMs) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    NSTimeInterval start = CACurrentMediaTime();
+    NSTimeInterval deadline = start + maxWaitMs / 1000.0;
+
+    while (true) {
+        __block double rx = 0, ry = 0, rw = 0, rh = 0;
+        __block BOOL ready = NO;
+
+        void (^block)(void) = ^{
+            UIView* view = findViewByTestIDInAllWindows(tid);
+            if (!view || !view.window) return;
+            UIWindow* win = view.window;
+
+            // Chain: every ancestor must accept hits. iOS sets
+            // userInteractionEnabled = NO on UIPresentationController's
+            // containerView only DURING a present/dismiss transition,
+            // so checking the chain catches mid-transition blocking
+            // without falsely rejecting idle screens. Hidden view ⇒
+            // hit-test always misses. Alpha is intentionally NOT
+            // checked: Modal fade-in starts at alpha 0 yet iOS still
+            // delivers the touch to the layer.
+            for (UIView* v = view; v != nil; v = v.superview) {
+                if (!v.userInteractionEnabled) return;
+                if (v.hidden) return;
+            }
+
+            // No alert-level window above us. UIAlertController takes
+            // a window at UIWindowLevelAlert; HID lands on the alert,
+            // not on our target. Wait for it to clear.
+            for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+                for (UIWindow* w in ((UIWindowScene*)scene).windows) {
+                    if (w == win) continue;
+                    if (w.hidden) continue;
+                    if (w.windowLevel >= UIWindowLevelAlert) return;
+                }
+            }
+
+            CGRect inWindow = [view convertRect:view.bounds toView:win];
+            rx = inWindow.origin.x;
+            ry = inWindow.origin.y;
+            rw = inWindow.size.width;
+            rh = inWindow.size.height;
+            if (rw > 0 && rh > 0) ready = YES;
+        };
+
+        if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+        if (ready) return {rx, ry, rw, rh};
+        if (CACurrentMediaTime() >= deadline) return {0, 0, 0, 0};
+        [NSThread sleepForTimeInterval:0.020];
+    }
+}
+
+// Build a synthesized UITouch the recognizer / responder chain accepts.
+// Phase is settable on the touch directly via private KVC; window/view
+// fields are required so RN's touch handlers route the event correctly.
+static UITouch* makeSynthTouch(UIView* view, UIWindow* window, CGPoint location, UITouchPhase phase) {
+    UITouch* touch = [[UITouch alloc] init];
+    if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
+        [touch _setLocationInWindow:location resetPrevious:NO];
+    } else {
+        [touch setValue:[NSValue valueWithCGPoint:location] forKey:@"locationInWindow"];
+    }
+    [touch setValue:@(phase) forKey:@"phase"];
+    [touch setValue:window forKey:@"window"];
+    [touch setValue:view forKey:@"view"];
+    [touch setValue:@(1) forKey:@"tapCount"];
+    [touch setValue:@([[NSProcessInfo processInfo] systemUptime]) forKey:@"timestamp"];
+    if ([touch respondsToSelector:@selector(_setIsFirstTouchForView:)]) {
+        [touch _setIsFirstTouchForView:YES];
+    }
+    return touch;
+}
+
+// Recurse through a view's subtree collecting recognizers. RNGH
+// attaches its handler's recognizer (RNNativeViewGestureRecognizer /
+// RNDummyGestureRecognizer) to the host view itself or a hidden child,
+// so a superview-only walk misses it.
+static void appendRecognizersFromSubtree(UIView* view, NSMutableArray* out, NSMutableSet* seen) {
+    if (!view || [seen containsObject:[NSValue valueWithNonretainedObject:view]]) return;
+    [seen addObject:[NSValue valueWithNonretainedObject:view]];
+    for (UIGestureRecognizer* r in view.gestureRecognizers) {
+        if (r.enabled) [out addObject:r];
+    }
+    for (UIView* sub in view.subviews) {
+        appendRecognizersFromSubtree(sub, out, seen);
+    }
+}
+
+// Walk view's own + ancestors' + descendants' recognizers. Deepest-first
+// (descendants then self then ancestors) so the inner gesture-handler's
+// recogniser wins gesture-coordinator ties.
+static NSArray<UIGestureRecognizer*>* collectRecognizersDeepestFirst(UIView* view) {
+    NSMutableArray* out = [NSMutableArray array];
+    NSMutableSet* seen = [NSMutableSet set];
+    // Subtree first (deepest).
+    appendRecognizersFromSubtree(view, out, seen);
+    // Then ancestors.
+    for (UIView* v = view.superview; v != nil; v = v.superview) {
+        for (UIGestureRecognizer* r in v.gestureRecognizers) {
+            if (r.enabled) [out addObject:r];
+        }
+    }
+    return out;
+}
+
+bool EnnioRuntimeHelper::fireTapByTestID(const std::string& testID) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool ok = false;
+
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view || !view.window) return;
+        UIWindow* window = view.window;
+        CGPoint center = CGPointMake(CGRectGetMidX(view.bounds), CGRectGetMidY(view.bounds));
+        CGPoint inWindow = [view convertPoint:center toView:window];
+        NSLog(@"[Ennio][fireTap] testID=%@ class=%@ window=YES", tid, NSStringFromClass([view class]));
+
+        // Path 1: nearest enabled UIControl ancestor → fire
+        // touchUpInside actions. Covers UIButton, UISwitch, UISlider,
+        // and RNGestureHandlerButton (RNGH BaseButton / pressto) —
+        // RNGH does register UIControl actions even though its public
+        // path is the gesture handler module. If allTargets is empty
+        // for this UIControl, fall through (some custom UIControls
+        // don't use action targets).
+        for (UIView* cursor = view; cursor != nil; cursor = cursor.superview) {
+            if (![cursor isKindOfClass:[UIControl class]]) continue;
+            UIControl* ctrl = (UIControl*)cursor;
+            if (!ctrl.enabled) continue;
+            NSSet* targets = [ctrl allTargets];
+            if (targets.count == 0) continue;
+            NSLog(@"[Ennio][fireTap] sendActions on %@ targets=%lu",
+                  NSStringFromClass([ctrl class]), (unsigned long)targets.count);
+            [ctrl sendActionsForControlEvents:UIControlEventTouchUpInside];
+            ok = true;
+            return;
+        }
+
+        // Path 2: drive every gesture recogniser in the view +
+        // ancestor chain by hand. RCTSurfaceTouchHandler (the
+        // RCTRootView-level recogniser RN uses to feed its responder
+        // system) recognises a tap → JS sees onResponderRelease →
+        // Pressability fires onPress. RNNativeViewGestureRecognizer
+        // (RNGH BaseButton/pressto) recognises a tap → JS sees
+        // onActivated → RNGH BaseButton fires onPress. Bypasses
+        // UIWindow.sendEvent so UIPresentationController's
+        // mid-transition gating can't drop the touch. Calling
+        // touchesBegan:/touchesEnded: directly on the recogniser is
+        // the supported entry point — UIKit dispatches there itself
+        // during normal events.
+        NSArray<UIGestureRecognizer*>* recognizers = collectRecognizersDeepestFirst(view);
+        NSLog(@"[Ennio][fireTap] recognizers count=%lu", (unsigned long)recognizers.count);
+        for (UIGestureRecognizer* r in recognizers) {
+            NSLog(@"[Ennio][fireTap]   - %@ enabled=%d", NSStringFromClass([r class]), r.enabled);
+        }
+        if (recognizers.count > 0) {
+            UIApplication* app = [UIApplication sharedApplication];
+            UIEvent* event = [app respondsToSelector:@selector(_touchesEvent)] ? [app _touchesEvent] : nil;
+
+            UITouch* touchBegan = makeSynthTouch(view, window, inWindow, UITouchPhaseBegan);
+            NSSet* setBegan = [NSSet setWithObject:touchBegan];
+            for (UIGestureRecognizer* r in recognizers) {
+                @try { [r touchesBegan:setBegan withEvent:event]; }
+                @catch (NSException* e) { NSLog(@"[Ennio] touchesBegan throw: %@", e.reason); }
+            }
+            // Spin the runloop one tick so recognisers can transition
+            // from Possible → Began (some need a frame to commit
+            // intermediate state before they accept Ended).
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.020]];
+
+            UITouch* touchEnded = makeSynthTouch(view, window, inWindow, UITouchPhaseEnded);
+            NSSet* setEnded = [NSSet setWithObject:touchEnded];
+            for (UIGestureRecognizer* r in recognizers) {
+                @try { [r touchesEnded:setEnded withEvent:event]; }
+                @catch (NSException* e) { NSLog(@"[Ennio] touchesEnded throw: %@", e.reason); }
+            }
+            ok = true;
+            return;
+        }
+
+        // Path 3: accessibilityActivate. Last resort because it only
+        // fires onPress for views that explicitly opt in (Pressable
+        // with accessibilityRole="button"). For the rest it returns
+        // YES but does nothing visible. Returning ok=true here is
+        // best-effort; the caller's assertVisible/assertNotVisible will
+        // catch a no-op.
+        if ([view accessibilityActivate]) {
+            ok = true;
+            return;
+        }
+    };
+
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
 }
 
 bool EnnioRuntimeHelper::backGesture() {

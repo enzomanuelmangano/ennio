@@ -37,6 +37,8 @@ Pod::Spec.new do |s|
       '"$(PODS_ROOT)/Headers/Public/React-Fabric"',
       '"$(PODS_ROOT)/Headers/Private/React-Fabric"',
       '"$(PODS_ROOT)/Headers/Public/React-Core-prebuilt/React_Fabric"',
+      '"$(PODS_ROOT)/Headers/Public/React-RuntimeApple"',
+      '"$(PODS_ROOT)/Headers/Public/React-Core-prebuilt/React_RuntimeApple"',
     ].join(' ')
   }
 

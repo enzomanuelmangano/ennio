@@ -5,11 +5,23 @@
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import "EnnioRuntimeHelper.h"
 
 #if __has_include(<React/RCTSurfacePresenter.h>)
 #import <React/RCTSurfacePresenter.h>
 #endif
+
+#include <jsi/jsi.h>
+#include <functional>
+#include "../cpp/HybridEnnio.hpp"
+
+#if __has_include(<ReactCommon/RCTInstance.h>)
+#import <ReactCommon/RCTInstance.h>
+#define ENNIO_HAVE_RCTINSTANCE 1
+#endif
+
+static const int kEnnioDefaultPort = 9876;
 
 // Flag to track if Ennio has been initialized
 static BOOL _ennioInitialized = NO;
@@ -104,6 +116,48 @@ static BOOL _ennioInitialized = NO;
 
     // Call original implementation
     [self ennio_start];
+
+    // Pure-native bootstrap: pull RCTInstance from RCTHost's `_instance`
+    // ivar, ask it to run a block on the JS thread once the runtime is
+    // ready. Inside that block we have a `jsi::Runtime&` — capture it,
+    // install the fiber walker, construct HybridEnnio, start the WS
+    // server. After this, the user's app never has to import
+    // `@ennio/core`; the package autolinks via Pod and bootstraps
+    // entirely from native.
+    Ivar instanceIvar = class_getInstanceVariable([self class], "_instance");
+    if (instanceIvar) {
+        id rctInstance = object_getIvar(self, instanceIvar);
+#ifdef ENNIO_HAVE_RCTINSTANCE
+        if ([rctInstance isKindOfClass:[RCTInstance class]]) {
+            __strong RCTInstance* strongInstance = (RCTInstance*)rctInstance;
+            // Hand a JS-thread executor to HybridEnnio. The WS-server
+            // thread will call this when it needs to invoke the React
+            // fiber walker on the JS thread.
+            margelo::nitro::ennio::HybridEnnio::JSThreadExecutor exec =
+                [strongInstance](std::function<void(facebook::jsi::Runtime&)>&& fn) {
+                    [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(fn)];
+                };
+            margelo::nitro::ennio::HybridEnnio::setJSThreadExecutor(std::move(exec));
+
+            // Bootstrap (capture runtime, install fiber walker, start
+            // WS server) once the JS thread is ready. Same RCTInstance
+            // method delivers our C++ lambda onto the JS thread.
+            std::function<void(facebook::jsi::Runtime&)> boot =
+                [](facebook::jsi::Runtime& rt) {
+                    margelo::nitro::ennio::HybridEnnio::nativeBootstrap(rt, kEnnioDefaultPort);
+                };
+            [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(boot)];
+            NSLog(@"[Ennio] Scheduled nativeBootstrap on JS thread");
+        } else {
+            NSLog(@"[Ennio] _instance is not an RCTInstance (got %@)", [rctInstance class]);
+        }
+#else
+        NSLog(@"[Ennio] RCTInstance.h not available — falling back to JS-side bootstrap");
+        (void)rctInstance;
+#endif
+    } else {
+        NSLog(@"[Ennio] Could not find RCTHost._instance ivar");
+    }
 
     // Get surface presenter from RCTHost
     if (!_ennioInitialized) {

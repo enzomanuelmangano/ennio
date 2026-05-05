@@ -6,6 +6,8 @@
 #include <thread>
 #include <chrono>
 #include <sstream>
+#include <atomic>
+#include <condition_variable>
 
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/UIManager.h>
@@ -645,6 +647,34 @@ void HybridEnnio::synchronize() {
             double idx = ::ennio::json::parseDouble(payload, "index");
             response.success = tapTab(idx);
         }
+        else if (type == "tapTabByName") {
+            std::string name = ::ennio::json::parseString(payload, "name");
+            response.success = ::ennio::EnnioRuntimeHelper::getInstance().tapTabByName(name);
+        }
+        else if (type == "fireTap") {
+            std::string tid = ::ennio::json::parseString(payload, "testID");
+            response.success = ::ennio::EnnioRuntimeHelper::getInstance().fireTapByTestID(tid);
+        }
+        else if (type == "invokeOnPress") {
+            std::string tid = ::ennio::json::parseString(payload, "testID");
+            // Schedule the Fiber walk on the JS thread via the Nitro
+            // Dispatcher captured by `bindRuntime` at boot. Blocks this
+            // WS thread on a condition variable until the JS thread
+            // signals completion or the 1500 ms timeout fires.
+            response.success = HybridEnnio::invokeOnPressFromCpp(tid);
+        }
+        else if (type == "getReadyCoord") {
+            std::string tid = ::ennio::json::parseString(payload, "testID");
+            double maxMs = ::ennio::json::parseDouble(payload, "maxWaitMs");
+            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getReadyCoord(tid, static_cast<int>(maxMs));
+            std::ostringstream oss;
+            oss << "{\"x\":" << std::get<0>(frame)
+                << ",\"y\":" << std::get<1>(frame)
+                << ",\"width\":" << std::get<2>(frame)
+                << ",\"height\":" << std::get<3>(frame) << "}";
+            response.data = oss.str();
+            response.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+        }
         else if (type == "backGesture") {
             response.success = backGesture();
         }
@@ -1155,6 +1185,164 @@ bool HybridEnnio::typeTextBySelector(const std::string& selectorJson, const std:
 bool HybridEnnio::clearTextBySelector(const std::string& selectorJson) {
     auto id = resolveSelectorToTestID(*this, selectorJson);
     return id ? clearText(*id) : false;
+}
+
+// ============================================
+// JS bridge: runtime + dispatcher capture, fiber walker install,
+// WS-thread → JS-thread invokeOnPress dispatch.
+// ============================================
+
+// React Fiber walker — installed onto globalThis once at boot. Invokes
+// the React onPress closure synchronously, bypassing iOS's gesture
+// pipeline. Living in a C++ string keeps app-side glue minimal: the
+// only JS the app touches is a one-line `__bindRuntime()` call after
+// createHybridObject.
+namespace {
+    constexpr const char* kFiberWalkerSource = R"JS(
+(function () {
+  function findFiberByTestID(fiber, testID) {
+    if (!fiber) return null;
+    if (fiber.memoizedProps && fiber.memoizedProps.testID === testID) return fiber;
+    var found = findFiberByTestID(fiber.child, testID);
+    if (found) return found;
+    return findFiberByTestID(fiber.sibling, testID);
+  }
+  globalThis.__ennio_invokeOnPress = function (testID) {
+    var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+    if (!hook || !hook.renderers || !hook.getFiberRoots) return false;
+    var iter = hook.renderers.entries();
+    while (true) {
+      var step = iter.next();
+      if (step.done) break;
+      var rendererID = typeof step.value[0] === 'number' ? step.value[0] : 1;
+      var roots;
+      try { roots = hook.getFiberRoots(rendererID); } catch (e) { continue; }
+      if (!roots) continue;
+      var rootsIter = roots.values();
+      while (true) {
+        var r = rootsIter.next();
+        if (r.done) break;
+        var fiber = findFiberByTestID(r.value && r.value.current, testID);
+        if (!fiber) continue;
+        var onPress = fiber.memoizedProps && fiber.memoizedProps.onPress;
+        if (typeof onPress === 'function') {
+          try {
+            onPress({
+              nativeEvent: {},
+              currentTarget: null,
+              target: null,
+              preventDefault: function () {},
+              stopPropagation: function () {},
+              persist: function () {},
+            });
+            return true;
+          } catch (e) { return false; }
+        }
+      }
+    }
+    return false;
+  };
+})();
+)JS";
+
+    std::mutex g_jsContextMutex;
+    facebook::jsi::Runtime* g_jsRuntime = nullptr;
+    HybridEnnio::JSThreadExecutor g_jsExecutor;
+
+    std::mutex g_instanceMutex;
+    std::shared_ptr<HybridEnnio> g_instance;
+}
+
+void HybridEnnio::setJSThreadExecutor(HybridEnnio::JSThreadExecutor exec) {
+    std::lock_guard<std::mutex> lock(g_jsContextMutex);
+    g_jsExecutor = std::move(exec);
+}
+
+void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
+    {
+        std::lock_guard<std::mutex> lock(g_jsContextMutex);
+        if (g_jsRuntime == nullptr) {
+            g_jsRuntime = &runtime;
+        }
+    }
+
+    try {
+        runtime.evaluateJavaScript(
+            std::make_shared<facebook::jsi::StringBuffer>(std::string(kFiberWalkerSource)),
+            "ennio_fiber_walker.js");
+    } catch (const std::exception& e) {
+        ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: walker eval failed: " << e.what()));
+        return;
+    }
+
+    std::shared_ptr<HybridEnnio> instance;
+    {
+        std::lock_guard<std::mutex> lock(g_instanceMutex);
+        if (!g_instance) {
+            try {
+                g_instance = std::make_shared<HybridEnnio>();
+            } catch (const std::exception& e) {
+                ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: ctor threw: " << e.what()));
+                return;
+            }
+        }
+        instance = g_instance;
+    }
+    if (!instance->isServerRunning()) {
+        try {
+            instance->startServer(static_cast<double>(port));
+        } catch (const std::exception& e) {
+            ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: startServer threw: " << e.what()));
+        }
+    }
+}
+
+bool HybridEnnio::invokeOnPressFromCpp(const std::string& testID) {
+    JSThreadExecutor executor;
+    {
+        std::lock_guard<std::mutex> lock(g_jsContextMutex);
+        executor = g_jsExecutor;
+    }
+    if (!executor) {
+        // Bootstrap hasn't run yet — caller falls back to idb HID tap.
+        return false;
+    }
+
+    // Schedule on JS thread, block here on a heap-allocated cv slot
+    // (closure may outlive the waiter on timeout, so the slot can't
+    // live on the WS thread's stack).
+    struct Slot {
+        std::mutex m;
+        std::condition_variable cv;
+        bool ready = false;
+        bool success = false;
+    };
+    auto slot = std::make_shared<Slot>();
+    std::string id = testID;
+
+    executor([slot, id](facebook::jsi::Runtime& rt) {
+        bool ok = false;
+        try {
+            auto fn = rt.global().getProperty(rt, "__ennio_invokeOnPress");
+            if (fn.isObject() && fn.asObject(rt).isFunction(rt)) {
+                auto result = fn.asObject(rt)
+                    .asFunction(rt)
+                    .call(rt, facebook::jsi::String::createFromUtf8(rt, id));
+                ok = result.isBool() && result.getBool();
+            }
+        } catch (...) {
+            ok = false;
+        }
+        std::lock_guard<std::mutex> lock(slot->m);
+        slot->success = ok;
+        slot->ready = true;
+        slot->cv.notify_one();
+    });
+
+    std::unique_lock<std::mutex> lock(slot->m);
+    bool finished = slot->cv.wait_for(lock, std::chrono::milliseconds(1500),
+                                       [&]() { return slot->ready; });
+    return finished && slot->success;
 }
 
 } // namespace margelo::nitro::ennio

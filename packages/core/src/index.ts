@@ -102,16 +102,8 @@ export const EnnioModule = {
   get isServerRunning() { return isServerRunning; },
 };
 
-// Expose globally and auto-start server for CLI access
-const _globalThis = globalThis as { __ENNIO_MODULE__?: Ennio };
-const _module = getEnnioModule();
-if (_module) {
-  _globalThis.__ENNIO_MODULE__ = _module;
-
-  // Auto-start the WebSocket server for CLI access
-  // Works in both debug and release builds
-  if (!_module.isServerRunning()) {
-    _module.startServer(DEFAULT_PORT);
-    console.log(`[Ennio] WebSocket server started on port ${DEFAULT_PORT}`);
-  }
-}
+// No JS-side bootstrap. `@ennio/core` autolinks via Pod, and the iOS
+// `EnnioAutoInit` swizzle drives the WS-server start + Fiber walker
+// install + HybridEnnio construction natively, on the JS thread, the
+// moment RCTHost finishes booting. The user's app never imports this
+// package; it lands purely through `npm install @ennio/core`.

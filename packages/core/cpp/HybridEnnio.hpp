@@ -13,6 +13,11 @@
 #include <react/renderer/core/ShadowNode.h>
 #include <react/renderer/uimanager/UIManager.h>
 
+// JSI for runtime + dispatcher access
+#include <jsi/jsi.h>
+
+namespace margelo::nitro { class Dispatcher; }
+
 // Internal components
 #include "WebSocketServer.hpp"
 #include "TestIDRegistry.hpp"
@@ -121,6 +126,31 @@ public:
      */
     bool isInitialized() const;
 
+    /**
+     * Drive a synthetic onPress on the React fiber whose `testID`
+     * matches. Blocks the calling (WS-server) thread until the JS
+     * thread finishes the walk or the timeout (1500 ms) elapses.
+     */
+    static bool invokeOnPressFromCpp(const std::string& testID);
+
+    /**
+     * JS-thread executor — wraps `RCTInstance.callFunctionOnBufferedRuntimeExecutor:`
+     * (or any equivalent scheduler) so the WS-server thread can
+     * dispatch fiber-walks back onto JS. Stored once during bootstrap.
+     */
+    using JSThreadExecutor = std::function<void(std::function<void(facebook::jsi::Runtime&)>&&)>;
+    static void setJSThreadExecutor(JSThreadExecutor exec);
+
+    /**
+     * Pure-native bootstrap. Called from `EnnioAutoInit`'s post-start
+     * hook on the JS thread (after the runtime is initialised).
+     * Captures the runtime, evaluates the Fiber walker into globalThis,
+     * constructs a singleton HybridEnnio + starts the WebSocket server.
+     * Idempotent.
+     */
+    static void nativeBootstrap(facebook::jsi::Runtime& runtime, int port);
+
+
 private:
     // Server state
     bool serverRunning_ = false;
@@ -170,6 +200,7 @@ private:
      * Find a node by selector criteria
      */
     ShadowNodePtr findNodeBySelector(const ::ennio::SelectorCriteria& criteria) const;
+
 };
 
 } // namespace margelo::nitro::ennio

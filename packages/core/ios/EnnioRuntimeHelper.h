@@ -125,6 +125,42 @@ public:
     bool swipe(const std::string& testID, const std::string& direction, double distance);
     bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID);
     bool tapTab(int index);
+    /**
+     * Find a UITabBarController in any window scene and select the tab
+     * whose viewController's title (or tabBarItem.title) matches `name`
+     * case-insensitively. Used when NativeTabs renders bar items via
+     * SwiftUI / UIKit hosts that don't surface their UIView subtree to
+     * accessibility-label walks. Returns false if no matching tab.
+     */
+    bool tapTabByName(const std::string& name);
+    /**
+     * One-shot tap-readiness query. Returns the window-coord frame for
+     * `testID` only after iOS is in a state where the next touch will
+     * actually deliver: no UIPresentationController / UINavigation
+     * transition is in flight, no alert-level UIWindow is sitting on
+     * top, the target's userInteractionEnabled chain is clean. Polls
+     * in-process every ~20 ms up to `maxWaitMs`; the JS / CLI side pays
+     * a single WS round-trip regardless of wait duration. Returns
+     * (0,0,0,0) on timeout. Library-agnostic — works for Pressable,
+     * TouchableOpacity, RNGH BaseButton, pressto, anything that hangs
+     * its handler off iOS's responder + recognizer pipeline.
+     */
+    std::tuple<double, double, double, double> getReadyCoord(const std::string& testID, int maxWaitMs);
+    /**
+     * Library-agnostic tap that bypasses iOS HID + gesture coordinator.
+     * Cascades through three direct-fire paths against the testID's
+     * UIView:
+     *   1. nearest enabled UIControl ancestor → sendActions touchUpInside
+     *      (UIButton, UISwitch, RNGestureHandlerButton)
+     *   2. gestureRecognizers on view + ancestors driven by direct
+     *      touchesBegan: / touchesEnded: calls (RCTSurfaceTouchHandler →
+     *      RN responder release → Pressable/Touchable onPress;
+     *      RNNativeViewGestureRecognizer → RNGH onActivated → user onPress)
+     *   3. accessibilityActivate (a11y-tagged buttons)
+     * Returns true if any path fired. Caller falls back to idb HID on
+     * false (covers pure-native UIAlertController buttons et al).
+     */
+    bool fireTapByTestID(const std::string& testID);
     bool backGesture();
     bool hideKeyboard();
     bool tapAlertButton(const std::string& buttonText);

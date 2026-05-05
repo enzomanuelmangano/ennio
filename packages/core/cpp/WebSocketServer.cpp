@@ -1,9 +1,11 @@
 #include "WebSocketServer.hpp"
 
+#include <chrono>
 #include <cstring>
 #include <sstream>
 #include <iomanip>
 #include <cerrno>
+#include <algorithm>
 
 #ifdef __APPLE__
 #include <sys/socket.h>
