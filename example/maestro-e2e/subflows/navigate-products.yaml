@@ -4,6 +4,9 @@ appId: com.ennio.example
 
 ---
 
+# Pop any Stack-pushed screen so the tab bar is reachable.
+- back
+
 - tapOn:
     text: "Products"
 - assertVisible:

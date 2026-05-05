@@ -76,6 +76,9 @@ tags:
 # TEST: Navigate to orders via profile menu
 # ============================================
 
+# Pop the Stack-pushed orders screen so the tab bar is reachable again.
+- back
+
 - tapOn:
     text: "Profile"
 
@@ -159,7 +162,8 @@ tags:
 # TEST: Guest user orders view
 # ============================================
 
-# Logout first
+# Logout first - pop the Stack-pushed orders screen so the tab bar is reachable.
+- back
 - tapOn:
     text: "Profile"
 - assertVisible:

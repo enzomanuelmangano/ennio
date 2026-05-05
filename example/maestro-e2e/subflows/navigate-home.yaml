@@ -4,6 +4,10 @@ appId: com.ennio.example
 
 ---
 
+# Pop any Stack-pushed screen so the tab bar is reachable. No-op when
+# already at the tabs root (no nav stack to pop, no presented VC).
+- back
+
 - tapOn:
     text: "Home"
 - assertVisible:
