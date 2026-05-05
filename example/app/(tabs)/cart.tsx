@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, Alert, Pressable } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,9 +33,9 @@ function CartItem({ item }: { item: ReturnType<typeof useCartStore.getState>['it
 
   return (
     <View style={[styles.cartItem, darkMode && styles.cardDark]} testID={`cart-item-${item.product.id}`}>
-      <PressableScale onPress={() => router.push(`/product/${item.product.id}`)}>
+      <Pressable onPress={() => router.push(`/product/${item.product.id}`)}>
         <Image source={{ uri: item.product.image }} style={styles.itemImage} />
-      </PressableScale>
+      </Pressable>
       <View style={styles.itemContent}>
         <Text style={[styles.itemName, darkMode && styles.textLight]} numberOfLines={2}>
           {item.product.name}
@@ -48,31 +48,31 @@ function CartItem({ item }: { item: ReturnType<typeof useCartStore.getState>['it
         </Text>
       </View>
       <View style={styles.quantityContainer}>
-        <PressableScale
+        <Pressable
           style={styles.quantityBtn}
           onPress={() => handleQuantityChange(-1)}
           testID={`decrease-qty-${item.product.id}`}
         >
           <Text style={styles.quantityBtnText}>−</Text>
-        </PressableScale>
+        </Pressable>
         <Text style={[styles.quantity, darkMode && styles.textLight]} testID={`qty-${item.product.id}`}>
           {item.quantity}
         </Text>
-        <PressableScale
+        <Pressable
           style={styles.quantityBtn}
           onPress={() => handleQuantityChange(1)}
           testID={`increase-qty-${item.product.id}`}
         >
           <Text style={styles.quantityBtnText}>+</Text>
-        </PressableScale>
+        </Pressable>
       </View>
-      <PressableScale
+      <Pressable
         style={styles.removeBtn}
         onPress={handleRemove}
         testID={`remove-item-${item.product.id}`}
       >
         <Text style={styles.removeText}>🗑️</Text>
-      </PressableScale>
+      </Pressable>
     </View>
   );
 }

@@ -7,6 +7,7 @@ import {
   TextInput,
   Image,
   Modal,
+  Pressable,
 } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
@@ -32,7 +33,7 @@ function ProductCard({ product }: { product: ReturnType<typeof useProductsStore.
   };
 
   return (
-    <PressableScale
+    <Pressable
       style={[styles.productCard, darkMode && styles.cardDark]}
       onPress={() => router.push(`/product/${product.id}`)}
       testID={`product-card-${product.id}`}
@@ -54,17 +55,17 @@ function ProductCard({ product }: { product: ReturnType<typeof useProductsStore.
         </View>
         <View style={styles.productFooter}>
           <Text style={styles.productPrice}>${product.price.toFixed(2)}</Text>
-          <PressableScale
+          <Pressable
             style={[styles.addToCartBtn, !product.inStock && styles.addToCartBtnDisabled]}
             onPress={handleAddToCart}
-            enabled={product.inStock}
+            disabled={!product.inStock}
             testID={`add-to-cart-${product.id}`}
           >
             <Text style={styles.addToCartText}>+</Text>
-          </PressableScale>
+          </Pressable>
         </View>
       </View>
-    </PressableScale>
+    </Pressable>
   );
 }
 

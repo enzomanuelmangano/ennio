@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, Image, Alert, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, Pressable } from 'react-native';
 import { PressableScale } from 'pressto';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +18,7 @@ function FeaturedProduct({ product }: { product: ReturnType<typeof useProductsSt
   };
 
   return (
-    <PressableScale
+    <Pressable
       style={styles.featuredCard}
       onPress={() => router.push(`/product/${product.id}`)}
       testID={`featured-product-${product.id}`}
@@ -31,15 +31,15 @@ function FeaturedProduct({ product }: { product: ReturnType<typeof useProductsSt
           <Text style={styles.rating}>⭐ {product.rating}</Text>
           <Text style={styles.reviews}>({product.reviews})</Text>
         </View>
-        <PressableScale
+        <Pressable
           style={styles.addButton}
           onPress={handleAddToCart}
           testID={`add-to-cart-featured-${product.id}`}
         >
           <Text style={styles.addButtonText}>Add to Cart</Text>
-        </PressableScale>
+        </Pressable>
       </View>
-    </PressableScale>
+    </Pressable>
   );
 }
 
@@ -87,24 +87,14 @@ export default function HomeScreen() {
           </Text>
         </View>
         {!isAuthenticated && (
-          <Pressable
+          <PressableScale
             style={styles.signInButton}
-            onPress={() => {
-              Alert.alert('signin tap', 'home-signin-btn onPress fired');
-              router.push('/auth/login');
-            }}
+            onPress={() => router.push('/auth/login')}
             testID="home-signin-btn"
           >
             <Text style={styles.signInText}>Sign In</Text>
-          </Pressable>
+          </PressableScale>
         )}
-        <PressableScale
-          style={[styles.signInButton, { backgroundColor: '#10b981' }]}
-          onPress={() => Alert.alert('pressto fired', 'PressableScale onPress invoked')}
-          testID="pressto-test-btn"
-        >
-          <Text style={styles.signInText}>Pressto Test</Text>
-        </PressableScale>
       </View>
 
       {/* Quick Actions */}

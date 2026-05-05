@@ -1,4 +1,3 @@
-import '@ennio/core'; // Initialize Ennio for E2E testing
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox } from 'react-native';

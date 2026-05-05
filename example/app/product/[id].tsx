@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, Alert, Pressable } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useProductsStore, useCartStore, useSettingsStore } from '../../store';
@@ -45,7 +45,7 @@ export default function ProductDetailScreen() {
       `${quantity}x ${product.name} added to your cart.`,
       [
         { text: 'Continue Shopping', style: 'cancel' },
-        { text: 'View Cart', onPress: () => router.push('/cart') },
+        { text: 'View Cart', onPress: () => { router.dismissAll(); router.push('/cart'); } },
       ]
     );
   };
@@ -102,23 +102,23 @@ export default function ProductDetailScreen() {
           <View style={[styles.quantitySection, darkMode && styles.cardDark]}>
             <Text style={[styles.quantityLabel, darkMode && styles.textLight]}>Quantity:</Text>
             <View style={styles.quantityControls}>
-              <PressableScale
+              <Pressable
                 style={styles.quantityBtn}
                 onPress={() => handleQuantityChange(-1)}
                 testID="decrease-quantity"
               >
                 <Text style={styles.quantityBtnText}>−</Text>
-              </PressableScale>
+              </Pressable>
               <Text style={[styles.quantityValue, darkMode && styles.textLight]} testID="quantity-value">
                 {quantity}
               </Text>
-              <PressableScale
+              <Pressable
                 style={styles.quantityBtn}
                 onPress={() => handleQuantityChange(1)}
                 testID="increase-quantity"
               >
                 <Text style={styles.quantityBtnText}>+</Text>
-              </PressableScale>
+              </Pressable>
             </View>
           </View>
 
