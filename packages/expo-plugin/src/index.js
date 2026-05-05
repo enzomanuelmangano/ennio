@@ -3,19 +3,19 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Expo config plugin for Ennio E2E testing
+ * Expo config plugin for Ennio E2E testing.
  *
- * This plugin conditionally includes the @ennio/core native module.
- * By default, it's only included in non-production builds.
+ * Default = OFF. Ennio's runtime embeds a network-listening
+ * remote-control surface in the app process; including it in a
+ * distribution build is a critical-severity security hole. The plugin
+ * is therefore strictly opt-in:
  *
- * Usage:
- *   // app.json - include in all builds
- *   ["@ennio/expo-plugin"]
+ *   ENNIO_ENABLED=1 bunx expo prebuild --clean      # iOS
+ *   ENNIO_ENABLED=true ./gradlew assembleDebug       # Android
  *
- *   // app.json - configure options
- *   ["@ennio/expo-plugin", { "enabled": true }]
- *
- * Set ENNIO_ENABLED=0 environment variable to disable at prebuild time.
+ * Any other value — including unset — produces a build with zero Ennio
+ * symbols. Production / App Store / Play Store builds MUST run without
+ * this env var set.
  */
 
 function withEnnioIOS(config) {
@@ -41,9 +41,12 @@ function withEnnioIOS(config) {
       // Add conditional pod inclusion before post_install block
       // Support both standard and monorepo layouts
       const ennioConfig = `
-  # Ennio E2E Testing - conditionally included
-  # Set ENNIO_ENABLED=0 to disable
-  if ENV['ENNIO_ENABLED'] != '0'
+  # Ennio E2E Testing — opt-in only.
+  # Ennio embeds a network-listening remote-control surface in the app
+  # process; shipping it to production is a critical vulnerability. The
+  # pod is included ONLY when ENNIO_ENABLED=1 is set at \`pod install\`
+  # time. Any other value (including unset) excludes it entirely.
+  if ENV['ENNIO_ENABLED'] == '1'
     # Try standard layout, monorepo (1 level up), and bun workspace
     # (2 levels up — apps/<app>/node_modules empty, root has hoisted dep).
     candidate_paths = [
@@ -107,9 +110,10 @@ function withEnnioAndroid(config) {
 
       // Add conditional dependency
       const ennioConfig = `
-    // Ennio E2E Testing - conditionally included
-    // Set ENNIO_ENABLED=false to disable
-    if (findProperty("ENNIO_ENABLED") != "false") {
+    // Ennio E2E Testing — opt-in only.
+    // Set ENNIO_ENABLED=true at build time to include. Any other value
+    // (including unset) excludes the dependency entirely.
+    if (findProperty("ENNIO_ENABLED") == "true") {
         implementation project(':ennio-core')
     }
 `;
@@ -132,9 +136,13 @@ function withEnnioAndroid(config) {
 }
 
 function withEnnio(config, options = {}) {
-  // Check if disabled via env var
-  if (process.env.ENNIO_ENABLED === '0' || process.env.ENNIO_ENABLED === 'false') {
-    console.log('[Ennio] Disabled via ENNIO_ENABLED environment variable');
+  // Default: OFF. Ennio embeds a remote-control surface; opt in
+  // explicitly per build by setting ENNIO_ENABLED=1 (iOS) or =true
+  // (Android) at prebuild time. Any other value — including unset —
+  // skips the entire plugin so production builds carry zero Ennio
+  // symbols.
+  if (process.env.ENNIO_ENABLED !== '1' && process.env.ENNIO_ENABLED !== 'true') {
+    console.log('[Ennio] Disabled (ENNIO_ENABLED is not set to 1/true)');
     return config;
   }
 
