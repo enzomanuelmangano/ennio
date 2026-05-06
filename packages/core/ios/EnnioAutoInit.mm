@@ -7,6 +7,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import "EnnioRuntimeHelper.h"
+#import "EnnioDebugBanner.h"
 
 #if __has_include(<React/RCTSurfacePresenter.h>)
 #import <React/RCTSurfacePresenter.h>
@@ -148,6 +149,12 @@ static BOOL _ennioInitialized = NO;
                 };
             [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(boot)];
             NSLog(@"[Ennio] Scheduled nativeBootstrap on JS thread");
+
+            // Show the top-right "E2E" ribbon. Tied to the same gate as
+            // the WS server: if Ennio is in this build, the ribbon
+            // shows; if Ennio isn't (ENNIO_ENABLED unset / =0 at
+            // prebuild), this whole file isn't compiled in.
+            [EnnioDebugBanner show];
         } else {
             NSLog(@"[Ennio] _instance is not an RCTInstance (got %@)", [rctInstance class]);
         }
