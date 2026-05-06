@@ -651,6 +651,10 @@ void HybridEnnio::synchronize() {
             std::string name = ::ennio::json::parseString(payload, "name");
             response.success = ::ennio::EnnioRuntimeHelper::getInstance().tapTabByName(name);
         }
+        else if (type == "tapAccessibilityElementByLabel") {
+            std::string text = ::ennio::json::parseString(payload, "text");
+            response.success = ::ennio::EnnioRuntimeHelper::getInstance().tapAccessibilityElementByLabel(text);
+        }
         else if (type == "fireTap") {
             std::string tid = ::ennio::json::parseString(payload, "testID");
             response.success = ::ennio::EnnioRuntimeHelper::getInstance().fireTapByTestID(tid);

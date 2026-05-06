@@ -134,6 +134,15 @@ public:
      */
     bool tapTabByName(const std::string& name);
     /**
+     * Activate a UIKit accessibility element whose label matches `text`.
+     * Walks every UIWindow's accessibility tree (including system
+     * overlay windows that host UIMenu / UIContextMenu), finds the
+     * first match, and calls `accessibilityActivate`. Used by zeego
+     * dropdowns and any other UIKit-rendered menu surface that doesn't
+     * appear in the React Fabric tree.
+     */
+    bool tapAccessibilityElementByLabel(const std::string& text);
+    /**
      * One-shot tap-readiness query. Returns the window-coord frame for
      * `testID` only after iOS is in a state where the next touch will
      * actually deliver: no UIPresentationController / UINavigation

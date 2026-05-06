@@ -1353,6 +1353,99 @@ bool EnnioRuntimeHelper::tapTab(int index) {
     return ok;
 }
 
+// ============================================================
+// Accessibility-tree tap. Walks every UIWindow's accessibility
+// hierarchy (incl. system-overlay windows that host UIMenu /
+// UIContextMenu / UIAlertController action sheets) and activates
+// the first element whose label matches `text`. Used by zeego
+// dropdown items, native action sheets, and any other UIKit
+// surface that's invisible to the React Fabric tree.
+// ============================================================
+
+static UIView* findAccessibilityElementInView(UIView* view, NSString* needle) {
+    if (!view) return nil;
+    if (view.isAccessibilityElement) {
+        NSString* label = view.accessibilityLabel ?: @"";
+        if ([label compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+            return view;
+        }
+    }
+    for (UIView* sub in view.subviews) {
+        UIView* hit = findAccessibilityElementInView(sub, needle);
+        if (hit) return hit;
+    }
+    return nil;
+}
+
+// Walks UIAccessibilityElement children when a container exposes
+// virtual elements (UIMenu items are surfaced this way). Returns
+// the matching element + its containing UIView so the caller can
+// dispatch `accessibilityActivate` against the right object.
+static id findAccessibilityElementOnView(UIView* container, NSString* needle) {
+    if (!container) return nil;
+    NSInteger count = container.accessibilityElementCount;
+    if (count != NSNotFound && count > 0) {
+        for (NSInteger i = 0; i < count; i++) {
+            id element = [container accessibilityElementAtIndex:i];
+            if (!element) continue;
+            NSString* label = nil;
+            if ([element respondsToSelector:@selector(accessibilityLabel)]) {
+                label = [element accessibilityLabel];
+            }
+            if (label && [label compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                return element;
+            }
+        }
+    }
+    for (UIView* sub in container.subviews) {
+        id hit = findAccessibilityElementOnView(sub, needle);
+        if (hit) return hit;
+    }
+    return nil;
+}
+
+bool EnnioRuntimeHelper::tapAccessibilityElementByLabel(const std::string& text) {
+    NSString* needle = [NSString stringWithUTF8String:text.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        // Walk windows in REVERSE order so overlay windows (UIMenu,
+        // UIContextMenu, UIAlertController) — which sit at higher
+        // window levels — are searched before the app's main window.
+        // First match wins, so the menu always takes precedence over
+        // any background view with the same label.
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            NSArray<UIWindow*>* windows =
+                [((UIWindowScene*)scene).windows
+                    sortedArrayUsingComparator:^NSComparisonResult(UIWindow* a, UIWindow* b) {
+                        if (a.windowLevel < b.windowLevel) return NSOrderedDescending;
+                        if (a.windowLevel > b.windowLevel) return NSOrderedAscending;
+                        return NSOrderedSame;
+                    }];
+            for (UIWindow* win in windows) {
+                // Pass 1: regular UIView matches (Fabric labeled views,
+                // custom React menus that set accessibilityLabel).
+                UIView* viewMatch = findAccessibilityElementInView(win, needle);
+                if (viewMatch && [viewMatch accessibilityActivate]) {
+                    ok = true;
+                    return;
+                }
+                // Pass 2: UIAccessibilityElement children (UIMenu items
+                // and other virtual accessibility elements).
+                id elementMatch = findAccessibilityElementOnView(win, needle);
+                if (elementMatch && [elementMatch respondsToSelector:@selector(accessibilityActivate)]) {
+                    if ([elementMatch accessibilityActivate]) {
+                        ok = true;
+                        return;
+                    }
+                }
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
 // DFS the VC hierarchy looking for the deepest UINavigationController
 // whose stack has > 1 controllers. react-native-screens nests its
 // RNSScreenStackHostController several levels deep, so we can't just walk

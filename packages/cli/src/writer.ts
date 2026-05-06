@@ -372,6 +372,14 @@ export class NitroWriter implements Writer {
       await idb.tap(data.x + data.width / 2, data.y + data.height / 2, 150);
       return true;
     }
+    // UIKit-rendered surfaces invisible to Fabric — zeego dropdowns,
+    // UIMenu items, native action sheets — only show up in iOS's
+    // accessibility tree. Walk every UIWindow's a11y hierarchy and
+    // call accessibilityActivate on the first matching element.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const a11y: any = await (this.client as any).send('tapAccessibilityElementByLabel', { text });
+    if (process.env.ENNIO_DEBUG_IDB) console.error(`[tapByText] '${text}' a11yActivate=${a11y?.success}`);
+    if (a11y?.success === true) return true;
     const c = await this.layoutCenter({ text });
     if (c) {
       await idb.tap(c.x, c.y, 150);
