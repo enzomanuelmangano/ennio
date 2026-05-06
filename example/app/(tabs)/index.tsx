@@ -1,14 +1,36 @@
-import { View, Text, StyleSheet, ScrollView, Image, Pressable } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  Pressable,
+  useColorScheme,
+} from 'react-native';
 import { PressableScale } from 'pressto';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuthStore, useProductsStore, useCartStore, useSettingsStore } from '../../store';
+import {
+  useAuthStore,
+  useProductsStore,
+  useCartStore,
+  useSettingsStore,
+} from '../../store';
 import * as Haptics from 'expo-haptics';
+import { colors, fontSize, lineHeight, radius } from '../../src/theme';
 
-function FeaturedProduct({ product }: { product: ReturnType<typeof useProductsStore.getState>['products'][0] }) {
+function FeaturedProduct({
+  product,
+  c,
+}: {
+  product: ReturnType<typeof useProductsStore.getState>['products'][0];
+  c: ReturnType<typeof colors>;
+}) {
   const router = useRouter();
   const addToCart = useCartStore(state => state.addToCart);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const hapticEnabled = useSettingsStore(
+    state => state.preferences.hapticFeedback,
+  );
 
   const handleAddToCart = () => {
     addToCart(product);
@@ -19,40 +41,66 @@ function FeaturedProduct({ product }: { product: ReturnType<typeof useProductsSt
 
   return (
     <Pressable
-      style={styles.featuredCard}
+      style={[
+        styles.featuredCard,
+        { backgroundColor: c.secondarySystemGroupedBackground },
+      ]}
       onPress={() => router.push(`/product/${product.id}`)}
       testID={`featured-product-${product.id}`}
     >
       <Image source={{ uri: product.image }} style={styles.featuredImage} />
       <View style={styles.featuredContent}>
-        <Text style={styles.featuredTitle} numberOfLines={1}>{product.name}</Text>
-        <Text style={styles.featuredPrice}>${product.price.toFixed(2)}</Text>
-        <View style={styles.ratingContainer}>
-          <Text style={styles.rating}>⭐ {product.rating}</Text>
-          <Text style={styles.reviews}>({product.reviews})</Text>
+        <Text
+          style={[styles.featuredTitle, { color: c.label }]}
+          numberOfLines={1}
+        >
+          {product.name}
+        </Text>
+        <View style={styles.featuredRow}>
+          <Text style={[styles.featuredPrice, { color: c.label }]}>
+            ${product.price.toFixed(2)}
+          </Text>
+          <Text style={[styles.featuredRating, { color: c.secondaryLabel }]}>
+            ★ {product.rating}
+          </Text>
         </View>
         <Pressable
-          style={styles.addButton}
+          style={[styles.addPill, { backgroundColor: c.systemBlue }]}
           onPress={handleAddToCart}
           testID={`add-to-cart-featured-${product.id}`}
         >
-          <Text style={styles.addButtonText}>Add to Cart</Text>
+          <Text style={styles.addPillText}>Add to Cart</Text>
         </Pressable>
       </View>
     </Pressable>
   );
 }
 
-function QuickAction({ icon, label, onPress, testID }: {
-  icon: string;
+function QuickAction({
+  symbol,
+  label,
+  tint,
+  onPress,
+  testID,
+  c,
+}: {
+  symbol: string;
   label: string;
+  tint: string;
   onPress: () => void;
   testID: string;
+  c: ReturnType<typeof colors>;
 }) {
   return (
-    <PressableScale style={styles.quickAction} onPress={onPress} testID={testID}>
-      <Text style={styles.quickActionIcon}>{icon}</Text>
-      <Text style={styles.quickActionLabel}>{label}</Text>
+    <PressableScale
+      style={styles.quickAction}
+      onPress={onPress}
+      testID={testID}
+    >
+      <View style={[styles.quickActionIcon, { backgroundColor: tint + '22' }]}>
+        <Text style={[styles.quickActionGlyph, { color: tint }]}>{symbol}</Text>
+      </View>
+      <Text style={[styles.quickActionLabel, { color: c.label }]}>{label}</Text>
     </PressableScale>
   );
 }
@@ -64,6 +112,9 @@ export default function HomeScreen() {
   const products = useProductsStore(state => state.products);
   const cartItemCount = useCartStore(state => state.getItemCount());
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const systemScheme = useColorScheme();
+  const scheme = darkMode ? 'dark' : systemScheme === 'dark' ? 'dark' : 'light';
+  const c = colors(scheme);
   const insets = useSafeAreaInsets();
   const TAB_BAR_HEIGHT = 49;
 
@@ -72,23 +123,29 @@ export default function HomeScreen() {
 
   return (
     <ScrollView
-      style={[styles.container, darkMode && styles.containerDark]}
-      contentContainerStyle={{ paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
+      style={[styles.container, { backgroundColor: c.systemGroupedBackground }]}
+      contentContainerStyle={{
+        paddingTop: insets.top + 8,
+        paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 24,
+      }}
+      showsVerticalScrollIndicator={false}
       testID="home-screen"
     >
-      {/* Header */}
+      {/* Large title header */}
       <View style={styles.header}>
-        <View>
-          <Text style={[styles.greeting, darkMode && styles.textLight]}>
-            {isAuthenticated ? `Hello, ${user?.name?.split(' ')[0]}!` : 'Welcome!'}
+        <View style={styles.headerTextWrap}>
+          <Text style={[styles.greeting, { color: c.secondaryLabel }]}>
+            {isAuthenticated ? 'Welcome back' : 'Welcome'}
           </Text>
-          <Text style={[styles.subtitle, darkMode && styles.subtitleDark]}>
-            Discover amazing products
+          <Text style={[styles.largeTitle, { color: c.label }]}>
+            {isAuthenticated && user?.name
+              ? user.name.split(' ')[0]
+              : 'Discover'}
           </Text>
         </View>
         {!isAuthenticated && (
           <PressableScale
-            style={styles.signInButton}
+            style={[styles.signInButton, { backgroundColor: c.systemBlue }]}
             onPress={() => router.push('/auth/login')}
             testID="home-signin-btn"
           >
@@ -98,40 +155,57 @@ export default function HomeScreen() {
       </View>
 
       {/* Quick Actions */}
-      <View style={styles.quickActionsContainer}>
+      <View
+        style={[
+          styles.quickActionsCard,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
+      >
         <QuickAction
-          icon="🔍"
+          symbol="⌕"
           label="Search"
+          tint={c.systemBlue}
           onPress={() => router.push('/products')}
           testID="quick-action-search"
+          c={c}
         />
         <QuickAction
-          icon="🛒"
-          label={`Cart (${cartItemCount})`}
+          symbol="◔"
+          label={`Cart${cartItemCount > 0 ? ` (${cartItemCount})` : ''}`}
+          tint={c.systemPink}
           onPress={() => router.push('/cart')}
           testID="quick-action-cart"
+          c={c}
         />
         <QuickAction
-          icon="📦"
+          symbol="◫"
           label="Orders"
+          tint={c.systemOrange}
           onPress={() => router.push('/orders')}
           testID="quick-action-orders"
+          c={c}
         />
         <QuickAction
-          icon="⚙️"
+          symbol="⚙"
           label="Settings"
+          tint={c.systemPurple}
           onPress={() => router.push('/settings')}
           testID="quick-action-settings"
+          c={c}
         />
       </View>
 
       {/* Featured Products */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Featured Products</Text>
+          <Text style={[styles.sectionTitle, { color: c.label }]}>
+            Featured
+          </Text>
           <Link href="/products" asChild>
-            <PressableScale testID="see-all-featured">
-              <Text style={styles.seeAll}>See All</Text>
+            <PressableScale testID="see-all-featured" hitSlop={8}>
+              <Text style={[styles.seeAll, { color: c.systemBlue }]}>
+                See All
+              </Text>
             </PressableScale>
           </Link>
         </View>
@@ -141,71 +215,157 @@ export default function HomeScreen() {
           contentContainerStyle={styles.featuredScroll}
         >
           {featuredProducts.map(product => (
-            <FeaturedProduct key={product.id} product={product} />
+            <FeaturedProduct key={product.id} product={product} c={c} />
           ))}
         </ScrollView>
       </View>
 
-      {/* Trending */}
+      {/* Trending — inset-grouped list */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Trending Now</Text>
-        {trendingProducts.map(product => (
-          <PressableScale
-            key={product.id}
-            style={[styles.trendingItem, darkMode && styles.cardDark]}
-            onPress={() => router.push(`/product/${product.id}`)}
-            testID={`trending-product-${product.id}`}
-          >
-            <Image source={{ uri: product.image }} style={styles.trendingImage} />
-            <View style={styles.trendingContent}>
-              <Text style={[styles.trendingTitle, darkMode && styles.textLight]}>{product.name}</Text>
-              <Text style={[styles.trendingCategory, darkMode && styles.subtitleDark]}>{product.category}</Text>
-              <View style={styles.trendingBottom}>
-                <Text style={styles.trendingPrice}>${product.price.toFixed(2)}</Text>
-                <Text style={styles.trendingRating}>⭐ {product.rating}</Text>
+        <Text
+          style={[
+            styles.sectionTitleSmall,
+            { color: c.secondaryLabel, marginLeft: 16 },
+          ]}
+        >
+          TRENDING NOW
+        </Text>
+        <View
+          style={[
+            styles.groupedCard,
+            { backgroundColor: c.secondarySystemGroupedBackground },
+          ]}
+        >
+          {trendingProducts.map((product, idx) => (
+            <Pressable
+              key={product.id}
+              style={({ pressed }) => [
+                styles.trendingItem,
+                pressed && {
+                  backgroundColor: c.tertiarySystemFill,
+                },
+              ]}
+              onPress={() => router.push(`/product/${product.id}`)}
+              testID={`trending-product-${product.id}`}
+            >
+              <Image
+                source={{ uri: product.image }}
+                style={styles.trendingImage}
+              />
+              <View style={styles.trendingContent}>
+                <Text
+                  style={[styles.trendingTitle, { color: c.label }]}
+                  numberOfLines={1}
+                >
+                  {product.name}
+                </Text>
+                <Text
+                  style={[
+                    styles.trendingCategory,
+                    { color: c.secondaryLabel },
+                  ]}
+                >
+                  {product.category}
+                </Text>
+                <View style={styles.trendingBottom}>
+                  <Text style={[styles.trendingPrice, { color: c.label }]}>
+                    ${product.price.toFixed(2)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.trendingRating,
+                      { color: c.secondaryLabel },
+                    ]}
+                  >
+                    ★ {product.rating}
+                  </Text>
+                </View>
               </View>
-            </View>
-          </PressableScale>
-        ))}
+              <Text style={[styles.chevron, { color: c.tertiaryLabel }]}>
+                ›
+              </Text>
+              {idx < trendingProducts.length - 1 && (
+                <View
+                  style={[
+                    styles.rowSeparator,
+                    { backgroundColor: c.separator },
+                  ]}
+                />
+              )}
+            </Pressable>
+          ))}
+        </View>
       </View>
 
       {/* Categories */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Shop by Category</Text>
+        <Text
+          style={[
+            styles.sectionTitleSmall,
+            { color: c.secondaryLabel, marginLeft: 16 },
+          ]}
+        >
+          SHOP BY CATEGORY
+        </Text>
         <View style={styles.categoriesGrid}>
-          {['Electronics', 'Sports', 'Home', 'Accessories'].map(category => (
+          {(
+            [
+              { name: 'Electronics', symbol: '⌬', tint: c.systemBlue },
+              { name: 'Sports', symbol: '◉', tint: c.systemGreen },
+              { name: 'Home', symbol: '⌂', tint: c.systemOrange },
+              { name: 'Accessories', symbol: '◊', tint: c.systemPurple },
+            ] as const
+          ).map(({ name, symbol, tint }) => (
             <PressableScale
-              key={category}
-              style={[styles.categoryCard, darkMode && styles.cardDark]}
+              key={name}
+              style={[
+                styles.categoryCard,
+                { backgroundColor: c.secondarySystemGroupedBackground },
+              ]}
               onPress={() => {
-                useProductsStore.getState().setCategory(category);
+                useProductsStore.getState().setCategory(name);
                 router.push('/products');
               }}
-              testID={`category-${category.toLowerCase()}`}
+              testID={`category-${name.toLowerCase()}`}
             >
-              <Text style={styles.categoryIcon}>
-                {category === 'Electronics' ? '📱' :
-                 category === 'Sports' ? '⚽' :
-                 category === 'Home' ? '🏠' : '👜'}
+              <View
+                style={[
+                  styles.categoryIconBg,
+                  { backgroundColor: tint + '22' },
+                ]}
+              >
+                <Text style={[styles.categoryIcon, { color: tint }]}>
+                  {symbol}
+                </Text>
+              </View>
+              <Text style={[styles.categoryLabel, { color: c.label }]}>
+                {name}
               </Text>
-              <Text style={[styles.categoryLabel, darkMode && styles.textLight]}>{category}</Text>
             </PressableScale>
           ))}
         </View>
       </View>
 
       {/* Promo Banner */}
-      <View style={styles.promoBanner} testID="promo-banner">
-        <Text style={styles.promoTitle}>🎉 Summer Sale!</Text>
-        <Text style={styles.promoSubtitle}>Up to 50% off on selected items</Text>
-        <Link href="/products" asChild>
-          <PressableScale style={styles.promoButton} testID="promo-shop-now">
-            <Text style={styles.promoButtonText}>Shop Now</Text>
-          </PressableScale>
-        </Link>
+      <View style={styles.section}>
+        <View
+          style={[styles.promoBanner, { backgroundColor: c.systemBlue }]}
+          testID="promo-banner"
+        >
+          <View style={styles.promoText}>
+            <Text style={styles.promoEyebrow}>SUMMER SALE</Text>
+            <Text style={styles.promoTitle}>Up to 50% off</Text>
+            <Text style={styles.promoSubtitle}>Selected items, today only</Text>
+          </View>
+          <Link href="/products" asChild>
+            <PressableScale style={styles.promoButton} testID="promo-shop-now">
+              <Text style={[styles.promoButtonText, { color: c.systemBlue }]}>
+                Shop Now
+              </Text>
+            </PressableScale>
+          </Link>
+        </View>
       </View>
-
-      <View style={styles.bottomPadding} />
     </ScrollView>
   );
 }
@@ -213,248 +373,262 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  containerDark: {
-    backgroundColor: '#16213e',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: 10,
+    alignItems: 'flex-end',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 18,
+  },
+  headerTextWrap: {
+    flex: 1,
   },
   greeting: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    fontSize: fontSize.subhead,
+    lineHeight: lineHeight.subhead,
+    fontWeight: '500',
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 4,
-  },
-  subtitleDark: {
-    color: '#aaa',
-  },
-  textLight: {
-    color: '#ffffff',
+  largeTitle: {
+    fontSize: fontSize.largeTitle,
+    lineHeight: lineHeight.largeTitle,
+    fontWeight: '700',
+    letterSpacing: 0.37,
+    marginTop: 2,
   },
   signInButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
   },
   signInText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontWeight: '600',
+    fontSize: fontSize.subhead,
   },
-  quickActionsContainer: {
+  quickActionsCard: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingHorizontal: 10,
-    paddingVertical: 15,
+    marginHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: radius.card,
   },
   quickAction: {
     alignItems: 'center',
-    padding: 12,
+    paddingHorizontal: 4,
   },
   quickActionIcon: {
-    fontSize: 28,
-    marginBottom: 6,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  quickActionGlyph: {
+    fontSize: 24,
+    fontWeight: '600',
   },
   quickActionLabel: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.caption1,
+    lineHeight: lineHeight.caption1,
     fontWeight: '500',
   },
   section: {
-    padding: 20,
-    paddingTop: 10,
+    marginTop: 24,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
+    alignItems: 'flex-end',
+    paddingHorizontal: 20,
+    marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 15,
+    fontSize: fontSize.title2,
+    lineHeight: lineHeight.title2,
+    fontWeight: '700',
+    letterSpacing: 0.35,
+  },
+  sectionTitleSmall: {
+    fontSize: fontSize.footnote,
+    lineHeight: lineHeight.footnote,
+    fontWeight: '400',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginHorizontal: 4,
   },
   seeAll: {
-    color: '#007AFF',
-    fontWeight: '600',
+    fontSize: fontSize.body,
+    fontWeight: '400',
   },
   featuredScroll: {
-    paddingRight: 20,
+    paddingHorizontal: 20,
+    paddingRight: 4,
   },
   featuredCard: {
-    width: 180,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginRight: 15,
+    width: 200,
+    borderRadius: radius.card,
+    marginRight: 12,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   featuredImage: {
     width: '100%',
-    height: 120,
-    backgroundColor: '#f0f0f0',
+    height: 130,
+    backgroundColor: 'rgba(120,120,128,0.12)',
   },
   featuredContent: {
     padding: 12,
   },
   featuredTitle: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '600',
-    color: '#1a1a2e',
+  },
+  featuredRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
   },
   featuredPrice: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#007AFF',
-    marginTop: 4,
+    fontSize: fontSize.body,
+    fontWeight: '700',
   },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
+  featuredRating: {
+    fontSize: fontSize.footnote,
+    fontWeight: '500',
   },
-  rating: {
-    fontSize: 12,
-    color: '#666',
-  },
-  reviews: {
-    fontSize: 12,
-    color: '#999',
-    marginLeft: 4,
-  },
-  addButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 8,
-    borderRadius: 6,
+  addPill: {
     marginTop: 10,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
     alignItems: 'center',
   },
-  addButtonText: {
-    color: '#fff',
+  addPillText: {
+    color: '#FFFFFF',
+    fontSize: fontSize.footnote,
     fontWeight: '600',
-    fontSize: 12,
+  },
+  groupedCard: {
+    marginHorizontal: 16,
+    borderRadius: radius.card,
+    overflow: 'hidden',
   },
   trendingItem: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  cardDark: {
-    backgroundColor: '#1a1a2e',
+    alignItems: 'center',
+    padding: 12,
   },
   trendingImage: {
-    width: 100,
-    height: 100,
-    backgroundColor: '#f0f0f0',
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: 'rgba(120,120,128,0.12)',
   },
   trendingContent: {
     flex: 1,
-    padding: 12,
-    justifyContent: 'space-between',
+    marginLeft: 12,
   },
   trendingTitle: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   trendingCategory: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.footnote,
+    marginTop: 1,
   },
   trendingBottom: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 4,
   },
   trendingPrice: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
   },
   trendingRating: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.footnote,
+    fontWeight: '500',
+  },
+  rowSeparator: {
+    position: 'absolute',
+    bottom: 0,
+    left: 80,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+  },
+  chevron: {
+    fontSize: 22,
+    fontWeight: '400',
+    marginLeft: 6,
   },
   categoriesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginHorizontal: -8,
+    paddingHorizontal: 12,
   },
   categoryCard: {
-    width: '45%',
-    margin: '2.5%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
+    width: '50%',
+    padding: 6,
+    paddingHorizontal: 4,
+    flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+  },
+  categoryIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    marginLeft: 8,
   },
   categoryIcon: {
-    fontSize: 32,
-    marginBottom: 8,
+    fontSize: 22,
+    fontWeight: '600',
   },
   categoryLabel: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   promoBanner: {
-    margin: 20,
-    padding: 24,
-    backgroundColor: '#FF6B6B',
-    borderRadius: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    marginHorizontal: 16,
+    padding: 18,
+    borderRadius: radius.card,
+  },
+  promoText: {
+    flex: 1,
+  },
+  promoEyebrow: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: fontSize.caption2,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginBottom: 4,
   },
   promoTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: fontSize.title2,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   promoSubtitle: {
-    fontSize: 14,
-    color: '#fff',
-    marginTop: 4,
-    opacity: 0.9,
+    fontSize: fontSize.footnote,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 2,
   },
   promoButton: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 20,
-    marginTop: 16,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
+    marginLeft: 12,
   },
   promoButtonText: {
-    color: '#FF6B6B',
-    fontWeight: 'bold',
-  },
-  bottomPadding: {
-    height: 40,
+    fontWeight: '600',
+    fontSize: fontSize.subhead,
   },
 });
