@@ -19,10 +19,18 @@
 @end
 
 // ─────────────────────────────────────────────────────────────────────
-// Ribbon view: 90x90 anchored top-right. Custom drawRect renders a red
-// 22pt-wide diagonal stripe rotated -45°, with bold white "E2E" text
-// centered along the stripe.
+// Ribbon view: 150x150 container anchored top-right. A red UIView
+// "stripe" subview sits diagonally across the corner via a +45°
+// rotation transform — same orientation as Flutter's debug banner.
+// A bold white UILabel inside the stripe reads naturally along the
+// diagonal. No custom drawRect → CALayer handles all the geometry,
+// shadow, and text rasterisation cleanly.
 // ─────────────────────────────────────────────────────────────────────
+
+static CGFloat const kEnnioBannerSize        = 130.0;
+static CGFloat const kEnnioStripeWidth       = 160.0; // longer than diagonal
+static CGFloat const kEnnioStripeHeight      = 18.0;
+static CGFloat const kEnnioStripeFromCorner  = 42.0;  // px from corner (along diagonal)
 
 @interface EnnioRibbonView : UIView
 @end
@@ -30,61 +38,62 @@
 @implementation EnnioRibbonView
 
 - (instancetype)init {
-    self = [super initWithFrame:CGRectMake(0, 0, 130, 130)];
+    self = [super initWithFrame:CGRectMake(0, 0, kEnnioBannerSize, kEnnioBannerSize)];
     if (self) {
         self.backgroundColor = [UIColor clearColor];
-        self.opaque = NO;
         self.userInteractionEnabled = NO;
         self.clipsToBounds = NO;
+
+        // Stripe — solid red, with a soft shadow so it stays visible
+        // on any background.
+        UIView* stripe = [[UIView alloc] initWithFrame:
+            CGRectMake(0, 0, kEnnioStripeWidth, kEnnioStripeHeight)];
+        stripe.backgroundColor = [UIColor systemRedColor];
+        stripe.layer.shadowColor   = [UIColor blackColor].CGColor;
+        stripe.layer.shadowOpacity = 0.30;
+        stripe.layer.shadowOffset  = CGSizeMake(0, 1);
+        stripe.layer.shadowRadius  = 2.5;
+        stripe.userInteractionEnabled = NO;
+
+        // Label — bold white "E2E", filling the stripe bounds, drawn
+        // in unrotated coordinates so the rotation transform applies
+        // to label + background as one unit.
+        UILabel* label = [[UILabel alloc] initWithFrame:stripe.bounds];
+        label.text = @"E2E";
+        label.font = [UIFont systemFontOfSize:10 weight:UIFontWeightHeavy];
+        label.textColor = [UIColor whiteColor];
+        label.textAlignment = NSTextAlignmentCenter;
+        label.adjustsFontSizeToFitWidth = NO;
+        label.userInteractionEnabled = NO;
+        // 1.5pt letter-spacing for slightly more breathing room.
+        NSMutableAttributedString* attr =
+            [[NSMutableAttributedString alloc] initWithString:label.text];
+        [attr addAttribute:NSKernAttributeName value:@1.0
+                     range:NSMakeRange(0, label.text.length)];
+        [attr addAttribute:NSFontAttributeName value:label.font
+                     range:NSMakeRange(0, label.text.length)];
+        [attr addAttribute:NSForegroundColorAttributeName value:label.textColor
+                     range:NSMakeRange(0, label.text.length)];
+        label.attributedText = attr;
+        [stripe addSubview:label];
+
+        [self addSubview:stripe];
+
+        // Position stripe so its centre sits on the diagonal that runs
+        // from top-right corner toward the lower-left of the view.
+        // Distance `kEnnioStripeFromCorner` along that diagonal from
+        // the corner: (corner.x - d/√2, corner.y + d/√2).
+        const CGFloat half = kEnnioStripeFromCorner * M_SQRT1_2;
+        stripe.center = CGPointMake(kEnnioBannerSize - half, half);
+
+        // +45° rotation = clockwise from the stripe's natural
+        // horizontal orientation. With the stripe's centre on the
+        // top-right diagonal, the rotated stripe lies along that
+        // diagonal and "E2E" reads naturally with a 45° head tilt to
+        // the right — matches Flutter's topEnd debug banner.
+        stripe.transform = CGAffineTransformMakeRotation(M_PI_4);
     }
     return self;
-}
-
-- (void)drawRect:(CGRect)rect {
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    CGContextSaveGState(ctx);
-
-    // Anchor coordinate system at the view's top-right corner, rotate
-    // -45° so a horizontal rect we draw next reads as the diagonal
-    // ribbon coming out of that corner.
-    CGContextTranslateCTM(ctx, rect.size.width, 0);
-    CGContextRotateCTM(ctx, -M_PI_4);
-
-    const CGFloat ribbonWidth  = 26;
-    const CGFloat ribbonLength = 200;
-    const CGFloat ribbonOffset = 28; // distance from corner along diagonal
-    CGRect ribbon = CGRectMake(-ribbonLength / 2.0,
-                                ribbonOffset,
-                                ribbonLength,
-                                ribbonWidth);
-
-    // Slight shadow so the ribbon stays legible over white/light app
-    // backgrounds.
-    CGContextSetShadowWithColor(ctx, CGSizeMake(0, 1), 2,
-        [[UIColor colorWithWhite:0 alpha:0.35] CGColor]);
-    CGContextSetFillColorWithColor(ctx, [[UIColor systemRedColor] CGColor]);
-    CGContextFillRect(ctx, ribbon);
-    CGContextSetShadowWithColor(ctx, CGSizeZero, 0, NULL);
-
-    // Centered "E2E" label, white bold, sized to fit the stripe height.
-    NSDictionary* attrs = @{
-        NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightBold],
-        NSForegroundColorAttributeName: [UIColor whiteColor],
-        NSKernAttributeName: @1.5,
-    };
-    NSString* text = @"E2E";
-    CGSize textSize = [text sizeWithAttributes:attrs];
-    // Position text along the visible portion of the rotated ribbon.
-    // After -45° rotation the +x axis points up-and-right (outside the
-    // view), so anything drawn at local x ≥ 0 falls past the view's
-    // right edge and clips. Shift the text into negative local x so
-    // it lands on the diagonal stripe inside the view bounds.
-    const CGFloat textShiftX = -55;
-    CGPoint textPos = CGPointMake(textShiftX - textSize.width / 2.0,
-                                   ribbonOffset + (ribbonWidth - textSize.height) / 2.0);
-    [text drawAtPoint:textPos withAttributes:attrs];
-
-    CGContextRestoreGState(ctx);
 }
 
 @end
@@ -146,8 +155,8 @@
     [NSLayoutConstraint activateConstraints:@[
         [ribbon.topAnchor      constraintEqualToAnchor:vc.view.topAnchor],
         [ribbon.trailingAnchor constraintEqualToAnchor:vc.view.trailingAnchor],
-        [ribbon.widthAnchor    constraintEqualToConstant:130],
-        [ribbon.heightAnchor   constraintEqualToConstant:130],
+        [ribbon.widthAnchor    constraintEqualToConstant:kEnnioBannerSize],
+        [ribbon.heightAnchor   constraintEqualToConstant:kEnnioBannerSize],
     ]];
 
     w.rootViewController = vc;
