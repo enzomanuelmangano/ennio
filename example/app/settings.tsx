@@ -1,90 +1,165 @@
-import { View, Text, StyleSheet, ScrollView, Switch, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Switch,
+  Alert,
+  useColorScheme,
+} from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useSettingsStore, useAuthStore, useCartStore } from '../store';
 import * as Haptics from 'expo-haptics';
+import { colors, fontSize, lineHeight, radius } from '../src/theme';
+
+type Palette = ReturnType<typeof colors>;
 
 function SettingRow({
-  icon,
+  symbol,
+  tint,
   label,
   description,
   value,
   onToggle,
-  darkMode,
+  c,
   testID,
+  isLast,
 }: {
-  icon: string;
+  symbol: string;
+  tint: string;
   label: string;
   description?: string;
   value: boolean;
   onToggle: (value: boolean) => void;
-  darkMode: boolean;
+  c: Palette;
   testID: string;
+  isLast: boolean;
 }) {
   return (
-    <View style={[styles.settingRow, darkMode && styles.settingRowDark]}>
-      <Text style={styles.settingIcon}>{icon}</Text>
-      <View style={styles.settingContent}>
-        <Text style={[styles.settingLabel, darkMode && styles.textLight]}>{label}</Text>
-        {description && (
-          <Text style={[styles.settingDescription, darkMode && styles.subtitleDark]}>
-            {description}
+    <View>
+      <View style={styles.settingRow}>
+        <View style={[styles.iconBg, { backgroundColor: tint + '22' }]}>
+          <Text style={[styles.icon, { color: tint }]}>{symbol}</Text>
+        </View>
+        <View style={styles.settingContent}>
+          <Text style={[styles.settingLabel, { color: c.label }]}>
+            {label}
           </Text>
-        )}
+          {description && (
+            <Text
+              style={[styles.settingDescription, { color: c.secondaryLabel }]}
+            >
+              {description}
+            </Text>
+          )}
+        </View>
+        <Switch
+          value={value}
+          onValueChange={onToggle}
+          trackColor={{ false: c.tertiarySystemFill, true: c.systemGreen }}
+          thumbColor="#FFFFFF"
+          ios_backgroundColor={c.tertiarySystemFill}
+          testID={testID}
+        />
       </View>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        trackColor={{ false: '#e0e0e0', true: '#007AFF' }}
-        thumbColor="#fff"
-        testID={testID}
-      />
+      {!isLast && (
+        <View
+          style={[
+            styles.rowSeparator,
+            { backgroundColor: c.separator },
+          ]}
+        />
+      )}
     </View>
   );
 }
 
 function SettingButton({
-  icon,
+  symbol,
+  tint,
   label,
   value,
   onPress,
-  darkMode,
+  c,
   testID,
   danger = false,
+  isLast,
 }: {
-  icon: string;
+  symbol: string;
+  tint: string;
   label: string;
   value?: string;
   onPress: () => void;
-  darkMode: boolean;
+  c: Palette;
   testID: string;
   danger?: boolean;
+  isLast: boolean;
 }) {
   return (
-    <PressableScale
-      style={[styles.settingRow, darkMode && styles.settingRowDark]}
-      onPress={onPress}
-      testID={testID}
-    >
-      <Text style={styles.settingIcon}>{icon}</Text>
-      <View style={styles.settingContent}>
-        <Text style={[
-          styles.settingLabel,
-          darkMode && styles.textLight,
-          danger && styles.dangerText,
-        ]}>
+    <View>
+      <PressableScale
+        style={styles.settingRow}
+        onPress={onPress}
+        testID={testID}
+      >
+        <View style={[styles.iconBg, { backgroundColor: tint + '22' }]}>
+          <Text style={[styles.icon, { color: tint }]}>{symbol}</Text>
+        </View>
+        <Text
+          style={[
+            styles.settingLabel,
+            styles.settingContent,
+            { color: danger ? c.systemRed : c.label },
+          ]}
+        >
           {label}
         </Text>
-      </View>
-      {value && <Text style={[styles.settingValue, darkMode && styles.subtitleDark]}>{value}</Text>}
-      <Text style={styles.chevron}>›</Text>
-    </PressableScale>
+        {value && (
+          <Text style={[styles.settingValue, { color: c.secondaryLabel }]}>
+            {value}
+          </Text>
+        )}
+        {!danger && (
+          <Text style={[styles.chevron, { color: c.tertiaryLabel }]}>›</Text>
+        )}
+      </PressableScale>
+      {!isLast && (
+        <View
+          style={[
+            styles.rowSeparator,
+            { backgroundColor: c.separator },
+          ]}
+        />
+      )}
+    </View>
   );
 }
 
-function SectionHeader({ title, darkMode }: { title: string; darkMode: boolean }) {
+function SectionHeader({ title, c }: { title: string; c: Palette }) {
   return (
-    <Text style={[styles.sectionHeader, darkMode && styles.subtitleDark]}>{title}</Text>
+    <Text style={[styles.sectionHeader, { color: c.secondaryLabel }]}>
+      {title}
+    </Text>
+  );
+}
+
+function GroupedSection({
+  c,
+  children,
+}: {
+  c: Palette;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      style={[
+        styles.section,
+        { backgroundColor: c.secondarySystemGroupedBackground },
+      ]}
+    >
+      {children}
+    </View>
   );
 }
 
@@ -102,8 +177,15 @@ export default function SettingsScreen() {
   const clearCart = useCartStore(state => state.clearCart);
 
   const darkMode = preferences.darkMode;
+  const systemScheme = useColorScheme();
+  const scheme = darkMode ? 'dark' : systemScheme === 'dark' ? 'dark' : 'light';
+  const c = colors(scheme);
 
-  const handleToggle = (key: string, value: boolean, type: 'pref' | 'notif' | 'privacy') => {
+  const handleToggle = (
+    key: string,
+    value: boolean,
+    type: 'pref' | 'notif' | 'privacy',
+  ) => {
     if (preferences.hapticFeedback) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -128,11 +210,13 @@ export default function SettingsScreen() {
           onPress: () => {
             resetSettings();
             if (preferences.hapticFeedback) {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning,
+              );
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -148,31 +232,29 @@ export default function SettingsScreen() {
           onPress: () => {
             clearCart();
             if (preferences.hapticFeedback) {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning,
+              );
             }
             Alert.alert('Done', 'All data has been cleared.');
           },
         },
-      ]
+      ],
     );
   };
 
   const handleLogout = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: () => {
-            logout();
-            router.back();
-          },
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: () => {
+          logout();
+          router.back();
         },
-      ]
-    );
+      },
+    ]);
   };
 
   return (
@@ -180,290 +262,323 @@ export default function SettingsScreen() {
       <Stack.Screen
         options={{
           title: 'Settings',
-          headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
+          headerStyle: { backgroundColor: c.systemBackground },
+          headerTintColor: c.label,
         }}
       />
       <ScrollView
-        style={[styles.container, darkMode && styles.containerDark]}
+        style={{ flex: 1, backgroundColor: c.systemGroupedBackground }}
+        contentContainerStyle={{ paddingBottom: 32 }}
         testID="settings-screen"
       >
-        {/* Appearance */}
-        <SectionHeader title="Appearance" darkMode={darkMode} />
-        <View style={[styles.section, darkMode && styles.sectionDark]}>
+        <SectionHeader title="APPEARANCE" c={c} />
+        <GroupedSection c={c}>
           <SettingRow
-            icon="🌙"
+            symbol="☾"
+            tint={c.systemPurple}
             label="Dark Mode"
             description="Use dark theme throughout the app"
             value={preferences.darkMode}
             onToggle={v => handleToggle('darkMode', v, 'pref')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-dark-mode"
+            isLast={false}
           />
           <SettingRow
-            icon="📳"
+            symbol="≈"
+            tint={c.systemPink}
             label="Haptic Feedback"
             description="Vibrate on button presses"
             value={preferences.hapticFeedback}
             onToggle={v => handleToggle('hapticFeedback', v, 'pref')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-haptic"
+            isLast={false}
           />
           <SettingRow
-            icon="🔔"
+            symbol="◔"
+            tint={c.systemOrange}
             label="Show Notifications Badge"
             value={preferences.showBadges}
             onToggle={v => handleToggle('showBadges', v, 'pref')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-badges"
+            isLast={true}
           />
-        </View>
+        </GroupedSection>
 
-        {/* Notifications */}
-        <SectionHeader title="Notifications" darkMode={darkMode} />
-        <View style={[styles.section, darkMode && styles.sectionDark]}>
+        <SectionHeader title="NOTIFICATIONS" c={c} />
+        <GroupedSection c={c}>
           <SettingRow
-            icon="📦"
+            symbol="◫"
+            tint={c.systemBlue}
             label="Order Updates"
             description="Get notified about order status changes"
             value={notifications.orderUpdates}
             onToggle={v => handleToggle('orderUpdates', v, 'notif')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-order-updates"
+            isLast={false}
           />
           <SettingRow
-            icon="💰"
+            symbol="$"
+            tint={c.systemGreen}
             label="Promotions"
             description="Receive deals and promotional offers"
             value={notifications.promotions}
             onToggle={v => handleToggle('promotions', v, 'notif')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-promotions"
+            isLast={false}
           />
           <SettingRow
-            icon="📰"
+            symbol="✦"
+            tint={c.systemTeal}
             label="New Arrivals"
             description="Be notified when new products are added"
             value={notifications.newArrivals}
             onToggle={v => handleToggle('newArrivals', v, 'notif')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-new-arrivals"
+            isLast={false}
           />
           <SettingRow
-            icon="🔖"
+            symbol="↓"
+            tint={c.systemIndigo}
             label="Price Drops"
             description="Get alerts when saved items go on sale"
             value={notifications.priceDrops}
             onToggle={v => handleToggle('priceDrops', v, 'notif')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-price-drops"
+            isLast={true}
           />
-        </View>
+        </GroupedSection>
 
-        {/* Privacy */}
-        <SectionHeader title="Privacy" darkMode={darkMode} />
-        <View style={[styles.section, darkMode && styles.sectionDark]}>
+        <SectionHeader title="PRIVACY" c={c} />
+        <GroupedSection c={c}>
           <SettingRow
-            icon="📊"
+            symbol="◯"
+            tint={c.systemBlue}
             label="Analytics"
             description="Help us improve by sharing anonymous usage data"
             value={privacy.analytics}
             onToggle={v => handleToggle('analytics', v, 'privacy')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-analytics"
+            isLast={false}
           />
           <SettingRow
-            icon="🎯"
+            symbol="◎"
+            tint={c.systemPurple}
             label="Personalized Ads"
             description="See ads based on your interests"
             value={privacy.personalizedAds}
             onToggle={v => handleToggle('personalizedAds', v, 'privacy')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-personalized-ads"
+            isLast={false}
           />
           <SettingRow
-            icon="📍"
+            symbol="◉"
+            tint={c.systemRed}
             label="Location Services"
             description="Allow location access for local deals"
             value={privacy.locationServices}
             onToggle={v => handleToggle('locationServices', v, 'privacy')}
-            darkMode={darkMode}
+            c={c}
             testID="toggle-location"
+            isLast={true}
           />
-        </View>
+        </GroupedSection>
 
-        {/* Account */}
-        <SectionHeader title="Account" darkMode={darkMode} />
-        <View style={[styles.section, darkMode && styles.sectionDark]}>
+        <SectionHeader title="ACCOUNT" c={c} />
+        <GroupedSection c={c}>
           {isAuthenticated ? (
             <>
               <SettingButton
-                icon="👤"
+                symbol="◔"
+                tint={c.systemBlue}
                 label="Edit Profile"
-                onPress={() => Alert.alert('Coming Soon', 'Profile editing will be available soon!')}
-                darkMode={darkMode}
+                onPress={() =>
+                  Alert.alert(
+                    'Coming Soon',
+                    'Profile editing will be available soon!',
+                  )
+                }
+                c={c}
                 testID="edit-profile"
+                isLast={false}
               />
               <SettingButton
-                icon="🔑"
+                symbol="⌬"
+                tint={c.systemTeal}
                 label="Change Password"
-                onPress={() => Alert.alert('Coming Soon', 'Password change will be available soon!')}
-                darkMode={darkMode}
+                onPress={() =>
+                  Alert.alert(
+                    'Coming Soon',
+                    'Password change will be available soon!',
+                  )
+                }
+                c={c}
                 testID="change-password"
+                isLast={false}
               />
               <SettingButton
-                icon="🚪"
+                symbol="↩"
+                tint={c.systemRed}
                 label="Sign Out"
                 onPress={handleLogout}
-                darkMode={darkMode}
+                c={c}
                 testID="sign-out"
                 danger
+                isLast={true}
               />
             </>
           ) : (
             <SettingButton
-              icon="🔐"
+              symbol="↪"
+              tint={c.systemBlue}
               label="Sign In"
               onPress={() => router.push('/auth/login')}
-              darkMode={darkMode}
+              c={c}
               testID="sign-in"
+              isLast={true}
             />
           )}
-        </View>
+        </GroupedSection>
 
-        {/* About */}
-        <SectionHeader title="About" darkMode={darkMode} />
-        <View style={[styles.section, darkMode && styles.sectionDark]}>
+        <SectionHeader title="ABOUT" c={c} />
+        <GroupedSection c={c}>
           <SettingButton
-            icon="📱"
+            symbol="ℹ"
+            tint={c.systemBlue}
             label="App Version"
             value="1.0.0"
             onPress={() => {}}
-            darkMode={darkMode}
+            c={c}
             testID="app-version"
+            isLast={false}
           />
           <SettingButton
-            icon="📄"
+            symbol="§"
+            tint={c.systemIndigo}
             label="Terms of Service"
-            onPress={() => Alert.alert('Terms of Service', 'Terms content here...')}
-            darkMode={darkMode}
+            onPress={() =>
+              Alert.alert('Terms of Service', 'Terms content here...')
+            }
+            c={c}
             testID="terms"
+            isLast={false}
           />
           <SettingButton
-            icon="🔒"
+            symbol="🔒"
+            tint={c.systemPurple}
             label="Privacy Policy"
-            onPress={() => Alert.alert('Privacy Policy', 'Privacy content here...')}
-            darkMode={darkMode}
+            onPress={() =>
+              Alert.alert('Privacy Policy', 'Privacy content here...')
+            }
+            c={c}
             testID="privacy-policy"
+            isLast={false}
           />
           <SettingButton
-            icon="❓"
+            symbol="?"
+            tint={c.systemTeal}
             label="Help & Support"
-            onPress={() => Alert.alert('Help', 'Contact us at support@ennio.example')}
-            darkMode={darkMode}
+            onPress={() =>
+              Alert.alert('Help', 'Contact us at support@ennio.example')
+            }
+            c={c}
             testID="help"
+            isLast={true}
           />
-        </View>
+        </GroupedSection>
 
-        {/* Data */}
-        <SectionHeader title="Data" darkMode={darkMode} />
-        <View style={[styles.section, darkMode && styles.sectionDark]}>
+        <SectionHeader title="DATA" c={c} />
+        <GroupedSection c={c}>
           <SettingButton
-            icon="🗑️"
+            symbol="✕"
+            tint={c.systemRed}
             label="Clear Cart & Orders"
             onPress={handleClearData}
-            darkMode={darkMode}
+            c={c}
             testID="clear-data"
             danger
+            isLast={false}
           />
           <SettingButton
-            icon="↺"
-            label="Reset All Settings"
+            symbol="↺"
+            tint={c.systemRed}
+            label="Reset Settings"
             onPress={handleResetSettings}
-            darkMode={darkMode}
+            c={c}
             testID="reset-settings"
             danger
+            isLast={true}
           />
-        </View>
-
-        <View style={styles.bottomPadding} />
+        </GroupedSection>
       </ScrollView>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  containerDark: {
-    backgroundColor: '#16213e',
-  },
   sectionHeader: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
+    fontSize: fontSize.footnote,
+    lineHeight: lineHeight.footnote,
+    fontWeight: '400',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    paddingHorizontal: 16,
+    letterSpacing: 0.4,
+    paddingHorizontal: 32,
     paddingTop: 24,
     paddingBottom: 8,
   },
   section: {
-    backgroundColor: '#fff',
-  },
-  sectionDark: {
-    backgroundColor: '#1a1a2e',
+    marginHorizontal: 16,
+    borderRadius: radius.card,
+    overflow: 'hidden',
   },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    backgroundColor: '#fff',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    minHeight: 50,
   },
-  settingRowDark: {
-    backgroundColor: '#1a1a2e',
-    borderBottomColor: '#2a2a3e',
-  },
-  settingIcon: {
-    fontSize: 20,
+  iconBg: {
+    width: 30,
+    height: 30,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
+  },
+  icon: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   settingContent: {
     flex: 1,
   },
   settingLabel: {
-    fontSize: 16,
-    color: '#1a1a2e',
+    fontSize: fontSize.body,
   },
   settingDescription: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 2,
+    fontSize: fontSize.caption1,
+    lineHeight: lineHeight.caption1,
+    marginTop: 1,
   },
   settingValue: {
-    fontSize: 14,
-    color: '#999',
-    marginRight: 8,
-  },
-  textLight: {
-    color: '#fff',
-  },
-  subtitleDark: {
-    color: '#aaa',
-  },
-  dangerText: {
-    color: '#FF3B30',
+    fontSize: fontSize.subhead,
+    marginRight: 6,
   },
   chevron: {
     fontSize: 20,
-    color: '#ccc',
+    fontWeight: '500',
   },
-  bottomPadding: {
-    height: 40,
+  rowSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 56,
   },
 });
