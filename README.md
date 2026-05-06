@@ -132,8 +132,16 @@ npm install -D @ennio/cli
 }
 ```
 
-> **Default = OFF.** Ennio is opt-in per build. Without `ENNIO_ENABLED=1`
-> the plugin produces a build with zero Ennio symbols.
+> **Default = OFF.** Having `@ennio/core` and `@ennio/expo-plugin` in
+> your dependencies is **safe to ship to production**. The native
+> runtime only links in when `ENNIO_ENABLED=1` is set at prebuild
+> time. Without it the plugin no-ops and the resulting build is
+> byte-equivalent to one that never installed the packages.
+>
+> When Ennio is active in a build, a red diagonal **E2E** ribbon
+> appears in the top-right corner of every screen — a visible
+> reminder that the build carries the remote-control surface and is
+> not for production distribution.
 
 Enable for E2E:
 
@@ -271,13 +279,30 @@ example/        Sample app + e2e/ flows (10 example flows, the
 
 ## Security
 
-> **Read this section before installing.** Ennio is a dev-only remote-control
-> surface. Shipping it to a production build is a critical-severity
-> vulnerability.
+> **TL;DR — installed ≠ enabled.** Keeping `@ennio/core` and
+> `@ennio/expo-plugin` in your dependencies and plugins list is **safe
+> for App Store / production builds**. They are inert by default. The
+> remote-control surface only ships when you explicitly set
+> `ENNIO_ENABLED=1` at prebuild time. Production builds without that
+> env var are byte-equivalent to a build that never had the package.
 
-### What ships when Ennio is enabled
+### Installed vs enabled
 
-A native WebSocket server bound to port `9876` listens for JSON
+| Action | Effect on production build |
+|--------|----------------------------|
+| `npm install @ennio/core @ennio/expo-plugin` | None. Adds JS deps, zero native code shipped. |
+| `"plugins": ["@ennio/expo-plugin"]` in `app.json` | None. Plugin self-checks env at prebuild and no-ops if `ENNIO_ENABLED ≠ 1`. |
+| `expo prebuild` (no env) | None. No `pod 'EnnioCore'` written, no Gradle dep, no symbols. |
+| `ENNIO_ENABLED=1 expo prebuild` | **Ennio active**. Pod linked, WebSocket server binds on launch, `E2E` ribbon shown top-right of every screen. |
+
+When the ribbon appears, Ennio is active. When the ribbon is absent,
+Ennio is dormant — even if the package is installed, listed in plugins,
+and shipped to TestFlight / App Store.
+
+### What "active" means
+
+When Ennio is active (`ENNIO_ENABLED=1` was set at prebuild for this
+build), a native WebSocket server bound to port `9876` listens for JSON
 commands. Any process that can reach the simulator host (`localhost`,
 LAN, or anything routable to the device) can:
 
