@@ -8,20 +8,34 @@ import {
   Image,
   Modal,
   Pressable,
+  useColorScheme,
 } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../store';
+import {
+  useProductsStore,
+  useCartStore,
+  useSettingsStore,
+  categories,
+} from '../../store';
 import * as Haptics from 'expo-haptics';
+import { colors, fontSize, lineHeight, radius } from '../../src/theme';
 
 type SortOption = 'price-asc' | 'price-desc' | 'rating' | 'name';
 
-function ProductCard({ product }: { product: ReturnType<typeof useProductsStore.getState>['products'][0] }) {
+function ProductCard({
+  product,
+  c,
+}: {
+  product: ReturnType<typeof useProductsStore.getState>['products'][0];
+  c: ReturnType<typeof colors>;
+}) {
   const router = useRouter();
   const addToCart = useCartStore(state => state.addToCart);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const hapticEnabled = useSettingsStore(
+    state => state.preferences.hapticFeedback,
+  );
 
   const handleAddToCart = () => {
     if (product.inStock) {
@@ -34,29 +48,51 @@ function ProductCard({ product }: { product: ReturnType<typeof useProductsStore.
 
   return (
     <Pressable
-      style={[styles.productCard, darkMode && styles.cardDark]}
+      style={[
+        styles.productCard,
+        { backgroundColor: c.secondarySystemGroupedBackground },
+      ]}
       onPress={() => router.push(`/product/${product.id}`)}
       testID={`product-card-${product.id}`}
     >
-      <Image source={{ uri: product.image }} style={styles.productImage} />
-      {!product.inStock && (
-        <View style={styles.outOfStockBadge}>
-          <Text style={styles.outOfStockText}>Out of Stock</Text>
-        </View>
-      )}
+      <View style={styles.productImageWrap}>
+        <Image source={{ uri: product.image }} style={styles.productImage} />
+        {!product.inStock && (
+          <View style={styles.outOfStockBadge}>
+            <Text style={styles.outOfStockText}>Out of Stock</Text>
+          </View>
+        )}
+      </View>
       <View style={styles.productContent}>
-        <Text style={[styles.productCategory, darkMode && styles.subtitleDark]}>{product.category}</Text>
-        <Text style={[styles.productName, darkMode && styles.textLight]} numberOfLines={2}>
+        <Text
+          style={[styles.productCategory, { color: c.secondaryLabel }]}
+        >
+          {product.category}
+        </Text>
+        <Text
+          style={[styles.productName, { color: c.label }]}
+          numberOfLines={2}
+        >
           {product.name}
         </Text>
         <View style={styles.productMeta}>
-          <Text style={styles.productRating}>⭐ {product.rating}</Text>
-          <Text style={[styles.productReviews, darkMode && styles.subtitleDark]}>({product.reviews})</Text>
+          <Text style={[styles.productRating, { color: c.secondaryLabel }]}>
+            ★ {product.rating}
+          </Text>
+          <Text style={[styles.productReviews, { color: c.tertiaryLabel }]}>
+            ({product.reviews})
+          </Text>
         </View>
         <View style={styles.productFooter}>
-          <Text style={styles.productPrice}>${product.price.toFixed(2)}</Text>
+          <Text style={[styles.productPrice, { color: c.label }]}>
+            ${product.price.toFixed(2)}
+          </Text>
           <Pressable
-            style={[styles.addToCartBtn, !product.inStock && styles.addToCartBtnDisabled]}
+            style={[
+              styles.addToCartBtn,
+              { backgroundColor: c.systemBlue },
+              !product.inStock && { backgroundColor: c.tertiarySystemFill },
+            ]}
             onPress={handleAddToCart}
             disabled={!product.inStock}
             testID={`add-to-cart-${product.id}`}
@@ -69,10 +105,9 @@ function ProductCard({ product }: { product: ReturnType<typeof useProductsStore.
   );
 }
 
-function CategoryFilter() {
+function CategoryFilter({ c }: { c: ReturnType<typeof colors> }) {
   const selectedCategory = useProductsStore(state => state.selectedCategory);
   const setCategory = useProductsStore(state => state.setCategory);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
 
   return (
     <View style={styles.categoryContainer}>
@@ -82,26 +117,32 @@ function CategoryFilter() {
         data={categories}
         keyExtractor={item => item}
         contentContainerStyle={styles.categoryList}
-        renderItem={({ item }) => (
-          <PressableScale
-            style={[
-              styles.categoryChip,
-              selectedCategory === item && styles.categoryChipActive,
-              darkMode && styles.categoryChipDark,
-            ]}
-            onPress={() => setCategory(item)}
-            testID={`filter-category-${item.toLowerCase()}`}
-          >
-            <Text
+        renderItem={({ item }) => {
+          const active = selectedCategory === item;
+          return (
+            <PressableScale
               style={[
-                styles.categoryChipText,
-                selectedCategory === item && styles.categoryChipTextActive,
+                styles.categoryChip,
+                {
+                  backgroundColor: active
+                    ? c.systemBlue
+                    : c.secondarySystemGroupedBackground,
+                },
               ]}
+              onPress={() => setCategory(item)}
+              testID={`filter-category-${item.toLowerCase()}`}
             >
-              {item}
-            </Text>
-          </PressableScale>
-        )}
+              <Text
+                style={[
+                  styles.categoryChipText,
+                  { color: active ? '#FFFFFF' : c.label },
+                ]}
+              >
+                {item}
+              </Text>
+            </PressableScale>
+          );
+        }}
       />
     </View>
   );
@@ -110,12 +151,15 @@ function CategoryFilter() {
 function SortDropdown({
   value,
   onChange,
+  c,
 }: {
   value: SortOption;
   onChange: (value: SortOption) => void;
+  c: ReturnType<typeof colors>;
 }) {
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const hapticEnabled = useSettingsStore(
+    state => state.preferences.hapticFeedback,
+  );
   const [open, setOpen] = useState(false);
 
   const options: { value: SortOption; label: string }[] = [
@@ -125,7 +169,8 @@ function SortDropdown({
     { value: 'name', label: 'Name: A to Z' },
   ];
 
-  const selectedLabel = options.find(o => o.value === value)?.label || 'Sort By';
+  const selectedLabel =
+    options.find(o => o.value === value)?.label || 'Sort By';
 
   const handleOpen = () => {
     if (hapticEnabled) Haptics.selectionAsync();
@@ -141,12 +186,17 @@ function SortDropdown({
   return (
     <>
       <PressableScale
-        style={[styles.sortButton, darkMode && styles.sortButtonDark]}
+        style={[
+          styles.sortButton,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
         onPress={handleOpen}
         testID="sort-dropdown"
       >
-        <Text style={[styles.sortButtonText, darkMode && styles.textLight]}>{selectedLabel}</Text>
-        <Text style={styles.sortArrow}>▼</Text>
+        <Text style={[styles.sortButtonText, { color: c.label }]}>
+          {selectedLabel}
+        </Text>
+        <Text style={[styles.sortArrow, { color: c.secondaryLabel }]}>⌄</Text>
       </PressableScale>
       <Modal
         visible={open}
@@ -154,22 +204,47 @@ function SortDropdown({
         animationType="fade"
         onRequestClose={() => setOpen(false)}
       >
-        <PressableScale style={styles.sortBackdrop} onPress={() => setOpen(false)}>
+        <PressableScale
+          style={styles.sortBackdrop}
+          onPress={() => setOpen(false)}
+        >
           <View
-            style={[styles.sortMenu, darkMode && styles.sortMenuDark]}
+            style={[
+              styles.sortMenu,
+              { backgroundColor: c.secondarySystemGroupedBackground },
+            ]}
             testID="sort-options"
           >
-            {options.map(o => (
-              <PressableScale
-                key={o.value}
-                style={[styles.sortOption, value === o.value && styles.sortOptionActive]}
-                onPress={() => handleSelect(o.value)}
-                testID={`sort-option-${o.value}`}
-              >
-                <Text style={[styles.sortOptionText, darkMode && styles.textLight]}>
-                  {o.label}
-                </Text>
-              </PressableScale>
+            {options.map((o, idx) => (
+              <View key={o.value}>
+                <PressableScale
+                  style={styles.sortOption}
+                  onPress={() => handleSelect(o.value)}
+                  testID={`sort-option-${o.value}`}
+                >
+                  <Text style={[styles.sortOptionText, { color: c.label }]}>
+                    {o.label}
+                  </Text>
+                  {value === o.value && (
+                    <Text
+                      style={[
+                        styles.sortCheck,
+                        { color: c.systemBlue },
+                      ]}
+                    >
+                      ✓
+                    </Text>
+                  )}
+                </PressableScale>
+                {idx < options.length - 1 && (
+                  <View
+                    style={[
+                      styles.sortSeparator,
+                      { backgroundColor: c.separator },
+                    ]}
+                  />
+                )}
+              </View>
             ))}
           </View>
         </PressableScale>
@@ -186,27 +261,26 @@ export default function ProductsScreen() {
   const sortBy = useProductsStore(state => state.sortBy);
   const setSortBy = useProductsStore(state => state.setSortBy);
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const systemScheme = useColorScheme();
+  const scheme = darkMode ? 'dark' : systemScheme === 'dark' ? 'dark' : 'light';
+  const c = colors(scheme);
 
-  // Memoize filtered products to avoid infinite re-renders
   const products = useMemo(() => {
     let filtered = allProducts;
 
-    // Filter by category
     if (selectedCategory !== 'All') {
       filtered = filtered.filter(p => p.category === selectedCategory);
     }
 
-    // Filter by search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         p =>
           p.name.toLowerCase().includes(query) ||
-          p.description.toLowerCase().includes(query)
+          p.description.toLowerCase().includes(query),
       );
     }
 
-    // Sort
     return [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'price-asc':
@@ -226,13 +300,31 @@ export default function ProductsScreen() {
   const TAB_BAR_HEIGHT = 49;
 
   return (
-    <View style={[styles.container, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="products-screen">
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: c.systemGroupedBackground },
+        {
+          paddingTop: insets.top + 8,
+          paddingBottom: insets.bottom + TAB_BAR_HEIGHT,
+        },
+      ]}
+      testID="products-screen"
+    >
+      <Text style={[styles.largeTitle, { color: c.label }]}>Products</Text>
+
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
+      <View
+        style={[
+          styles.searchContainer,
+          { backgroundColor: c.tertiarySystemFill },
+        ]}
+      >
+        <Text style={[styles.searchIcon, { color: c.secondaryLabel }]}>⌕</Text>
         <TextInput
-          style={[styles.searchInput, darkMode && styles.searchInputDark]}
-          placeholder="Search products..."
-          placeholderTextColor={darkMode ? '#888' : '#999'}
+          style={[styles.searchInput, { color: c.label }]}
+          placeholder="Search products"
+          placeholderTextColor={c.secondaryLabel}
           value={searchQuery}
           onChangeText={setSearchQuery}
           autoCorrect={false}
@@ -245,37 +337,44 @@ export default function ProductsScreen() {
             style={styles.clearSearch}
             onPress={() => setSearchQuery('')}
             testID="clear-search"
+            hitSlop={8}
           >
-            <Text style={styles.clearSearchText}>✕</Text>
+            <View
+              style={[
+                styles.clearSearchCircle,
+                { backgroundColor: c.tertiaryLabel },
+              ]}
+            >
+              <Text style={styles.clearSearchText}>✕</Text>
+            </View>
           </PressableScale>
         )}
       </View>
 
       {/* Category Filter */}
-      <CategoryFilter />
+      <CategoryFilter c={c} />
 
       {/* Sort & Results Count */}
       <View style={styles.toolbar}>
-        <Text style={[styles.resultsCount, darkMode && styles.subtitleDark]}>
-          {products.length} products
+        <Text style={[styles.resultsCount, { color: c.secondaryLabel }]}>
+          {products.length} {products.length === 1 ? 'result' : 'results'}
         </Text>
-        <SortDropdown value={sortBy} onChange={setSortBy} />
+        <SortDropdown value={sortBy} onChange={setSortBy} c={c} />
       </View>
 
-      {/* Reset all filters / search — visible whenever either is active.
-          Distinct testID from `reset-filters` (which only renders inside
-          the empty state) so flows that conditionally check the empty
-          state still work. */}
       {(searchQuery.length > 0 || selectedCategory !== 'All') && (
         <PressableScale
-          style={[styles.resetTopButton, darkMode && styles.resetTopButtonDark]}
+          style={[
+            styles.resetTopButton,
+            { backgroundColor: c.tertiarySystemFill },
+          ]}
           onPress={() => {
             setSearchQuery('');
             useProductsStore.getState().setCategory('All');
           }}
           testID="reset-all"
         >
-          <Text style={[styles.resetTopButtonText, darkMode && styles.textLight]}>
+          <Text style={[styles.resetTopButtonText, { color: c.label }]}>
             Reset Filters
           </Text>
         </PressableScale>
@@ -289,18 +388,30 @@ export default function ProductsScreen() {
           keyExtractor={item => item.id}
           contentContainerStyle={styles.productsList}
           columnWrapperStyle={styles.productsRow}
-          renderItem={({ item }) => <ProductCard product={item} />}
+          renderItem={({ item }) => <ProductCard product={item} c={c} />}
+          showsVerticalScrollIndicator={false}
           testID="products-list"
         />
       ) : (
         <View style={styles.emptyState} testID="no-products">
-          <Text style={styles.emptyIcon}>🔍</Text>
-          <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>No products found</Text>
-          <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
+          <View
+            style={[
+              styles.emptyIconBg,
+              { backgroundColor: c.tertiarySystemFill },
+            ]}
+          >
+            <Text style={[styles.emptyIcon, { color: c.secondaryLabel }]}>
+              ⌕
+            </Text>
+          </View>
+          <Text style={[styles.emptyTitle, { color: c.label }]}>
+            No products found
+          </Text>
+          <Text style={[styles.emptySubtitle, { color: c.secondaryLabel }]}>
             Try adjusting your search or filters
           </Text>
           <PressableScale
-            style={styles.resetButton}
+            style={[styles.resetButton, { backgroundColor: c.systemBlue }]}
             onPress={() => {
               setSearchQuery('');
               useProductsStore.getState().setCategory('All');
@@ -318,111 +429,91 @@ export default function ProductsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
-  containerDark: {
-    backgroundColor: '#16213e',
+  largeTitle: {
+    fontSize: fontSize.largeTitle,
+    lineHeight: lineHeight.largeTitle,
+    fontWeight: '700',
+    letterSpacing: 0.37,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    margin: 15,
-    marginBottom: 10,
+    marginHorizontal: 16,
+    marginTop: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: radius.card,
+  },
+  searchIcon: {
+    fontSize: 18,
+    marginRight: 6,
   },
   searchInput: {
     flex: 1,
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    fontSize: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  searchInputDark: {
-    backgroundColor: '#1a1a2e',
-    color: '#fff',
+    fontSize: fontSize.body,
+    paddingVertical: 0,
   },
   clearSearch: {
-    position: 'absolute',
-    right: 12,
-    padding: 4,
+    paddingLeft: 8,
+  },
+  clearSearchCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   clearSearchText: {
-    fontSize: 16,
-    color: '#999',
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   categoryContainer: {
-    marginBottom: 10,
+    marginTop: 14,
   },
   categoryList: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 16,
+    gap: 8,
   },
   categoryChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    marginRight: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  categoryChipDark: {
-    backgroundColor: '#1a1a2e',
-  },
-  categoryChipActive: {
-    backgroundColor: '#007AFF',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    marginRight: 8,
   },
   categoryChipText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  categoryChipTextActive: {
-    color: '#fff',
+    fontSize: fontSize.subhead,
+    fontWeight: '600',
   },
   toolbar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
   resultsCount: {
-    fontSize: 14,
-    color: '#666',
-  },
-  subtitleDark: {
-    color: '#aaa',
-  },
-  textLight: {
-    color: '#fff',
+    fontSize: fontSize.footnote,
+    fontWeight: '500',
   },
   sortButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  sortButtonDark: {
-    backgroundColor: '#1a1a2e',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
   },
   sortButtonText: {
-    fontSize: 14,
-    color: '#333',
-    marginRight: 6,
+    fontSize: fontSize.footnote,
+    fontWeight: '600',
+    marginRight: 4,
   },
   sortArrow: {
-    fontSize: 10,
-    color: '#666',
+    fontSize: 12,
+    fontWeight: '700',
   },
   sortBackdrop: {
     flex: 1,
@@ -431,57 +522,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sortMenu: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    width: '80%',
-    paddingVertical: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  sortMenuDark: {
-    backgroundColor: '#1a1a2e',
+    borderRadius: radius.sheet,
+    width: '78%',
+    overflow: 'hidden',
   },
   sortOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 14,
-    paddingHorizontal: 20,
-  },
-  sortOptionActive: {
-    backgroundColor: '#e6f0ff',
+    paddingHorizontal: 18,
   },
   sortOptionText: {
-    fontSize: 16,
-    color: '#222',
+    fontSize: fontSize.body,
+    fontWeight: '500',
+  },
+  sortCheck: {
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  sortSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 18,
+  },
+  resetTopButton: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignSelf: 'flex-start',
+    borderRadius: radius.pill,
+  },
+  resetTopButtonText: {
+    fontSize: fontSize.footnote,
+    fontWeight: '600',
   },
   productsList: {
-    padding: 10,
-    paddingBottom: 100,
+    paddingHorizontal: 12,
+    paddingBottom: 24,
   },
   productsRow: {
     justifyContent: 'space-between',
-    paddingHorizontal: 5,
+    paddingHorizontal: 4,
   },
   productCard: {
     width: '48%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 15,
+    borderRadius: radius.card,
+    marginBottom: 12,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  cardDark: {
-    backgroundColor: '#1a1a2e',
+  productImageWrap: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: 'rgba(120,120,128,0.12)',
   },
   productImage: {
     width: '100%',
-    height: 140,
-    backgroundColor: '#f0f0f0',
+    height: '100%',
   },
   outOfStockBadge: {
     position: 'absolute',
@@ -490,26 +587,25 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.7)',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 4,
+    borderRadius: radius.pill,
   },
   outOfStockText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
+    color: '#FFFFFF',
+    fontSize: fontSize.caption2,
+    fontWeight: '700',
   },
   productContent: {
     padding: 12,
   },
   productCategory: {
-    fontSize: 11,
-    color: '#999',
+    fontSize: fontSize.caption2,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
+    fontWeight: '600',
   },
   productName: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '600',
-    color: '#1a1a2e',
     marginTop: 4,
     lineHeight: 20,
   },
@@ -519,12 +615,11 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   productRating: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.caption1,
+    fontWeight: '500',
   },
   productReviews: {
-    fontSize: 11,
-    color: '#999',
+    fontSize: fontSize.caption1,
     marginLeft: 4,
   },
   productFooter: {
@@ -534,25 +629,21 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   productPrice: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontSize: fontSize.body,
+    fontWeight: '700',
   },
   addToCartBtn: {
-    backgroundColor: '#007AFF',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addToCartBtnDisabled: {
-    backgroundColor: '#ccc',
-  },
   addToCartText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    marginTop: -2,
   },
   emptyState: {
     flex: 1,
@@ -560,47 +651,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 40,
   },
+  emptyIconBg: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
   emptyIcon: {
-    fontSize: 60,
-    marginBottom: 20,
+    fontSize: 38,
+    fontWeight: '500',
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 8,
+    fontSize: fontSize.title2,
+    fontWeight: '700',
+    marginBottom: 6,
   },
   emptySubtitle: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: fontSize.subhead,
     textAlign: 'center',
   },
   resetButton: {
-    marginTop: 20,
-    paddingHorizontal: 24,
+    marginTop: 22,
+    paddingHorizontal: 28,
     paddingVertical: 12,
-    backgroundColor: '#007AFF',
-    borderRadius: 20,
+    borderRadius: radius.pill,
   },
   resetButtonText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontWeight: '600',
-  },
-  resetTopButton: {
-    marginHorizontal: 15,
-    marginBottom: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    alignSelf: 'flex-start',
-    borderRadius: 16,
-    backgroundColor: '#eef2ff',
-  },
-  resetTopButtonDark: {
-    backgroundColor: '#1f2740',
-  },
-  resetTopButtonText: {
-    color: '#1a1a2e',
-    fontWeight: '600',
-    fontSize: 13,
+    fontSize: fontSize.body,
   },
 });

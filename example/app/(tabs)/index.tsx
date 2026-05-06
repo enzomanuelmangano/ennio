@@ -199,7 +199,7 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: c.label }]}>
-            Featured
+            Featured Products
           </Text>
           <Link href="/products" asChild>
             <PressableScale testID="see-all-featured" hitSlop={8}>
