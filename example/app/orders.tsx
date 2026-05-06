@@ -1,48 +1,72 @@
-import { View, Text, StyleSheet, FlatList, Image } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  Image,
+  useColorScheme,
+} from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useCartStore, useSettingsStore, useAuthStore } from '../store';
 import { useState } from 'react';
+import { colors, fontSize, lineHeight, radius } from '../src/theme';
+
+type Palette = ReturnType<typeof colors>;
 
 type OrderStatus = 'processing' | 'shipped' | 'delivered' | 'cancelled';
 
-function getStatusColor(status: OrderStatus) {
+function statusTint(c: Palette, status: OrderStatus) {
   switch (status) {
     case 'processing':
-      return '#FF9500';
+      return c.systemOrange;
     case 'shipped':
-      return '#007AFF';
+      return c.systemBlue;
     case 'delivered':
-      return '#34C759';
+      return c.systemGreen;
     case 'cancelled':
-      return '#FF3B30';
+      return c.systemRed;
     default:
-      return '#666';
+      return c.secondaryLabel;
   }
 }
 
-function getStatusIcon(status: OrderStatus) {
+function statusGlyph(status: OrderStatus) {
   switch (status) {
     case 'processing':
-      return '⏳';
+      return '◷';
     case 'shipped':
-      return '🚚';
+      return '⇄';
     case 'delivered':
-      return '✅';
+      return '✓';
     case 'cancelled':
-      return '❌';
+      return '✕';
     default:
-      return '📦';
+      return '●';
   }
+}
+
+function StatusPill({ status, c }: { status: OrderStatus; c: Palette }) {
+  const tint = statusTint(c, status);
+  return (
+    <View style={[styles.statusPill, { backgroundColor: tint + '22' }]}>
+      <Text style={[styles.statusGlyph, { color: tint }]}>
+        {statusGlyph(status)}
+      </Text>
+      <Text style={[styles.statusText, { color: tint }]}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </Text>
+    </View>
+  );
 }
 
 function OrderCard({
   order,
-  darkMode,
+  c,
   onPress,
 }: {
   order: ReturnType<typeof useCartStore.getState>['orders'][0];
-  darkMode: boolean;
+  c: Palette;
   onPress: () => void;
 }) {
   const firstItem = order.items[0];
@@ -51,14 +75,19 @@ function OrderCard({
 
   return (
     <PressableScale
-      style={[styles.orderCard, darkMode && styles.cardDark]}
+      style={StyleSheet.flatten([
+        styles.orderCard,
+        { backgroundColor: c.secondarySystemGroupedBackground },
+      ])}
       onPress={onPress}
       testID={`order-${order.id}`}
     >
       <View style={styles.orderHeader}>
-        <View>
-          <Text style={[styles.orderId, darkMode && styles.textLight]}>Order #{order.id.slice(0, 8)}</Text>
-          <Text style={[styles.orderDate, darkMode && styles.subtitleDark]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.orderId, { color: c.label }]}>
+            Order #{order.id.slice(0, 8)}
+          </Text>
+          <Text style={[styles.orderDate, { color: c.secondaryLabel }]}>
             {new Date(order.date).toLocaleDateString('en-US', {
               month: 'short',
               day: 'numeric',
@@ -66,15 +95,12 @@ function OrderCard({
             })}
           </Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(status) + '20' }]}>
-          <Text style={styles.statusIcon}>{getStatusIcon(status)}</Text>
-          <Text style={[styles.statusText, { color: getStatusColor(status) }]}>
-            {status.charAt(0).toUpperCase() + status.slice(1)}
-          </Text>
-        </View>
+        <StatusPill status={status} c={c} />
       </View>
 
-      <View style={styles.orderItems}>
+      <View
+        style={[styles.orderItemsRow, { borderTopColor: c.separator }]}
+      >
         {firstItem && (
           <View style={styles.itemPreview}>
             <Image
@@ -82,28 +108,34 @@ function OrderCard({
               style={styles.itemImage}
             />
             <View style={styles.itemInfo}>
-              <Text style={[styles.itemName, darkMode && styles.textLight]} numberOfLines={1}>
+              <Text
+                style={[styles.itemName, { color: c.label }]}
+                numberOfLines={1}
+              >
                 {firstItem.product.name}
               </Text>
-              <Text style={[styles.itemQty, darkMode && styles.subtitleDark]}>
-                Qty: {firstItem.quantity}
+              <Text style={[styles.itemQty, { color: c.secondaryLabel }]}>
+                Qty {firstItem.quantity}
+                {moreCount > 0 &&
+                  ` · +${moreCount} more item${moreCount > 1 ? 's' : ''}`}
               </Text>
             </View>
           </View>
         )}
-        {moreCount > 0 && (
-          <Text style={[styles.moreItems, darkMode && styles.subtitleDark]}>
-            +{moreCount} more item{moreCount > 1 ? 's' : ''}
-          </Text>
-        )}
       </View>
 
-      <View style={styles.orderFooter}>
-        <View>
-          <Text style={[styles.totalLabel, darkMode && styles.subtitleDark]}>Total</Text>
-          <Text style={styles.totalValue}>${order.total.toFixed(2)}</Text>
+      <View
+        style={[styles.orderFooter, { borderTopColor: c.separator }]}
+      >
+        <Text style={[styles.totalLabel, { color: c.secondaryLabel }]}>
+          Total
+        </Text>
+        <View style={styles.footerRight}>
+          <Text style={[styles.totalValue, { color: c.label }]}>
+            ${order.total.toFixed(2)}
+          </Text>
+          <Text style={[styles.chevron, { color: c.tertiaryLabel }]}>›</Text>
         </View>
-        <Text style={styles.chevron}>›</Text>
       </View>
     </PressableScale>
   );
@@ -111,72 +143,125 @@ function OrderCard({
 
 function OrderDetails({
   order,
-  darkMode,
+  c,
   onClose,
 }: {
   order: ReturnType<typeof useCartStore.getState>['orders'][0];
-  darkMode: boolean;
+  c: Palette;
   onClose: () => void;
 }) {
   const status = order.status as OrderStatus;
 
   return (
-    <View style={[styles.detailsOverlay]} testID="order-details">
-      <View style={[styles.detailsContent, darkMode && styles.cardDark]}>
+    <View style={styles.detailsOverlay} testID="order-details">
+      <View
+        style={[
+          styles.detailsContent,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
+      >
         <View style={styles.detailsHeader}>
-          <Text style={[styles.detailsTitle, darkMode && styles.textLight]}>Order Details</Text>
-          <PressableScale onPress={onClose} testID="close-details">
-            <Text style={styles.closeBtn}>✕</Text>
+          <Text style={[styles.detailsTitle, { color: c.label }]}>
+            Order Details
+          </Text>
+          <PressableScale
+            onPress={onClose}
+            testID="close-details"
+            hitSlop={8}
+            style={[
+              styles.closeBtnCircle,
+              { backgroundColor: c.tertiarySystemFill },
+            ]}
+          >
+            <Text style={[styles.closeBtn, { color: c.label }]}>✕</Text>
           </PressableScale>
         </View>
 
-        <View style={[styles.detailsSection]}>
-          <Text style={[styles.detailsLabel, darkMode && styles.subtitleDark]}>Order ID</Text>
-          <Text style={[styles.detailsValue, darkMode && styles.textLight]}>{order.id}</Text>
+        <View style={styles.detailsSection}>
+          <Text style={[styles.detailsLabel, { color: c.secondaryLabel }]}>
+            Order ID
+          </Text>
+          <Text style={[styles.detailsValue, { color: c.label }]}>
+            {order.id}
+          </Text>
         </View>
 
         <View style={styles.detailsSection}>
-          <Text style={[styles.detailsLabel, darkMode && styles.subtitleDark]}>Status</Text>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(status) + '20' }]}>
-            <Text style={styles.statusIcon}>{getStatusIcon(status)}</Text>
-            <Text style={[styles.statusText, { color: getStatusColor(status) }]}>
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </Text>
+          <Text style={[styles.detailsLabel, { color: c.secondaryLabel }]}>
+            Status
+          </Text>
+          <View style={{ alignSelf: 'flex-start', marginTop: 4 }}>
+            <StatusPill status={status} c={c} />
           </View>
         </View>
 
         <View style={styles.detailsSection}>
-          <Text style={[styles.detailsLabel, darkMode && styles.subtitleDark]}>Shipping Address</Text>
-          <Text style={[styles.detailsValue, darkMode && styles.textLight]}>{order.shippingAddress}</Text>
+          <Text style={[styles.detailsLabel, { color: c.secondaryLabel }]}>
+            Shipping Address
+          </Text>
+          <Text style={[styles.detailsValue, { color: c.label }]}>
+            {order.shippingAddress}
+          </Text>
         </View>
 
         <View style={styles.detailsSection}>
-          <Text style={[styles.detailsLabel, darkMode && styles.subtitleDark]}>Items</Text>
-          {order.items.map(item => (
-            <View key={item.product.id} style={styles.detailItem}>
-              <Image source={{ uri: item.product.image }} style={styles.detailItemImage} />
+          <Text style={[styles.detailsLabel, { color: c.secondaryLabel }]}>
+            Items
+          </Text>
+          {order.items.map((item, idx) => (
+            <View
+              key={item.product.id}
+              style={[
+                styles.detailItem,
+                idx < order.items.length - 1 && {
+                  borderBottomColor: c.separator,
+                  borderBottomWidth: StyleSheet.hairlineWidth,
+                },
+              ]}
+            >
+              <Image
+                source={{ uri: item.product.image }}
+                style={styles.detailItemImage}
+              />
               <View style={styles.detailItemInfo}>
-                <Text style={[styles.detailItemName, darkMode && styles.textLight]} numberOfLines={1}>
+                <Text
+                  style={[styles.detailItemName, { color: c.label }]}
+                  numberOfLines={1}
+                >
                   {item.product.name}
                 </Text>
-                <Text style={[styles.detailItemMeta, darkMode && styles.subtitleDark]}>
+                <Text
+                  style={[
+                    styles.detailItemMeta,
+                    { color: c.secondaryLabel },
+                  ]}
+                >
                   ${item.product.price.toFixed(2)} × {item.quantity}
                 </Text>
               </View>
-              <Text style={styles.detailItemTotal}>
+              <Text style={[styles.detailItemTotal, { color: c.label }]}>
                 ${(item.product.price * item.quantity).toFixed(2)}
               </Text>
             </View>
           ))}
         </View>
 
-        <View style={[styles.detailsTotalSection, darkMode && { borderTopColor: '#2a2a3e' }]}>
-          <Text style={[styles.detailsTotalLabel, darkMode && styles.textLight]}>Total</Text>
-          <Text style={styles.detailsTotalValue}>${order.total.toFixed(2)}</Text>
+        <View
+          style={[
+            styles.detailsTotalSection,
+            { borderTopColor: c.separator },
+          ]}
+        >
+          <Text style={[styles.detailsTotalLabel, { color: c.label }]}>
+            Total
+          </Text>
+          <Text style={[styles.detailsTotalValue, { color: c.label }]}>
+            ${order.total.toFixed(2)}
+          </Text>
         </View>
 
         <PressableScale
-          style={styles.trackButton}
+          style={[styles.trackButton, { backgroundColor: c.systemBlue }]}
           onPress={onClose}
           testID="track-order"
         >
@@ -187,15 +272,40 @@ function OrderDetails({
   );
 }
 
-function EmptyOrders({ darkMode, onBrowse }: { darkMode: boolean; onBrowse: () => void }) {
+function EmptyOrders({
+  c,
+  onBrowse,
+}: {
+  c: Palette;
+  onBrowse: () => void;
+}) {
   return (
-    <View style={[styles.emptyContainer, darkMode && styles.containerDark]} testID="empty-orders">
-      <Text style={styles.emptyIcon}>📦</Text>
-      <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>No orders yet</Text>
-      <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: c.systemGroupedBackground,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 40,
+      }}
+      testID="empty-orders"
+    >
+      <View
+        style={[styles.emptyIconBg, { backgroundColor: c.tertiarySystemFill }]}
+      >
+        <Text style={[styles.emptyIcon, { color: c.secondaryLabel }]}>◫</Text>
+      </View>
+      <Text style={[styles.emptyTitle, { color: c.label }]}>
+        No orders yet
+      </Text>
+      <Text style={[styles.emptySubtitle, { color: c.secondaryLabel }]}>
         Start shopping to see your orders here
       </Text>
-      <PressableScale style={styles.browseButton} onPress={onBrowse} testID="browse-products">
+      <PressableScale
+        style={[styles.browseButton, { backgroundColor: c.systemBlue }]}
+        onPress={onBrowse}
+        testID="browse-products"
+      >
         <Text style={styles.browseButtonText}>Browse Products</Text>
       </PressableScale>
     </View>
@@ -207,11 +317,15 @@ export default function OrdersScreen() {
   const orders = useCartStore(state => state.orders);
   const isAuthenticated = useAuthStore(state => state.isAuthenticated);
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
-  const [selectedOrder, setSelectedOrder] = useState<typeof orders[0] | null>(null);
+  const systemScheme = useColorScheme();
+  const scheme = darkMode ? 'dark' : systemScheme === 'dark' ? 'dark' : 'light';
+  const c = colors(scheme);
+  const [selectedOrder, setSelectedOrder] = useState<typeof orders[0] | null>(
+    null,
+  );
 
-  // Sort orders by date (newest first)
-  const sortedOrders = [...orders].sort((a, b) =>
-    new Date(b.date).getTime() - new Date(a.date).getTime()
+  const sortedOrders = [...orders].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
   );
 
   if (!isAuthenticated) {
@@ -220,18 +334,36 @@ export default function OrdersScreen() {
         <Stack.Screen
           options={{
             title: 'Orders',
-            headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-            headerTintColor: darkMode ? '#ffffff' : '#000000',
+            headerStyle: { backgroundColor: c.systemBackground },
+            headerTintColor: c.label,
           }}
         />
-        <View style={[styles.emptyContainer, darkMode && styles.containerDark]} testID="orders-guest">
-          <Text style={styles.emptyIcon}>🔒</Text>
-          <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>Sign in to view orders</Text>
-          <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: c.systemGroupedBackground,
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 40,
+          }}
+          testID="orders-guest"
+        >
+          <View
+            style={[
+              styles.emptyIconBg,
+              { backgroundColor: c.systemBlue + '22' },
+            ]}
+          >
+            <Text style={[styles.emptyIcon, { color: c.systemBlue }]}>⚿</Text>
+          </View>
+          <Text style={[styles.emptyTitle, { color: c.label }]}>
+            Sign in to view orders
+          </Text>
+          <Text style={[styles.emptySubtitle, { color: c.secondaryLabel }]}>
             You need to be signed in to view your order history
           </Text>
           <PressableScale
-            style={styles.browseButton}
+            style={[styles.browseButton, { backgroundColor: c.systemBlue }]}
             onPress={() => router.push('/auth/login')}
             testID="sign-in-btn"
           >
@@ -247,18 +379,22 @@ export default function OrdersScreen() {
       <Stack.Screen
         options={{
           title: 'My Orders',
-          headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
+          headerStyle: { backgroundColor: c.systemBackground },
+          headerTintColor: c.label,
         }}
       />
-      <View style={[styles.container, darkMode && styles.containerDark]} testID="orders-screen">
+      <View
+        style={{ flex: 1, backgroundColor: c.systemGroupedBackground }}
+        testID="orders-screen"
+      >
         {sortedOrders.length === 0 ? (
-          <EmptyOrders darkMode={darkMode} onBrowse={() => router.push('/products')} />
+          <EmptyOrders c={c} onBrowse={() => router.push('/products')} />
         ) : (
           <>
             <View style={styles.header}>
-              <Text style={[styles.headerTitle, darkMode && styles.textLight]}>
-                {sortedOrders.length} Order{sortedOrders.length !== 1 ? 's' : ''}
+              <Text style={[styles.headerTitle, { color: c.secondaryLabel }]}>
+                {sortedOrders.length} ORDER
+                {sortedOrders.length !== 1 ? 'S' : ''}
               </Text>
             </View>
             <FlatList
@@ -267,11 +403,12 @@ export default function OrdersScreen() {
               renderItem={({ item }) => (
                 <OrderCard
                   order={item}
-                  darkMode={darkMode}
+                  c={c}
                   onPress={() => setSelectedOrder(item)}
                 />
               )}
               contentContainerStyle={styles.list}
+              showsVerticalScrollIndicator={false}
               testID="orders-list"
             />
           </>
@@ -280,7 +417,7 @@ export default function OrdersScreen() {
         {selectedOrder && (
           <OrderDetails
             order={selectedOrder}
-            darkMode={darkMode}
+            c={c}
             onClose={() => setSelectedOrder(null)}
           />
         )}
@@ -290,80 +427,57 @@ export default function OrdersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  containerDark: {
-    backgroundColor: '#16213e',
-  },
   header: {
-    padding: 16,
+    paddingHorizontal: 32,
+    paddingTop: 16,
     paddingBottom: 8,
   },
   headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a2e',
-  },
-  textLight: {
-    color: '#fff',
-  },
-  subtitleDark: {
-    color: '#aaa',
-  },
-  cardDark: {
-    backgroundColor: '#1a1a2e',
+    fontSize: fontSize.footnote,
+    fontWeight: '400',
+    letterSpacing: 0.4,
   },
   list: {
-    padding: 16,
-    paddingTop: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
   },
   orderCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: radius.card,
     padding: 16,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   orderId: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   orderDate: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: fontSize.footnote,
     marginTop: 2,
   },
-  statusBadge: {
+  statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: radius.pill,
   },
-  statusIcon: {
-    fontSize: 12,
+  statusGlyph: {
+    fontSize: 11,
+    fontWeight: '700',
     marginRight: 4,
   },
   statusText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: fontSize.caption1,
+    fontWeight: '700',
   },
-  orderItems: {
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+  orderItemsRow: {
+    borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 12,
     marginBottom: 12,
   },
@@ -372,85 +486,79 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   itemImage: {
-    width: 50,
-    height: 50,
+    width: 48,
+    height: 48,
     borderRadius: 8,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: 'rgba(120,120,128,0.12)',
   },
   itemInfo: {
     flex: 1,
     marginLeft: 12,
   },
   itemName: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '500',
-    color: '#1a1a2e',
   },
   itemQty: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: fontSize.caption1,
     marginTop: 2,
-  },
-  moreItems: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 8,
-    fontStyle: 'italic',
   },
   orderFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 12,
   },
   totalLabel: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.footnote,
+    fontWeight: '500',
+  },
+  footerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   totalValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontSize: fontSize.title3,
+    fontWeight: '700',
   },
   chevron: {
-    fontSize: 24,
-    color: '#ccc',
+    fontSize: 22,
+    fontWeight: '500',
+    marginLeft: 6,
   },
-  emptyContainer: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
+  emptyIconBg: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
+    marginBottom: 22,
   },
   emptyIcon: {
-    fontSize: 80,
-    marginBottom: 20,
+    fontSize: 50,
+    fontWeight: '600',
   },
   emptyTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 10,
+    fontSize: fontSize.title2,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
   },
   emptySubtitle: {
-    fontSize: 15,
-    color: '#666',
+    fontSize: fontSize.subhead,
     textAlign: 'center',
-    marginBottom: 25,
+    marginBottom: 26,
   },
   browseButton: {
-    backgroundColor: '#007AFF',
     paddingHorizontal: 30,
     paddingVertical: 14,
-    borderRadius: 25,
+    borderRadius: radius.pill,
   },
   browseButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: fontSize.body,
   },
   detailsOverlay: {
     position: 'absolute',
@@ -458,15 +566,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 16,
   },
   detailsContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: radius.sheet,
+    padding: 18,
     width: '100%',
     maxHeight: '90%',
   },
@@ -474,91 +581,86 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
   },
   detailsTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    fontSize: fontSize.title3,
+    fontWeight: '700',
+  },
+  closeBtnCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   closeBtn: {
-    fontSize: 24,
-    color: '#999',
-    padding: 4,
+    fontSize: 14,
+    fontWeight: '700',
   },
   detailsSection: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   detailsLabel: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.footnote,
     textTransform: 'uppercase',
+    letterSpacing: 0.4,
     marginBottom: 4,
   },
   detailsValue: {
-    fontSize: 15,
-    color: '#1a1a2e',
+    fontSize: fontSize.body,
   },
   detailItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   detailItemImage: {
     width: 40,
     height: 40,
     borderRadius: 6,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: 'rgba(120,120,128,0.12)',
   },
   detailItemInfo: {
     flex: 1,
     marginLeft: 10,
   },
   detailItemName: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '500',
-    color: '#1a1a2e',
   },
   detailItemMeta: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.caption1,
   },
   detailItemTotal: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '600',
-    color: '#007AFF',
   },
   detailsTotalSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    paddingTop: 16,
-    marginTop: 8,
-    marginBottom: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 14,
+    marginTop: 4,
+    marginBottom: 18,
   },
   detailsTotalLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    fontSize: fontSize.body,
+    fontWeight: '700',
   },
   detailsTotalValue: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontSize: fontSize.title2,
+    fontWeight: '700',
   },
   trackButton: {
-    backgroundColor: '#007AFF',
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: radius.button,
     alignItems: 'center',
   },
   trackButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#FFFFFF',
+    fontSize: fontSize.body,
+    fontWeight: '600',
   },
 });
