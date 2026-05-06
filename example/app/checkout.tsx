@@ -208,11 +208,11 @@ export default function CheckoutScreen() {
   );
 
   const fieldRow = (
-    key: string,
     label: string,
     placeholder: string,
     value: string,
     onChange: (v: string) => void,
+    testID: string,
     extraProps: Partial<React.ComponentProps<typeof TextInput>> = {},
   ) => (
     <View style={styles.fieldRow}>
@@ -228,6 +228,7 @@ export default function CheckoutScreen() {
         autoCorrect={false}
         autoCapitalize="none"
         spellCheck={false}
+        testID={testID}
         {...extraProps}
       />
     </View>
@@ -245,57 +246,52 @@ export default function CheckoutScreen() {
         ]}
       >
         {fieldRow(
-          'fullName',
           'Name',
           'John Doe',
           shippingAddress.fullName,
           text => setShippingAddress(p => ({ ...p, fullName: text })),
-          { testID: 'shipping-name' as any },
+          'shipping-name',
         )}
         <View style={[styles.divider, { backgroundColor: c.separator }]} />
         {fieldRow(
-          'street',
           'Street',
           '123 Main St',
           shippingAddress.street,
           text => setShippingAddress(p => ({ ...p, street: text })),
-          { testID: 'shipping-street' as any },
+          'shipping-street',
         )}
         <View style={[styles.divider, { backgroundColor: c.separator }]} />
         {fieldRow(
-          'city',
           'City',
           'New York',
           shippingAddress.city,
           text => setShippingAddress(p => ({ ...p, city: text })),
-          { testID: 'shipping-city' as any },
+          'shipping-city',
         )}
         <View style={[styles.divider, { backgroundColor: c.separator }]} />
         {fieldRow(
-          'state',
           'State',
           'NY',
           shippingAddress.state,
           text => setShippingAddress(p => ({ ...p, state: text })),
-          { testID: 'shipping-state' as any },
+          'shipping-state',
         )}
         <View style={[styles.divider, { backgroundColor: c.separator }]} />
         {fieldRow(
-          'zipCode',
           'ZIP',
           '10001',
           shippingAddress.zipCode,
           text => setShippingAddress(p => ({ ...p, zipCode: text })),
-          { keyboardType: 'numeric', testID: 'shipping-zip' as any },
+          'shipping-zip',
+          { keyboardType: 'numeric' },
         )}
         <View style={[styles.divider, { backgroundColor: c.separator }]} />
         {fieldRow(
-          'phone',
           'Phone',
           '(555) 123-4567',
           shippingAddress.phone,
           text => setShippingAddress(p => ({ ...p, phone: text })),
-          { testID: 'shipping-phone' as any },
+          'shipping-phone',
         )}
       </View>
       {Object.values(errors).filter(Boolean).length > 0 && (
@@ -325,7 +321,6 @@ export default function CheckoutScreen() {
         ]}
       >
         {fieldRow(
-          'cardNumber',
           'Card',
           '1234 5678 9012 3456',
           paymentMethod.cardNumber,
@@ -334,26 +329,20 @@ export default function CheckoutScreen() {
               ...p,
               cardNumber: formatCardNumber(text),
             })),
-          {
-            keyboardType: 'numeric',
-            testID: 'payment-card-number' as any,
-          },
+          'payment-card-number',
+          { keyboardType: 'numeric' },
         )}
         <View style={[styles.divider, { backgroundColor: c.separator }]} />
         {fieldRow(
-          'cardholderName',
           'Holder',
           'JOHN DOE',
           paymentMethod.cardholderName,
           text => setPaymentMethod(p => ({ ...p, cardholderName: text })),
-          {
-            autoCapitalize: 'characters',
-            testID: 'payment-cardholder' as any,
-          },
+          'payment-cardholder',
+          { autoCapitalize: 'characters' },
         )}
         <View style={[styles.divider, { backgroundColor: c.separator }]} />
         {fieldRow(
-          'expiryDate',
           'Expiry',
           'MM/YY',
           paymentMethod.expiryDate,
@@ -362,11 +351,11 @@ export default function CheckoutScreen() {
               ...p,
               expiryDate: formatExpiryDate(text),
             })),
-          { keyboardType: 'numeric', testID: 'payment-expiry' as any },
+          'payment-expiry',
+          { keyboardType: 'numeric' },
         )}
         <View style={[styles.divider, { backgroundColor: c.separator }]} />
         {fieldRow(
-          'cvv',
           'CVV',
           '123',
           paymentMethod.cvv,
@@ -375,11 +364,8 @@ export default function CheckoutScreen() {
               ...p,
               cvv: text.replace(/\D/g, '').slice(0, 4),
             })),
-          {
-            keyboardType: 'numeric',
-            secureTextEntry: true,
-            testID: 'payment-cvv' as any,
-          },
+          'payment-cvv',
+          { keyboardType: 'numeric', secureTextEntry: true },
         )}
       </View>
 
