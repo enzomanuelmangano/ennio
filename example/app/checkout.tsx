@@ -9,12 +9,15 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  useColorScheme,
 } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useCartStore, useSettingsStore } from '../store';
 import * as Haptics from 'expo-haptics';
+import { colors, fontSize, lineHeight, radius } from '../src/theme';
 
+type Palette = ReturnType<typeof colors>;
 type Step = 'shipping' | 'payment' | 'review';
 
 export default function CheckoutScreen() {
@@ -24,8 +27,13 @@ export default function CheckoutScreen() {
   const getSubtotal = useCartStore(state => state.getSubtotal);
   const getTax = useCartStore(state => state.getTax);
   const checkout = useCartStore(state => state.checkout);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const hapticEnabled = useSettingsStore(
+    state => state.preferences.hapticFeedback,
+  );
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const systemScheme = useColorScheme();
+  const scheme = darkMode ? 'dark' : systemScheme === 'dark' ? 'dark' : 'light';
+  const c = colors(scheme);
 
   const [currentStep, setCurrentStep] = useState<Step>('shipping');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -50,11 +58,14 @@ export default function CheckoutScreen() {
 
   const validateShipping = () => {
     const newErrors: Record<string, string> = {};
-    if (!shippingAddress.fullName.trim()) newErrors.fullName = 'Name is required';
-    if (!shippingAddress.street.trim()) newErrors.street = 'Street address is required';
+    if (!shippingAddress.fullName.trim())
+      newErrors.fullName = 'Name is required';
+    if (!shippingAddress.street.trim())
+      newErrors.street = 'Street address is required';
     if (!shippingAddress.city.trim()) newErrors.city = 'City is required';
     if (!shippingAddress.state.trim()) newErrors.state = 'State is required';
-    if (!shippingAddress.zipCode.trim()) newErrors.zipCode = 'ZIP code is required';
+    if (!shippingAddress.zipCode.trim())
+      newErrors.zipCode = 'ZIP code is required';
     if (!shippingAddress.phone.trim()) newErrors.phone = 'Phone is required';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -82,12 +93,14 @@ export default function CheckoutScreen() {
     if (currentStep === 'shipping') {
       if (validateShipping()) {
         setCurrentStep('payment');
-        if (hapticEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        if (hapticEnabled)
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
     } else if (currentStep === 'payment') {
       if (validatePayment()) {
         setCurrentStep('review');
-        if (hapticEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        if (hapticEnabled)
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
     }
   };
@@ -108,7 +121,7 @@ export default function CheckoutScreen() {
       Alert.alert(
         'Order Placed!',
         'Your order has been placed successfully. You will receive a confirmation email shortly.',
-        [{ text: 'View Orders', onPress: () => router.replace('/orders') }]
+        [{ text: 'View Orders', onPress: () => router.replace('/orders') }],
       );
     } catch (error) {
       Alert.alert('Error', 'Failed to place order. Please try again.');
@@ -131,271 +144,391 @@ export default function CheckoutScreen() {
   };
 
   const renderStepIndicator = () => (
-    <View style={styles.stepIndicator}>
-      {(['shipping', 'payment', 'review'] as Step[]).map((step, index) => (
-        <View key={step} style={styles.stepItem}>
-          <View
-            style={[
-              styles.stepCircle,
-              currentStep === step && styles.stepCircleActive,
-              (['shipping', 'payment', 'review'].indexOf(currentStep) > index) && styles.stepCircleCompleted,
-            ]}
-          >
-            <Text style={styles.stepNumber}>
-              {(['shipping', 'payment', 'review'].indexOf(currentStep) > index) ? '✓' : index + 1}
+    <View
+      style={[
+        styles.stepIndicator,
+        { backgroundColor: c.systemGroupedBackground },
+      ]}
+    >
+      {(['shipping', 'payment', 'review'] as Step[]).map((step, index) => {
+        const isCompleted =
+          ['shipping', 'payment', 'review'].indexOf(currentStep) > index;
+        const isActive = currentStep === step;
+        const tint = isCompleted
+          ? c.systemGreen
+          : isActive
+            ? c.systemBlue
+            : c.tertiarySystemFill;
+        return (
+          <View key={step} style={styles.stepItem}>
+            <View
+              style={[
+                styles.stepCircle,
+                {
+                  backgroundColor: tint,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.stepNumber,
+                  {
+                    color:
+                      isActive || isCompleted ? '#FFFFFF' : c.secondaryLabel,
+                  },
+                ]}
+              >
+                {isCompleted ? '✓' : index + 1}
+              </Text>
+            </View>
+            <Text
+              style={[
+                styles.stepLabel,
+                {
+                  color: isActive
+                    ? c.label
+                    : isCompleted
+                      ? c.secondaryLabel
+                      : c.tertiaryLabel,
+                  fontWeight: isActive ? '600' : '500',
+                },
+              ]}
+            >
+              {step.charAt(0).toUpperCase() + step.slice(1)}
             </Text>
+            {index < 2 && (
+              <View
+                style={[styles.stepLine, { backgroundColor: c.separator }]}
+              />
+            )}
           </View>
-          <Text style={[
-            styles.stepLabel,
-            darkMode && styles.subtitleDark,
-            currentStep === step && styles.stepLabelActive,
-          ]}>
-            {step.charAt(0).toUpperCase() + step.slice(1)}
-          </Text>
-          {index < 2 && <View style={[styles.stepLine, darkMode && styles.stepLineDark]} />}
-        </View>
-      ))}
+        );
+      })}
+    </View>
+  );
+
+  const fieldRow = (
+    key: string,
+    label: string,
+    placeholder: string,
+    value: string,
+    onChange: (v: string) => void,
+    extraProps: Partial<React.ComponentProps<typeof TextInput>> = {},
+  ) => (
+    <View style={styles.fieldRow}>
+      <Text style={[styles.fieldLabel, { color: c.secondaryLabel }]}>
+        {label}
+      </Text>
+      <TextInput
+        style={[styles.fieldInput, { color: c.label }]}
+        defaultValue={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={c.tertiaryLabel}
+        autoCorrect={false}
+        autoCapitalize="none"
+        spellCheck={false}
+        {...extraProps}
+      />
     </View>
   );
 
   const renderShippingForm = () => (
     <View testID="shipping-form">
-      <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Shipping Address</Text>
-
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, darkMode && styles.textLight]}>Full Name</Text>
-        <TextInput
-          style={[styles.input, darkMode && styles.inputDark, errors.fullName && styles.inputError]}
-          defaultValue={shippingAddress.fullName}
-          onChangeText={text => setShippingAddress(prev => ({ ...prev, fullName: text }))}
-          placeholder="John Doe"
-          placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-          testID="shipping-name"
-        />
-        {errors.fullName && <Text style={styles.errorText}>{errors.fullName}</Text>}
+      <Text style={[styles.sectionTitle, { color: c.label }]}>
+        Shipping Address
+      </Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
+      >
+        {fieldRow(
+          'fullName',
+          'Name',
+          'John Doe',
+          shippingAddress.fullName,
+          text => setShippingAddress(p => ({ ...p, fullName: text })),
+          { testID: 'shipping-name' as any },
+        )}
+        <View style={[styles.divider, { backgroundColor: c.separator }]} />
+        {fieldRow(
+          'street',
+          'Street',
+          '123 Main St',
+          shippingAddress.street,
+          text => setShippingAddress(p => ({ ...p, street: text })),
+          { testID: 'shipping-street' as any },
+        )}
+        <View style={[styles.divider, { backgroundColor: c.separator }]} />
+        {fieldRow(
+          'city',
+          'City',
+          'New York',
+          shippingAddress.city,
+          text => setShippingAddress(p => ({ ...p, city: text })),
+          { testID: 'shipping-city' as any },
+        )}
+        <View style={[styles.divider, { backgroundColor: c.separator }]} />
+        {fieldRow(
+          'state',
+          'State',
+          'NY',
+          shippingAddress.state,
+          text => setShippingAddress(p => ({ ...p, state: text })),
+          { testID: 'shipping-state' as any },
+        )}
+        <View style={[styles.divider, { backgroundColor: c.separator }]} />
+        {fieldRow(
+          'zipCode',
+          'ZIP',
+          '10001',
+          shippingAddress.zipCode,
+          text => setShippingAddress(p => ({ ...p, zipCode: text })),
+          { keyboardType: 'numeric', testID: 'shipping-zip' as any },
+        )}
+        <View style={[styles.divider, { backgroundColor: c.separator }]} />
+        {fieldRow(
+          'phone',
+          'Phone',
+          '(555) 123-4567',
+          shippingAddress.phone,
+          text => setShippingAddress(p => ({ ...p, phone: text })),
+          { testID: 'shipping-phone' as any },
+        )}
       </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, darkMode && styles.textLight]}>Street Address</Text>
-        <TextInput
-          style={[styles.input, darkMode && styles.inputDark, errors.street && styles.inputError]}
-          defaultValue={shippingAddress.street}
-          onChangeText={text => setShippingAddress(prev => ({ ...prev, street: text }))}
-          placeholder="123 Main St"
-          placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-          testID="shipping-street"
-        />
-        {errors.street && <Text style={styles.errorText}>{errors.street}</Text>}
-      </View>
-
-      <View style={styles.row}>
-        <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
-          <Text style={[styles.label, darkMode && styles.textLight]}>City</Text>
-          <TextInput
-            style={[styles.input, darkMode && styles.inputDark, errors.city && styles.inputError]}
-            defaultValue={shippingAddress.city}
-            onChangeText={text => setShippingAddress(prev => ({ ...prev, city: text }))}
-            placeholder="New York"
-            placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-            testID="shipping-city"
-          />
-          {errors.city && <Text style={styles.errorText}>{errors.city}</Text>}
+      {Object.values(errors).filter(Boolean).length > 0 && (
+        <View style={styles.errorBlock}>
+          {Object.entries(errors).map(([key, msg]) => (
+            <Text
+              key={key}
+              style={[styles.errorText, { color: c.systemRed }]}
+            >
+              {msg}
+            </Text>
+          ))}
         </View>
-        <View style={[styles.inputGroup, styles.flex1]}>
-          <Text style={[styles.label, darkMode && styles.textLight]}>State</Text>
-          <TextInput
-            style={[styles.input, darkMode && styles.inputDark, errors.state && styles.inputError]}
-            defaultValue={shippingAddress.state}
-            onChangeText={text => setShippingAddress(prev => ({ ...prev, state: text }))}
-            placeholder="NY"
-            placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-            testID="shipping-state"
-          />
-          {errors.state && <Text style={styles.errorText}>{errors.state}</Text>}
-        </View>
-      </View>
-
-      <View style={styles.row}>
-        <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
-          <Text style={[styles.label, darkMode && styles.textLight]}>ZIP Code</Text>
-          <TextInput
-            style={[styles.input, darkMode && styles.inputDark, errors.zipCode && styles.inputError]}
-            defaultValue={shippingAddress.zipCode}
-            onChangeText={text => setShippingAddress(prev => ({ ...prev, zipCode: text }))}
-            placeholder="10001"
-            placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-            keyboardType="numeric"
-            testID="shipping-zip"
-          />
-          {errors.zipCode && <Text style={styles.errorText}>{errors.zipCode}</Text>}
-        </View>
-        <View style={[styles.inputGroup, styles.flex1]}>
-          <Text style={[styles.label, darkMode && styles.textLight]}>Phone</Text>
-          <TextInput
-            style={[styles.input, darkMode && styles.inputDark, errors.phone && styles.inputError]}
-            defaultValue={shippingAddress.phone}
-            onChangeText={text => setShippingAddress(prev => ({ ...prev, phone: text }))}
-            placeholder="(555) 123-4567"
-            placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-            testID="shipping-phone"
-          />
-          {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
-        </View>
-      </View>
+      )}
     </View>
   );
 
   const renderPaymentForm = () => (
     <View testID="payment-form">
-      <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Payment Details</Text>
-
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, darkMode && styles.textLight]}>Card Number</Text>
-        <TextInput
-          style={[styles.input, darkMode && styles.inputDark, errors.cardNumber && styles.inputError]}
-          defaultValue={paymentMethod.cardNumber}
-          onChangeText={text => setPaymentMethod(prev => ({ ...prev, cardNumber: formatCardNumber(text) }))}
-          placeholder="1234 5678 9012 3456"
-          placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-          keyboardType="numeric"
-          testID="payment-card-number"
-        />
-        {errors.cardNumber && <Text style={styles.errorText}>{errors.cardNumber}</Text>}
+      <Text style={[styles.sectionTitle, { color: c.label }]}>
+        Payment Details
+      </Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
+      >
+        {fieldRow(
+          'cardNumber',
+          'Card',
+          '1234 5678 9012 3456',
+          paymentMethod.cardNumber,
+          text =>
+            setPaymentMethod(p => ({
+              ...p,
+              cardNumber: formatCardNumber(text),
+            })),
+          {
+            keyboardType: 'numeric',
+            testID: 'payment-card-number' as any,
+          },
+        )}
+        <View style={[styles.divider, { backgroundColor: c.separator }]} />
+        {fieldRow(
+          'cardholderName',
+          'Holder',
+          'JOHN DOE',
+          paymentMethod.cardholderName,
+          text => setPaymentMethod(p => ({ ...p, cardholderName: text })),
+          {
+            autoCapitalize: 'characters',
+            testID: 'payment-cardholder' as any,
+          },
+        )}
+        <View style={[styles.divider, { backgroundColor: c.separator }]} />
+        {fieldRow(
+          'expiryDate',
+          'Expiry',
+          'MM/YY',
+          paymentMethod.expiryDate,
+          text =>
+            setPaymentMethod(p => ({
+              ...p,
+              expiryDate: formatExpiryDate(text),
+            })),
+          { keyboardType: 'numeric', testID: 'payment-expiry' as any },
+        )}
+        <View style={[styles.divider, { backgroundColor: c.separator }]} />
+        {fieldRow(
+          'cvv',
+          'CVV',
+          '123',
+          paymentMethod.cvv,
+          text =>
+            setPaymentMethod(p => ({
+              ...p,
+              cvv: text.replace(/\D/g, '').slice(0, 4),
+            })),
+          {
+            keyboardType: 'numeric',
+            secureTextEntry: true,
+            testID: 'payment-cvv' as any,
+          },
+        )}
       </View>
 
-      <View style={styles.inputGroup}>
-        <Text style={[styles.label, darkMode && styles.textLight]}>Cardholder Name</Text>
-        <TextInput
-          style={[styles.input, darkMode && styles.inputDark, errors.cardholderName && styles.inputError]}
-          defaultValue={paymentMethod.cardholderName}
-          onChangeText={text => setPaymentMethod(prev => ({ ...prev, cardholderName: text }))}
-          placeholder="JOHN DOE"
-          placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="characters"
-          spellCheck={false}
-          testID="payment-cardholder"
-        />
-        {errors.cardholderName && <Text style={styles.errorText}>{errors.cardholderName}</Text>}
-      </View>
-
-      <View style={styles.row}>
-        <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
-          <Text style={[styles.label, darkMode && styles.textLight]}>Expiry Date</Text>
-          <TextInput
-            style={[styles.input, darkMode && styles.inputDark, errors.expiryDate && styles.inputError]}
-            defaultValue={paymentMethod.expiryDate}
-            onChangeText={text => setPaymentMethod(prev => ({ ...prev, expiryDate: formatExpiryDate(text) }))}
-            placeholder="MM/YY"
-            placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-            keyboardType="numeric"
-            testID="payment-expiry"
-          />
-          {errors.expiryDate && <Text style={styles.errorText}>{errors.expiryDate}</Text>}
-        </View>
-        <View style={[styles.inputGroup, styles.flex1]}>
-          <Text style={[styles.label, darkMode && styles.textLight]}>CVV</Text>
-          <TextInput
-            style={[styles.input, darkMode && styles.inputDark, errors.cvv && styles.inputError]}
-            defaultValue={paymentMethod.cvv}
-            onChangeText={text => setPaymentMethod(prev => ({ ...prev, cvv: text.replace(/\D/g, '').slice(0, 4) }))}
-            placeholder="123"
-            placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
-            keyboardType="numeric"
-            secureTextEntry
-            testID="payment-cvv"
-          />
-          {errors.cvv && <Text style={styles.errorText}>{errors.cvv}</Text>}
-        </View>
-      </View>
-
-      <View style={[styles.securityNote, darkMode && styles.cardDark]}>
-        <Text style={styles.securityIcon}>🔒</Text>
-        <Text style={[styles.securityText, darkMode && styles.subtitleDark]}>
+      <View
+        style={[
+          styles.securityNote,
+          { backgroundColor: c.systemGreen + '15' },
+        ]}
+      >
+        <Text style={[styles.securityIcon, { color: c.systemGreen }]}>⚿</Text>
+        <Text style={[styles.securityText, { color: c.label }]}>
           Your payment information is encrypted and secure
         </Text>
       </View>
+
+      {Object.values(errors).filter(Boolean).length > 0 && (
+        <View style={styles.errorBlock}>
+          {Object.entries(errors).map(([key, msg]) => (
+            <Text
+              key={key}
+              style={[styles.errorText, { color: c.systemRed }]}
+            >
+              {msg}
+            </Text>
+          ))}
+        </View>
+      )}
     </View>
   );
 
   const renderReview = () => (
     <View testID="order-review">
-      <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Order Review</Text>
+      <Text style={[styles.sectionTitle, { color: c.label }]}>
+        Order Review
+      </Text>
 
-      <View style={[styles.reviewCard, darkMode && styles.cardDark]}>
-        <Text style={[styles.reviewLabel, darkMode && styles.subtitleDark]}>Shipping To:</Text>
-        <Text style={[styles.reviewValue, darkMode && styles.textLight]}>{shippingAddress.fullName}</Text>
-        <Text style={[styles.reviewSubvalue, darkMode && styles.subtitleDark]}>
-          {shippingAddress.street}, {shippingAddress.city}, {shippingAddress.state} {shippingAddress.zipCode}
+      <Text style={[styles.cardLabel, { color: c.secondaryLabel }]}>
+        SHIPPING TO
+      </Text>
+      <View
+        style={[
+          styles.reviewCard,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
+      >
+        <Text style={[styles.reviewValue, { color: c.label }]}>
+          {shippingAddress.fullName}
         </Text>
-        <Text style={[styles.reviewSubvalue, darkMode && styles.subtitleDark]}>{shippingAddress.phone}</Text>
+        <Text style={[styles.reviewSubvalue, { color: c.secondaryLabel }]}>
+          {shippingAddress.street}, {shippingAddress.city},{' '}
+          {shippingAddress.state} {shippingAddress.zipCode}
+        </Text>
+        <Text style={[styles.reviewSubvalue, { color: c.secondaryLabel }]}>
+          {shippingAddress.phone}
+        </Text>
       </View>
 
-      <View style={[styles.reviewCard, darkMode && styles.cardDark]}>
-        <Text style={[styles.reviewLabel, darkMode && styles.subtitleDark]}>Payment Method:</Text>
-        <Text style={[styles.reviewValue, darkMode && styles.textLight]}>
+      <Text style={[styles.cardLabel, { color: c.secondaryLabel }]}>
+        PAYMENT METHOD
+      </Text>
+      <View
+        style={[
+          styles.reviewCard,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
+      >
+        <Text style={[styles.reviewValue, { color: c.label }]}>
           •••• •••• •••• {paymentMethod.cardNumber.slice(-4)}
         </Text>
-        <Text style={[styles.reviewSubvalue, darkMode && styles.subtitleDark]}>
+        <Text style={[styles.reviewSubvalue, { color: c.secondaryLabel }]}>
           {paymentMethod.cardholderName}
         </Text>
       </View>
 
-      <View style={[styles.reviewCard, darkMode && styles.cardDark]}>
-        <Text style={[styles.reviewLabel, darkMode && styles.subtitleDark]}>Items ({items.length}):</Text>
-        {items.map(item => (
-          <View key={item.product.id} style={styles.reviewItem}>
-            <Text style={[styles.reviewItemName, darkMode && styles.textLight]}>
-              {item.quantity}x {item.product.name}
+      <Text style={[styles.cardLabel, { color: c.secondaryLabel }]}>
+        ITEMS ({items.length})
+      </Text>
+      <View
+        style={[
+          styles.reviewCard,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
+      >
+        {items.map((item, idx) => (
+          <View
+            key={item.product.id}
+            style={[
+              styles.reviewItem,
+              idx < items.length - 1 && {
+                borderBottomColor: c.separator,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.reviewItemName, { color: c.label }]}
+              numberOfLines={2}
+            >
+              {item.quantity}× {item.product.name}
             </Text>
-            <Text style={styles.reviewItemPrice}>${(item.product.price * item.quantity).toFixed(2)}</Text>
+            <Text style={[styles.reviewItemPrice, { color: c.label }]}>
+              ${(item.product.price * item.quantity).toFixed(2)}
+            </Text>
           </View>
         ))}
       </View>
 
-      <View style={[styles.totalCard, darkMode && styles.cardDark]}>
+      <View
+        style={[
+          styles.totalCard,
+          { backgroundColor: c.secondarySystemGroupedBackground },
+        ]}
+      >
         <View style={styles.totalRow}>
-          <Text style={[styles.totalLabel, darkMode && styles.subtitleDark]}>Subtotal</Text>
-          <Text style={[styles.totalValue, darkMode && styles.textLight]}>${getSubtotal().toFixed(2)}</Text>
+          <Text style={[styles.totalLabel, { color: c.secondaryLabel }]}>
+            Subtotal
+          </Text>
+          <Text style={[styles.totalValue, { color: c.label }]}>
+            ${getSubtotal().toFixed(2)}
+          </Text>
         </View>
         <View style={styles.totalRow}>
-          <Text style={[styles.totalLabel, darkMode && styles.subtitleDark]}>Tax (10%)</Text>
-          <Text style={[styles.totalValue, darkMode && styles.textLight]}>${getTax().toFixed(2)}</Text>
+          <Text style={[styles.totalLabel, { color: c.secondaryLabel }]}>
+            Tax (10%)
+          </Text>
+          <Text style={[styles.totalValue, { color: c.label }]}>
+            ${getTax().toFixed(2)}
+          </Text>
         </View>
         <View style={styles.totalRow}>
-          <Text style={[styles.totalLabel, darkMode && styles.subtitleDark]}>Shipping</Text>
-          <Text style={styles.freeShipping}>FREE</Text>
+          <Text style={[styles.totalLabel, { color: c.secondaryLabel }]}>
+            Shipping
+          </Text>
+          <Text style={[styles.freeShipping, { color: c.systemGreen }]}>
+            FREE
+          </Text>
         </View>
-        <View style={[styles.totalRow, styles.grandTotal]}>
-          <Text style={[styles.grandTotalLabel, darkMode && styles.textLight]}>Total</Text>
-          <Text style={styles.grandTotalValue}>${getTotal().toFixed(2)}</Text>
+        <View
+          style={[
+            styles.grandTotal,
+            { borderTopColor: c.separator },
+          ]}
+        >
+          <Text style={[styles.grandTotalLabel, { color: c.label }]}>
+            Total
+          </Text>
+          <Text style={[styles.grandTotalValue, { color: c.label }]}>
+            ${getTotal().toFixed(2)}
+          </Text>
         </View>
       </View>
     </View>
@@ -406,57 +539,74 @@ export default function CheckoutScreen() {
       <Stack.Screen
         options={{
           title: 'Checkout',
-          headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
+          headerStyle: { backgroundColor: c.systemBackground },
+          headerTintColor: c.label,
         }}
       />
       <KeyboardAvoidingView
-        style={[styles.container, darkMode && styles.containerDark]}
+        style={{ flex: 1, backgroundColor: c.systemGroupedBackground }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <View style={styles.flex1} testID="checkout-screen">
-        {renderStepIndicator()}
+        <View style={{ flex: 1 }} testID="checkout-screen">
+          {renderStepIndicator()}
 
-        <ScrollView
-          style={styles.content}
-          contentContainerStyle={styles.contentContainer}
-          keyboardShouldPersistTaps="handled"
-        >
-          {currentStep === 'shipping' && renderShippingForm()}
-          {currentStep === 'payment' && renderPaymentForm()}
-          {currentStep === 'review' && renderReview()}
-        </ScrollView>
-
-        <View style={[styles.footer, darkMode && styles.footerDark]}>
-          {currentStep !== 'shipping' && (
-            <PressableScale
-              style={[styles.backButton, darkMode && styles.backButtonDark]}
-              onPress={handleBack}
-              testID="back-btn"
-            >
-              <Text style={[styles.backButtonText, darkMode && styles.textLight]}>Back</Text>
-            </PressableScale>
-          )}
-          <PressableScale
-            style={[
-              styles.nextButton,
-              currentStep === 'shipping' && styles.nextButtonFull,
-              isProcessing && styles.nextButtonDisabled,
-            ]}
-            onPress={currentStep === 'review' ? handlePlaceOrder : handleNext}
-            enabled={!isProcessing}
-            testID={currentStep === 'review' ? 'place-order-btn' : 'next-btn'}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.contentContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
           >
-            {isProcessing ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.nextButtonText}>
-                {currentStep === 'review' ? 'Place Order' : 'Continue'}
-              </Text>
+            {currentStep === 'shipping' && renderShippingForm()}
+            {currentStep === 'payment' && renderPaymentForm()}
+            {currentStep === 'review' && renderReview()}
+          </ScrollView>
+
+          <View
+            style={[
+              styles.footer,
+              {
+                backgroundColor: c.secondarySystemGroupedBackground,
+                borderTopColor: c.separator,
+              },
+            ]}
+          >
+            {currentStep !== 'shipping' && (
+              <PressableScale
+                style={[
+                  styles.backButton,
+                  { backgroundColor: c.tertiarySystemFill },
+                ]}
+                onPress={handleBack}
+                testID="back-btn"
+              >
+                <Text style={[styles.backButtonText, { color: c.label }]}>
+                  Back
+                </Text>
+              </PressableScale>
             )}
-          </PressableScale>
-        </View>
+            <PressableScale
+              style={StyleSheet.flatten([
+                styles.nextButton,
+                { backgroundColor: c.systemBlue },
+                currentStep === 'shipping' && styles.nextButtonFull,
+                isProcessing && { opacity: 0.6 },
+              ])}
+              onPress={
+                currentStep === 'review' ? handlePlaceOrder : handleNext
+              }
+              enabled={!isProcessing}
+              testID={currentStep === 'review' ? 'place-order-btn' : 'next-btn'}
+            >
+              {isProcessing ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.nextButtonText}>
+                  {currentStep === 'review' ? 'Place Order' : 'Continue'}
+                </Text>
+              )}
+            </PressableScale>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </>
@@ -464,183 +614,138 @@ export default function CheckoutScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  containerDark: {
-    backgroundColor: '#16213e',
-  },
   stepIndicator: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
   },
   stepItem: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   stepCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#e0e0e0',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 6,
   },
-  stepCircleActive: {
-    backgroundColor: '#007AFF',
-  },
-  stepCircleCompleted: {
-    backgroundColor: '#34C759',
-  },
   stepNumber: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12,
+    fontWeight: '700',
+    fontSize: fontSize.caption1,
   },
   stepLabel: {
-    fontSize: 12,
-    color: '#666',
-  },
-  stepLabelActive: {
-    color: '#007AFF',
-    fontWeight: '600',
+    fontSize: fontSize.subhead,
   },
   stepLine: {
-    width: 30,
-    height: 2,
-    backgroundColor: '#e0e0e0',
-    marginHorizontal: 8,
-  },
-  stepLineDark: {
-    backgroundColor: '#2a2a3e',
-  },
-  content: {
-    flex: 1,
+    width: 28,
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 10,
   },
   contentContainer: {
-    padding: 20,
-    paddingBottom: 380,
+    paddingHorizontal: 16,
+    paddingBottom: 32,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 20,
+    fontSize: fontSize.title2,
+    lineHeight: lineHeight.title2,
+    fontWeight: '700',
+    marginBottom: 14,
+    marginHorizontal: 4,
   },
-  textLight: {
-    color: '#fff',
+  card: {
+    borderRadius: radius.card,
+    paddingVertical: 4,
+    marginBottom: 14,
   },
-  subtitleDark: {
-    color: '#aaa',
-  },
-  cardDark: {
-    backgroundColor: '#1a1a2e',
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1a1a2e',
+  cardLabel: {
+    fontSize: fontSize.footnote,
+    fontWeight: '400',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginHorizontal: 16,
+    marginTop: 14,
     marginBottom: 8,
   },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
+  fieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    paddingVertical: 10,
+    minHeight: 44,
   },
-  inputDark: {
-    backgroundColor: '#1a1a2e',
-    borderColor: '#2a2a3e',
-    color: '#fff',
+  fieldLabel: {
+    fontSize: fontSize.body,
+    width: 90,
+    fontWeight: '500',
   },
-  inputError: {
-    borderColor: '#FF3B30',
+  fieldInput: {
+    flex: 1,
+    fontSize: fontSize.body,
+    paddingVertical: 6,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 14,
+  },
+  errorBlock: {
+    paddingHorizontal: 14,
+    marginBottom: 8,
   },
   errorText: {
-    color: '#FF3B30',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  row: {
-    flexDirection: 'row',
-  },
-  flex1: {
-    flex: 1,
-  },
-  marginRight: {
-    marginRight: 12,
+    fontSize: fontSize.caption1,
+    marginBottom: 2,
   },
   securityNote: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
     padding: 12,
-    borderRadius: 10,
-    marginTop: 8,
+    borderRadius: radius.card,
+    marginBottom: 8,
   },
   securityIcon: {
     fontSize: 16,
+    fontWeight: '700',
     marginRight: 8,
   },
   securityText: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: fontSize.footnote,
     flex: 1,
   },
   reviewCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  reviewLabel: {
-    fontSize: 12,
-    color: '#666',
-    textTransform: 'uppercase',
-    marginBottom: 6,
+    borderRadius: radius.card,
+    padding: 14,
   },
   reviewValue: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   reviewSubvalue: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: fontSize.subhead,
     marginTop: 2,
   },
   reviewItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    alignItems: 'center',
+    paddingVertical: 10,
   },
   reviewItemName: {
-    fontSize: 14,
-    color: '#1a1a2e',
+    fontSize: fontSize.subhead,
     flex: 1,
+    marginRight: 8,
   },
   reviewItemPrice: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '600',
-    color: '#007AFF',
   },
   totalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: radius.card,
+    padding: 14,
+    marginTop: 14,
   },
   totalRow: {
     flexDirection: 'row',
@@ -648,79 +753,61 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   totalLabel: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: fontSize.subhead,
   },
   totalValue: {
-    fontSize: 14,
-    color: '#1a1a2e',
+    fontSize: fontSize.subhead,
+    fontWeight: '500',
   },
   freeShipping: {
-    fontSize: 14,
-    color: '#34C759',
+    fontSize: fontSize.subhead,
     fontWeight: '600',
   },
   grandTotal: {
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 12,
-    marginTop: 5,
-    marginBottom: 0,
+    marginTop: 4,
   },
   grandTotalLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    fontSize: fontSize.body,
+    fontWeight: '700',
   },
   grandTotalValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontSize: fontSize.title3,
+    fontWeight: '700',
   },
   footer: {
     flexDirection: 'row',
-    padding: 16,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  footerDark: {
-    backgroundColor: '#1a1a2e',
-    borderTopColor: '#2a2a3e',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 10,
   },
   backButton: {
     flex: 1,
     paddingVertical: 14,
     alignItems: 'center',
-    marginRight: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  backButtonDark: {
-    borderColor: '#2a2a3e',
+    borderRadius: radius.button,
   },
   backButtonText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   nextButton: {
     flex: 2,
-    backgroundColor: '#007AFF',
     paddingVertical: 14,
     alignItems: 'center',
-    borderRadius: 10,
+    borderRadius: radius.button,
   },
   nextButtonFull: {
     flex: 1,
   },
-  nextButtonDisabled: {
-    backgroundColor: '#99c9ff',
-  },
   nextButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#FFFFFF',
+    fontSize: fontSize.body,
+    fontWeight: '600',
   },
 });
