@@ -9,18 +9,25 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  useColorScheme,
 } from 'react-native';
 import { PressableScale } from 'pressto';
 import { Link, useRouter, Stack } from 'expo-router';
 import { useAuthStore, useSettingsStore } from '../../store';
 import * as Haptics from 'expo-haptics';
+import { colors, fontSize, lineHeight, radius } from '../../src/theme';
 
 export default function LoginScreen() {
   const router = useRouter();
   const login = useAuthStore(state => state.login);
   const isLoading = useAuthStore(state => state.isLoading);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const hapticEnabled = useSettingsStore(
+    state => state.preferences.hapticFeedback,
+  );
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const systemScheme = useColorScheme();
+  const scheme = darkMode ? 'dark' : systemScheme === 'dark' ? 'dark' : 'light';
+  const c = colors(scheme);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -84,12 +91,13 @@ export default function LoginScreen() {
       <Stack.Screen
         options={{
           title: 'Sign In',
-          headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
+          headerStyle: { backgroundColor: c.systemBackground },
+          headerTintColor: c.label,
+          headerLargeTitle: false,
         }}
       />
       <KeyboardAvoidingView
-        style={[styles.container, darkMode && styles.containerDark]}
+        style={{ flex: 1, backgroundColor: c.systemGroupedBackground }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
@@ -97,56 +105,78 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           testID="login-screen"
         >
+          {/* Hero */}
           <View style={styles.header}>
-            <Text style={styles.logo}>🛍️</Text>
-            <Text style={[styles.title, darkMode && styles.textLight]}>Welcome Back</Text>
-            <Text style={[styles.subtitle, darkMode && styles.subtitleDark]}>
+            <View
+              style={[
+                styles.logoCircle,
+                { backgroundColor: c.systemBlue + '22' },
+              ]}
+            >
+              <Text style={[styles.logoGlyph, { color: c.systemBlue }]}>
+                ◔
+              </Text>
+            </View>
+            <Text style={[styles.title, { color: c.label }]}>
+              Welcome Back
+            </Text>
+            <Text style={[styles.subtitle, { color: c.secondaryLabel }]}>
               Sign in to continue shopping
             </Text>
           </View>
 
-          <View style={styles.form}>
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, darkMode && styles.textLight]}>Email</Text>
+          {/* Form card */}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: c.secondarySystemGroupedBackground },
+            ]}
+          >
+            <View style={styles.fieldRow}>
+              <Text style={[styles.fieldLabel, { color: c.secondaryLabel }]}>
+                Email
+              </Text>
               <TextInput
-                style={[
-                  styles.input,
-                  darkMode && styles.inputDark,
-                  errors.email && styles.inputError,
-                ]}
+                style={[styles.fieldInput, { color: c.label }]}
                 placeholder="your@email.com"
-                placeholderTextColor={darkMode ? '#666' : '#999'}
+                placeholderTextColor={c.tertiaryLabel}
                 value={email}
                 onChangeText={text => {
                   setEmail(text);
-                  if (errors.email) setErrors(prev => ({ ...prev, email: undefined }));
+                  if (errors.email)
+                    setErrors(prev => ({ ...prev, email: undefined }));
                 }}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
                 testID="email-input"
               />
-              {errors.email && (
-                <Text style={styles.errorText} testID="email-error">{errors.email}</Text>
-              )}
             </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, darkMode && styles.textLight]}>Password</Text>
-              <View style={styles.passwordContainer}>
+            {errors.email && (
+              <Text
+                style={[styles.errorText, { color: c.systemRed }]}
+                testID="email-error"
+              >
+                {errors.email}
+              </Text>
+            )}
+            <View
+              style={[styles.divider, { backgroundColor: c.separator }]}
+            />
+            <View style={styles.fieldRow}>
+              <Text style={[styles.fieldLabel, { color: c.secondaryLabel }]}>
+                Password
+              </Text>
+              <View style={styles.passwordWrap}>
                 <TextInput
-                  style={[
-                    styles.input,
-                    styles.passwordInput,
-                    darkMode && styles.inputDark,
-                    errors.password && styles.inputError,
-                  ]}
+                  style={[styles.fieldInput, { color: c.label, flex: 1 }]}
                   placeholder="••••••••"
-                  placeholderTextColor={darkMode ? '#666' : '#999'}
+                  placeholderTextColor={c.tertiaryLabel}
                   value={password}
                   onChangeText={text => {
                     setPassword(text);
-                    if (errors.password) setErrors(prev => ({ ...prev, password: undefined }));
+                    if (errors.password)
+                      setErrors(prev => ({ ...prev, password: undefined }));
                   }}
                   secureTextEntry={!showPassword}
                   testID="password-input"
@@ -155,73 +185,119 @@ export default function LoginScreen() {
                   style={styles.showPasswordBtn}
                   onPress={() => setShowPassword(!showPassword)}
                   testID="toggle-password"
+                  hitSlop={8}
                 >
-                  <Text style={styles.showPasswordText}>{showPassword ? '🙈' : '👁️'}</Text>
+                  <Text
+                    style={[styles.showPasswordText, { color: c.systemBlue }]}
+                  >
+                    {showPassword ? 'Hide' : 'Show'}
+                  </Text>
                 </PressableScale>
               </View>
-              {errors.password && (
-                <Text style={styles.errorText} testID="password-error">{errors.password}</Text>
-              )}
             </View>
+            {errors.password && (
+              <Text
+                style={[styles.errorText, { color: c.systemRed }]}
+                testID="password-error"
+              >
+                {errors.password}
+              </Text>
+            )}
+          </View>
 
-            <PressableScale style={styles.forgotPassword} testID="forgot-password">
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-            </PressableScale>
+          <PressableScale
+            style={styles.forgotPassword}
+            testID="forgot-password"
+            hitSlop={8}
+          >
+            <Text style={[styles.forgotPasswordText, { color: c.systemBlue }]}>
+              Forgot Password?
+            </Text>
+          </PressableScale>
 
+          <PressableScale
+            style={StyleSheet.flatten([
+              styles.primaryButton,
+              { backgroundColor: c.systemBlue },
+              isLoading && { opacity: 0.6 },
+            ])}
+            onPress={handleLogin}
+            enabled={!isLoading}
+            testID="login-btn"
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.primaryButtonText}>Sign In</Text>
+            )}
+          </PressableScale>
+
+          <View style={styles.dividerRow}>
+            <View
+              style={[styles.dividerLine, { backgroundColor: c.separator }]}
+            />
+            <Text style={[styles.dividerText, { color: c.secondaryLabel }]}>
+              or
+            </Text>
+            <View
+              style={[styles.dividerLine, { backgroundColor: c.separator }]}
+            />
+          </View>
+
+          <PressableScale
+            style={StyleSheet.flatten([
+              styles.secondaryButton,
+              { backgroundColor: c.secondarySystemGroupedBackground },
+            ])}
+            onPress={handleDemoLogin}
+            testID="demo-login-btn"
+          >
+            <Text style={[styles.secondaryButtonText, { color: c.label }]}>
+              Continue with Demo Account
+            </Text>
+          </PressableScale>
+
+          <View style={styles.socialButtons}>
             <PressableScale
-              style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
-              onPress={handleLogin}
-              enabled={!isLoading}
-              testID="login-btn"
+              style={StyleSheet.flatten([
+                styles.socialButton,
+                { backgroundColor: c.label },
+              ])}
+              testID="apple-login"
             >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.loginButtonText}>Sign In</Text>
-              )}
-            </PressableScale>
-
-            <View style={styles.divider}>
-              <View style={[styles.dividerLine, darkMode && styles.dividerLineDark]} />
-              <Text style={[styles.dividerText, darkMode && styles.subtitleDark]}>or</Text>
-              <View style={[styles.dividerLine, darkMode && styles.dividerLineDark]} />
-            </View>
-
-            <PressableScale
-              style={[styles.demoButton, darkMode && styles.demoButtonDark]}
-              onPress={handleDemoLogin}
-              testID="demo-login-btn"
-            >
-              <Text style={[styles.demoButtonText, darkMode && styles.textLight]}>
-                Continue with Demo Account
+              <Text
+                style={[
+                  styles.socialText,
+                  { color: c.systemBackground },
+                ]}
+              >
+                 Apple
               </Text>
             </PressableScale>
-
-            <View style={styles.socialButtons}>
-              <PressableScale
-                style={[styles.socialButton, darkMode && styles.socialButtonDark]}
-                testID="google-login"
-              >
-                <Text style={styles.socialIcon}>🔵</Text>
-                <Text style={[styles.socialText, darkMode && styles.textLight]}>Google</Text>
-              </PressableScale>
-              <PressableScale
-                style={[styles.socialButton, darkMode && styles.socialButtonDark]}
-                testID="apple-login"
-              >
-                <Text style={styles.socialIcon}>🍎</Text>
-                <Text style={[styles.socialText, darkMode && styles.textLight]}>Apple</Text>
-              </PressableScale>
-            </View>
+            <PressableScale
+              style={StyleSheet.flatten([
+                styles.socialButton,
+                {
+                  backgroundColor: c.secondarySystemGroupedBackground,
+                },
+              ])}
+              testID="google-login"
+            >
+              <Text style={[styles.socialText, { color: c.label }]}>
+                G  Google
+              </Text>
+            </PressableScale>
           </View>
 
           <View style={styles.footer}>
-            <Text style={[styles.footerText, darkMode && styles.subtitleDark]}>
+            <Text style={[styles.footerText, { color: c.secondaryLabel }]}>
               Don't have an account?{' '}
             </Text>
             <Link href="/auth/register" asChild>
-              <PressableScale testID="go-to-register">
-                <Text style={styles.signUpLink}>Sign Up</Text>
+              <PressableScale testID="go-to-register" hitSlop={6}>
+                <Text style={[styles.signUpLink, { color: c.systemBlue }]}>
+                  Sign Up
+                </Text>
               </PressableScale>
             </Link>
           </View>
@@ -232,194 +308,154 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  containerDark: {
-    backgroundColor: '#16213e',
-  },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    padding: 20,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
-    marginTop: 20,
+    marginBottom: 28,
+    marginTop: 12,
   },
-  logo: {
-    fontSize: 60,
-    marginBottom: 16,
+  logoCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  logoGlyph: {
+    fontSize: 42,
+    fontWeight: '600',
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 8,
+    fontSize: fontSize.title1,
+    lineHeight: lineHeight.title1,
+    fontWeight: '700',
+    marginBottom: 4,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: fontSize.subhead,
+    fontWeight: '400',
   },
-  textLight: {
-    color: '#fff',
+  card: {
+    borderRadius: radius.card,
+    paddingVertical: 4,
+    marginBottom: 14,
   },
-  subtitleDark: {
-    color: '#aaa',
+  fieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minHeight: 44,
   },
-  form: {
-    marginBottom: 30,
+  fieldLabel: {
+    fontSize: fontSize.body,
+    width: 90,
+    fontWeight: '500',
   },
-  inputGroup: {
-    marginBottom: 20,
+  fieldInput: {
+    flex: 1,
+    fontSize: fontSize.body,
+    paddingVertical: 6,
   },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a2e',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  inputDark: {
-    backgroundColor: '#1a1a2e',
-    borderColor: '#2a2a3e',
-    color: '#fff',
-  },
-  inputError: {
-    borderColor: '#FF3B30',
-  },
-  passwordContainer: {
-    position: 'relative',
-  },
-  passwordInput: {
-    paddingRight: 50,
+  passwordWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   showPasswordBtn: {
-    position: 'absolute',
-    right: 12,
-    top: 12,
-    padding: 4,
+    paddingLeft: 10,
   },
   showPasswordText: {
-    fontSize: 20,
+    fontSize: fontSize.subhead,
+    fontWeight: '600',
   },
   errorText: {
-    color: '#FF3B30',
-    fontSize: 12,
-    marginTop: 6,
+    fontSize: fontSize.caption1,
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 14,
   },
   forgotPassword: {
     alignSelf: 'flex-end',
-    marginBottom: 24,
+    marginBottom: 18,
+    paddingVertical: 4,
   },
   forgotPasswordText: {
-    color: '#007AFF',
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '500',
   },
-  loginButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
+  primaryButton: {
     paddingVertical: 16,
+    borderRadius: radius.button,
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
   },
-  loginButtonDisabled: {
-    backgroundColor: '#99c9ff',
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: fontSize.body,
+    fontWeight: '600',
   },
-  loginButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  divider: {
+  dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
   },
   dividerLine: {
     flex: 1,
-    height: 1,
-    backgroundColor: '#e0e0e0',
-  },
-  dividerLineDark: {
-    backgroundColor: '#2a2a3e',
+    height: StyleSheet.hairlineWidth,
   },
   dividerText: {
-    marginHorizontal: 16,
-    color: '#666',
-    fontSize: 14,
+    marginHorizontal: 14,
+    fontSize: fontSize.footnote,
+    fontWeight: '500',
   },
-  demoButton: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+  secondaryButton: {
     paddingVertical: 14,
+    borderRadius: radius.button,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  demoButtonDark: {
-    backgroundColor: '#1a1a2e',
-    borderColor: '#2a2a3e',
-  },
-  demoButtonText: {
-    color: '#1a1a2e',
-    fontSize: 15,
-    fontWeight: '600',
+  secondaryButtonText: {
+    fontSize: fontSize.body,
+    fontWeight: '500',
   },
   socialButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 14,
   },
   socialButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 12,
-    marginHorizontal: 6,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  socialButtonDark: {
-    backgroundColor: '#1a1a2e',
-    borderColor: '#2a2a3e',
-  },
-  socialIcon: {
-    fontSize: 18,
-    marginRight: 8,
+    paddingVertical: 14,
+    borderRadius: radius.button,
   },
   socialText: {
-    fontSize: 14,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 'auto',
-    paddingBottom: 20,
+    paddingTop: 22,
+    paddingBottom: 12,
   },
   footerText: {
-    color: '#666',
-    fontSize: 15,
+    fontSize: fontSize.subhead,
   },
   signUpLink: {
-    color: '#007AFF',
-    fontSize: 15,
+    fontSize: fontSize.subhead,
     fontWeight: '600',
   },
 });
