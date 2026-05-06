@@ -131,37 +131,33 @@ tags:
 # TEST: Sort options
 # ============================================
 
-# Open sort dropdown
+# Open sort dropdown — zeego renders this as a native UIMenu, items
+# live outside the React Fabric tree, so we tap them by visible label
+# (Ennio routes through the accessibility-tree fallback).
 - tapOn:
     id: "sort-dropdown"
-- assertVisible:
-    id: "sort-options"
-    timeout: 1000
 
 # Price: Low to High
 - tapOn:
-    id: "sort-option-price-asc"
-- assertNotVisible:
-    id: "sort-options"
-    timeout: 5000
+    text: "Price: Low to High"
 
 # Price: High to Low
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-price-desc"
+    text: "Price: High to Low"
 
 # Name: A to Z
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-name"
+    text: "Name: A to Z"
 
 # Top Rated
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-rating"
+    text: "Top Rated"
 
 # ============================================
 # TEST: Combined filters - Electronics + search
@@ -189,7 +185,7 @@ tags:
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-price-asc"
+    text: "Price: Low to High"
 
 - assertVisible:
     id: "products-list"
@@ -207,7 +203,7 @@ tags:
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-price-desc"
+    text: "Price: High to Low"
 
 - assertVisible:
     id: "products-list"
