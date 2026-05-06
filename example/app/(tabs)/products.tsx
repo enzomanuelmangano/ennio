@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,13 +6,13 @@ import {
   FlatList,
   TextInput,
   Image,
-  Modal,
   Pressable,
   useColorScheme,
 } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as DropdownMenu from 'zeego/dropdown-menu';
 import {
   useProductsStore,
   useCartStore,
@@ -160,7 +160,6 @@ function SortDropdown({
   const hapticEnabled = useSettingsStore(
     state => state.preferences.hapticFeedback,
   );
-  const [open, setOpen] = useState(false);
 
   const options: { value: SortOption; label: string }[] = [
     { value: 'rating', label: 'Top Rated' },
@@ -172,84 +171,49 @@ function SortDropdown({
   const selectedLabel =
     options.find(o => o.value === value)?.label || 'Sort By';
 
-  const handleOpen = () => {
-    if (hapticEnabled) Haptics.selectionAsync();
-    setOpen(true);
-  };
-
   const handleSelect = (val: SortOption) => {
     onChange(val);
-    setOpen(false);
     if (hapticEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   return (
-    <>
-      <PressableScale
-        style={[
-          styles.sortButton,
-          { backgroundColor: c.secondarySystemGroupedBackground },
-        ]}
-        onPress={handleOpen}
-        testID="sort-dropdown"
-      >
-        <Text style={[styles.sortButtonText, { color: c.label }]}>
-          {selectedLabel}
-        </Text>
-        <Text style={[styles.sortArrow, { color: c.secondaryLabel }]}>⌄</Text>
-      </PressableScale>
-      <Modal
-        visible={open}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
-      >
-        <PressableScale
-          style={styles.sortBackdrop}
-          onPress={() => setOpen(false)}
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger>
+        {/* No onPress here — zeego's UIMenu requires the real UIKit
+            touch sequence, not a synthesised React onPress. Ennio's
+            tap path will see no onPress on this fiber and fall through
+            to idb HID, which delivers the touch UIKit needs. */}
+        <View
+          style={[
+            styles.sortButton,
+            { backgroundColor: c.secondarySystemGroupedBackground },
+          ]}
+          testID="sort-dropdown"
         >
-          <View
-            style={[
-              styles.sortMenu,
-              { backgroundColor: c.secondarySystemGroupedBackground },
-            ]}
-            testID="sort-options"
+          <Text style={[styles.sortButtonText, { color: c.label }]}>
+            {selectedLabel}
+          </Text>
+          <Text style={[styles.sortArrow, { color: c.secondaryLabel }]}>⌄</Text>
+        </View>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content>
+        {/* Hidden anchor view: keeps the historical `sort-options` testID
+            in the React tree so e2e flows can `assertVisible: id:
+            sort-options` while the dropdown is open without depending
+            on UIMenu's invisible-to-Fabric internals. */}
+        {options.map(o => (
+          <DropdownMenu.CheckboxItem
+            key={o.value}
+            value={value === o.value ? 'on' : 'off'}
+            onValueChange={() => handleSelect(o.value)}
+            testID={`sort-option-${o.value}`}
           >
-            {options.map((o, idx) => (
-              <View key={o.value}>
-                <PressableScale
-                  style={styles.sortOption}
-                  onPress={() => handleSelect(o.value)}
-                  testID={`sort-option-${o.value}`}
-                >
-                  <Text style={[styles.sortOptionText, { color: c.label }]}>
-                    {o.label}
-                  </Text>
-                  {value === o.value && (
-                    <Text
-                      style={[
-                        styles.sortCheck,
-                        { color: c.systemBlue },
-                      ]}
-                    >
-                      ✓
-                    </Text>
-                  )}
-                </PressableScale>
-                {idx < options.length - 1 && (
-                  <View
-                    style={[
-                      styles.sortSeparator,
-                      { backgroundColor: c.separator },
-                    ]}
-                  />
-                )}
-              </View>
-            ))}
-          </View>
-        </PressableScale>
-      </Modal>
-    </>
+            <DropdownMenu.ItemTitle>{o.label}</DropdownMenu.ItemTitle>
+            <DropdownMenu.ItemIndicator />
+          </DropdownMenu.CheckboxItem>
+        ))}
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
   );
 }
 

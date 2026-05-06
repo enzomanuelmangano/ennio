@@ -122,36 +122,31 @@ tags:
 - tapOn:
     id: "sort-dropdown"
 
-- assertVisible:
-    id: "sort-options"
-    timeout: 4000
-
-# Sort by price low to high
+# Sort by price low to high. The sort dropdown now uses zeego, which
+# opens iOS's native UIMenu — items live outside the React Fabric
+# tree, so we match by visible label. Ennio's tapByText pipeline
+# picks up UIMenu items via the accessibility-tree fallback in
+# writer.tapByText.
 - tapOn:
-    id: "sort-option-price-asc"
-
-# Dropdown should close
-- assertNotVisible:
-    id: "sort-options"
-    timeout: 5000
+    text: "Price: Low to High"
 
 # Sort by price high to low
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-price-desc"
+    text: "Price: High to Low"
 
 # Sort by name
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-name"
+    text: "Name: A to Z"
 
 # Sort by rating (default)
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-rating"
+    text: "Top Rated"
 
 # ============================================
 # TEST: Combined search + filter + sort
@@ -165,7 +160,7 @@ tags:
 - tapOn:
     id: "sort-dropdown"
 - tapOn:
-    id: "sort-option-price-desc"
+    text: "Price: High to Low"
 
 # Should show filtered, searched, sorted results
 - assertVisible:
