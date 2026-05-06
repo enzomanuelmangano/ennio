@@ -1,9 +1,26 @@
-import { View, Text, StyleSheet, ScrollView, Image, Alert, Pressable } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  Alert,
+  Pressable,
+  useColorScheme,
+} from 'react-native';
 import { PressableScale } from 'pressto';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import { useProductsStore, useCartStore, useSettingsStore } from '../../store';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  useProductsStore,
+  useCartStore,
+  useSettingsStore,
+} from '../../store';
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
+import { colors, fontSize, lineHeight, radius } from '../../src/theme';
+
+type Palette = ReturnType<typeof colors>;
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -11,20 +28,40 @@ export default function ProductDetailScreen() {
   const products = useProductsStore(state => state.products);
   const addToCart = useCartStore(state => state.addToCart);
   const cartItems = useCartStore(state => state.items);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const hapticEnabled = useSettingsStore(
+    state => state.preferences.hapticFeedback,
+  );
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const systemScheme = useColorScheme();
+  const scheme = darkMode ? 'dark' : systemScheme === 'dark' ? 'dark' : 'light';
+  const c = colors(scheme);
+  const insets = useSafeAreaInsets();
 
   const [quantity, setQuantity] = useState(1);
-  const [selectedTab, setSelectedTab] = useState<'description' | 'specs' | 'reviews'>('description');
+  const [selectedTab, setSelectedTab] = useState<
+    'description' | 'specs' | 'reviews'
+  >('description');
 
   const product = products.find(p => p.id === id);
   const inCart = cartItems.find(item => item.product.id === id);
 
   if (!product) {
     return (
-      <View style={[styles.container, styles.centered, darkMode && styles.containerDark]}>
-        <Text style={[styles.errorText, darkMode && styles.textLight]}>Product not found</Text>
-        <PressableScale style={styles.backButton} onPress={() => router.back()}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: c.systemGroupedBackground,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text style={[styles.errorText, { color: c.label }]}>
+          Product not found
+        </Text>
+        <PressableScale
+          style={[styles.backButton, { backgroundColor: c.systemBlue }]}
+          onPress={() => router.back()}
+        >
           <Text style={styles.backButtonText}>Go Back</Text>
         </PressableScale>
       </View>
@@ -45,8 +82,14 @@ export default function ProductDetailScreen() {
       `${quantity}x ${product.name} added to your cart.`,
       [
         { text: 'Continue Shopping', style: 'cancel' },
-        { text: 'View Cart', onPress: () => { router.dismissAll(); router.push('/cart'); } },
-      ]
+        {
+          text: 'View Cart',
+          onPress: () => {
+            router.dismissAll();
+            router.push('/cart');
+          },
+        },
+      ],
     );
   };
 
@@ -63,99 +106,193 @@ export default function ProductDetailScreen() {
       <Stack.Screen
         options={{
           title: product.name,
-          headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
+          headerStyle: { backgroundColor: c.systemBackground },
+          headerTintColor: c.label,
         }}
       />
       <ScrollView
-        style={[styles.container, darkMode && styles.containerDark]}
+        style={{ flex: 1, backgroundColor: c.systemGroupedBackground }}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
         testID="product-detail-screen"
       >
-        <Image source={{ uri: product.image }} style={styles.productImage} />
-
-        {!product.inStock && (
-          <View style={styles.outOfStockBanner}>
-            <Text style={styles.outOfStockText}>Out of Stock</Text>
-          </View>
-        )}
+        <View style={styles.imageWrap}>
+          <Image source={{ uri: product.image }} style={styles.productImage} />
+          {!product.inStock && (
+            <View style={styles.outOfStockBanner}>
+              <Text style={styles.outOfStockText}>Out of Stock</Text>
+            </View>
+          )}
+        </View>
 
         <View style={styles.content}>
-          <View style={styles.header}>
-            <Text style={[styles.category, darkMode && styles.subtitleDark]}>{product.category}</Text>
-            <View style={styles.ratingBadge}>
-              <Text style={styles.ratingText}>⭐ {product.rating}</Text>
+          <View style={styles.headerRow}>
+            <Text style={[styles.category, { color: c.secondaryLabel }]}>
+              {product.category}
+            </Text>
+            <View
+              style={[
+                styles.ratingBadge,
+                { backgroundColor: c.systemYellow + '33' },
+              ]}
+            >
+              <Text style={[styles.ratingGlyph, { color: c.systemOrange }]}>
+                ★
+              </Text>
+              <Text style={[styles.ratingText, { color: c.label }]}>
+                {product.rating}
+              </Text>
             </View>
           </View>
 
-          <Text style={[styles.title, darkMode && styles.textLight]} testID="product-title">
+          <Text
+            style={[styles.title, { color: c.label }]}
+            testID="product-title"
+          >
             {product.name}
           </Text>
 
           <View style={styles.priceRow}>
-            <Text style={styles.price} testID="product-price">${product.price.toFixed(2)}</Text>
-            <Text style={[styles.reviews, darkMode && styles.subtitleDark]}>
+            <Text
+              style={[styles.price, { color: c.label }]}
+              testID="product-price"
+            >
+              ${product.price.toFixed(2)}
+            </Text>
+            <Text style={[styles.reviews, { color: c.secondaryLabel }]}>
               {product.reviews} reviews
             </Text>
           </View>
 
-          {/* Quantity Selector */}
-          <View style={[styles.quantitySection, darkMode && styles.cardDark]}>
-            <Text style={[styles.quantityLabel, darkMode && styles.textLight]}>Quantity:</Text>
-            <View style={styles.quantityControls}>
+          {/* Quantity card */}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: c.secondarySystemGroupedBackground },
+            ]}
+          >
+            <Text style={[styles.cardLabel, { color: c.label }]}>
+              Quantity
+            </Text>
+            <View
+              style={[
+                styles.stepper,
+                { backgroundColor: c.tertiarySystemFill },
+              ]}
+            >
               <Pressable
-                style={styles.quantityBtn}
+                style={styles.stepperBtn}
                 onPress={() => handleQuantityChange(-1)}
                 testID="decrease-quantity"
+                hitSlop={4}
               >
-                <Text style={styles.quantityBtnText}>−</Text>
+                <Text style={[styles.stepperGlyph, { color: c.label }]}>
+                  −
+                </Text>
               </Pressable>
-              <Text style={[styles.quantityValue, darkMode && styles.textLight]} testID="quantity-value">
+              <Text
+                style={[styles.quantityValue, { color: c.label }]}
+                testID="quantity-value"
+              >
                 {quantity}
               </Text>
               <Pressable
-                style={styles.quantityBtn}
+                style={styles.stepperBtn}
                 onPress={() => handleQuantityChange(1)}
                 testID="increase-quantity"
+                hitSlop={4}
               >
-                <Text style={styles.quantityBtnText}>+</Text>
+                <Text style={[styles.stepperGlyph, { color: c.label }]}>
+                  +
+                </Text>
               </Pressable>
             </View>
           </View>
 
-          {/* Tab Navigation */}
-          <View style={styles.tabContainer}>
-            {(['description', 'specs', 'reviews'] as const).map(tab => (
-              <PressableScale
-                key={tab}
-                style={[styles.tab, selectedTab === tab && styles.tabActive]}
-                onPress={() => setSelectedTab(tab)}
-                testID={`tab-${tab}`}
-              >
-                <Text style={[
-                  styles.tabText,
-                  darkMode && styles.subtitleDark,
-                  selectedTab === tab && styles.tabTextActive,
-                ]}>
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </Text>
-              </PressableScale>
-            ))}
+          {/* Segmented control */}
+          <View
+            style={[
+              styles.segmented,
+              { backgroundColor: c.tertiarySystemFill },
+            ]}
+          >
+            {(['description', 'specs', 'reviews'] as const).map(tab => {
+              const active = selectedTab === tab;
+              return (
+                <PressableScale
+                  key={tab}
+                  style={StyleSheet.flatten([
+                    styles.segment,
+                    active && {
+                      backgroundColor: c.secondarySystemGroupedBackground,
+                    },
+                  ])}
+                  onPress={() => setSelectedTab(tab)}
+                  testID={`tab-${tab}`}
+                >
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      {
+                        color: active ? c.label : c.secondaryLabel,
+                        fontWeight: active ? '600' : '500',
+                      },
+                    ]}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </Text>
+                </PressableScale>
+              );
+            })}
           </View>
 
-          {/* Tab Content */}
-          <View style={[styles.tabContent, darkMode && styles.cardDark]}>
+          {/* Tab content card */}
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: c.secondarySystemGroupedBackground },
+            ]}
+          >
             {selectedTab === 'description' && (
-              <Text style={[styles.description, darkMode && styles.subtitleDark]} testID="product-description">
+              <Text
+                style={[styles.description, { color: c.label }]}
+                testID="product-description"
+              >
                 {product.description}
               </Text>
             )}
             {selectedTab === 'specs' && (
               <View testID="product-specs">
-                <SpecRow label="Category" value={product.category} darkMode={darkMode} />
-                <SpecRow label="Rating" value={`${product.rating} / 5.0`} darkMode={darkMode} />
-                <SpecRow label="Reviews" value={`${product.reviews} reviews`} darkMode={darkMode} />
-                <SpecRow label="Availability" value={product.inStock ? 'In Stock' : 'Out of Stock'} darkMode={darkMode} />
-                <SpecRow label="SKU" value={`SKU-${product.id.toUpperCase()}`} darkMode={darkMode} />
+                <SpecRow
+                  label="Category"
+                  value={product.category}
+                  c={c}
+                  isLast={false}
+                />
+                <SpecRow
+                  label="Rating"
+                  value={`${product.rating} / 5.0`}
+                  c={c}
+                  isLast={false}
+                />
+                <SpecRow
+                  label="Reviews"
+                  value={`${product.reviews} reviews`}
+                  c={c}
+                  isLast={false}
+                />
+                <SpecRow
+                  label="Availability"
+                  value={product.inStock ? 'In Stock' : 'Out of Stock'}
+                  c={c}
+                  isLast={false}
+                />
+                <SpecRow
+                  label="SKU"
+                  value={`SKU-${product.id.toUpperCase()}`}
+                  c={c}
+                  isLast={true}
+                />
               </View>
             )}
             {selectedTab === 'reviews' && (
@@ -165,29 +302,37 @@ export default function ProductDetailScreen() {
                   rating={5}
                   comment="Excellent product! Highly recommended."
                   date="2 days ago"
-                  darkMode={darkMode}
+                  c={c}
+                  isLast={false}
                 />
                 <ReviewCard
                   name="Sarah M."
                   rating={4}
                   comment="Great quality, fast shipping."
                   date="1 week ago"
-                  darkMode={darkMode}
+                  c={c}
+                  isLast={false}
                 />
                 <ReviewCard
                   name="Mike T."
                   rating={5}
                   comment="Exactly as described. Very happy with my purchase."
                   date="2 weeks ago"
-                  darkMode={darkMode}
+                  c={c}
+                  isLast={true}
                 />
               </View>
             )}
           </View>
 
           {inCart && (
-            <View style={styles.inCartBadge}>
-              <Text style={styles.inCartText}>
+            <View
+              style={[
+                styles.inCartBadge,
+                { backgroundColor: c.systemGreen + '22' },
+              ]}
+            >
+              <Text style={[styles.inCartText, { color: c.systemGreen }]}>
                 ✓ {inCart.quantity} already in cart
               </Text>
             </View>
@@ -196,13 +341,32 @@ export default function ProductDetailScreen() {
       </ScrollView>
 
       {/* Fixed Bottom Bar */}
-      <View style={[styles.bottomBar, darkMode && styles.bottomBarDark]}>
+      <View
+        style={[
+          styles.bottomBar,
+          {
+            backgroundColor: c.secondarySystemGroupedBackground,
+            borderTopColor: c.separator,
+            paddingBottom: insets.bottom + 12,
+          },
+        ]}
+      >
         <View style={styles.bottomPriceContainer}>
-          <Text style={[styles.bottomPriceLabel, darkMode && styles.subtitleDark]}>Total:</Text>
-          <Text style={styles.bottomPrice}>${(product.price * quantity).toFixed(2)}</Text>
+          <Text
+            style={[styles.bottomPriceLabel, { color: c.secondaryLabel }]}
+          >
+            Total
+          </Text>
+          <Text style={[styles.bottomPrice, { color: c.label }]}>
+            ${(product.price * quantity).toFixed(2)}
+          </Text>
         </View>
         <PressableScale
-          style={[styles.addToCartButton, !product.inStock && styles.addToCartButtonDisabled]}
+          style={StyleSheet.flatten([
+            styles.addToCartButton,
+            { backgroundColor: c.systemBlue },
+            !product.inStock && { backgroundColor: c.tertiarySystemFill },
+          ])}
           onPress={handleAddToCart}
           enabled={product.inStock}
           testID="add-to-cart-btn"
@@ -216,11 +380,31 @@ export default function ProductDetailScreen() {
   );
 }
 
-function SpecRow({ label, value, darkMode }: { label: string; value: string; darkMode: boolean }) {
+function SpecRow({
+  label,
+  value,
+  c,
+  isLast,
+}: {
+  label: string;
+  value: string;
+  c: Palette;
+  isLast: boolean;
+}) {
   return (
-    <View style={styles.specRow}>
-      <Text style={[styles.specLabel, darkMode && styles.subtitleDark]}>{label}</Text>
-      <Text style={[styles.specValue, darkMode && styles.textLight]}>{value}</Text>
+    <View
+      style={[
+        styles.specRow,
+        !isLast && {
+          borderBottomColor: c.separator,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+        },
+      ]}
+    >
+      <Text style={[styles.specLabel, { color: c.secondaryLabel }]}>
+        {label}
+      </Text>
+      <Text style={[styles.specValue, { color: c.label }]}>{value}</Text>
     </View>
   );
 }
@@ -230,217 +414,193 @@ function ReviewCard({
   rating,
   comment,
   date,
-  darkMode,
+  c,
+  isLast,
 }: {
   name: string;
   rating: number;
   comment: string;
   date: string;
-  darkMode: boolean;
+  c: Palette;
+  isLast: boolean;
 }) {
   return (
-    <View style={[styles.reviewCard, darkMode && styles.reviewCardDark]}>
+    <View
+      style={[
+        styles.reviewCard,
+        !isLast && {
+          borderBottomColor: c.separator,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+        },
+      ]}
+    >
       <View style={styles.reviewHeader}>
-        <Text style={[styles.reviewerName, darkMode && styles.textLight]}>{name}</Text>
-        <Text style={styles.reviewRating}>{'⭐'.repeat(rating)}</Text>
+        <Text style={[styles.reviewerName, { color: c.label }]}>{name}</Text>
+        <Text style={[styles.reviewRating, { color: c.systemOrange }]}>
+          {'★'.repeat(rating)}
+        </Text>
       </View>
-      <Text style={[styles.reviewComment, darkMode && styles.subtitleDark]}>{comment}</Text>
-      <Text style={[styles.reviewDate, darkMode && styles.subtitleDark]}>{date}</Text>
+      <Text style={[styles.reviewComment, { color: c.label }]}>{comment}</Text>
+      <Text style={[styles.reviewDate, { color: c.secondaryLabel }]}>
+        {date}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  containerDark: {
-    backgroundColor: '#16213e',
-  },
-  centered: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   errorText: {
-    fontSize: 18,
-    color: '#666',
+    fontSize: fontSize.body,
     marginBottom: 20,
   },
-  textLight: {
-    color: '#fff',
-  },
-  subtitleDark: {
-    color: '#aaa',
-  },
-  cardDark: {
-    backgroundColor: '#1a1a2e',
-  },
   backButton: {
-    backgroundColor: '#007AFF',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: radius.button,
   },
   backButtonText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontWeight: '600',
+  },
+  imageWrap: {
+    width: '100%',
+    aspectRatio: 1.1,
+    backgroundColor: 'rgba(120,120,128,0.12)',
   },
   productImage: {
     width: '100%',
-    height: 300,
-    backgroundColor: '#f0f0f0',
+    height: '100%',
   },
   outOfStockBanner: {
-    backgroundColor: '#FF3B30',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
     padding: 10,
     alignItems: 'center',
   },
   outOfStockText: {
-    color: '#fff',
-    fontWeight: 'bold',
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: fontSize.subhead,
   },
   content: {
     padding: 20,
   },
-  header: {
+  headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   category: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: fontSize.footnote,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  ratingBadge: {
-    backgroundColor: '#FFF9E6',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  ratingText: {
-    fontSize: 14,
+    letterSpacing: 0.4,
     fontWeight: '600',
   },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  ratingGlyph: {
+    fontSize: 13,
+    marginRight: 4,
+  },
+  ratingText: {
+    fontSize: fontSize.subhead,
+    fontWeight: '700',
+  },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    fontSize: fontSize.title1,
+    lineHeight: lineHeight.title1,
+    fontWeight: '700',
     marginBottom: 10,
   },
   priceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
   },
   price: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontSize: fontSize.title1,
+    fontWeight: '700',
   },
   reviews: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: fontSize.subhead,
   },
-  quantitySection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#fff',
+  card: {
     padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
+    borderRadius: radius.card,
+    marginBottom: 14,
   },
-  quantityLabel: {
-    fontSize: 16,
+  cardLabel: {
+    fontSize: fontSize.body,
     fontWeight: '600',
-    color: '#1a1a2e',
+    marginBottom: 12,
   },
-  quantityControls: {
+  stepper: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: radius.pill,
+    paddingHorizontal: 6,
+    alignSelf: 'flex-start',
   },
-  quantityBtn: {
+  stepperBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f0f0f0',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  quantityBtnText: {
+  stepperGlyph: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '600',
   },
   quantityValue: {
-    fontSize: 18,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    marginHorizontal: 20,
-    minWidth: 30,
+    minWidth: 28,
     textAlign: 'center',
   },
-  tabContainer: {
+  segmented: {
     flexDirection: 'row',
-    marginBottom: 15,
+    padding: 2,
+    borderRadius: 9,
+    marginBottom: 14,
   },
-  tab: {
+  segment: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 7,
     alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    borderRadius: 7,
   },
-  tabActive: {
-    borderBottomColor: '#007AFF',
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
-  },
-  tabTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  tabContent: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
+  segmentText: {
+    fontSize: fontSize.subhead,
   },
   description: {
-    fontSize: 15,
-    lineHeight: 24,
-    color: '#444',
+    fontSize: fontSize.body,
+    lineHeight: lineHeight.body,
   },
   specRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingVertical: 11,
   },
   specLabel: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: fontSize.subhead,
   },
   specValue: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   reviewCard: {
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  reviewCardDark: {
-    borderBottomColor: '#2a2a3e',
   },
   reviewHeader: {
     flexDirection: 'row',
@@ -448,68 +608,58 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   reviewerName: {
-    fontSize: 14,
+    fontSize: fontSize.subhead,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   reviewRating: {
-    fontSize: 12,
+    fontSize: fontSize.caption1,
   },
   reviewComment: {
-    fontSize: 14,
-    color: '#444',
+    fontSize: fontSize.subhead,
     marginBottom: 4,
+    lineHeight: lineHeight.subhead,
   },
   reviewDate: {
-    fontSize: 12,
-    color: '#999',
+    fontSize: fontSize.caption1,
   },
   inCartBadge: {
-    backgroundColor: '#E8F5E9',
     padding: 12,
-    borderRadius: 8,
+    borderRadius: radius.card,
     alignItems: 'center',
   },
   inCartText: {
-    color: '#4CAF50',
     fontWeight: '600',
+    fontSize: fontSize.subhead,
   },
   bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  bottomBarDark: {
-    backgroundColor: '#1a1a2e',
-    borderTopColor: '#2a2a3e',
+    paddingTop: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   bottomPriceContainer: {
     flex: 1,
   },
   bottomPriceLabel: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.footnote,
   },
   bottomPrice: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontSize: fontSize.title2,
+    fontWeight: '700',
   },
   addToCartButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 32,
+    paddingHorizontal: 26,
     paddingVertical: 14,
-    borderRadius: 12,
-  },
-  addToCartButtonDisabled: {
-    backgroundColor: '#ccc',
+    borderRadius: radius.button,
   },
   addToCartText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#FFFFFF',
+    fontSize: fontSize.body,
+    fontWeight: '600',
   },
 });
