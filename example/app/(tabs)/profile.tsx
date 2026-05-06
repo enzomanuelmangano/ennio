@@ -1,118 +1,257 @@
-import { View, Text, StyleSheet, ScrollView, Image, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  Alert,
+  useColorScheme,
+} from 'react-native';
 import { PressableScale } from 'pressto';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore, useCartStore, useSettingsStore } from '../../store';
 import * as Haptics from 'expo-haptics';
+import { colors, fontSize, lineHeight, radius } from '../../src/theme';
+
+type Palette = ReturnType<typeof colors>;
 
 function MenuItem({
-  icon,
+  symbol,
+  tint,
   label,
   value,
   onPress,
   testID,
   danger = false,
+  c,
+  isLast,
 }: {
-  icon: string;
+  symbol: string;
+  tint: string;
   label: string;
   value?: string;
   onPress: () => void;
   testID: string;
   danger?: boolean;
+  c: Palette;
+  isLast: boolean;
 }) {
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
-
   return (
-    <PressableScale
-      style={[styles.menuItem, darkMode && styles.menuItemDark]}
-      onPress={onPress}
-      testID={testID}
-    >
-      <View style={styles.menuItemLeft}>
-        <Text style={styles.menuIcon}>{icon}</Text>
-        <Text style={[styles.menuLabel, darkMode && styles.textLight, danger && styles.dangerText]}>
+    <View>
+      <PressableScale
+        style={styles.menuItem}
+        onPress={onPress}
+        testID={testID}
+      >
+        <View style={[styles.menuIconBg, { backgroundColor: tint + '22' }]}>
+          <Text style={[styles.menuIcon, { color: tint }]}>{symbol}</Text>
+        </View>
+        <Text
+          style={[
+            styles.menuLabel,
+            { color: danger ? c.systemRed : c.label },
+          ]}
+        >
           {label}
         </Text>
-      </View>
-      <View style={styles.menuItemRight}>
-        {value && <Text style={[styles.menuValue, darkMode && styles.subtitleDark]}>{value}</Text>}
-        <Text style={styles.chevron}>›</Text>
-      </View>
-    </PressableScale>
+        <View style={styles.menuItemRight}>
+          {value !== undefined && value !== '' && (
+            <Text style={[styles.menuValue, { color: c.secondaryLabel }]}>
+              {value}
+            </Text>
+          )}
+          {!danger && (
+            <Text style={[styles.chevron, { color: c.tertiaryLabel }]}>›</Text>
+          )}
+        </View>
+      </PressableScale>
+      {!isLast && (
+        <View
+          style={[
+            styles.menuSeparator,
+            { backgroundColor: c.separator },
+          ]}
+        />
+      )}
+    </View>
   );
 }
 
-function ProfileHeader() {
+function ProfileHeader({ c }: { c: Palette }) {
   const user = useAuthStore(state => state.user);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
 
   return (
-    <View style={[styles.profileHeader, darkMode && styles.cardDark]} testID="profile-header">
+    <View
+      style={[
+        styles.profileHeader,
+        { backgroundColor: c.secondarySystemGroupedBackground },
+      ]}
+      testID="profile-header"
+    >
       <Image
         source={{ uri: user?.avatar || 'https://i.pravatar.cc/150' }}
         style={styles.avatar}
       />
       <View style={styles.profileInfo}>
-        <Text style={[styles.profileName, darkMode && styles.textLight]}>{user?.name}</Text>
-        <Text style={[styles.profileEmail, darkMode && styles.subtitleDark]}>{user?.email}</Text>
+        <Text style={[styles.profileName, { color: c.label }]}>
+          {user?.name}
+        </Text>
+        <Text style={[styles.profileEmail, { color: c.secondaryLabel }]}>
+          {user?.email}
+        </Text>
       </View>
       <Link href="/settings" asChild>
-        <PressableScale style={styles.editButton} testID="edit-profile-btn">
-          <Text style={styles.editButtonText}>Edit</Text>
+        <PressableScale
+          style={StyleSheet.flatten([
+            styles.editButton,
+            { backgroundColor: c.tertiarySystemFill },
+          ])}
+          testID="edit-profile-btn"
+        >
+          <Text style={[styles.editButtonText, { color: c.systemBlue }]}>
+            Edit
+          </Text>
         </PressableScale>
       </Link>
     </View>
   );
 }
 
-function StatsCard() {
+function StatsCard({ c }: { c: Palette }) {
   const orders = useCartStore(state => state.orders);
   const items = useCartStore(state => state.items);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
 
   const totalSpent = orders.reduce((sum, order) => sum + order.total, 0);
 
   return (
-    <View style={[styles.statsCard, darkMode && styles.cardDark]} testID="stats-card">
+    <View
+      style={[
+        styles.statsCard,
+        { backgroundColor: c.secondarySystemGroupedBackground },
+      ]}
+      testID="stats-card"
+    >
       <View style={styles.statItem}>
-        <Text style={styles.statValue}>{orders.length}</Text>
-        <Text style={[styles.statLabel, darkMode && styles.subtitleDark]}>Orders</Text>
+        <Text style={[styles.statValue, { color: c.label }]}>
+          {orders.length}
+        </Text>
+        <Text style={[styles.statLabel, { color: c.secondaryLabel }]}>
+          Orders
+        </Text>
       </View>
-      <View style={[styles.statDivider, darkMode && styles.dividerDark]} />
+      <View style={[styles.statDivider, { backgroundColor: c.separator }]} />
       <View style={styles.statItem}>
-        <Text style={styles.statValue}>{items.length}</Text>
-        <Text style={[styles.statLabel, darkMode && styles.subtitleDark]}>In Cart</Text>
+        <Text style={[styles.statValue, { color: c.label }]}>
+          {items.length}
+        </Text>
+        <Text style={[styles.statLabel, { color: c.secondaryLabel }]}>
+          In Cart
+        </Text>
       </View>
-      <View style={[styles.statDivider, darkMode && styles.dividerDark]} />
+      <View style={[styles.statDivider, { backgroundColor: c.separator }]} />
       <View style={styles.statItem}>
-        <Text style={styles.statValue}>${totalSpent.toFixed(0)}</Text>
-        <Text style={[styles.statLabel, darkMode && styles.subtitleDark]}>Spent</Text>
+        <Text style={[styles.statValue, { color: c.label }]}>
+          ${totalSpent.toFixed(0)}
+        </Text>
+        <Text style={[styles.statLabel, { color: c.secondaryLabel }]}>
+          Spent
+        </Text>
       </View>
     </View>
   );
 }
 
-function GuestView() {
-  const router = useRouter();
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
-
+function GuestView({ c }: { c: Palette }) {
   return (
-    <View style={[styles.guestContainer, darkMode && styles.containerDark]} testID="guest-view">
-      <Text style={styles.guestIcon}>👤</Text>
-      <Text style={[styles.guestTitle, darkMode && styles.textLight]}>Welcome to Ennio Shop</Text>
-      <Text style={[styles.guestSubtitle, darkMode && styles.subtitleDark]}>
+    <View
+      style={StyleSheet.flatten([
+        styles.guestContainer,
+        { backgroundColor: c.systemGroupedBackground },
+      ])}
+      testID="guest-view"
+    >
+      <View
+        style={StyleSheet.flatten([
+          styles.guestIconBg,
+          { backgroundColor: c.systemBlue + '22' },
+        ])}
+      >
+        <Text
+          style={StyleSheet.flatten([
+            styles.guestIcon,
+            { color: c.systemBlue },
+          ])}
+        >
+          ◔
+        </Text>
+      </View>
+      <Text
+        style={StyleSheet.flatten([
+          styles.guestTitle,
+          { color: c.label },
+        ])}
+      >
+        Welcome to Ennio Shop
+      </Text>
+      <Text
+        style={StyleSheet.flatten([
+          styles.guestSubtitle,
+          { color: c.secondaryLabel },
+        ])}
+      >
         Sign in to access your profile, view orders, and more
       </Text>
       <Link href="/auth/login" asChild>
-        <PressableScale style={styles.signInBtn} testID="guest-signin-btn">
+        <PressableScale
+          style={StyleSheet.flatten([styles.signInBtn, { backgroundColor: c.systemBlue }])}
+          testID="guest-signin-btn"
+        >
           <Text style={styles.signInBtnText}>Sign In</Text>
         </PressableScale>
       </Link>
       <Link href="/auth/register" asChild>
-        <PressableScale style={styles.createAccountBtn} testID="guest-register-btn">
-          <Text style={[styles.createAccountText, darkMode && styles.textLight]}>Create Account</Text>
+        <PressableScale
+          style={styles.createAccountBtn}
+          testID="guest-register-btn"
+        >
+          <Text
+            style={StyleSheet.flatten([
+              styles.createAccountText,
+              { color: c.systemBlue },
+            ])}
+          >
+            Create Account
+          </Text>
         </PressableScale>
       </Link>
+    </View>
+  );
+}
+
+function SectionTitle({ title, c }: { title: string; c: Palette }) {
+  return (
+    <Text style={[styles.sectionTitle, { color: c.secondaryLabel }]}>
+      {title}
+    </Text>
+  );
+}
+
+function GroupedSection({
+  c,
+  children,
+}: {
+  c: Palette;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      style={[
+        styles.groupedSection,
+        { backgroundColor: c.secondarySystemGroupedBackground },
+      ]}
+    >
+      {children}
     </View>
   );
 }
@@ -121,125 +260,173 @@ export default function ProfileScreen() {
   const router = useRouter();
   const isAuthenticated = useAuthStore(state => state.isAuthenticated);
   const logout = useAuthStore(state => state.logout);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const hapticEnabled = useSettingsStore(
+    state => state.preferences.hapticFeedback,
+  );
   const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const systemScheme = useColorScheme();
+  const scheme = darkMode ? 'dark' : systemScheme === 'dark' ? 'dark' : 'light';
+  const c = colors(scheme);
   const insets = useSafeAreaInsets();
   const TAB_BAR_HEIGHT = 49;
 
   const handleLogout = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: () => {
-            logout();
-            if (hapticEnabled) {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            }
-          },
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: () => {
+          logout();
+          if (hapticEnabled) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   if (!isAuthenticated) {
-    return <GuestView />;
+    return <GuestView c={c} />;
   }
 
   return (
     <ScrollView
-      style={[styles.container, darkMode && styles.containerDark]}
-      contentContainerStyle={{ paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
+      style={{ flex: 1, backgroundColor: c.systemGroupedBackground }}
+      contentContainerStyle={{
+        paddingTop: insets.top + 8,
+        paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 24,
+      }}
+      showsVerticalScrollIndicator={false}
       testID="profile-screen"
     >
-      <ProfileHeader />
-      <StatsCard />
+      <Text style={[styles.largeTitle, { color: c.label }]}>Profile</Text>
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Account</Text>
+      <ProfileHeader c={c} />
+      <StatsCard c={c} />
+
+      <SectionTitle title="ACCOUNT" c={c} />
+      <GroupedSection c={c}>
         <MenuItem
-          icon="📦"
+          symbol="◫"
+          tint={c.systemBlue}
           label="Order History"
           value=""
           onPress={() => router.push('/orders')}
           testID="menu-orders"
+          c={c}
+          isLast={false}
         />
         <MenuItem
-          icon="💳"
+          symbol="▭"
+          tint={c.systemGreen}
           label="Payment Methods"
           value="•••• 4242"
-          onPress={() => Alert.alert('Coming Soon', 'Payment methods will be available soon!')}
+          onPress={() =>
+            Alert.alert('Coming Soon', 'Payment methods will be available soon!')
+          }
           testID="menu-payment"
+          c={c}
+          isLast={false}
         />
         <MenuItem
-          icon="📍"
+          symbol="◉"
+          tint={c.systemRed}
           label="Addresses"
           value="2 saved"
-          onPress={() => Alert.alert('Coming Soon', 'Address management will be available soon!')}
+          onPress={() =>
+            Alert.alert(
+              'Coming Soon',
+              'Address management will be available soon!',
+            )
+          }
           testID="menu-addresses"
+          c={c}
+          isLast={true}
         />
-      </View>
+      </GroupedSection>
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Preferences</Text>
+      <SectionTitle title="PREFERENCES" c={c} />
+      <GroupedSection c={c}>
         <MenuItem
-          icon="⚙️"
+          symbol="⚙"
+          tint={c.secondaryLabel}
           label="Settings"
           onPress={() => router.push('/settings')}
           testID="menu-settings"
+          c={c}
+          isLast={false}
         />
         <MenuItem
-          icon="🔔"
+          symbol="◔"
+          tint={c.systemOrange}
           label="Notifications"
           onPress={() => router.push('/settings')}
           testID="menu-notifications"
+          c={c}
+          isLast={false}
         />
         <MenuItem
-          icon={darkMode ? '🌙' : '☀️'}
+          symbol={darkMode ? '☾' : '☀'}
+          tint={c.systemPurple}
           label="Appearance"
           value={darkMode ? 'Dark' : 'Light'}
           onPress={() => router.push('/settings')}
           testID="menu-appearance"
+          c={c}
+          isLast={true}
         />
-      </View>
+      </GroupedSection>
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Support</Text>
+      <SectionTitle title="SUPPORT" c={c} />
+      <GroupedSection c={c}>
         <MenuItem
-          icon="❓"
+          symbol="?"
+          tint={c.systemTeal}
           label="Help Center"
           onPress={() => Alert.alert('Help Center', 'How can we help you today?')}
           testID="menu-help"
+          c={c}
+          isLast={false}
         />
         <MenuItem
-          icon="💬"
+          symbol="✉"
+          tint={c.systemBlue}
           label="Contact Us"
           onPress={() => Alert.alert('Contact', 'support@ennio.example')}
           testID="menu-contact"
+          c={c}
+          isLast={false}
         />
         <MenuItem
-          icon="📄"
+          symbol="§"
+          tint={c.systemIndigo}
           label="Terms & Privacy"
-          onPress={() => Alert.alert('Terms & Privacy', 'Read our terms and privacy policy.')}
+          onPress={() =>
+            Alert.alert('Terms & Privacy', 'Read our terms and privacy policy.')
+          }
           testID="menu-terms"
+          c={c}
+          isLast={true}
         />
-      </View>
+      </GroupedSection>
 
-      <View style={styles.section}>
+      <GroupedSection c={c}>
         <MenuItem
-          icon="🚪"
+          symbol="↩"
+          tint={c.systemRed}
           label="Sign Out"
           onPress={handleLogout}
           testID="menu-logout"
+          c={c}
           danger
+          isLast={true}
         />
-      </View>
+      </GroupedSection>
 
-      <Text style={[styles.version, darkMode && styles.subtitleDark]}>Version 1.0.0</Text>
+      <Text style={[styles.version, { color: c.tertiaryLabel }]}>
+        Version 1.0.0
+      </Text>
     </ScrollView>
   );
 }
@@ -247,200 +434,174 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
-  containerDark: {
-    backgroundColor: '#16213e',
+  largeTitle: {
+    fontSize: fontSize.largeTitle,
+    lineHeight: lineHeight.largeTitle,
+    fontWeight: '700',
+    letterSpacing: 0.37,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
   },
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    margin: 15,
-    padding: 20,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  cardDark: {
-    backgroundColor: '#1a1a2e',
-  },
-  textLight: {
-    color: '#fff',
-  },
-  subtitleDark: {
-    color: '#aaa',
+    marginHorizontal: 16,
+    padding: 16,
+    borderRadius: radius.card,
   },
   avatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: '#f0f0f0',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(120,120,128,0.12)',
   },
   profileInfo: {
     flex: 1,
-    marginLeft: 16,
+    marginLeft: 14,
   },
   profileName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    fontSize: fontSize.body,
+    fontWeight: '600',
   },
   profileEmail: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
+    fontSize: fontSize.footnote,
+    marginTop: 2,
   },
   editButton: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    paddingVertical: 7,
+    borderRadius: radius.pill,
   },
   editButtonText: {
-    color: '#007AFF',
     fontWeight: '600',
+    fontSize: fontSize.subhead,
   },
   statsCard: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    marginHorizontal: 15,
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 16,
+    borderRadius: radius.card,
   },
   statItem: {
     flex: 1,
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#007AFF',
+    fontSize: fontSize.title2,
+    fontWeight: '700',
   },
   statLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
+    fontSize: fontSize.caption1,
+    marginTop: 2,
   },
   statDivider: {
-    width: 1,
-    backgroundColor: '#e0e0e0',
-  },
-  dividerDark: {
-    backgroundColor: '#2a2a3e',
-  },
-  section: {
-    marginBottom: 20,
+    width: StyleSheet.hairlineWidth,
   },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
+    fontSize: fontSize.footnote,
+    fontWeight: '400',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginHorizontal: 15,
-    marginBottom: 10,
+    letterSpacing: 0.4,
+    marginHorizontal: 32,
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  groupedSection: {
+    marginHorizontal: 16,
+    borderRadius: radius.card,
+    overflow: 'hidden',
   },
   menuItem: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 15,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
   },
-  menuItemDark: {
-    backgroundColor: '#1a1a2e',
-    borderBottomColor: '#2a2a3e',
-  },
-  menuItemLeft: {
-    flexDirection: 'row',
+  menuIconBg: {
+    width: 30,
+    height: 30,
+    borderRadius: 7,
     alignItems: 'center',
-  },
-  menuIcon: {
-    fontSize: 20,
+    justifyContent: 'center',
     marginRight: 12,
   },
-  menuLabel: {
+  menuIcon: {
     fontSize: 16,
-    color: '#1a1a2e',
+    fontWeight: '600',
+  },
+  menuLabel: {
+    flex: 1,
+    fontSize: fontSize.body,
   },
   menuItemRight: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   menuValue: {
-    fontSize: 14,
-    color: '#999',
-    marginRight: 8,
+    fontSize: fontSize.subhead,
+    marginRight: 6,
   },
   chevron: {
     fontSize: 20,
-    color: '#ccc',
+    fontWeight: '500',
   },
-  dangerText: {
-    color: '#FF3B30',
+  menuSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 56,
   },
   version: {
     textAlign: 'center',
-    color: '#999',
-    fontSize: 12,
-    marginVertical: 20,
+    fontSize: fontSize.caption1,
+    marginTop: 24,
   },
   guestContainer: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 40,
   },
+  guestIconBg: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
   guestIcon: {
-    fontSize: 80,
-    marginBottom: 20,
+    fontSize: 50,
+    fontWeight: '600',
   },
   guestTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    fontSize: fontSize.title2,
+    fontWeight: '700',
     marginBottom: 10,
     textAlign: 'center',
   },
   guestSubtitle: {
-    fontSize: 15,
-    color: '#666',
+    fontSize: fontSize.subhead,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 30,
+    lineHeight: lineHeight.subhead,
+    marginBottom: 28,
   },
   signInBtn: {
-    backgroundColor: '#007AFF',
     paddingHorizontal: 50,
     paddingVertical: 14,
-    borderRadius: 25,
-    marginBottom: 15,
+    borderRadius: radius.pill,
+    marginBottom: 14,
   },
   signInBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: fontSize.body,
   },
   createAccountBtn: {
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   createAccountText: {
-    color: '#007AFF',
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: fontSize.subhead,
   },
 });
