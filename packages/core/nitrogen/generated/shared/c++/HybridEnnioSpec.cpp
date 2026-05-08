@@ -43,6 +43,8 @@ namespace margelo::nitro::ennio {
       prototype.registerHybridMethod("scroll", &HybridEnnioSpec::scroll);
       prototype.registerHybridMethod("swipe", &HybridEnnioSpec::swipe);
       prototype.registerHybridMethod("scrollTo", &HybridEnnioSpec::scrollTo);
+      prototype.registerHybridMethod("swipeAtPoints", &HybridEnnioSpec::swipeAtPoints);
+      prototype.registerHybridMethod("pressHardwareKey", &HybridEnnioSpec::pressHardwareKey);
       prototype.registerHybridMethod("tapTab", &HybridEnnioSpec::tapTab);
       prototype.registerHybridMethod("backGesture", &HybridEnnioSpec::backGesture);
       prototype.registerHybridMethod("hideKeyboard", &HybridEnnioSpec::hideKeyboard);

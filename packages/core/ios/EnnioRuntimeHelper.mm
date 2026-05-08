@@ -427,6 +427,11 @@ std::vector<std::string> EnnioRuntimeHelper::getAlertButtons() {
  * regardless of which view owns the gesture. ~5 ms in-process, no HID,
  * no XCTest.
  */
+// Forward declaration: invokeTapGestureRecognizers is defined further
+// down (with the rest of the activation helpers) but synthesizeTouchAtPoint
+// needs to call it as part of its UIControl-walk fallback chain.
+static BOOL invokeTapGestureRecognizers(UIView* view);
+
 static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
     UIApplication* app = [UIApplication sharedApplication];
     UIWindow* window = nil;
@@ -456,21 +461,50 @@ static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
     NSLog(@"[Ennio] tapAtPoint window=(%.1f,%.1f) hit=%@",
           locationInWindow.x, locationInWindow.y, NSStringFromClass([hit class]));
 
-    // UIControl subclasses (UIButton, RNGestureHandlerButton from RNGH /
-    // pressto, etc.) wire their onPress to UIControlEvent.touchUpInside,
-    // not to the UIWindow.sendEvent → touchesBegan responder chain.
-    // Walk up to find the nearest enabled UIControl and fire its actions
-    // directly. Falls through to synthesised touches for pure RN
-    // Pressable / TouchableNativeFeedback that do listen on the
-    // responder chain.
+    // UIControl subclasses (UIButton, RNGestureHandlerButton with
+    // RNNativeViewGestureHandler bound to it, etc.) wire `onPress` to
+    // a UIControlEvent action chain. Walk up to find the nearest
+    // enabled UIControl with at least one TouchUpInside target. Then
+    // fire TouchDown FIRST, then TouchUpInside — RNGH's
+    // RNNativeViewGestureHandler maps TouchDown → JS-side State.Active
+    // and TouchUpInside → JS-side State.End, and `BaseButton.onPress`
+    // only fires when the JS sees `oldState === Active && state === End`.
+    // A bare TouchUpInside lands as End-without-Active and is silently
+    // dropped. UIButton (no GR binding) ignores TouchDown, so this is
+    // a no-op cost there.
     for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
         if ([cursor isKindOfClass:[UIControl class]]) {
             UIControl* ctrl = (UIControl*)cursor;
-            if (ctrl.enabled) {
+            if (!ctrl.enabled) continue;
+            BOOL hasAction = NO;
+            for (id t in ctrl.allTargets) {
+                NSArray* actions = [ctrl actionsForTarget:t forControlEvent:UIControlEventTouchUpInside];
+                if (actions.count > 0) { hasAction = YES; break; }
+            }
+            if (hasAction) {
+                // RNNativeViewGestureHandler binds via UIControlEventTouchDown
+                // → State.Active and UIControlEventTouchUpInside → State.End
+                // on the JS side. BaseButton.onPress only fires when the JS
+                // sees `oldState === Active && state === End`, so a bare
+                // TouchUpInside is dropped — fire TouchDown first.
+                [ctrl sendActionsForControlEvents:UIControlEventTouchDown];
                 [ctrl sendActionsForControlEvents:UIControlEventTouchUpInside];
                 return YES;
             }
         }
+    }
+
+    // Pressable / TouchableOpacity / RN-Gesture-Handler attach a
+    // UITapGestureRecognizer to a wrapper view higher up the tree.
+    // Synthesised UITouches reach UIWindow.sendEvent, but the GR system
+    // doesn't always engage on private-API touches the way it does on
+    // real HID events — so walk up looking for any tap-class GR and
+    // invoke its action target directly via KVC. Solves the case where
+    // a hit lands on an inner Text leaf (e.g. a status badge "Processing"
+    // inside a Pressable order card) and we need the wrapper's onPress
+    // to fire, not the leaf's own (absent) handler.
+    for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
+        if (invokeTapGestureRecognizers(cursor)) return YES;
     }
 
     UIEvent* event = nil;
@@ -485,7 +519,46 @@ static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
     } else {
         [touch setValue:[NSValue valueWithCGPoint:locationInWindow] forKey:@"locationInWindow"];
     }
+
+    // RN-Gesture-Handler's `RNDummyGestureRecognizer` (used by every
+    // NativeViewGestureHandler-bound view — pressto's PressableScale,
+    // RNGH RawButton, BaseButton on non-UIControl views) only fires
+    // `onPress` when its `touchesBegan:withEvent:` and `touchesEnded:withEvent:`
+    // overrides run with a real touch. UIKit's gesture pipeline doesn't
+    // always deliver synthesised touches to the GR's overrides — so
+    // forward the touch directly via the public UIGestureRecognizerSubclass
+    // entry points. Detect by class-name prefix to avoid coupling to RNGH
+    // headers from inside Ennio's pod target.
+    NSSet<UITouch*>* touchSet = [NSSet setWithObject:touch];
     [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
+    [touch setValue:window forKey:@"window"];
+    [touch setValue:hit forKey:@"view"];
+    [touch setValue:@(1) forKey:@"tapCount"];
+    NSTimeInterval rngBeganAt = [[NSProcessInfo processInfo] systemUptime];
+    [touch setValue:@(rngBeganAt) forKey:@"timestamp"];
+    for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
+        for (UIGestureRecognizer* gr in cursor.gestureRecognizers) {
+            if (!gr.enabled) continue;
+            NSString* clsName = NSStringFromClass([gr class]);
+            if (![clsName hasPrefix:@"RNDummy"] && ![clsName hasPrefix:@"RNNative"]) continue;
+            @try {
+                if ([gr respondsToSelector:@selector(touchesBegan:withEvent:)]) {
+                    [gr touchesBegan:touchSet withEvent:event];
+                }
+                [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
+                [touch setValue:@(rngBeganAt + 0.030) forKey:@"timestamp"];
+                if ([gr respondsToSelector:@selector(touchesEnded:withEvent:)]) {
+                    [gr touchesEnded:touchSet withEvent:event];
+                }
+                return YES;
+            } @catch (NSException* e) {
+                NSLog(@"[Ennio] forward to %@: %@", clsName, e.reason);
+            }
+        }
+    }
+    // Reset for standard send-event fallback below.
+    [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
+    [touch setValue:@(rngBeganAt) forKey:@"timestamp"];
     [touch setValue:window forKey:@"window"];
     [touch setValue:hit forKey:@"view"];
     [touch setValue:@(1) forKey:@"tapCount"];
@@ -609,16 +682,54 @@ static BOOL synthesizeTouchAtViewCenter(UIView* view) {
 // onPress handler — synthesised UITouch events go through the touch
 // processor and may be filtered (e.g. on third-party RN setups where
 // UITouch private API doesn't reach the Pressability state machine).
+// Drive a tap-style GR's state machine to fire onPress. Only safe on
+// known recogniser classes — system / accessibility GRs (e.g.
+// _UIAccessibilityHUDGateGestureRecognizer attached to RCTUITextField)
+// SIGSEGV on iOS 26 when state is set outside a real touch interaction.
+// The whitelist below covers every tap-firing class encountered in
+// practice across the Fabric / RNGH / pressto / TouchableOpacity stacks.
+static BOOL canStateDrive(UIGestureRecognizer* gr) {
+    NSString* name = NSStringFromClass([gr class]);
+    // RN-Gesture-Handler's tap recogniser (used by RNGH BaseButton +
+    // pressto's PressableScale + every Gesture.Tap() in user code).
+    if ([name isEqualToString:@"RNBetterTapGestureRecognizer"]) return YES;
+    // Plain UIKit tap GR — RN's TouchableOpacity / TouchableHighlight on
+    // the old bridge add this directly to their wrapper view.
+    if ([gr isKindOfClass:[UITapGestureRecognizer class]]) return YES;
+    return NO;
+}
+
 static BOOL invokeTapGestureRecognizers(UIView* view) {
     if (!view) return NO;
     BOOL fired = NO;
     for (UIGestureRecognizer* gr in view.gestureRecognizers) {
         if (!gr.enabled) continue;
+        // Preferred path: drive the GR through Began → Ended via the
+        // public `state` setter (UIGestureRecognizerSubclass). UIKit's
+        // action-dispatch fires registered targets automatically when
+        // state transitions to Ended, with the recogniser's `state`
+        // already at Ended — so RNGH's `recognizerState` maps to
+        // `RNGestureHandlerStateEnd` and the JS-side onPress fires.
+        if (canStateDrive(gr)) {
+            @try {
+                gr.state = UIGestureRecognizerStateBegan;
+                gr.state = UIGestureRecognizerStateEnded;
+                fired = YES;
+                continue;
+            } @catch (NSException* e) {
+                NSLog(@"[Ennio] state-drive %@: %@", NSStringFromClass([gr class]), e.reason);
+            }
+        }
+        // Fallback for unrecognised tap-class GRs: walk `_targets` and
+        // invoke the action selector. Modern iOS UIGestureRecognizerTarget
+        // has been observed to hide the `_action` key on KVC under some
+        // configurations — wrap in @try so the warning doesn't propagate.
         @try {
             NSArray* targets = [gr valueForKey:@"_targets"];
             for (id target in targets) {
                 id realTarget = [target valueForKey:@"_target"];
-                NSString* actionName = [target valueForKey:@"_action"];
+                NSString* actionName = nil;
+                @try { actionName = [target valueForKey:@"_action"]; } @catch (...) {}
                 if (!realTarget || !actionName) continue;
                 SEL action = NSSelectorFromString(actionName);
                 if (![realTarget respondsToSelector:action]) continue;
@@ -895,6 +1006,206 @@ bool EnnioRuntimeHelper::tapAtScreenPoint(double x, double y) {
             }
         }
         ok = synthesizeTouchAtPoint(point);
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs) {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        // Resolve the React surface offset the same way tapAtScreenPoint
+        // does — both endpoints are React-surface-relative when the caller
+        // is forwarding maestro yaml `swipe: start: ...` coords.
+        UIApplication* app = [UIApplication sharedApplication];
+        UIWindow* keyWindow = nil;
+        for (UIScene* scene in app.connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            UIWindowScene* ws = (UIWindowScene*)scene;
+            for (UIWindow* w in ws.windows) {
+                if (w.isKeyWindow) { keyWindow = w; break; }
+            }
+            if (keyWindow) break;
+        }
+        CGFloat offX = 0, offY = 0;
+        if (keyWindow && keyWindow.rootViewController.view) {
+            UIView* surface = keyWindow.rootViewController.view;
+            CGRect inWindow = [surface convertRect:surface.bounds toView:keyWindow];
+            offX = inWindow.origin.x;
+            offY = inWindow.origin.y;
+        }
+        CGPoint start = CGPointMake((CGFloat)x1 + offX, (CGFloat)y1 + offY);
+        CGPoint end = CGPointMake((CGFloat)x2 + offX, (CGFloat)y2 + offY);
+
+        if (!keyWindow) keyWindow = app.keyWindow;
+        if (!keyWindow) { ok = NO; return; }
+
+        // Fast path: the start point lands inside a UIScrollView. Any
+        // RN ScrollView / FlatList / FlashList ends up as one. Compute
+        // the new offset from the swipe delta (negated — content moves
+        // opposite to the finger) and clamp to the scrollable bounds.
+        UIView* hit = [keyWindow hitTest:start withEvent:nil];
+        UIScrollView* scrollView = nil;
+        for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
+            if ([cursor isKindOfClass:[UIScrollView class]]) {
+                scrollView = (UIScrollView*)cursor;
+                break;
+            }
+        }
+        if (scrollView) {
+            CGFloat dx = end.x - start.x;
+            CGFloat dy = end.y - start.y;
+            CGPoint newOffset = scrollView.contentOffset;
+            newOffset.x -= dx;
+            newOffset.y -= dy;
+            // Clamp into [0, contentSize - frame] so we don't end up in
+            // bounce territory.
+            CGFloat maxX = MAX(0, scrollView.contentSize.width - scrollView.bounds.size.width);
+            CGFloat maxY = MAX(0, scrollView.contentSize.height - scrollView.bounds.size.height);
+            newOffset.x = MAX(0, MIN(newOffset.x, maxX));
+            newOffset.y = MAX(0, MIN(newOffset.y, maxY));
+            [scrollView setContentOffset:newOffset animated:NO];
+            ok = YES;
+            return;
+        }
+
+        // Slow path: drive a synthesised UITouch sequence with phase=Moved
+        // updates between Began and Ended. Lets us pan a sheet, drive a
+        // UIPanGestureRecognizer attached to a non-scroll view, etc.
+        // Pick step count so each Move is ~30 ms — that's the cadence
+        // RNGH and UIKit gesture recognisers expect for a "real" swipe.
+        UIView* startView = hit ?: keyWindow;
+        UIView* reactView = startView;
+        while (reactView && ![NSStringFromClass([reactView class]) hasPrefix:@"RCT"]) {
+            reactView = reactView.superview;
+        }
+        if (reactView) startView = reactView;
+
+        const int totalMs = durationMs > 0 ? durationMs : 200;
+        const int stepMs = 30;
+        const int steps = MAX(4, totalMs / stepMs);
+        UIEvent* event = [app respondsToSelector:@selector(_touchesEvent)] ? [app _touchesEvent] : nil;
+        if (!event) { ok = NO; return; }
+
+        UITouch* touch = [[UITouch alloc] init];
+        if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
+            [touch _setLocationInWindow:start resetPrevious:NO];
+        } else {
+            [touch setValue:[NSValue valueWithCGPoint:start] forKey:@"locationInWindow"];
+        }
+        [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
+        [touch setValue:keyWindow forKey:@"window"];
+        [touch setValue:startView forKey:@"view"];
+        [touch setValue:@(1) forKey:@"tapCount"];
+        NSTimeInterval beganAt = [[NSProcessInfo processInfo] systemUptime];
+        [touch setValue:@(beganAt) forKey:@"timestamp"];
+        if ([touch respondsToSelector:@selector(_setIsFirstTouchForView:)]) {
+            [touch _setIsFirstTouchForView:YES];
+        }
+
+        @try {
+            if ([event respondsToSelector:@selector(_clearTouches)]) [event _clearTouches];
+            if ([event respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
+                [event _addTouch:touch forDelayedDelivery:NO];
+            }
+            [app sendEvent:event];
+
+            for (int i = 1; i < steps; i++) {
+                CGFloat t = (CGFloat)i / (CGFloat)steps;
+                CGPoint mid = CGPointMake(start.x + (end.x - start.x) * t,
+                                          start.y + (end.y - start.y) * t);
+                if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
+                    [touch _setLocationInWindow:mid resetPrevious:NO];
+                }
+                [touch setValue:@(UITouchPhaseMoved) forKey:@"phase"];
+                [touch setValue:@(beganAt + (stepMs * i) / 1000.0) forKey:@"timestamp"];
+                UIEvent* moveEvent = [app respondsToSelector:@selector(_touchesEvent)] ? [app _touchesEvent] : event;
+                if (moveEvent != event) {
+                    if ([moveEvent respondsToSelector:@selector(_clearTouches)]) [moveEvent _clearTouches];
+                    if ([moveEvent respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
+                        [moveEvent _addTouch:touch forDelayedDelivery:NO];
+                    }
+                }
+                [app sendEvent:moveEvent];
+                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:stepMs / 1000.0]];
+            }
+
+            if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
+                [touch _setLocationInWindow:end resetPrevious:NO];
+            }
+            [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
+            [touch setValue:@(beganAt + totalMs / 1000.0) forKey:@"timestamp"];
+            UIEvent* endEvent = [app respondsToSelector:@selector(_touchesEvent)] ? [app _touchesEvent] : event;
+            if (endEvent != event) {
+                if ([endEvent respondsToSelector:@selector(_clearTouches)]) [endEvent _clearTouches];
+                if ([endEvent respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
+                    [endEvent _addTouch:touch forDelayedDelivery:NO];
+                }
+            }
+            [app sendEvent:endEvent];
+            ok = YES;
+        } @catch (NSException* e) {
+            NSLog(@"[Ennio] swipeAtPoints: %@", e.reason);
+            ok = NO;
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::pressHardwareKey(double keyCode) {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        // Walk the key window's responder chain to the current first
+        // responder. UIKeyInput is the protocol UITextInput descends
+        // from; insertText: / deleteBackward are the standard hooks.
+        UIApplication* app = [UIApplication sharedApplication];
+        UIWindow* keyWindow = nil;
+        for (UIScene* scene in app.connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            UIWindowScene* ws = (UIWindowScene*)scene;
+            for (UIWindow* w in ws.windows) {
+                if (w.isKeyWindow) { keyWindow = w; break; }
+            }
+            if (keyWindow) break;
+        }
+        if (!keyWindow) { ok = NO; return; }
+
+        UIResponder* fr = nil;
+        // Crawl the view tree for whatever has isFirstResponder set —
+        // findFirstResponder lives elsewhere in this file but as a
+        // file-local helper, so duplicate the trivial walk here to
+        // avoid forward-declaration churn.
+        NSMutableArray<UIView*>* stack = [NSMutableArray arrayWithObject:keyWindow];
+        while (stack.count) {
+            UIView* v = stack.lastObject;
+            [stack removeLastObject];
+            if (v.isFirstResponder) { fr = v; break; }
+            for (UIView* sub in v.subviews) [stack addObject:sub];
+        }
+        if (!fr || ![fr conformsToProtocol:@protocol(UIKeyInput)]) { ok = NO; return; }
+        id<UIKeyInput> input = (id<UIKeyInput>)fr;
+
+        // Nitro hands us the keycode as a double (TS `number`); narrow
+        // it for the switch.
+        const int code = (int)keyCode;
+        switch (code) {
+            case 42: // backspace
+                [input deleteBackward];
+                ok = YES;
+                break;
+            case 40: // return
+                [input insertText:@"\n"];
+                ok = YES;
+                break;
+            case 44: // space
+                [input insertText:@" "];
+                ok = YES;
+                break;
+            default:
+                ok = NO;
+                break;
+        }
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return ok;

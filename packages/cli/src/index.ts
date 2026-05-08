@@ -20,7 +20,8 @@ import { existsSync, statSync } from 'fs';
 import { resolve, basename, join } from 'path';
 import { glob } from 'glob';
 import { EnnioClient } from './client';
-import { runMaestroTests } from './maestro-runner';
+import { runMaestroTests, getBootedSimulatorId, launchAppOnSimulator } from './maestro-runner';
+import { parseMaestroFile } from './maestro-parser';
 import { NitroWriter, type Writer } from './writer';
 import { NitroReader, type Reader } from './reader';
 
@@ -131,13 +132,46 @@ async function main() {
 
   console.log('\n🧪 Ennio\n');
 
-  const client = await tryWebSocketConnection(port);
+  let client = await tryWebSocketConnection(port);
   if (!client) {
-    console.error(
-      `Could not connect to the in-app Ennio server on port ${port}.\n` +
-        `Make sure the user app is running on the iOS simulator before invoking ennio.`
-    );
-    process.exit(1);
+    // App not running — auto-launch on the booted simulator. The CLI used
+    // to require the user to launch the app manually before invoking; that
+    // mismatched maestro's UX (maestro spawns the app via XCTest as part
+    // of `launchApp`). Parse the first flow's `appId`, launch, retry.
+    const udid = getBootedSimulatorId();
+    let appId: string | undefined;
+    try {
+      appId = parseMaestroFile(files[0]).appId;
+    } catch {
+      // bad yaml — fall through to error below
+    }
+    if (udid && appId) {
+      console.log(`(App not running — launching ${appId} on ${udid.slice(0, 8)}…)`);
+      try {
+        launchAppOnSimulator(udid, appId);
+      } catch (e) {
+        console.error(`Failed to launch ${appId}: ${(e as Error).message}`);
+        process.exit(1);
+      }
+      // Poll for WS up to 10s — RN bridge + Nitro WS bind takes ~3-6s on
+      // a fresh launch, longer on first launch after install.
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 500));
+        client = await tryWebSocketConnection(port);
+        if (client) break;
+      }
+    }
+    if (!client) {
+      console.error(
+        `Could not connect to the in-app Ennio server on port ${port}.\n` +
+          (udid
+            ? `Tried auto-launching ${appId ?? '<unknown appId>'}; WebSocket never bound.\n` +
+              `Confirm the app has @ennio/core wired and ENNIO_ENABLED=1 in pod install.`
+            : `No booted iOS simulator found. Boot one (xcrun simctl boot <UDID>) or set ENNIO_UDID.`)
+      );
+      process.exit(1);
+    }
   }
   console.log(`(Connected via WebSocket on port ${port})\n`);
 

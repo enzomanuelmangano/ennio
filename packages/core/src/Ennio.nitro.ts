@@ -372,6 +372,27 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   scrollTo(scrollViewTestID: string, elementTestID: string): boolean;
 
   /**
+   * Synthesize a pan gesture from (x1,y1) to (x2,y2) over `durationMs`.
+   * If the start point hits a UIScrollView, takes the fast path
+   * (`setContentOffset:animated:NO` with the delta) — no UITouch tax.
+   * Otherwise drives a UITouchPhaseMoved loop for cross-view drags
+   * (sheet dismiss, page swipe, non-scrollable carousel pan).
+   * Coordinates are window-relative. Sim-only (UITouch private API).
+   */
+  swipeAtPoints(x1: number, y1: number, x2: number, y2: number, durationMs: number): boolean;
+
+  /**
+   * Synthesize a hardware key press by HID keycode against the current
+   * first responder when it conforms to UIKeyInput. Currently maps:
+   *   42 → deleteBackward (backspace)
+   *   40 → insertText("\n") (return)
+   *   44 → insertText(" ") (space)
+   * Returns false when no first responder accepts text input. Replaces
+   * idb's HID `pressKey` for in-app text fields.
+   */
+  pressHardwareKey(keyCode: number): boolean;
+
+  /**
    * Tap the n-th tab in the topmost UITabBar. 0-indexed left to right.
    * RN's NativeTabs items don't expose their accessibilityIdentifier on
    * the underlying UITabBarItem reliably, so we index instead.

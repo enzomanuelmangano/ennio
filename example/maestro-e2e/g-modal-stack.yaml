@@ -1,0 +1,34 @@
+appId: com.ennio.example
+name: "Gauntlet — Modal stacking"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-modal-stack"
+- assertVisible:
+    id: "modal-stack-screen"
+
+- tapOn:
+    id: "modal-open-first"
+- assertVisible:
+    id: "modal-1-body"
+    timeout: 3000
+
+- tapOn:
+    id: "modal-open-second"
+- assertVisible:
+    id: "modal-2-body"
+    timeout: 3000
+
+- tapOn:
+    id: "modal-close-second"
+- assertNotVisible:
+    id: "modal-2-body"
+    timeout: 3000
+
+- tapOn:
+    id: "modal-close-first"
+- assertNotVisible:
+    id: "modal-1-body"
+    timeout: 3000

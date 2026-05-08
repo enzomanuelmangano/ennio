@@ -1,0 +1,14 @@
+appId: com.ennio.example
+name: "Gauntlet — Picker"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-picker"
+- assertVisible:
+    id: "picker-screen"
+- assertVisible:
+    text: "Selected: apple"
+- assertVisible:
+    id: "picker-control"

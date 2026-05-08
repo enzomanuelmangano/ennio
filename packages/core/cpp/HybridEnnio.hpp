@@ -94,6 +94,8 @@ public:
     bool scroll(const std::string& testID, ScrollDirection direction, double distance) override;
     bool swipe(const std::string& testID, ScrollDirection direction, double distance) override;
     bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) override;
+    bool swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs) override;
+    bool pressHardwareKey(double keyCode) override;
     bool tapTab(double index) override;
     bool backGesture() override;
     bool hideKeyboard() override;

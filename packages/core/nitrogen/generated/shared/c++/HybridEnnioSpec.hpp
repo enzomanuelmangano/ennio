@@ -91,6 +91,8 @@ namespace margelo::nitro::ennio {
       virtual bool scroll(const std::string& testID, ScrollDirection direction, double distance) = 0;
       virtual bool swipe(const std::string& testID, ScrollDirection direction, double distance) = 0;
       virtual bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) = 0;
+      virtual bool swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs) = 0;
+      virtual bool pressHardwareKey(double keyCode) = 0;
       virtual bool tapTab(double index) = 0;
       virtual bool backGesture() = 0;
       virtual bool hideKeyboard() = 0;

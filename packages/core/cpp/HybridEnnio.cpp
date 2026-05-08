@@ -540,6 +540,26 @@ void HybridEnnio::synchronize() {
             response.success = ::ennio::EnnioRuntimeHelper::getInstance()
                 .tapAtScreenPoint(x, y);
         }
+        else if (type == "swipeAtPoints") {
+            // Window-coordinate pan: (x1,y1)→(x2,y2) over durationMs.
+            // Replaces idb HID swipe — used for cross-screen drags and
+            // horizontal carousel panning that doesn't bind to a
+            // UIScrollView's scroll axis.
+            double x1 = ::ennio::json::parseDouble(payload, "x1");
+            double y1 = ::ennio::json::parseDouble(payload, "y1");
+            double x2 = ::ennio::json::parseDouble(payload, "x2");
+            double y2 = ::ennio::json::parseDouble(payload, "y2");
+            int durationMs = (int)::ennio::json::parseDouble(payload, "durationMs");
+            response.success = ::ennio::EnnioRuntimeHelper::getInstance()
+                .swipeAtPoints(x1, y1, x2, y2, durationMs);
+        }
+        else if (type == "pressHardwareKey") {
+            // Hardware-key press by HID keycode against the focused
+            // first responder. Replaces idb.pressKey for in-app fields.
+            int keyCode = (int)::ennio::json::parseDouble(payload, "keyCode");
+            response.success = ::ennio::EnnioRuntimeHelper::getInstance()
+                .pressHardwareKey(keyCode);
+        }
         else if (type == "getSurfaceOffset") {
             // React-surface origin in the user app's window. Lets the
             // CLI translate Fabric's surface-relative `screenX/screenY`
@@ -1081,6 +1101,12 @@ bool HybridEnnio::swipe(const std::string& testID, ScrollDirection direction, do
 bool HybridEnnio::scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) {
     return ::ennio::EnnioRuntimeHelper::getInstance().scrollTo(scrollViewTestID, elementTestID);
 }
+bool HybridEnnio::swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().swipeAtPoints(x1, y1, x2, y2, durationMs);
+}
+bool HybridEnnio::pressHardwareKey(double keyCode) {
+    return ::ennio::EnnioRuntimeHelper::getInstance().pressHardwareKey(keyCode);
+}
 bool HybridEnnio::tapTab(double index) {
     return ::ennio::EnnioRuntimeHelper::getInstance().tapTab(static_cast<int>(index));
 }
@@ -1122,6 +1148,8 @@ bool HybridEnnio::pressKey(const std::string&, const std::string&) { return fals
 bool HybridEnnio::scroll(const std::string&, ScrollDirection, double) { return false; }
 bool HybridEnnio::swipe(const std::string&, ScrollDirection, double) { return false; }
 bool HybridEnnio::scrollTo(const std::string&, const std::string&) { return false; }
+bool HybridEnnio::swipeAtPoints(double, double, double, double, double) { return false; }
+bool HybridEnnio::pressHardwareKey(double) { return false; }
 bool HybridEnnio::tapTab(double) { return false; }
 bool HybridEnnio::backGesture() { return false; }
 bool HybridEnnio::hideKeyboard() { return false; }

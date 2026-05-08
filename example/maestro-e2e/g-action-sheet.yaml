@@ -1,0 +1,15 @@
+appId: com.ennio.example
+name: "Gauntlet — Action sheet"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-action-sheet"
+- assertVisible:
+    id: "action-sheet-screen"
+- tapOn:
+    id: "action-sheet-open"
+- tapOn: "Save"
+- assertVisible:
+    text: "Save"

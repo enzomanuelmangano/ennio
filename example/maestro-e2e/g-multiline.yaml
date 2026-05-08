@@ -1,0 +1,15 @@
+appId: com.ennio.example
+name: "Gauntlet — Multi-line TextInput"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-multiline"
+- assertVisible:
+    id: "multiline-screen"
+- tapOn:
+    id: "multiline-input"
+- inputText: "First line"
+- assertVisible:
+    text: "10 chars"

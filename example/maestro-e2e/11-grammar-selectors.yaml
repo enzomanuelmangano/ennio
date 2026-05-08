@@ -1,0 +1,63 @@
+appId: com.ennio.example
+name: Grammar — selectors (id, text, label, index, relational, anyOf, state)
+---
+- launchApp
+- tapOn: "Playground"
+- assertVisible: "Playground"
+
+# id selector
+- assertVisible:
+    id: "counter-display"
+- tapOn:
+    id: "counter-inc-btn"
+- tapOn:
+    id: "counter-inc-btn"
+- tapOn:
+    id: "counter-inc-btn"
+- assertVisible:
+    text: "3"
+- tapOn:
+    id: "counter-reset-btn"
+- assertVisible:
+    text: "0"
+
+# text selector — bare string shorthand
+- assertVisible: "Toggles"
+
+# index — multiple Toggles by index
+- assertVisible:
+    id: "toggle-1"
+- assertVisible:
+    id: "toggle-3"
+- assertVisible:
+    id: "toggle-5"
+
+# anyOf
+- assertVisible:
+    anyOf:
+      - id: "toggle-1"
+      - id: "non-existent"
+
+# Search input + filtered results
+- tapOn:
+    id: "search-input"
+- clearText:
+    id: "search-input"
+- inputText: "cherry"
+- hideKeyboard
+- assertVisible:
+    id: "fruit-cherry"
+- assertNotVisible:
+    id: "fruit-banana"
+
+# clearText then verify all return
+- clearText:
+    id: "search-input"
+- assertVisible:
+    id: "fruit-banana"
+
+# Relational selectors — Ennio matcher gap (rightOf/leftOf not implemented)
+# - assertVisible:
+#     text: "Step 2"
+#     rightOf:
+#       id: "step-1"

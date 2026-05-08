@@ -1,0 +1,20 @@
+appId: com.ennio.example
+name: "Gauntlet — Reanimated worklet button"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-reanimated"
+- assertVisible:
+    id: "reanimated-screen"
+- assertVisible:
+    text: "Pressed: 0"
+- tapOn:
+    id: "reanimated-button"
+- tapOn:
+    id: "reanimated-button"
+- tapOn:
+    id: "reanimated-button"
+- assertVisible:
+    text: "Pressed: 3"

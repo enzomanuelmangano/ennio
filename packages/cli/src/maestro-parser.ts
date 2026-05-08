@@ -69,6 +69,9 @@ export type MaestroCommand =
   | { launchApp: true | { clearState?: boolean; appId?: string } }
   | { clearState: true | { appId?: string } }
   | { stopApp: true | { appId?: string } }
+  | { killApp: true | { appId?: string } }
+  | { dismissAlert: true | Record<string, never> }
+  | { clearKeychain: true | Record<string, never> }
   | { openLink: string | { link: string } }
   | { takeScreenshot: string | { path: string } }
   | { hideKeyboard: true }
@@ -79,11 +82,18 @@ export type MaestroCommand =
   | { runScript: { file: string; env?: Record<string, string> } }
   | { setLocation: { latitude: number; longitude: number } | string }
   | { setPermissions: Record<string, 'allow' | 'deny' | 'unset'> }
+  | { setAirplaneMode: 'enabled' | 'disabled' | true | false }
+  | { toggleAirplaneMode: true | Record<string, never> }
+  | { travel: { points: Array<{ latitude: number; longitude: number } | string>; speed?: number } }
   | { startRecording: string | { path: string } }
   | { stopRecording: true }
   | { addMedia: string[] | { files: string[] } }
   | { waitForAnimationToEnd: true | { timeout?: number } }
-  | { extendedWaitUntil: { visible?: MaestroSelector; notVisible?: MaestroSelector; timeout?: number } };
+  | { extendedWaitUntil: { visible?: MaestroSelector; notVisible?: MaestroSelector; timeout?: number } }
+  | { inputRandomEmail: true | Record<string, never> }
+  | { inputRandomNumber: true | { length?: number } }
+  | { inputRandomText: true | { length?: number } }
+  | { inputRandomPersonName: true | Record<string, never> };
 
 export interface RunFlowCommand {
   file?: string;
@@ -101,6 +111,14 @@ export interface MaestroFlow {
    * commands as their default env.
    */
   env?: Record<string, string>;
+  /**
+   * Maestro lifecycle hooks. Run once per flow, before/after the main
+   * command list. Failures inside `onFlowStart` abort the flow;
+   * `onFlowComplete` runs in a finally — its failures are logged but
+   * don't change the flow's pass/fail.
+   */
+  onFlowStart?: MaestroCommand[];
+  onFlowComplete?: MaestroCommand[];
   commands: MaestroCommand[];
   filePath: string;
 }
@@ -141,6 +159,8 @@ export function parseMaestroFile(filePath: string): MaestroFlow {
     name: metadata.name as string | undefined,
     tags: metadata.tags as string[] | undefined,
     env: metadata.env as Record<string, string> | undefined,
+    onFlowStart: metadata.onFlowStart as MaestroCommand[] | undefined,
+    onFlowComplete: metadata.onFlowComplete as MaestroCommand[] | undefined,
     commands,
     filePath: absolutePath,
   };

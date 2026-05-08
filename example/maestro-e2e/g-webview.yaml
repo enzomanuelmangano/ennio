@@ -1,0 +1,13 @@
+appId: com.ennio.example
+name: "Gauntlet — WebView"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-webview"
+- assertVisible:
+    id: "webview-screen"
+- assertVisible:
+    id: "webview-loaded-marker"
+    timeout: 8000

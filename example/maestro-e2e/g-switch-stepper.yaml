@@ -1,0 +1,28 @@
+appId: com.ennio.example
+name: "Gauntlet — Switch + Stepper"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-switch"
+- assertVisible:
+    id: "switch-stepper-screen"
+- assertVisible:
+    text: "off"
+- tapOn:
+    id: "switch-control"
+- assertVisible:
+    text: "on"
+- tapOn:
+    id: "stepper-inc"
+- tapOn:
+    id: "stepper-inc"
+- tapOn:
+    id: "stepper-inc"
+- assertVisible:
+    text: "3"
+- tapOn:
+    id: "stepper-dec"
+- assertVisible:
+    text: "2"

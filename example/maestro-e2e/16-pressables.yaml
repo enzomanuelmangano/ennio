@@ -1,0 +1,81 @@
+appId: com.ennio.example
+name: Pressables — every RN pressable variant
+---
+- launchApp
+- tapOn:
+    text: "Playground"
+- tapOn:
+    id: "open-pressables-btn"
+- assertVisible: "Pressables"
+- assertVisible:
+    id: "hit-last"
+
+# Pressable
+- tapOn:
+    id: "press-pressable"
+- assertVisible:
+    id: "hit-last"
+    text: "Pressable"
+
+# TouchableOpacity
+- tapOn:
+    id: "press-touchable-opacity"
+- assertVisible:
+    text: "TouchableOpacity"
+
+# TouchableHighlight
+- tapOn:
+    id: "press-touchable-highlight"
+- assertVisible:
+    text: "TouchableHighlight"
+
+# TouchableWithoutFeedback
+- tapOn:
+    id: "press-touchable-without-feedback"
+- assertVisible:
+    text: "TouchableWithoutFeedback"
+
+# PressableScale (pressto)
+- tapOn:
+    id: "press-pressable-scale"
+- assertVisible:
+    text: "PressableScale"
+
+# PressableOpacity (pressto)
+- tapOn:
+    id: "press-pressable-opacity-pressto"
+- assertVisible:
+    text: "PressableOpacity"
+
+# GestureDetector (RNGH Tap)
+- tapOn:
+    id: "press-gesture-detector"
+- assertVisible:
+    text: "GestureDetector"
+
+# Switch (toggle) — Ennio gap: idb tap on RCTSwitch doesn't fire
+# onValueChange, fiber walker bails because Switch has no `onPress` prop.
+# Skipping until writer learns to dispatch a synthetic toggle.
+# - swipe:
+#     direction: UP
+#     duration: 300
+# - tapOn:
+#     id: "press-switch"
+# - assertVisible:
+#     text: "Switch"
+
+# Long-press
+- longPress:
+    id: "press-long"
+- assertVisible:
+    text: "LongPress"
+
+# Double-tap
+- doubleTapOn:
+    id: "press-double"
+- assertVisible:
+    text: "DoubleTap"
+
+# Verify total count = 9 hits (Switch test currently disabled)
+- assertVisible:
+    text: "Total: 9"

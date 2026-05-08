@@ -50,6 +50,16 @@ export default function TabLayout() {
             md="person"
           />
         </NativeTabs.Trigger>
+        <NativeTabs.Trigger name="gauntlet" testID="tab-gauntlet">
+          <NativeTabs.Trigger.Label>Gauntlet</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon
+            sf={{
+              default: 'wand.and.stars',
+              selected: 'wand.and.stars.inverse',
+            }}
+            md="science"
+          />
+        </NativeTabs.Trigger>
       </NativeTabs>
     </>
   );

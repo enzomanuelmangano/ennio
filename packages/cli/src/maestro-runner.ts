@@ -61,6 +61,24 @@ const DEFAULT_RETRY_INTERVAL = 30;
 const DEFAULT_RECONNECT_TIMEOUT = 30000;
 const DEFAULT_WS_PORT = 9876;
 
+/**
+ * Maestro per-command `optional: true`. Lives at the command level
+ * (e.g. `tapOn: { id: cookie-banner, optional: true }`) and at the
+ * action level for some commands (`assertVisible: { id: x, optional: true }`).
+ * We treat any nested object that has `optional === true` on its
+ * top level as flagging the whole command optional.
+ */
+function isOptional(cmd: unknown): boolean {
+  if (!cmd || typeof cmd !== 'object') return false;
+  const values = Object.values(cmd as Record<string, unknown>);
+  for (const v of values) {
+    if (v && typeof v === 'object' && (v as { optional?: boolean }).optional === true) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ============================================
 // Simulator Helpers
 // ============================================
@@ -68,7 +86,7 @@ const DEFAULT_WS_PORT = 9876;
 /**
  * Get the booted iOS simulator device ID
  */
-function getBootedSimulatorId(): string | null {
+export function getBootedSimulatorId(): string | null {
   // Honor ENNIO_UDID env override so tests pin to a specific simulator
   // even when other sims are booted (avoid argent / xcrun picking wrong one).
   if (process.env.ENNIO_UDID) return process.env.ENNIO_UDID;
@@ -102,7 +120,7 @@ function terminateApp(deviceId: string, appId: string): void {
 /**
  * Launch an app on simulator
  */
-function launchAppOnSimulator(deviceId: string, appId: string): void {
+export function launchAppOnSimulator(deviceId: string, appId: string): void {
   execSync(`xcrun simctl launch ${deviceId} ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
 }
 
@@ -202,6 +220,12 @@ export async function runMaestroTests(
 
   const start = Date.now();
   try {
+    // onFlowStart — run setup hooks before main commands. Failures here
+    // are fatal: the flow's invariants haven't been established, so the
+    // body would be testing the wrong state.
+    if (flow.onFlowStart && flow.onFlowStart.length > 0) {
+      await executor.executeCommands(flow.onFlowStart);
+    }
     await executor.executeCommands(flow.commands);
     results.passed = 1;
     results.tests.push({
@@ -229,6 +253,17 @@ export async function runMaestroTests(
       error: err instanceof Error ? err.message : String(err),
       ms: Date.now() - start,
     });
+  } finally {
+    // onFlowComplete — always runs (success or failure). Failures here
+    // are logged, never propagated: a teardown hook breaking shouldn't
+    // mask a flow's real result.
+    if (flow.onFlowComplete && flow.onFlowComplete.length > 0) {
+      try {
+        await executor.executeCommands(flow.onFlowComplete);
+      } catch (e) {
+        console.log(`  (onFlowComplete failed: ${(e as Error).message})`);
+      }
+    }
   }
 
   // Return potentially updated client (may have been replaced by launchApp/clearState)
@@ -252,6 +287,10 @@ class MaestroExecutor {
   private reconnectClient: () => Promise<EnnioClient>;
   private jsContext: JsContext;
   private flowEnv: Record<string, string> = {};
+  // Tracks airplane-mode state so `toggleAirplaneMode` knows which way to
+  // flip without parsing `simctl status_bar list` output. Initialised to
+  // false because every fresh sim boots without an override.
+  private airplaneOn: boolean = false;
 
   constructor(
     client: EnnioClient,
@@ -633,12 +672,20 @@ class MaestroExecutor {
    */
   async executeCommand(cmd: MaestroCommand): Promise<void> {
     // Preprocess command to evaluate ${} expressions
-    const processedCmd = preprocessCommand(cmd, this.jsContext);
+    let processedCmd = preprocessCommand(cmd, this.jsContext);
 
     // YAML may produce string-form commands (e.g. `- back`) or null entries.
     // Handle them before any `in` operator runs against a non-object.
     if (processedCmd == null) return;
     if (typeof processedCmd === 'string') {
+      // Maestro accepts a number of commands in either bare-string
+      // form (`- clearState`) or object form (`- clearState: { appId: x }`).
+      // Two of them carry custom inline behaviour we want to preserve
+      // (back's alert preflight, waitForAnimationToEnd's 500ms cap),
+      // so they handle themselves below. Everything else just normalises
+      // the bare string into an empty-payload object and falls through
+      // to the same handler the object form uses — one code path per
+      // command, no duplicate inline branches.
       if (processedCmd === 'back') {
         // Dismiss any native alert first — backGesture's nav-pop path
         // can race with a presented UIAlertController and silently
@@ -651,14 +698,6 @@ class MaestroExecutor {
         await this.sleep(120);
         return;
       }
-      if (processedCmd === 'hideKeyboard') {
-        await this.writer.hideKeyboard();
-        return;
-      }
-      if (processedCmd === 'pasteText') {
-        await this.writer.pasteToFocused();
-        return;
-      }
       if (processedCmd === 'waitForAnimationToEnd') {
         // Bare string `- waitForAnimationToEnd`. Maestro's default is 5s
         // but most RN transitions settle in 200-400ms — the long tail is
@@ -668,7 +707,26 @@ class MaestroExecutor {
         try { await this.client.waitForIdle(500); } catch { /* timeouts ignored */ }
         return;
       }
-      throw new Error(`Unknown string command: ${processedCmd}`);
+      const STRING_FORM_COMMANDS = new Set([
+        'hideKeyboard',
+        'pasteText',
+        'launchApp',
+        'clearState',
+        'stopApp',
+        'killApp',
+        'dismissAlert',
+        'clearKeychain',
+        'stopRecording',
+        'inputRandomEmail',
+        'inputRandomNumber',
+        'inputRandomText',
+        'inputRandomPersonName',
+        'toggleAirplaneMode',
+      ]);
+      if (!STRING_FORM_COMMANDS.has(processedCmd)) {
+        throw new Error(`Unknown string command: ${processedCmd}`);
+      }
+      processedCmd = { [processedCmd]: {} } as MaestroCommand;
     }
     if (typeof processedCmd !== 'object') {
       throw new Error(`Unsupported command type: ${typeof processedCmd}`);
@@ -971,10 +1029,13 @@ class MaestroExecutor {
       return;
     }
 
-    // stopApp
-    if ('stopApp' in cmd) {
-      const stopCmd = cmd.stopApp;
-      const targetAppId = (typeof stopCmd === 'object' && stopCmd.appId) || this.appId;
+    // stopApp / killApp (maestro alias — same behaviour, different name).
+    if ('stopApp' in cmd || 'killApp' in cmd) {
+      const subCmd = ('stopApp' in cmd ? cmd.stopApp : (cmd as { killApp: typeof cmd extends { stopApp: infer S } ? S : unknown }).killApp) as
+        | true
+        | { appId?: string }
+        | undefined;
+      const targetAppId = (typeof subCmd === 'object' && subCmd?.appId) || this.appId;
 
       if (!targetAppId) {
         throw new Error('stopApp: No appId specified in command or flow metadata');
@@ -987,6 +1048,154 @@ class MaestroExecutor {
 
       this.log(`stopApp: ${targetAppId}`);
       terminateApp(deviceId, targetAppId);
+      return;
+    }
+
+    // clearKeychain — wipe the booted sim's keychain. Maestro semantics:
+    // applies to whatever device is targeted. We don't need an appId
+    // because `simctl keychain reset` is sim-wide.
+    if ('clearKeychain' in cmd) {
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('clearKeychain: No booted iOS simulator found');
+      }
+      this.log('clearKeychain');
+      try {
+        execSync(`xcrun simctl keychain ${deviceId} reset`, { encoding: 'utf-8', stdio: 'pipe' });
+      } catch (e) {
+        // Older sims occasionally return non-zero on a no-op reset; fall
+        // through silently — the next launch will see a fresh keychain
+        // anyway from the rm-rf+launch path.
+        if (process.env.ENNIO_VERBOSE) console.error(`clearKeychain: ${e}`);
+      }
+      return;
+    }
+
+    // dismissAlert — first-class command. Inline alert handling already
+    // covers most flows; this is the standalone-command form maestro
+    // exposes for explicit `- dismissAlert` steps.
+    if ('dismissAlert' in cmd) {
+      this.log('dismissAlert');
+      try {
+        await this.writer.dismissAlert();
+      } catch { /* noop — no alert presented */ }
+      return;
+    }
+
+    // setAirplaneMode — sim-only via `simctl status_bar override`.
+    // Maestro accepts boolean or 'enabled'/'disabled'. We translate to
+    // status_bar dataNetworkType=airplane (on) or clear (off).
+    if ('setAirplaneMode' in cmd) {
+      const value = (cmd as { setAirplaneMode: boolean | 'enabled' | 'disabled' }).setAirplaneMode;
+      const enabled = value === true || value === 'enabled';
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) {
+        throw new Error('setAirplaneMode: No booted iOS simulator found');
+      }
+      this.log(`setAirplaneMode: ${enabled ? 'on' : 'off'}`);
+      try {
+        if (enabled) {
+          execSync(
+            `xcrun simctl status_bar ${deviceId} override --dataNetworkType none --wifiMode failed --cellularMode notSupported`,
+            { encoding: 'utf-8', stdio: 'pipe' },
+          );
+        } else {
+          execSync(`xcrun simctl status_bar ${deviceId} clear`, { encoding: 'utf-8', stdio: 'pipe' });
+        }
+      } catch (e) {
+        if (process.env.ENNIO_VERBOSE) console.error(`setAirplaneMode: ${e}`);
+      }
+      return;
+    }
+
+    // toggleAirplaneMode — flip whatever the current sim status bar
+    // shows. We don't read state back (`simctl status_bar list` is
+    // brittle); track an in-runner flag and flip it.
+    if ('toggleAirplaneMode' in cmd) {
+      this.airplaneOn = !this.airplaneOn;
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) throw new Error('toggleAirplaneMode: No booted iOS simulator found');
+      this.log(`toggleAirplaneMode → ${this.airplaneOn ? 'on' : 'off'}`);
+      try {
+        if (this.airplaneOn) {
+          execSync(
+            `xcrun simctl status_bar ${deviceId} override --dataNetworkType none --wifiMode failed --cellularMode notSupported`,
+            { encoding: 'utf-8', stdio: 'pipe' },
+          );
+        } else {
+          execSync(`xcrun simctl status_bar ${deviceId} clear`, { encoding: 'utf-8', stdio: 'pipe' });
+        }
+      } catch (e) {
+        if (process.env.ENNIO_VERBOSE) console.error(`toggleAirplaneMode: ${e}`);
+      }
+      return;
+    }
+
+    // travel — iterate setLocation across waypoints. Maestro's grammar
+    // takes a list of {lat, lon} pairs; we walk them with a small fixed
+    // delay (200 ms) so observers (CLLocationManagerDelegate) see a
+    // sequence of fixes rather than a teleport. `speed` is informational;
+    // sim-side simctl location takes a single fix at a time.
+    if ('travel' in cmd) {
+      const travelCmd = (cmd as { travel: { points: Array<{ latitude: number; longitude: number } | string>; speed?: number } }).travel;
+      const deviceId = getBootedSimulatorId();
+      if (!deviceId) throw new Error('travel: No booted iOS simulator found');
+      this.log(`travel: ${travelCmd.points.length} waypoints`);
+      for (const p of travelCmd.points) {
+        let lat: number, lon: number;
+        if (typeof p === 'string') {
+          const [latStr, lonStr] = p.split(',').map((s) => s.trim());
+          lat = parseFloat(latStr);
+          lon = parseFloat(lonStr);
+        } else {
+          lat = p.latitude;
+          lon = p.longitude;
+        }
+        try {
+          execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, { encoding: 'utf-8', stdio: 'pipe' });
+        } catch (e) {
+          if (process.env.ENNIO_VERBOSE) console.error(`travel: ${e}`);
+        }
+        await this.sleep(200);
+      }
+      return;
+    }
+
+    // inputRandomEmail / Number / Text / PersonName — generate a value
+    // and route through typeText so the field receives a normal change.
+    if ('inputRandomEmail' in cmd) {
+      const text = `e2e-${Math.random().toString(36).slice(2, 10)}@example.com`;
+      this.log(`inputRandomEmail: "${text}"`);
+      await this.typeText(text);
+      return;
+    }
+    if ('inputRandomNumber' in cmd) {
+      const numCmd = (cmd as { inputRandomNumber: true | { length?: number } }).inputRandomNumber;
+      const length = (typeof numCmd === 'object' && numCmd?.length) || 8;
+      let text = '';
+      for (let i = 0; i < length; i++) text += Math.floor(Math.random() * 10).toString();
+      this.log(`inputRandomNumber: "${text}"`);
+      await this.typeText(text);
+      return;
+    }
+    if ('inputRandomText' in cmd) {
+      const tCmd = (cmd as { inputRandomText: true | { length?: number } }).inputRandomText;
+      const length = (typeof tCmd === 'object' && tCmd?.length) || 8;
+      const chars = 'abcdefghijklmnopqrstuvwxyz';
+      let text = '';
+      for (let i = 0; i < length; i++) text += chars[Math.floor(Math.random() * chars.length)];
+      this.log(`inputRandomText: "${text}"`);
+      await this.typeText(text);
+      return;
+    }
+    if ('inputRandomPersonName' in cmd) {
+      // Tiny fixed pool — deterministic enough for tests, varied enough
+      // not to clash with hardcoded "Test User" assertions.
+      const first = ['Alex', 'Jordan', 'Sam', 'Casey', 'Robin', 'Taylor'];
+      const last = ['Smith', 'Jones', 'Brown', 'Davis', 'Wilson', 'Miller'];
+      const name = `${first[Math.floor(Math.random() * first.length)]} ${last[Math.floor(Math.random() * last.length)]}`;
+      this.log(`inputRandomPersonName: "${name}"`);
+      await this.typeText(name);
       return;
     }
 
@@ -1274,7 +1483,20 @@ class MaestroExecutor {
    */
   async executeCommands(commands: MaestroCommand[]): Promise<void> {
     for (const cmd of commands) {
-      await this.executeCommand(cmd);
+      // Maestro per-command `optional: true` — failures swallow + log
+      // instead of bubbling. Lets flows like `- tapOn: { id: cookie-banner-x, optional: true }`
+      // tolerate missing UI without an explicit runFlow + when wrapper.
+      const optional = isOptional(cmd);
+      try {
+        await this.executeCommand(cmd);
+      } catch (err) {
+        if (optional) {
+          const cmdName = typeof cmd === 'string' ? cmd : Object.keys(cmd as object)[0];
+          this.log(`  (optional ${cmdName} failed, continuing): ${(err as Error).message}`);
+        } else {
+          throw err;
+        }
+      }
       if (this.trace) {
         await this.snapshotState(cmd);
       }

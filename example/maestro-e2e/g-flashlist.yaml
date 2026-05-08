@@ -1,0 +1,22 @@
+appId: com.ennio.example
+name: "Gauntlet — FlashList"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- assertVisible:
+    id: "gauntlet-screen"
+- tapOn:
+    id: "g-flashlist"
+- assertVisible:
+    id: "flashlist-screen"
+    timeout: 4000
+- assertVisible:
+    id: "flash-0"
+- assertVisible:
+    text: "Item #1"
+- scroll:
+    direction: DOWN
+    amount: 800
+- assertVisible:
+    text: "Item #5"

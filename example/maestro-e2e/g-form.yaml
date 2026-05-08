@@ -1,0 +1,43 @@
+appId: com.ennio.example
+name: "Gauntlet — Form validation"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-form"
+- assertVisible:
+    id: "form-screen"
+
+# Submit empty → both error labels appear.
+- tapOn:
+    id: "form-submit"
+- assertVisible:
+    id: "form-email-error"
+- assertVisible:
+    id: "form-age-error"
+
+# Fill invalid age → still error on age.
+- tapOn:
+    id: "form-email"
+- inputText: "test@example.com"
+- tapOn:
+    id: "form-age"
+- inputText: "12"
+- tapOn:
+    id: "form-submit"
+- assertVisible:
+    id: "form-age-error"
+- assertNotVisible:
+    id: "form-email-error"
+
+# Fix age → submit succeeds.
+- clearText:
+    id: "form-age"
+- tapOn:
+    id: "form-age"
+- inputText: "30"
+- tapOn:
+    id: "form-submit"
+- assertVisible:
+    id: "form-submitted"

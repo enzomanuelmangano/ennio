@@ -1,0 +1,16 @@
+appId: com.ennio.example
+name: "Gauntlet — Pinch gesture"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-pinch"
+- assertVisible:
+    id: "pinch-screen"
+- assertVisible:
+    id: "pinch-box"
+- tapOn:
+    id: "pinch-reset"
+- assertVisible:
+    text: "Resets: 1"

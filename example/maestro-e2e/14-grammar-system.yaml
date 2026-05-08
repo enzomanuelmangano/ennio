@@ -1,0 +1,47 @@
+appId: com.ennio.example
+name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, doubleTap, back)
+---
+- launchApp
+- tapOn:
+    text: "Playground"
+
+# Native alert + dismissAlert (bare string)
+- tapOn:
+    id: "open-alert-btn"
+- assertVisible: "Playground Alert"
+- dismissAlert
+- assertNotVisible: "Playground Alert"
+
+# takeScreenshot
+- takeScreenshot: /tmp/grammar-system-pre-alert.png
+
+# hideKeyboard (bare string + object form)
+- tapOn:
+    id: "search-input"
+- inputText: "test"
+- hideKeyboard
+- clearText:
+    id: "search-input"
+
+# doubleTap
+- doubleTapOn:
+    id: "counter-inc-btn"
+
+# longPress
+- longPress:
+    id: "counter-display"
+
+# swipe (scroll the playground)
+- swipe:
+    direction: UP
+    duration: 300
+- swipe:
+    direction: DOWN
+    duration: 300
+
+# back gesture (bare string) — only valid if there's a stack to pop; tab root
+# typically has nothing to pop, so wrap in retry to absorb the no-op.
+- retry:
+    maxRetries: 1
+    commands:
+      - back

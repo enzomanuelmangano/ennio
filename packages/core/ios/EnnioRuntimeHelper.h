@@ -94,6 +94,22 @@ public:
      * testID.
      */
     bool tapAtScreenPoint(double x, double y);
+
+    /**
+     * Synthesise a pan gesture from (x1,y1) to (x2,y2) over `durationMs`.
+     * Fast path when the start point hits a UIScrollView ancestor:
+     * setContentOffset with the delta, no UITouch tax. Otherwise drives
+     * a UITouchPhaseMoved loop along the line. Window-coords (logical pt).
+     * Sim-only.
+     */
+    bool swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs);
+
+    /**
+     * Synthesise a hardware key press by HID keycode against the current
+     * first responder when it conforms to UIKeyInput. Mapped: 42=backspace,
+     * 40=return, 44=space. Returns false when no input field is focused.
+     */
+    bool pressHardwareKey(double keyCode);
     /**
      * Origin of the React surface inside the user app's window, in
      * logical points. Adds to Fabric's surface-relative screenX/screenY

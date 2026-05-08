@@ -1,0 +1,16 @@
+appId: com.ennio.example
+name: "Gauntlet — Pan gesture"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-pan"
+- assertVisible:
+    id: "pan-screen"
+- assertVisible:
+    id: "pan-box"
+- tapOn:
+    id: "pan-reset"
+- assertVisible:
+    text: "Resets: 1"

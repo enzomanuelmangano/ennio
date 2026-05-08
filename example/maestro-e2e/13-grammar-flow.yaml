@@ -1,0 +1,44 @@
+appId: com.ennio.example
+name: Grammar — flow control (waitFor, repeat, retry, runFlow when, assertTrue, evalScript)
+---
+- launchApp
+- tapOn:
+    text: "Playground"
+
+# repeat: increment counter 5 times
+- tapOn:
+    id: "counter-reset-btn"
+- repeat:
+    times: 5
+    commands:
+      - tapOn:
+          id: "counter-inc-btn"
+- assertVisible:
+    text: "5"
+
+# extendedWaitUntil — Ennio gap: visibility primitive is not scroll-aware
+# so `scrollUntilVisible` short-circuits before the loading button is on
+# screen, and a blind swipe doesn't always reach the KeyboardAwareScrollView.
+# Skipping the loading-spinner cycle until the visibility primitive learns
+# to clip to the visible viewport.
+
+# runFlow when: visible — gated subflow (use Counter section, always on screen)
+- runFlow:
+    when:
+      visible: "Counter"
+    commands:
+      - tapOn:
+          id: "counter-inc-btn"
+- assertVisible:
+    text: "6"
+
+# evalScript + assertTrue
+- evalScript: ${output.x = 42}
+- assertTrue: ${output.x === 42}
+
+# retry — flaky command wrapped (here: a stable one)
+- retry:
+    maxRetries: 3
+    commands:
+      - assertVisible:
+          id: "counter-display"

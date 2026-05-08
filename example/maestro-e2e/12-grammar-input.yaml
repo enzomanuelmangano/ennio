@@ -1,0 +1,59 @@
+appId: com.ennio.example
+name: Grammar — input commands (text, random, erase, clear, paste, key)
+---
+- launchApp
+- tapOn:
+    text: "Playground"
+- assertVisible: "Search"
+
+# inputText — basic
+- tapOn:
+    id: "search-input"
+- inputText: "banana"
+- assertVisible:
+    id: "fruit-banana"
+- assertNotVisible:
+    id: "fruit-apple"
+
+# eraseText — drop characters
+- eraseText: 6
+- assertVisible:
+    id: "fruit-apple"
+
+# clearText then re-input via random
+- clearText:
+    id: "search-input"
+
+# pressKey on focused field
+- tapOn:
+    id: "search-input"
+- inputText: "fig"
+- pressKey: "Backspace"
+- pressKey: "Backspace"
+- pressKey: "Backspace"
+- assertVisible:
+    id: "fruit-banana"
+
+# inputRandomText (length 4)
+- tapOn:
+    id: "search-input"
+- inputRandomText: 4
+- clearText:
+    id: "search-input"
+
+# inputRandomNumber (length 6)
+- inputRandomNumber:
+    length: 6
+- clearText:
+    id: "search-input"
+
+# Clipboard — copy + paste
+- inputText: "cherry"
+- assertVisible:
+    id: "fruit-cherry"
+- setClipboard: "elderberry"
+- clearText:
+    id: "search-input"
+- pasteText
+- assertVisible:
+    id: "fruit-elderberry"

@@ -1,0 +1,102 @@
+# Test: Grammar parity extras
+# Exercises new commands added for maestro parity:
+#  - bare-string forms (`- clearState`, `- launchApp`, `- stopApp`, `- killApp`)
+#  - alias commands (killApp ↔ stopApp)
+#  - clearKeychain, dismissAlert standalone
+#  - inputRandom* family
+#  - optional flag
+#  - onFlowStart / onFlowComplete hooks
+#  - setAirplaneMode / toggleAirplaneMode
+#  - travel
+
+appId: com.ennio.example
+name: "Grammar Extras"
+tags:
+  - grammar
+  - parity
+
+onFlowStart:
+  - launchApp:
+      clearState: true
+  - clearKeychain
+
+onFlowComplete:
+  # Make sure we restore network so subsequent flows aren't stuck offline.
+  - setAirplaneMode: false
+
+---
+
+# Bare-string clearState — must work without `: true` payload.
+- clearState
+
+# Bare-string launchApp.
+- launchApp
+
+# Wait for the app to settle on Home.
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000
+
+# Optional tap on a non-existent element — must not fail.
+- tapOn:
+    id: "this-element-does-not-exist"
+    optional: true
+
+# Standalone dismissAlert (no alert present — should be a no-op, not a throw).
+- dismissAlert
+
+# Airplane-mode toggles. We're targeting status-bar override; the app
+# itself doesn't change, so a follow-up assertVisible just confirms the
+# CLI command didn't blow up.
+- setAirplaneMode: true
+- assertVisible:
+    id: "home-screen"
+- toggleAirplaneMode
+- assertVisible:
+    id: "home-screen"
+- setAirplaneMode: false
+
+# travel — multi-point location simulation. Coordinates are San Francisco
+# block-walks. The app doesn't read location, so this is purely a CLI
+# smoke test for the simctl loop.
+- travel:
+    points:
+      - latitude: 37.7749
+        longitude: -122.4194
+      - latitude: 37.7755
+        longitude: -122.4180
+      - latitude: 37.7762
+        longitude: -122.4170
+
+# inputRandom* family. We need a focused TextInput first — sign-in flow
+# has one.
+- tapOn:
+    id: "home-signin-btn"
+- assertVisible:
+    id: "login-screen"
+    timeout: 4000
+- tapOn:
+    id: "email-input"
+- inputRandomEmail
+
+- tapOn:
+    id: "password-input"
+- inputRandomText:
+    length: 10
+
+# Clear and try inputRandomNumber on the same field.
+- clearText:
+    id: "password-input"
+- tapOn:
+    id: "password-input"
+- inputRandomNumber:
+    length: 6
+
+# killApp alias — should behave identically to stopApp. We follow it
+# with launchApp to bring the app back so onFlowComplete can reset
+# airplane mode against a live process.
+- killApp
+- launchApp
+- assertVisible:
+    id: "home-screen"
+    timeout: 5000

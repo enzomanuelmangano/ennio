@@ -1,0 +1,17 @@
+appId: com.ennio.example
+name: "Gauntlet — KeyboardAvoidingView"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-keyboard"
+- assertVisible:
+    id: "keyboard-screen"
+- tapOn:
+    id: "keyboard-input"
+- inputText: "Hello"
+- tapOn:
+    id: "keyboard-submit"
+- assertVisible:
+    text: "Submitted: Hello"

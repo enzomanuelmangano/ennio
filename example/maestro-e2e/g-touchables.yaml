@@ -1,0 +1,42 @@
+appId: com.ennio.example
+name: "Gauntlet — Touchable variants"
+---
+- launchApp:
+    clearState: true
+- tapOn: "Gauntlet"
+- tapOn:
+    id: "g-touchables"
+- assertVisible:
+    id: "touchables-screen"
+
+- tapOn:
+    id: "touch-pressable"
+- assertVisible:
+    id: "count-Pressable"
+
+- tapOn:
+    id: "touch-opacity"
+- tapOn:
+    id: "touch-opacity"
+- assertVisible:
+    text: "2"
+
+- tapOn:
+    id: "touch-highlight"
+- assertVisible:
+    id: "count-TouchableHighlight"
+
+- tapOn:
+    id: "touch-baseButton"
+- assertVisible:
+    id: "count-BaseButton"
+
+- tapOn:
+    id: "touch-rawButton"
+- assertVisible:
+    id: "count-RawButton"
+
+- tapOn:
+    id: "touch-pressableScale"
+- assertVisible:
+    id: "count-PressableScale"
