@@ -740,6 +740,7 @@ class MaestroExecutor {
         'inputRandomText',
         'inputRandomPersonName',
         'toggleAirplaneMode',
+        'eraseText',
       ]);
       if (!STRING_FORM_COMMANDS.has(processedCmd)) {
         throw new Error(`Unknown string command: ${processedCmd}`);

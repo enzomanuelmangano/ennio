@@ -4,7 +4,7 @@
  * per action. Coordinates are in logical points (matches Fabric layout).
  */
 
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 
 function runCapture(args: string[], timeoutMs = 10_000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -15,8 +15,26 @@ function runCapture(args: string[], timeoutMs = 10_000): Promise<string> {
   });
 }
 
+let cachedUDID: string | null = null;
 function getUDID(): string | null {
   if (process.env.ENNIO_UDID) return process.env.ENNIO_UDID;
+  if (cachedUDID) return cachedUDID;
+  // Auto-detect: pick the first booted iOS Simulator. Without `--udid`
+  // idb picks "any companion", which is fine for one booted sim but
+  // racy when multiple sims are booted (the wrong target receives the
+  // touch and the runner times out). Cache the lookup so we don't
+  // shell out per-call.
+  try {
+    const out = execFileSync('xcrun', ['simctl', 'list', 'devices', 'booted'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+    const match = out.match(/\(([0-9A-F-]{36})\) \(Booted\)/);
+    if (match) {
+      cachedUDID = match[1];
+      return cachedUDID;
+    }
+  } catch { /* fall through */ }
   return null;
 }
 
