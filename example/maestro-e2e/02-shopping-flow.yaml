@@ -166,14 +166,10 @@ tags:
 - assertVisible:
     id: "products-list"
 
-# Reset all filters
-- runFlow:
-    when:
-      visible:
-        id: "reset-filters"
-    commands:
-      - tapOn:
-          id: "reset-filters"
+# Reset all filters (optional — only present when filters applied).
+- tapOn:
+    id: "reset-filters"
+    optional: true
 
 # ============================================
 # TEST: Product detail navigation
@@ -241,7 +237,12 @@ tags:
 # TEST: Navigate back via categories
 # ============================================
 
-- back
+# Pop the product-detail Stack screen. The Stack header on iOS shows
+# `< (tabs)` as the back-button label since the parent route is
+# `(tabs)`; tap that title text instead of relying on Maestro's
+# `back` (which doesn't always reach RNScreens' nav controller).
+- tapOn:
+    text: "(tabs)"
 
 - assertVisible:
     id: "products-screen"
@@ -254,6 +255,13 @@ tags:
 # TEST: Category navigation from home
 # ============================================
 
+# `category-electronics` lives in the Shop-by-Category section below
+# the Featured carousel + Trending row, so it's off-screen on first
+# render — scroll the home ScrollView first.
+- scrollUntilVisible:
+    element:
+      id: "category-electronics"
+    direction: DOWN
 - tapOn:
     id: "category-electronics"
 

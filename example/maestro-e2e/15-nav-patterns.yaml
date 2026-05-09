@@ -16,7 +16,13 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
       text: "Navigation patterns"
     direction: DOWN
 
-# formSheet
+# formSheet — header lands above the buttons; scroll a touch further so
+# the actual `open-form-sheet-btn` is on-screen, not just its section
+# heading.
+- scrollUntilVisible:
+    element:
+      id: "open-form-sheet-btn"
+    direction: DOWN
 - tapOn:
     id: "open-form-sheet-btn"
 - assertVisible:
@@ -65,7 +71,6 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
 - waitForAnimationToEnd
 - assertNotVisible:
     id: "inner-modal-title"
-    timeout: 8000
 - assertVisible:
     id: "stacked-modal-title"
 - tapOn:
@@ -73,4 +78,3 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
 - waitForAnimationToEnd
 - assertNotVisible:
     id: "stacked-modal-title"
-    timeout: 8000

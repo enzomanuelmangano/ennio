@@ -74,8 +74,8 @@ name: Pressables — every RN pressable variant
 # - assertVisible:
 #     text: "Switch"
 
-# Long-press
-- longPress:
+# Long-press (Maestro uses longPressOn)
+- longPressOn:
     id: "press-long"
 - assertVisible:
     text: "LongPress"

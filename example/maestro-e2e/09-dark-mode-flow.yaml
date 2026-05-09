@@ -113,20 +113,16 @@ tags:
 # TEST: Dark mode on login screen
 # ============================================
 
-- runFlow:
-    when:
-      visible:
-        id: "guest-view"
-    commands:
-      - tapOn:
-          id: "guest-signin-btn"
-      - assertVisible:
-          id: "login-screen"
-      - assertVisible:
-          id: "email-input"
-      - assertVisible:
-          id: "login-btn"
-      - back
+# Guest profile is visible after clearState (we never logged in this run).
+- tapOn:
+    id: "guest-signin-btn"
+- assertVisible:
+    id: "login-screen"
+- assertVisible:
+    id: "email-input"
+- assertVisible:
+    id: "login-btn"
+- back
 
 # ============================================
 # TEST: Toggle dark mode off
@@ -173,16 +169,11 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
-# Login
-- runFlow:
-    when:
-      visible:
-        id: "home-signin-btn"
-    commands:
-      - tapOn:
-          id: "home-signin-btn"
-      - tapOn:
-          id: "demo-login-btn"
+# Login (we logged out earlier in this flow).
+- tapOn:
+    id: "home-signin-btn"
+- tapOn:
+    id: "demo-login-btn"
 
 - assertVisible:
     id: "home-screen"

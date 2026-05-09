@@ -11,7 +11,7 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 - tapOn:
     id: "g-playground"
 
-# Native alert + dismissAlert (bare string)
+# Native alert (Maestro lacks dismissAlert; tap the OK button to dismiss)
 - scrollUntilVisible:
     element:
       id: "open-alert-btn"
@@ -19,26 +19,33 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 - tapOn:
     id: "open-alert-btn"
 - assertVisible: "Playground Alert"
-- dismissAlert
+- tapOn:
+    text: "OK"
 - assertNotVisible: "Playground Alert"
 
 # takeScreenshot
 - takeScreenshot: /tmp/grammar-system-pre-alert.png
 
-# hideKeyboard (bare string + object form)
+# hideKeyboard (bare string + object form). search-input lives above the
+# alert button — scroll back up so it's in the viewport.
+- scrollUntilVisible:
+    element:
+      id: "search-input"
+    direction: UP
 - tapOn:
     id: "search-input"
 - inputText: "test"
 - hideKeyboard
-- clearText:
+- tapOn:
     id: "search-input"
+- eraseText
 
 # doubleTap
 - doubleTapOn:
     id: "counter-inc-btn"
 
-# longPress
-- longPress:
+# longPress (Maestro uses longPressOn)
+- longPressOn:
     id: "counter-display"
 
 # swipe (scroll the playground)
@@ -49,9 +56,5 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
     direction: DOWN
     duration: 300
 
-# back gesture (bare string) — only valid if there's a stack to pop; tab root
-# typically has nothing to pop, so wrap in retry to absorb the no-op.
-- retry:
-    maxRetries: 1
-    commands:
-      - back
+# back gesture — bare string is fine on a tab root in Maestro (no-op).
+- back

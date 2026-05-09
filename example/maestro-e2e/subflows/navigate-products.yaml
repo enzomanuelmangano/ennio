@@ -4,8 +4,10 @@ appId: com.ennio.example
 
 ---
 
-# Pop any Stack-pushed screen so the tab bar is reachable.
-- back
+- tapOn:
+    text: "(tabs)"
+    optional: true
+- waitForAnimationToEnd
 
 - tapOn:
     text: "Products"

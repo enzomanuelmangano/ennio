@@ -239,6 +239,11 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
+# Shop-by-Category section is below the Featured carousel + Trending row.
+- scrollUntilVisible:
+    element:
+      id: "category-sports"
+    direction: DOWN
 - tapOn:
     id: "category-sports"
 

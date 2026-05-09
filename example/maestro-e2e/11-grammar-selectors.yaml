@@ -42,8 +42,7 @@ name: Grammar — selectors (id, text, label, index, relational, state)
 # Search input + filtered results
 - tapOn:
     id: "search-input"
-- clearText:
-    id: "search-input"
+- eraseText
 - inputText: "cherry"
 - hideKeyboard
 - assertVisible:
@@ -51,9 +50,10 @@ name: Grammar — selectors (id, text, label, index, relational, state)
 - assertNotVisible:
     id: "fruit-banana"
 
-# clearText then verify all return
-- clearText:
+# eraseText then verify all return
+- tapOn:
     id: "search-input"
+- eraseText
 - assertVisible:
     id: "fruit-banana"
 

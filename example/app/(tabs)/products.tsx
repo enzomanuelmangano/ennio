@@ -37,6 +37,8 @@ function ProductCard({ product }: { product: ReturnType<typeof useProductsStore.
       style={[styles.productCard, darkMode && styles.cardDark]}
       onPress={() => router.push(`/product/${product.id}`)}
       testID={`product-card-${product.id}`}
+      accessibilityIdentifier={`product-card-${product.id}`}
+      accessible
     >
       <Image source={{ uri: product.image }} style={styles.productImage} />
       {!product.inStock && (

@@ -20,32 +20,18 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
-# Login with demo account
-- runFlow:
-    when:
-      visible:
-        id: "home-signin-btn"
-    commands:
-      - tapOn:
-          id: "home-signin-btn"
-      - tapOn:
-          id: "demo-login-btn"
-      - assertVisible:
-          id: "home-screen"
+# Login with demo account. clearState above puts us on home with the
+# sign-in CTA — tap it directly (no conditional wrapper).
+- tapOn:
+    id: "home-signin-btn"
+- tapOn:
+    id: "demo-login-btn"
+- assertVisible:
+    id: "home-screen"
 
-# Clear cart first
+# Cart is empty after clearState — no need to clear.
 - runFlow:
     file: subflows/navigate-cart.yaml
-
-- runFlow:
-    when:
-      visible:
-        id: "clear-cart-btn"
-    commands:
-      - tapOn:
-          id: "clear-cart-btn"
-      - tapOn:
-          text: "Clear"
 
 # Add products to cart
 - runFlow:
