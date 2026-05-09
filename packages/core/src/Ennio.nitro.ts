@@ -333,7 +333,7 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   getAlertButtons(): string[];
 
   // ============================================
-  // Fast-mode Writes (in-app, no XCUI)
+  // In-app writes (no HID, no out-of-process driver)
   //
   // All actions resolve a UIView by accessibilityIdentifier (testID) and
   // drive sanctioned-ish UIKit APIs:

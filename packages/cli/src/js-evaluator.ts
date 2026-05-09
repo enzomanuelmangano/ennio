@@ -13,7 +13,7 @@
 import * as vm from 'vm';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 /**
  * Maestro-compatible synchronous http helper.
@@ -24,6 +24,9 @@ import { execSync } from 'child_process';
  */
 function createSyncHttp() {
   function send(method: string, url: string, opts: { headers?: Record<string, string>; body?: string } = {}) {
+    // execFileSync, not execSync: input flows directly into argv, never
+    // through a shell interpreter — no quote-escape contract to break,
+    // no glob/IFS/command-substitution surface.
     const args = ['-sS', '-X', method, '-w', '\n%{http_code}', url];
     for (const [k, v] of Object.entries(opts.headers || {})) {
       args.push('-H', `${k}: ${v}`);
@@ -31,10 +34,9 @@ function createSyncHttp() {
     if (opts.body !== undefined) {
       args.push('--data-binary', opts.body);
     }
-    const cmd = ['curl', ...args.map((a) => `'${String(a).replace(/'/g, `'\\''`)}'`)].join(' ');
     let stdout = '';
     try {
-      stdout = execSync(cmd, { encoding: 'utf-8', timeout: 30_000 });
+      stdout = execFileSync('curl', args, { encoding: 'utf-8', timeout: 30_000 });
     } catch (err: unknown) {
       const e = err as { stdout?: string };
       stdout = e.stdout || '';
