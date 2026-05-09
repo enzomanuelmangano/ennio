@@ -13,6 +13,7 @@
     "lint:fix": "turbo run lint -- --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "prepare": "husky",
     "android": "expo run:android",
     "ios": "expo run:ios"
   },
@@ -20,6 +21,8 @@
     "eslint": "^9.18.0",
     "eslint-config-expo": "^9.2.0",
     "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.3",
     "prettier": "^3.4.2",
     "turbo": "^2.0.0",
     "typescript": "^5.4.0",
