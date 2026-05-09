@@ -1,0 +1,26 @@
+diff --git a/src/pressables/base.tsx b/src/pressables/base.tsx
+index 76c4195764d5b0be6d5a4606247f4abac86dbe7c..73de7b7b67849a8a8298dbbb246fe14e12b7da76 100644
+--- a/src/pressables/base.tsx
++++ b/src/pressables/base.tsx
+@@ -324,9 +324,21 @@ const BasePressable: React.FC<BasePressableProps> = React.memo(
+       [defaultProps, rest]
+     );
+ 
++    // Mirror RN convention (Pressable / TouchableOpacity / View): testID
++    // becomes accessibilityIdentifier on iOS, and tappable controls are
++    // accessibility elements by default. RNGH's BaseButton accepts
++    // testID but does NOT propagate it, so e2e runners (Maestro,
++    // XCUITest, Detox) can't find pressto buttons by id without this.
++    const propsAny = mergedProps as Record<string, unknown>;
++    const testIDProp = propsAny.testID as string | undefined;
++    const a11yIdProp = (propsAny.accessibilityIdentifier as string | undefined) ?? testIDProp;
++    const accessibleProp = (propsAny.accessible as boolean | undefined) ?? true;
++
+     return (
+       <AnimatedBaseButton
+         {...mergedProps}
++        accessibilityIdentifier={a11yIdProp}
++        accessible={accessibleProp}
+         {...(hoverProps as any)}
+         style={[rest?.style ?? {}, rAnimatedStyle, cursorStyle]}
+         enabled={enabled}
