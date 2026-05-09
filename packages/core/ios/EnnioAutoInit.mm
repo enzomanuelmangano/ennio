@@ -27,6 +27,69 @@ static const int kEnnioDefaultPort = 9876;
 // Flag to track if Ennio has been initialized
 static BOOL _ennioInitialized = NO;
 
+// Distribution channel detection. Ennio is a dev / QA tool and must
+// refuse to start on App Store production or Enterprise builds — the
+// build-time `ENNIO_ENABLED` gate is necessary but not sufficient,
+// because a single CI misconfiguration could ship the pod.
+typedef NS_ENUM(NSInteger, EnnioDistribution) {
+    EnnioDistDev,
+    EnnioDistAdHoc,
+    EnnioDistTestFlight,
+    EnnioDistAppStore,
+    EnnioDistEnterprise,
+};
+
+static EnnioDistribution ennioDetectDistribution(void) {
+    NSURL* receiptURL = [NSBundle mainBundle].appStoreReceiptURL;
+    NSString* receiptName = receiptURL.lastPathComponent;
+
+    NSString* profilePath = [[NSBundle mainBundle] pathForResource:@"embedded" ofType:@"mobileprovision"];
+    NSData* profileData = profilePath ? [NSData dataWithContentsOfFile:profilePath] : nil;
+    // .mobileprovision is a CMS-signed blob; the embedded plist XML is
+    // ASCII inside binary noise. Latin-1 makes containsString: work
+    // without decode failures on the surrounding bytes.
+    NSString* profileStr = profileData
+        ? [[NSString alloc] initWithData:profileData encoding:NSISOLatin1StringEncoding]
+        : nil;
+
+    BOOL provisionsAllDevices = [profileStr containsString:@"<key>ProvisionsAllDevices</key>"];
+    BOOL hasProvisionedDevices = [profileStr containsString:@"<key>ProvisionedDevices</key>"];
+    BOOL hasProfile = (profileStr.length > 0);
+
+    // Enterprise: profile claims to provision all devices.
+    if (provisionsAllDevices) return EnnioDistEnterprise;
+
+    // Receipt-based channel detection (the device chose this at install
+    // time, not the build).
+    if ([receiptName isEqualToString:@"receipt"]) return EnnioDistAppStore;
+    if ([receiptName isEqualToString:@"sandboxReceipt"]) return EnnioDistTestFlight;
+
+    // Ad-Hoc: profile names a specific device list.
+    if (hasProvisionedDevices) return EnnioDistAdHoc;
+
+    // App Store distribution profile: no ProvisionedDevices, no
+    // ProvisionsAllDevices, and no receipt yet. This catches the
+    // sideloaded-production-IPA edge case where the build is signed
+    // with the App Store profile but Xcode/Configurator pushed it
+    // straight to a device without going through TestFlight or App
+    // Store, so no receipt was fetched.
+    if (hasProfile && !hasProvisionedDevices && !provisionsAllDevices) return EnnioDistAppStore;
+
+    // Simulator and Xcode-attached debug builds have no embedded
+    // profile at all. Treat as Dev.
+    return EnnioDistDev;
+}
+
+static NSString* ennioDistributionName(EnnioDistribution d) {
+    switch (d) {
+        case EnnioDistDev:        return @"Development";
+        case EnnioDistAdHoc:      return @"Ad-Hoc";
+        case EnnioDistTestFlight: return @"TestFlight";
+        case EnnioDistAppStore:   return @"App Store";
+        case EnnioDistEnterprise: return @"Enterprise";
+    }
+}
+
 /**
  * Hook into RCTHost's start method to capture the surface presenter
  */
@@ -118,6 +181,20 @@ static BOOL _ennioInitialized = NO;
     // Call original implementation
     [self ennio_start];
 
+    // Distribution gate. Even if the build-time gate slipped and Ennio
+    // is linked into an App Store / Enterprise binary, refuse to start
+    // the WS server, fiber walker, or banner. This is the runtime
+    // backstop to the `ENNIO_ENABLED=1` plugin gate.
+    EnnioDistribution dist = ennioDetectDistribution();
+    if (dist == EnnioDistAppStore || dist == EnnioDistEnterprise) {
+        NSLog(@"[Ennio] REFUSING to start: %@ distribution detected. "
+              @"Ennio must never run in App Store or Enterprise builds. "
+              @"Your build pipeline is leaking a remote-control surface — fix it.",
+              ennioDistributionName(dist));
+        return;
+    }
+    NSLog(@"[Ennio] Distribution: %@ — starting", ennioDistributionName(dist));
+
     // Pure-native bootstrap: pull RCTInstance from RCTHost's `_instance`
     // ivar, ask it to run a block on the JS thread once the runtime is
     // ready. Inside that block we have a `jsi::Runtime&` — capture it,
@@ -149,6 +226,13 @@ static BOOL _ennioInitialized = NO;
                 };
             [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(boot)];
             NSLog(@"[Ennio] Scheduled nativeBootstrap on JS thread");
+
+            // Loud, greppable announce. If this line ever shows up in
+            // Console.app on a non-dev device, the build pipeline has
+            // leaked Ennio into a build it shouldn't be in.
+            NSLog(@"[Ennio] WebSocket server listening on 127.0.0.1:%d (distribution: %@) — "
+                  @"if you see this in production, your build pipeline is broken.",
+                  kEnnioDefaultPort, ennioDistributionName(dist));
 
             // Show the top-right "E2E" ribbon. Tied to the same gate as
             // the WS server: if Ennio is in this build, the ribbon
