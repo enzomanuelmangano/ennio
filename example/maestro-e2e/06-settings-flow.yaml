@@ -20,19 +20,14 @@ tags:
 
 # Sign in so account-section settings (edit-profile, change-password,
 # sign-out) render — flow scrolls to and asserts those later.
-- runFlow:
-    when:
-      visible:
-        id: "home-signin-btn"
-    commands:
-      - tapOn:
-          id: "home-signin-btn"
-      - tapOn:
-          id: "demo-login-btn"
-      - assertNotVisible:
-          id: "demo-login-btn"
-      - assertVisible:
-          id: "home-screen"
+- tapOn:
+    id: "home-signin-btn"
+- tapOn:
+    id: "demo-login-btn"
+- assertNotVisible:
+    id: "demo-login-btn"
+- assertVisible:
+    id: "home-screen"
 
 # ============================================
 # TEST: Navigate to settings via quick action
@@ -138,7 +133,11 @@ tags:
 - tapOn:
     id: "toggle-personalized-ads"
 
-# Location services
+# Location services — below the fold after the previous toggles
+- scrollUntilVisible:
+    element:
+      id: "toggle-location"
+    direction: DOWN
 - assertVisible:
     id: "toggle-location"
 - tapOn:
@@ -150,21 +149,9 @@ tags:
 # TEST: Account settings (when logged in)
 # ============================================
 
-# Login first
+# Already logged in earlier — just navigate back to home.
 - runFlow:
     file: subflows/navigate-home.yaml
-- runFlow:
-    when:
-      visible:
-        id: "home-signin-btn"
-    commands:
-      - tapOn:
-          id: "home-signin-btn"
-      - tapOn:
-          id: "demo-login-btn"
-      - waitForAnimationToEnd
-      - assertNotVisible:
-          id: "demo-login-btn"
 
 - tapOn:
     id: "quick-action-settings"
@@ -278,14 +265,10 @@ tags:
 - tapOn:
     id: "toggle-dark-mode"
 
-# Defensive: dismiss any stray alert that may still be up before tab nav.
-- runFlow:
-    when:
-      visible:
-        text: "OK"
-    commands:
-      - tapOn:
-          text: "OK"
+# Defensive: dismiss any stray alert (optional — no-op when absent).
+- tapOn:
+    text: "OK"
+    optional: true
 
 # Navigate to other screens and verify dark mode
 - runFlow:

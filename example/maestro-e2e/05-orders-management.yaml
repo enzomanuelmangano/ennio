@@ -19,20 +19,15 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
-- runFlow:
-    when:
-      visible:
-        id: "home-signin-btn"
-    commands:
-      - tapOn:
-          id: "home-signin-btn"
-      - tapOn:
-          id: "demo-login-btn"
-      - waitForAnimationToEnd
-      - assertNotVisible:
-          id: "demo-login-btn"
-      - assertVisible:
-          id: "home-screen"
+- tapOn:
+    id: "home-signin-btn"
+- tapOn:
+    id: "demo-login-btn"
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "demo-login-btn"
+- assertVisible:
+    id: "home-screen"
 
 # ============================================
 # TEST: Navigate to orders via quick action
@@ -48,23 +43,11 @@ tags:
 # TEST: Orders list or empty state
 # ============================================
 
-- runFlow:
-    when:
-      visible:
-        id: "empty-orders"
-    commands:
-      - assertVisible:
-          text: "No orders yet"
-      - assertVisible:
-          id: "browse-products"
-
-- runFlow:
-    when:
-      visible:
-        id: "orders-list"
-    commands:
-      - assertVisible:
-          id: "orders-screen"
+# Empty state assertions — fresh demo user has no orders.
+- assertVisible:
+    text: "No orders yet"
+- assertVisible:
+    id: "browse-products"
 
 # ============================================
 # TEST: Navigate to orders via profile menu
@@ -89,54 +72,25 @@ tags:
 # TEST: Create an order for testing (if needed)
 # ============================================
 
+# Create a test order so subsequent assertions have something to look at.
 - runFlow:
-    when:
-      visible:
-        id: "empty-orders"
     file: subflows/create-test-order.yaml
 
-# ============================================
-# TEST: Order card displays correctly
-# ============================================
+# Orders list now populated.
+- assertVisible:
+    id: "orders-list"
 
-- runFlow:
-    when:
-      visible:
-        id: "orders-list"
-    commands:
-      # First order should be visible
-      - assertVisible:
-          id: "orders-list"
-
-# ============================================
-# TEST: View order details
-# ============================================
-
-- runFlow:
-    when:
-      visible:
-        id: "orders-list"
-    commands:
-      # Tap the order card. The status pill text "Processing" is unique
-      # to the order card so the runner can find it without guessing
-      # the auto-generated order id.
-      - tapOn:
-          text: "Processing"
-
-      # Order details modal should open
-      - assertVisible:
-          id: "order-details"
-
-      # Details should show shipping address
-      - assertVisible:
-          text: "Shipping"
-
-      # Close details
-      - tapOn:
-          id: "close-details"
-
-      - assertVisible:
-          id: "orders-screen"
+# View order details.
+- tapOn:
+    text: "Processing"
+- assertVisible:
+    id: "order-details"
+- assertVisible:
+    text: "Shipping"
+- tapOn:
+    id: "close-details"
+- assertVisible:
+    id: "orders-screen"
 
 # ============================================
 # TEST: Guest user orders view

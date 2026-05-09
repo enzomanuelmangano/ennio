@@ -20,38 +20,7 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
-# Logout if logged in
-- runFlow:
-    when:
-      notVisible:
-        id: "home-signin-btn"
-    commands:
-      - tapOn:
-          text: "Profile"
-      - scrollUntilVisible:
-          element:
-            id: "menu-logout"
-          direction: DOWN
-      - tapOn:
-          id: "menu-logout"
-      - tapOn:
-          text: "Sign Out"
-      - runFlow:
-          file: subflows/navigate-home.yaml
-
-# Clear cart if has items
-- runFlow:
-    file: subflows/navigate-cart.yaml
-
-- runFlow:
-    when:
-      visible:
-        id: "clear-cart-btn"
-    commands:
-      - tapOn:
-          id: "clear-cart-btn"
-      - tapOn:
-          text: "Clear"
+# clearState above already logs out & empties cart — no cleanup needed.
 
 # ============================================
 # PHASE 2: Browse as Guest

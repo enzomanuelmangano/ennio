@@ -26,9 +26,10 @@ name: Grammar — input commands (text, random, erase, clear, paste, key)
 - assertVisible:
     id: "fruit-apple"
 
-# clearText then re-input via random
-- clearText:
+# eraseText then re-input via random
+- tapOn:
     id: "search-input"
+- eraseText
 
 # pressKey on focused field
 - tapOn:
@@ -43,23 +44,27 @@ name: Grammar — input commands (text, random, erase, clear, paste, key)
 # inputRandomText (length 4)
 - tapOn:
     id: "search-input"
-- inputRandomText: 4
-- clearText:
+- inputRandomText:
+    length: 4
+- tapOn:
     id: "search-input"
+- eraseText
 
 # inputRandomNumber (length 6)
 - inputRandomNumber:
     length: 6
-- clearText:
+- tapOn:
     id: "search-input"
+- eraseText
 
 # Clipboard — copy + paste
 - inputText: "cherry"
 - assertVisible:
     id: "fruit-cherry"
 - setClipboard: "elderberry"
-- clearText:
+- tapOn:
     id: "search-input"
+- eraseText
 - pasteText
 - assertVisible:
     id: "fruit-elderberry"

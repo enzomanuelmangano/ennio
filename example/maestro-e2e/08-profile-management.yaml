@@ -26,36 +26,26 @@ tags:
 - tapOn:
     text: "Profile"
 
-# Should show guest view initially (if not logged in)
-- runFlow:
-    when:
-      visible:
-        id: "guest-view"
-    commands:
-      - assertVisible:
-          text: "Sign In"
-      - assertVisible:
-          id: "guest-signin-btn"
-      - assertVisible:
-          id: "guest-register-btn"
+# Guest view (clearState ensures we start logged out).
+- assertVisible:
+    text: "Sign In"
+- assertVisible:
+    id: "guest-signin-btn"
+- assertVisible:
+    id: "guest-register-btn"
 
 # ============================================
 # TEST: Login from guest profile
 # ============================================
 
-- runFlow:
-    when:
-      visible:
-        id: "guest-signin-btn"
-    commands:
-      - tapOn:
-          id: "guest-signin-btn"
-      - assertVisible:
-          id: "login-screen"
-      - tapOn:
-          id: "demo-login-btn"
-      - assertVisible:
-          id: "home-screen"
+- tapOn:
+    id: "guest-signin-btn"
+- assertVisible:
+    id: "login-screen"
+- tapOn:
+    id: "demo-login-btn"
+- assertVisible:
+    id: "home-screen"
 
 # Navigate back to profile
 - tapOn:
@@ -132,6 +122,10 @@ tags:
     id: "menu-terms"
 
 # Logout
+- scrollUntilVisible:
+    element:
+      id: "menu-logout"
+    direction: DOWN
 - assertVisible:
     id: "menu-logout"
 
@@ -150,8 +144,10 @@ tags:
 - assertVisible:
     id: "orders-screen"
 
-# Go back to profile
-- back
+# Go back to profile via tab bar — iOS RNScreens `back` is unreliable
+# from a Stack-pushed screen.
+- tapOn:
+    text: "Profile"
 - assertVisible:
     id: "profile-screen"
 
@@ -165,8 +161,9 @@ tags:
 - assertVisible:
     id: "settings-screen"
 
-# Go back
-- back
+# Go back via tab bar.
+- tapOn:
+    text: "Profile"
 - assertVisible:
     id: "profile-screen"
 
@@ -181,7 +178,8 @@ tags:
 - assertVisible:
     id: "settings-screen"
 
-- back
+- tapOn:
+    text: "Profile"
 - assertVisible:
     id: "profile-screen"
 

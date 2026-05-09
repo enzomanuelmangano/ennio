@@ -19,16 +19,7 @@ tags:
 - runFlow:
     file: subflows/navigate-cart.yaml
 
-# Clear cart if not empty
-- runFlow:
-    when:
-      visible:
-        id: "clear-cart-btn"
-    commands:
-      - tapOn:
-          id: "clear-cart-btn"
-      - tapOn:
-          text: "Clear"
+# Cart is empty after clearState; no cleanup needed.
 
 # ============================================
 # TEST: Empty cart state
@@ -78,6 +69,12 @@ tags:
 - runFlow:
     file: subflows/navigate-products.yaml
 
+# Sort + filter put Smart Watch Pro (`product-card-2`) below the
+# fold; scroll until it's in view before tapping.
+- scrollUntilVisible:
+    element:
+      id: "product-card-2"
+    direction: DOWN
 - tapOn:
     id: "product-card-2"
 
@@ -162,10 +159,16 @@ tags:
     element:
       id: "featured-product-1"
     direction: UP
-- scrollUntilVisible:
-    element:
-      id: "add-to-cart-featured-3"
-    direction: RIGHT
+
+# Featured carousel is a horizontal ScrollView nested under the home
+# vertical ScrollView. Maestro's scrollUntilVisible LEFT can't always
+# pick the right scroller (it picks the outer one and finds nothing
+# horizontal there); a couple of explicit LEFT swipes on the carousel
+# reliably advance it to product-3.
+- swipe:
+    direction: LEFT
+- swipe:
+    direction: LEFT
 - tapOn:
     id: "add-to-cart-featured-3"
 
