@@ -257,37 +257,37 @@ export default function ProductsScreen() {
   );
 
   return (
-    <View style={styles.container} testID="products-screen">
-      <FlatList
-        data={products}
-        numColumns={2}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.productsList}
-        columnWrapperStyle={products.length > 0 ? styles.productsRow : undefined}
-        renderItem={({ item }) => <ProductCard product={item} styles={styles} theme={theme} />}
-        testID="products-list"
-        contentInsetAdjustmentBehavior="automatic"
-        ListHeaderComponent={ListHeader}
-        ListEmptyComponent={
-          <View style={styles.emptyState} testID="no-products">
-            <View style={styles.emptyIconWrap}>
-              <Ionicons name="search-outline" size={36} color={theme.colors.text.muted} />
-            </View>
-            <Text style={styles.emptyTitle}>No products found</Text>
-            <Text style={styles.emptySubtitle}>Try adjusting your search or filters</Text>
-            <PressableScale
-              style={styles.resetButton}
-              onPress={() => {
-                setSearchQuery('');
-                useProductsStore.getState().setCategory('All');
-              }}
-              testID="reset-filters">
-              <Text style={styles.resetButtonText}>Reset Filters</Text>
-            </PressableScale>
+    <FlatList
+      style={styles.container}
+      data={products}
+      numColumns={2}
+      keyExtractor={item => item.id}
+      contentContainerStyle={styles.productsList}
+      columnWrapperStyle={products.length > 0 ? styles.productsRow : undefined}
+      renderItem={({ item }) => <ProductCard product={item} styles={styles} theme={theme} />}
+      testID="products-list"
+      accessibilityLabel="products-screen"
+      contentInsetAdjustmentBehavior="automatic"
+      ListHeaderComponent={ListHeader}
+      ListEmptyComponent={
+        <View style={styles.emptyState} testID="no-products">
+          <View style={styles.emptyIconWrap}>
+            <Ionicons name="search-outline" size={36} color={theme.colors.text.muted} />
           </View>
-        }
-      />
-    </View>
+          <Text style={styles.emptyTitle}>No products found</Text>
+          <Text style={styles.emptySubtitle}>Try adjusting your search or filters</Text>
+          <PressableScale
+            style={styles.resetButton}
+            onPress={() => {
+              setSearchQuery('');
+              useProductsStore.getState().setCategory('All');
+            }}
+            testID="reset-filters">
+            <Text style={styles.resetButtonText}>Reset Filters</Text>
+          </PressableScale>
+        </View>
+      }
+    />
   );
 }
 
@@ -296,6 +296,9 @@ const createStyles = (theme: Theme) =>
     container: {
       flex: 1,
       backgroundColor: theme.colors.background.primary,
+    },
+    list: {
+      flex: 1,
     },
     searchContainer: {
       flexDirection: 'row',
@@ -409,14 +412,15 @@ const createStyles = (theme: Theme) =>
       width: '48%',
       backgroundColor: theme.colors.background.elevated,
       borderRadius: theme.radii.lg,
-      marginBottom: 14,
-      overflow: 'hidden',
+      marginBottom: 16,
       ...theme.shadows.soft,
     },
     productImage: {
       width: '100%',
       height: 150,
       backgroundColor: theme.colors.background.tonal,
+      borderTopLeftRadius: theme.radii.lg,
+      borderTopRightRadius: theme.radii.lg,
     },
     outOfStockBadge: {
       position: 'absolute',

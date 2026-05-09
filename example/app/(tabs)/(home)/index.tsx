@@ -159,25 +159,24 @@ export default function HomeScreen() {
         />
       </View>
 
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Featured</Text>
-          <Link href="/(tabs)/(products)" asChild>
-            <PressableScale testID="see-all-featured">
-              <Text style={styles.seeAll}>See All</Text>
-            </PressableScale>
-          </Link>
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.featuredScroll}
-        >
-          {featuredProducts.map(product => (
-            <FeaturedProduct key={product.id} product={product} styles={styles} theme={theme} />
-          ))}
-        </ScrollView>
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>Featured</Text>
+        <Link href="/(tabs)/(products)" asChild>
+          <PressableScale testID="see-all-featured">
+            <Text style={styles.seeAll}>See All</Text>
+          </PressableScale>
+        </Link>
       </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.featuredScroll}
+        style={styles.featuredScrollOuter}
+      >
+        {featuredProducts.map(product => (
+          <FeaturedProduct key={product.id} product={product} styles={styles} theme={theme} />
+        ))}
+      </ScrollView>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Trending Now</Text>
@@ -315,6 +314,14 @@ const createStyles = (theme: Theme) =>
       paddingTop: 8,
       paddingBottom: 16,
     },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: 12,
+    },
     sectionHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -325,7 +332,6 @@ const createStyles = (theme: Theme) =>
       fontSize: 22,
       fontWeight: '700',
       color: theme.colors.text.primary,
-      marginBottom: 14,
       letterSpacing: -0.4,
     },
     seeAll: {
@@ -335,21 +341,26 @@ const createStyles = (theme: Theme) =>
       textDecorationLine: 'underline',
     },
 
+    featuredScrollOuter: {
+      paddingVertical: 6,
+    },
     featuredScroll: {
-      paddingRight: 20,
-      gap: 14,
+      paddingHorizontal: 20,
+      gap: 16,
+      paddingBottom: 18,
     },
     featuredCard: {
       width: 220,
       backgroundColor: theme.colors.background.elevated,
       borderRadius: theme.radii.lg,
-      overflow: 'hidden',
       ...theme.shadows.depth,
     },
     featuredImage: {
       width: '100%',
       height: 200,
       backgroundColor: theme.colors.background.tonal,
+      borderTopLeftRadius: theme.radii.lg,
+      borderTopRightRadius: theme.radii.lg,
     },
     featuredContent: {
       padding: 14,
@@ -392,14 +403,15 @@ const createStyles = (theme: Theme) =>
       flexDirection: 'row',
       backgroundColor: theme.colors.background.elevated,
       borderRadius: theme.radii.lg,
-      marginBottom: 12,
-      overflow: 'hidden',
+      marginBottom: 14,
       ...theme.shadows.soft,
     },
     trendingImage: {
       width: 110,
       height: 110,
       backgroundColor: theme.colors.background.tonal,
+      borderTopLeftRadius: theme.radii.lg,
+      borderBottomLeftRadius: theme.radii.lg,
     },
     trendingContent: {
       flex: 1,
