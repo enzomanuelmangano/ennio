@@ -116,7 +116,7 @@ export const mockProducts: Product[] = [
     description: 'Adjustable LED desk lamp with multiple brightness levels and color temperatures. USB charging port included.',
     price: 69.99,
     image: 'https://picsum.photos/seed/lamp/400/400',
-    category: 'Home',
+    category: 'Decor',
     rating: 4.3,
     reviews: 654,
     inStock: true,
@@ -128,7 +128,7 @@ export const mockProducts: Product[] = [
     description: 'Programmable coffee maker with built-in grinder. Makes up to 12 cups with thermal carafe.',
     price: 249.99,
     image: 'https://picsum.photos/seed/coffee/400/400',
-    category: 'Home',
+    category: 'Decor',
     rating: 4.7,
     reviews: 1123,
     inStock: true,
@@ -136,7 +136,7 @@ export const mockProducts: Product[] = [
   },
 ];
 
-export const categories = ['All', 'Electronics', 'Accessories', 'Sports', 'Home'];
+export const categories = ['All', 'Electronics', 'Accessories', 'Sports', 'Decor'];
 
 interface ProductsState {
   products: Product[];

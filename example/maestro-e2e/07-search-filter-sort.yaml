@@ -105,7 +105,7 @@ tags:
 
 # Home
 - tapOn:
-    id: "filter-category-home"
+    id: "filter-category-decor"
 - assertVisible:
     id: "products-list"
 
