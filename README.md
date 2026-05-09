@@ -15,7 +15,7 @@ ennio e2e/                       # every *.yaml in the directory
 ```
 ┌─ host machine ────────────────────────────────────┐
 │  ennio CLI (Bun)                                  │
-│    EnnioClient ──ws :9876──► device               │
+│    EnnioClient ──ws 127.0.0.1:9876──► same host   │
 │    idb subprocess (HID input)                     │
 └────────────────────────────┬──────────────────────┘
                              │
@@ -141,7 +141,9 @@ npm install -D @ennio/cli
 > When Ennio is active in a build, a red diagonal **E2E** ribbon
 > appears in the top-right corner of every screen — a visible
 > reminder that the build carries the remote-control surface and is
-> not for production distribution.
+> not for production distribution. If a build with Ennio enabled is
+> archived for App Store or Enterprise distribution, the runtime
+> refuses to start: no server, no fiber walker, no ribbon.
 
 Enable for E2E:
 
@@ -286,6 +288,24 @@ example/        Sample app + e2e/ flows (10 example flows, the
 > `ENNIO_ENABLED=1` at prebuild time. Production builds without that
 > env var are byte-equivalent to a build that never had the package.
 
+### Defense layers
+
+Ennio applies four independent gates. A misconfiguration of any single
+layer still leaves the others in place.
+
+| Layer | Stage | Mechanism |
+|-------|-------|-----------|
+| 1 | Plugin (build time) | `@ennio/expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols. |
+| 2 | Runtime (app launch) | `EnnioAutoInit` parses `appStoreReceiptURL` + `embedded.mobileprovision` and refuses to start the server, fiber walker, or ribbon on App Store / Enterprise distribution — even if the build-time gate slipped. |
+| 3 | Network (server bind) | WebSocket server binds to `127.0.0.1` only. Off-host LAN traffic is refused at `bind()`. |
+| 4 | Visual | When all three above are bypassed and Ennio is in fact running, the red diagonal **E2E** ribbon paints in the top-right corner of every screen — visible on every screenshot, App Store reviewer included. |
+
+Allowed channels (layer 2): Development, Ad-Hoc, TestFlight (sandbox
+receipt). Refused: App Store production receipt, Enterprise
+provisioning profile (`ProvisionsAllDevices=true`), and App Store
+distribution profiles installed by sideload (no receipt + no
+`ProvisionedDevices`).
+
 ### Installed vs enabled
 
 | Action | Effect on production build |
@@ -301,10 +321,11 @@ and shipped to TestFlight / App Store.
 
 ### What "active" means
 
-When Ennio is active (`ENNIO_ENABLED=1` was set at prebuild for this
-build), a native WebSocket server bound to port `9876` listens for JSON
-commands. Any process that can reach the simulator host (`localhost`,
-LAN, or anything routable to the device) can:
+When Ennio is active (`ENNIO_ENABLED=1` was set at prebuild **and** the
+build is not App Store / Enterprise distribution), a native WebSocket
+server bound to `127.0.0.1:9876` listens for JSON commands. Only
+same-host processes can connect — off-host LAN traffic is refused at
+the bind. A same-host process can:
 
 - Read the entire React tree — every visible label, every TextInput
   value, every navigation state.
@@ -315,9 +336,11 @@ LAN, or anything routable to the device) can:
   prompts → no UI confirmation.
 - Force tab switches, pop nav stacks, dismiss alerts, scroll content.
 
-Same threat model as Reactotron, Flipper, React DevTools — and worse,
-because the write surface is unauthenticated and bound on all
-interfaces.
+Same threat model as Reactotron, Flipper, and React DevTools: an
+unauthenticated control surface scoped to the local host. Different in
+that Ennio writes can fire `onPress` synchronously without going
+through the iOS gesture pipeline — biometrics and confirmation alerts
+do not gate the call.
 
 ### Default = OFF
 
@@ -372,18 +395,17 @@ nm -gU build/Build/Products/Release-iphoneos/YourApp.app/YourApp \
 - **Treat the gate as a hard rule.** The plugin defaults to off; any CI
   workflow that sets `ENNIO_ENABLED=1` on a production target is a
   policy violation, not a feature.
-- **Pin the WS bind to loopback.** Defense in depth — even an active
-  Ennio binary on a real device shouldn't be reachable across LAN.
-  (Current code binds to `INADDR_ANY` for sim convenience; switch to
-  `127.0.0.1` before any real-device run if that path matters.)
-- **Treat any prod build with Ennio active as an incident.** Pull the
-  build, audit who could have reached affected devices, rotate any
-  credentials that could have been in scope (anything visible in
-  TextInput state qualifies).
-- **Consider a bake-time token.** Embed a per-build secret read by both
-  the WS server and the CLI; reject unauthenticated frames. This blocks
-  the worst case where a misbuilt binary leaks but the attacker doesn't
-  yet know the token.
+- **Treat any prod build with Ennio active as an incident.** If
+  `[Ennio] WebSocket server listening` ever shows up in Console.app on
+  a build that wasn't supposed to carry Ennio, pull the build, audit
+  who could have reached affected devices, and rotate any credentials
+  that could have been in scope (anything visible in TextInput state
+  qualifies).
+- **Consider a bake-time token (not shipped).** Defense in depth
+  against the exotic case of a same-host malicious app on a developer
+  device: embed a per-build secret read by both the WS server and the
+  CLI; reject unauthenticated frames. Out of scope today — the four
+  shipped layers cover the realistic attack surface.
 
 ## Limitations
 
