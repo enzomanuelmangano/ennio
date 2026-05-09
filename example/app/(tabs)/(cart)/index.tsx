@@ -58,6 +58,7 @@ function CartItem({
               style={styles.quantityBtn}
               onPress={() => handleQuantityChange(-1)}
               testID={`decrease-qty-${item.product.id}`}
+              hitSlop={6}
             >
               <Ionicons name="remove" size={16} color={theme.colors.text.primary} />
             </Pressable>
@@ -68,6 +69,7 @@ function CartItem({
               style={styles.quantityBtn}
               onPress={() => handleQuantityChange(1)}
               testID={`increase-qty-${item.product.id}`}
+              hitSlop={6}
             >
               <Ionicons name="add" size={16} color={theme.colors.text.primary} />
             </Pressable>
@@ -241,6 +243,7 @@ const createStyles = (theme: Theme) =>
       borderRadius: theme.radii.lg,
       padding: 14,
       marginBottom: 12,
+      borderCurve: 'continuous',
       ...theme.shadows.soft,
     },
     itemImage: {
@@ -248,6 +251,7 @@ const createStyles = (theme: Theme) =>
       height: 84,
       borderRadius: theme.radii.md,
       backgroundColor: theme.colors.background.tonal,
+      borderCurve: 'continuous',
     },
     itemContent: {
       flex: 1,
@@ -284,6 +288,7 @@ const createStyles = (theme: Theme) =>
       alignItems: 'center',
       backgroundColor: theme.colors.background.tonal,
       borderRadius: theme.radii.pill,
+      borderCurve: 'continuous',
     },
     quantityBtn: {
       width: 28,
@@ -291,6 +296,7 @@ const createStyles = (theme: Theme) =>
       borderRadius: theme.radii.pill,
       alignItems: 'center',
       justifyContent: 'center',
+      borderCurve: 'continuous',
     },
     quantity: {
       fontSize: 14,
@@ -312,6 +318,7 @@ const createStyles = (theme: Theme) =>
       borderRadius: theme.radii.lg,
       padding: 18,
       marginBottom: 14,
+      borderCurve: 'continuous',
       ...theme.shadows.soft,
     },
     summaryRow: {
@@ -364,6 +371,7 @@ const createStyles = (theme: Theme) =>
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
+      borderCurve: 'continuous',
       ...theme.shadows.depth,
     },
     checkoutText: {
@@ -408,6 +416,7 @@ const createStyles = (theme: Theme) =>
       paddingHorizontal: 32,
       paddingVertical: 14,
       borderRadius: theme.radii.pill,
+      borderCurve: 'continuous',
     },
     shopButtonText: {
       color: theme.colors.text.onAccent,

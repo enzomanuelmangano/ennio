@@ -324,11 +324,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    boxShadow: '0px 1px 2px rgba(0, 0, 0, 0.1)',
+    borderCurve: 'continuous',
   },
   orderHeader: {
     flexDirection: 'row',
@@ -352,6 +349,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   statusIcon: {
     fontSize: 12,
@@ -376,6 +374,7 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 8,
     backgroundColor: '#f0f0f0',
+    borderCurve: 'continuous',
   },
   itemInfo: {
     flex: 1,
@@ -446,6 +445,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
     paddingVertical: 14,
     borderRadius: 25,
+    borderCurve: 'continuous',
   },
   browseButtonText: {
     color: '#fff',
@@ -469,6 +469,7 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '100%',
     maxHeight: '90%',
+    borderCurve: 'continuous',
   },
   detailsHeader: {
     flexDirection: 'row',
@@ -511,6 +512,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 6,
     backgroundColor: '#f0f0f0',
+    borderCurve: 'continuous',
   },
   detailItemInfo: {
     flex: 1,
@@ -555,6 +557,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 10,
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   trackButtonText: {
     color: '#fff',

@@ -69,6 +69,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     marginBottom: 12,
+    borderCurve: 'continuous',
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   last: { marginTop: 16, color: '#34C759', fontSize: 18 },

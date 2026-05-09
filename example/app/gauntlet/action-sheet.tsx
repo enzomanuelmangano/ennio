@@ -41,7 +41,13 @@ export default function ActionSheetScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20 },
   title: { fontSize: 22, fontWeight: '600', marginBottom: 24 },
-  button: { backgroundColor: '#007AFF', padding: 14, borderRadius: 10, alignItems: 'center' },
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderCurve: 'continuous',
+  },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   picked: { marginTop: 16, color: '#34C759', fontSize: 18 },
 });
