@@ -61,7 +61,7 @@ function ProductCard({
             style={[styles.addToCartBtn, !product.inStock && styles.addToCartBtnDisabled]}
             onPress={handleAddToCart}
             disabled={!product.inStock}
-            testID={`add-to-cart-${product.id}`}
+            testID={`add-to-cart-${product.id}`} hitSlop={4}
           >
             <Ionicons name="add" size={20} color={theme.colors.text.onAccent} />
           </Pressable>
@@ -315,6 +315,7 @@ const createStyles = (theme: Theme) =>
       backgroundColor: theme.colors.background.tonal,
       borderRadius: theme.radii.md,
       paddingHorizontal: 14,
+      borderCurve: 'continuous',
       ...theme.shadows.inset,
     },
     searchIcon: {
@@ -341,6 +342,7 @@ const createStyles = (theme: Theme) =>
       paddingVertical: 8,
       backgroundColor: theme.colors.background.tonal,
       borderRadius: theme.radii.pill,
+      borderCurve: 'continuous',
     },
     categoryChipActive: {
       backgroundColor: theme.colors.accent.ink,
@@ -373,6 +375,7 @@ const createStyles = (theme: Theme) =>
       paddingHorizontal: 14,
       paddingVertical: 8,
       borderRadius: theme.radii.pill,
+      borderCurve: 'continuous',
     },
     sortButtonText: {
       fontSize: 13,
@@ -390,6 +393,7 @@ const createStyles = (theme: Theme) =>
       borderRadius: theme.radii.lg,
       width: '82%',
       paddingVertical: 6,
+      borderCurve: 'continuous',
       ...theme.shadows.depth,
     },
     sortOption: {
@@ -419,6 +423,7 @@ const createStyles = (theme: Theme) =>
       backgroundColor: theme.colors.background.elevated,
       borderRadius: theme.radii.lg,
       marginBottom: 16,
+      borderCurve: 'continuous',
       ...theme.shadows.soft,
     },
     productImage: {
@@ -427,6 +432,7 @@ const createStyles = (theme: Theme) =>
       backgroundColor: theme.colors.background.tonal,
       borderTopLeftRadius: theme.radii.lg,
       borderTopRightRadius: theme.radii.lg,
+      borderCurve: 'continuous',
     },
     outOfStockBadge: {
       position: 'absolute',
@@ -436,6 +442,7 @@ const createStyles = (theme: Theme) =>
       paddingHorizontal: 8,
       paddingVertical: 4,
       borderRadius: 4,
+      borderCurve: 'continuous',
     },
     outOfStockText: {
       color: '#FFFFFF',
@@ -491,6 +498,7 @@ const createStyles = (theme: Theme) =>
       borderRadius: theme.radii.pill,
       alignItems: 'center',
       justifyContent: 'center',
+      borderCurve: 'continuous',
     },
     addToCartBtnDisabled: {
       backgroundColor: theme.colors.text.muted,
@@ -528,6 +536,7 @@ const createStyles = (theme: Theme) =>
       paddingVertical: 11,
       backgroundColor: theme.colors.accent.ink,
       borderRadius: theme.radii.pill,
+      borderCurve: 'continuous',
     },
     resetButtonText: {
       color: theme.colors.text.onAccent,
@@ -542,6 +551,7 @@ const createStyles = (theme: Theme) =>
       alignSelf: 'flex-start',
       borderRadius: theme.radii.pill,
       backgroundColor: theme.colors.background.tonal,
+      borderCurve: 'continuous',
     },
     resetTopButtonText: {
       color: theme.colors.text.primary,

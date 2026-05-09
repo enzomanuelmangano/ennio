@@ -1,5 +1,6 @@
 import expoConfig from 'eslint-config-expo/flat.js';
 import prettierConfig from 'eslint-config-prettier';
+import refined from 'eslint-plugin-refined';
 import tseslint from 'typescript-eslint';
 
 const unusedVarsOptions = {
@@ -29,6 +30,18 @@ export default [
   },
   ...expoConfig,
   prettierConfig,
+  {
+    files: ['example/**/*.{ts,tsx}'],
+    plugins: { refined },
+    rules: refined.configs.recommended.rules,
+  },
+  {
+    // Gauntlet intentionally exercises every touchable variant; disable
+    // the avoid-touchable-opacity rule there. example/src/App.tsx is the
+    // legacy non-router demo and isn't part of the live app surface.
+    files: ['example/app/gauntlet/**/*.{ts,tsx}', 'example/src/**/*.{ts,tsx}'],
+    rules: { 'refined/avoid-touchable-opacity': 'off' },
+  },
   {
     files: ['**/*.{ts,tsx}'],
     plugins: { '@typescript-eslint': tseslint.plugin },

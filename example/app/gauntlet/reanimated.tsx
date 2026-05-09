@@ -47,6 +47,7 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     paddingHorizontal: 32,
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   buttonText: { color: '#fff', fontSize: 17, fontWeight: '600' },
 });

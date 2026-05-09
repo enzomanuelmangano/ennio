@@ -107,7 +107,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '600', marginBottom: 24 },
   row: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 12 },
   rowLabel: { width: 120, fontSize: 14 },
-  btn: { backgroundColor: '#007AFF', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 },
+  btn: { backgroundColor: '#007AFF', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8,
+  borderCurve: 'continuous' },
   btnText: { color: '#fff', fontWeight: '600' },
   rowCount: { fontSize: 16, fontWeight: '700', minWidth: 30, textAlign: 'right' },
 });

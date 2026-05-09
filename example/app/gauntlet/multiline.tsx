@@ -26,6 +26,7 @@ export default function MultilineScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20 },
   title: { fontSize: 22, fontWeight: '600', marginBottom: 16 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 12, minHeight: 140 },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 12, minHeight: 140,
+  borderCurve: 'continuous' },
   count: { marginTop: 12, color: '#666' },
 });

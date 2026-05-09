@@ -61,6 +61,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    borderCurve: 'continuous',
   },
   boxLabel: { color: '#fff', fontWeight: '600' },
   button: {
@@ -69,6 +70,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginTop: 48,
     paddingHorizontal: 32,
+    borderCurve: 'continuous',
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   counter: { marginTop: 12 },

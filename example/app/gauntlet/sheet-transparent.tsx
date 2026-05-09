@@ -40,6 +40,7 @@ const styles = StyleSheet.create({
     gap: 12,
     width: '100%',
     maxWidth: 360,
+    borderCurve: 'continuous',
   },
   title: { fontSize: 22, fontWeight: '700' },
   body: { fontSize: 14, color: '#666' },
@@ -49,6 +50,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     alignItems: 'center',
     marginTop: 4,
+    borderCurve: 'continuous',
   },
   btnText: { color: '#fff', fontWeight: '600' },
 });

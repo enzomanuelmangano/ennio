@@ -64,6 +64,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     marginTop: 12,
+    borderCurve: 'continuous',
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   opened: { marginTop: 12, color: '#34C759' },

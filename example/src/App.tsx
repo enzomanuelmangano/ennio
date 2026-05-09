@@ -547,6 +547,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     borderRadius: 12,
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   buttonDisabled: {
     opacity: 0.7,
@@ -568,6 +569,7 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: '#e0e7ff',
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   infoText: {
     fontSize: 14,
@@ -593,6 +595,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     color: '#1e293b',
+    borderCurve: 'continuous',
   },
   inputError: {
     borderColor: '#ef4444',
@@ -658,6 +661,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   listItemSelected: {
     backgroundColor: '#eef2ff',
@@ -693,6 +697,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginVertical: 16,
+    borderCurve: 'continuous',
   },
   lastActionLabel: {
     fontSize: 12,
@@ -717,6 +722,7 @@ const styles = StyleSheet.create({
     width: '85%',
     maxWidth: 400,
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   modalTitle: {
     fontSize: 20,
@@ -742,6 +748,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     minWidth: 100,
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   cancelButton: {
     backgroundColor: '#f1f5f9',

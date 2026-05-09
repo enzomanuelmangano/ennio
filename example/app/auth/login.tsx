@@ -292,6 +292,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    borderCurve: 'continuous',
   },
   inputDark: {
     backgroundColor: '#1a1a2e',
@@ -336,6 +337,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     marginBottom: 20,
+    borderCurve: 'continuous',
   },
   loginButtonDisabled: {
     backgroundColor: '#99c9ff',
@@ -371,6 +373,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
     marginBottom: 16,
+    borderCurve: 'continuous',
   },
   demoButtonDark: {
     backgroundColor: '#1a1a2e',
@@ -396,6 +399,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 6,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    borderCurve: 'continuous',
   },
   socialButtonDark: {
     backgroundColor: '#1a1a2e',

@@ -64,12 +64,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#007AFF',
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   btnSecondary: {
     padding: 14,
     borderRadius: 8,
     backgroundColor: '#666',
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   btnText: { color: '#fff', fontWeight: '600' },
   innerBackdrop: {
@@ -86,6 +88,7 @@ const styles = StyleSheet.create({
     gap: 12,
     width: '100%',
     maxWidth: 320,
+    borderCurve: 'continuous',
   },
   innerTitle: { fontSize: 20, fontWeight: '700' },
 });
