@@ -136,6 +136,17 @@ public:
     static bool invokeOnPressFromCpp(const std::string& testID);
 
     /**
+     * Walk every fiber root, find a fiber whose RawText / stateNode
+     * matches `text`, then walk the .return chain to invoke the
+     * surrounding Pressable / TouchableOpacity / RNGH BaseButton's
+     * onPress. Used by tap-by-text when the runner can't reach RN
+     * gesture recognisers via synthesised UITouches (pressto's
+     * PressableScale, RNGH BaseButton — synth UITouch never settles
+     * the tap recogniser, so the press handler never fires).
+     */
+    static bool invokeOnPressByTextFromCpp(const std::string& text);
+
+    /**
      * JS-thread executor — wraps `RCTInstance.callFunctionOnBufferedRuntimeExecutor:`
      * (or any equivalent scheduler) so the WS-server thread can
      * dispatch fiber-walks back onto JS. Stored once during bootstrap.

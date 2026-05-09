@@ -151,9 +151,10 @@ export class NitroWriter implements Writer {
     // scrolls inside a vertical-host page (featured carousel under a
     // ScrollView) fool the topmost-scrollable heuristic, so use a
     // synthesised swipe at the centre — UIKit hands it to whichever
-    // recogniser claims it. Finger direction inverts vs content.
+    // recogniser claims it. Maestro convention: `LEFT` is finger
+    // right→left (advance to next page); `RIGHT` is left→right.
     if (direction === 'left' || direction === 'right') {
-      const endX = direction === 'right' ? SAFE_CENTER_X - distance : SAFE_CENTER_X + distance;
+      const endX = direction === 'right' ? SAFE_CENTER_X + distance : SAFE_CENTER_X - distance;
       try {
         await this.swipeAtPoints(SAFE_CENTER_X, SAFE_CENTER_Y, endX, SAFE_CENTER_Y, DEFAULT_SWIPE_DURATION_MS);
       } catch { /* best effort */ }
@@ -214,16 +215,18 @@ export class NitroWriter implements Writer {
     // update like useSafeAreaInsets's 0→real value transition.
     if (selector.id && !selector.text && !selector.point) {
       const screen = await this.getScreenSize();
-      for (let i = 0; i < 8; i++) {
+      // Brief retry only for the window=nil race (view in Fabric tree but
+      // not yet attached to a window — happens on the first tap after a
+      // layout-causing prop update). NO auto-scroll: parity with Maestro
+      // / XCUI, where `tapOn id: X` refuses to find an off-screen element
+      // and the caller must `scrollUntilVisible` first. Auto-scrolling
+      // here masked legitimate flow bugs (off-screen taps that a real
+      // finger could never deliver) and let Ennio pass flows that
+      // Maestro correctly failed.
+      for (let i = 0; i < 4; i++) {
         const r = await this.send('getViewWindowFrame', { testID: selector.id });
         const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
         if (data && data.width > 0 && data.height > 0) {
-          // Element is in Fabric tree and attached to a window, but the
-          // tap centre might still be off the visible screen if the host
-          // FlatList / ScrollView is positioned past the viewport.
-          // Maestro auto-scrolls in this case; do the same so flows that
-          // rely on second-row product cards (etc.) don't have to add
-          // explicit scroll commands.
           const cx = data.x + data.width / 2;
           const cy = data.y + data.height / 2;
           const onScreen = cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height;
@@ -233,35 +236,9 @@ export class NitroWriter implements Writer {
             }
             return { x: cx, y: cy };
           }
-          // Try to scroll the host into view, then re-measure. Pick
-          // axis based on which side of the screen the centre is past;
-          // horizontal carousels (featured products row) need a "right"
-          // scroll, vertical lists need "down".
-          const dx = cx < 0 ? cx - 100 : cx > screen.width ? cx - screen.width + 100 : 0;
-          const dy = cy < 0 ? cy - 100 : cy > screen.height ? cy - screen.height + 200 : 0;
-          if (Math.abs(dx) > Math.abs(dy) && dx !== 0) {
-            await this.scrollAuto(dx > 0 ? 'right' : 'left', Math.abs(dx), selector.id);
-          } else if (dy !== 0) {
-            await this.scrollAuto(dy > 0 ? 'down' : 'up', Math.abs(dy), selector.id);
-          }
-          await new Promise((res) => setTimeout(res, 200));
-          continue;
-        }
-        // No UIView (window=nil) — element exists in Fabric tree but is
-        // virtualised below the FlatList's render window. Use Fabric's
-        // accumulated offset to figure out which way to scroll, then let
-        // the next iteration pick it up via getViewWindowFrame.
-        const found = await this.client.findBySelector(selector);
-        const layout = (found as { layout?: { screenX: number; screenY: number; width: number; height: number } } | null | undefined)?.layout;
-        if (layout && layout.height > 0) {
-          const offset = await this.getSurfaceOffset();
-          const cy = layout.screenY + layout.height / 2 + offset.y;
-          const dy = cy < 0 ? cy - 100 : cy - screen.height + 200;
-          if (Math.abs(dy) > 50) {
-            await this.scrollAuto(dy > 0 ? 'down' : 'up', Math.abs(dy));
-            await new Promise((res) => setTimeout(res, 200));
-            continue;
-          }
+          // UIView found but its centre lies outside the visible viewport.
+          // Refuse — the caller is expected to scroll first.
+          return null;
         }
         await new Promise((res) => setTimeout(res, 100));
       }
@@ -375,13 +352,33 @@ export class NitroWriter implements Writer {
       await this.scrollAuto(direction, distance, testID ?? '');
       return true;
     }
-    // Horizontal: synthesise a swipe at viewport centre. UIKit hands it
-    // to whichever recogniser claims it. Native testID-anchored scroll
-    // doesn't reliably hit horizontal carousels.
-    let endX = SAFE_CENTER_X;
-    if (direction === 'right') endX = SAFE_CENTER_X - distance;
-    else if (direction === 'left') endX = SAFE_CENTER_X + distance;
-    return this.swipeAtPoints(SAFE_CENTER_X, SAFE_CENTER_Y, endX, SAFE_CENTER_Y, DEFAULT_SWIPE_DURATION_MS);
+    // Horizontal: drive idb HID directly. Synthesised UITouches aren't
+    // recognised by RN's RCTScrollView pan gesture (the React-side
+    // offset state re-syncs immediately after a setContentOffset) so
+    // paged carousels never advance. idb injects real iOS touches at
+    // the simulator level, the pan recogniser sees them, and the page
+    // snaps as it would for a real finger.
+    // Maestro convention: `direction: LEFT` is finger right→left
+    // (advance to next page); `RIGHT` is left→right.
+    // Drive idb HID for horizontal swipes. Synthesised UITouch
+    // sequences don't reliably reach RCTScrollView's pan recogniser
+    // (RN re-syncs contentOffset to React state immediately after
+    // direct setContentOffset, and the synth Began→Moved→Ended path
+    // doesn't fire the recogniser's state machine for paging-enabled
+    // scrollers). idb routes through the simulator's IOHID layer so
+    // the recogniser sees real touches and the page snaps.
+    const screen = await this.getScreenSize();
+    const startX = direction === 'left' ? screen.width - 40 : 40;
+    const endX = direction === 'left' ? 40 : screen.width - 40;
+    const midY = SAFE_CENTER_Y;
+    try {
+      await idb.swipe(startX, midY, endX, midY, DEFAULT_SWIPE_DURATION_MS);
+      return true;
+    } catch { /* fall back to synthesised UITouch path below */ }
+    let endXSynth = SAFE_CENTER_X;
+    if (direction === 'right') endXSynth = SAFE_CENTER_X + distance;
+    else if (direction === 'left') endXSynth = SAFE_CENTER_X - distance;
+    return this.swipeAtPoints(SAFE_CENTER_X, SAFE_CENTER_Y, endXSynth, SAFE_CENTER_Y, DEFAULT_SWIPE_DURATION_MS);
   }
   async swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
     return this.scroll(testID, direction, distance);
@@ -448,6 +445,13 @@ export class NitroWriter implements Writer {
     const tab = await this.send('tapTabByName', { name: text });
     if (process.env.ENNIO_DEBUG_IDB) console.error(`[tapByText] '${text}' tabSwitch=${tab?.success}`);
     if (tab?.success === true) return true;
+    // Fiber-walker dispatch. Finds the React fiber whose RawText
+    // matches `text`, walks .return to the surrounding Pressable, and
+    // calls onPress directly. Necessary for RNGH BaseButton (pressto
+    // PressableScale) — its pan/tap recogniser refuses synthesised
+    // UITouches, so the coord-tap path below never fires onPress.
+    const fiber = await this.send('invokeOnPressByText', { text });
+    if (fiber?.success === true) return true;
     // Coord-based tap at the matched label's centre. The Nitro
     // `tapAtPoint` chain handles every touch class we can reach in
     // process: UIControl with TouchUpInside actions, RNBetterTapGestureRecognizer
