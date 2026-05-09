@@ -100,17 +100,6 @@
         "@expo/config-plugins": "^9.0.0",
       },
     },
-    "packages/test": {
-      "name": "@ennio/test",
-      "version": "0.1.0",
-      "devDependencies": {
-        "typescript": "^5.0.0",
-      },
-      "peerDependencies": {
-        "@ennio/core": "*",
-        "react-native": ">=0.74.0",
-      },
-    },
   },
   "patchedDependencies": {
     "pressto@0.6.1": "patches/pressto@0.6.1.patch",
@@ -319,8 +308,6 @@
     "@ennio/core": ["@ennio/core@workspace:packages/core"],
 
     "@ennio/expo-plugin": ["@ennio/expo-plugin@workspace:packages/expo-plugin"],
-
-    "@ennio/test": ["@ennio/test@workspace:packages/test"],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.21.5", "", { "os": "aix", "cpu": "ppc64" }, "sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ=="],
 
