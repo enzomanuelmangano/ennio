@@ -24,7 +24,6 @@ tags:
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 5000
 
 # Ensure dark mode is off first
 # (We'll toggle twice to ensure consistent state)
@@ -53,7 +52,6 @@ tags:
 
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
 
 # Home should be in dark mode
 - assertVisible:
@@ -68,7 +66,6 @@ tags:
 
 - assertVisible:
     id: "products-screen"
-    timeout: 5000
 
 - assertVisible:
     id: "search-input"
@@ -84,7 +81,6 @@ tags:
 
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 5000
 
 - assertVisible:
     id: "product-title"
@@ -101,10 +97,7 @@ tags:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    anyOf:
-      - id: "cart-screen"
-      - id: "cart-screen-empty"
-    timeout: 5000
+    id: "cart-root"
 
 # ============================================
 # TEST: Dark mode on profile (guest)
@@ -114,10 +107,7 @@ tags:
     text: "Profile"
 
 - assertVisible:
-    anyOf:
-      - id: "profile-screen"
-      - id: "guest-view"
-    timeout: 5000
+    id: "profile-root"
 
 # ============================================
 # TEST: Dark mode on login screen
@@ -132,7 +122,6 @@ tags:
           id: "guest-signin-btn"
       - assertVisible:
           id: "login-screen"
-          timeout: 5000
       - assertVisible:
           id: "email-input"
       - assertVisible:
@@ -151,7 +140,6 @@ tags:
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 5000
 
 - tapOn:
     id: "toggle-dark-mode"
@@ -165,23 +153,18 @@ tags:
 
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
 
 - runFlow:
     file: subflows/navigate-products.yaml
 
 - assertVisible:
     id: "products-screen"
-    timeout: 5000
 
 - runFlow:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    anyOf:
-      - id: "cart-screen"
-      - id: "cart-screen-empty"
-    timeout: 5000
+    id: "cart-root"
 
 # ============================================
 # TEST: Dark mode with authenticated user
@@ -203,7 +186,6 @@ tags:
 
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
 
 # Enable dark mode
 - tapOn:
@@ -217,7 +199,6 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 - assertVisible:
     id: "profile-header"
@@ -227,10 +208,7 @@ tags:
     id: "menu-orders"
 
 - assertVisible:
-    anyOf:
-      - id: "orders-screen"
-      - id: "empty-orders"
-    timeout: 5000
+    id: "orders-screen"
 
 # ============================================
 # CLEANUP: Restore light mode

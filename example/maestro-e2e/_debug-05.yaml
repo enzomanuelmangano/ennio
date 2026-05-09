@@ -16,5 +16,4 @@ name: "Debug 05"
           id: "demo-login-btn"
       - assertVisible:
           id: "home-screen"
-          timeout: 5000
 - takeScreenshot: "/tmp/ennio-shots/probe-after-login.png"

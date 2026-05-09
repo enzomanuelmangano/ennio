@@ -6,17 +6,21 @@ name: "Gauntlet — FlashList"
 - tapOn: "Gauntlet"
 - assertVisible:
     id: "gauntlet-screen"
+- scrollUntilVisible:
+    element:
+      id: "g-flashlist"
+    direction: DOWN
 - tapOn:
     id: "g-flashlist"
 - assertVisible:
     id: "flashlist-screen"
-    timeout: 4000
 - assertVisible:
     id: "flash-0"
 - assertVisible:
     text: "Item #1"
-- scroll:
+- scrollUntilVisible:
+    element:
+      text: "Item #5"
     direction: DOWN
-    amount: 800
 - assertVisible:
     text: "Item #5"

@@ -19,4 +19,3 @@ appId: com.ennio.example
           text: "Clear"
       - assertVisible:
           id: "cart-screen-empty"
-          timeout: 2000

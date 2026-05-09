@@ -10,7 +10,4 @@ appId: com.ennio.example
 - tapOn:
     text: "Cart"
 - assertVisible:
-    anyOf:
-      - id: "cart-screen"
-      - id: "cart-screen-empty"
-    timeout: 5000
+    id: "cart-root"

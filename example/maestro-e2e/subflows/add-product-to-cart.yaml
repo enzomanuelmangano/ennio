@@ -10,7 +10,6 @@ appId: com.ennio.example
     id: "product-card-1"
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 3000
 
 # Add to cart
 - tapOn:
@@ -19,6 +18,5 @@ appId: com.ennio.example
 # Handle the alert
 - assertVisible:
     text: "Added to Cart"
-    timeout: 2000
 - tapOn:
     text: "Continue Shopping"

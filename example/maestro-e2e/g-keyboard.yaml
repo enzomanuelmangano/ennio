@@ -4,6 +4,10 @@ name: "Gauntlet — KeyboardAvoidingView"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-keyboard"
+    direction: DOWN
 - tapOn:
     id: "g-keyboard"
 - assertVisible:

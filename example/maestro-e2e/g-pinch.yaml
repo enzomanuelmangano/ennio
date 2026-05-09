@@ -4,6 +4,10 @@ name: "Gauntlet — Pinch gesture"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-pinch"
+    direction: DOWN
 - tapOn:
     id: "g-pinch"
 - assertVisible:

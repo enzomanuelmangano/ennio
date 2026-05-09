@@ -12,10 +12,13 @@ name: "Gauntlet — Deep link route"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-deep-link"
+    direction: DOWN
 - tapOn:
     id: "g-deep-link"
 - assertVisible:
     id: "deep-link-screen"
-    timeout: 5000
 - assertVisible:
     id: "deep-link-marker"

@@ -21,13 +21,11 @@ appId: com.ennio.example
 # Begin checkout
 - assertVisible:
     id: "checkout-btn"
-    timeout: 3000
 - tapOn:
     id: "checkout-btn"
 
 - assertVisible:
     id: "checkout-screen"
-    timeout: 3000
 
 # Step 1: shipping
 - tapOn:
@@ -90,18 +88,15 @@ appId: com.ennio.example
 # Step 3: review + place order
 - assertVisible:
     id: "place-order-btn"
-    timeout: 3000
 - tapOn:
     id: "place-order-btn"
 
 # Wait for the confirmation alert to appear, then tap through it.
 - assertVisible:
     text: "Order Placed"
-    timeout: 10000
 - tapOn:
     text: "View Orders"
 
 # Ensure we end on the orders screen.
 - assertVisible:
     id: "orders-screen"
-    timeout: 5000

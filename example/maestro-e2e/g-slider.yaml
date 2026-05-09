@@ -4,6 +4,10 @@ name: "Gauntlet — Slider"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-slider"
+    direction: DOWN
 - tapOn:
     id: "g-slider"
 - assertVisible:

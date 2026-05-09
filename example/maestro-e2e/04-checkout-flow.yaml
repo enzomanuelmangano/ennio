@@ -32,7 +32,6 @@ tags:
           id: "demo-login-btn"
       - assertVisible:
           id: "home-screen"
-          timeout: 5000
 
 # Clear cart first
 - runFlow:
@@ -59,7 +58,6 @@ tags:
     id: "product-card-2"
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 5000
 - tapOn:
     id: "add-to-cart-btn"
 - tapOn:
@@ -71,7 +69,6 @@ tags:
 
 - assertVisible:
     id: "cart-screen"
-    timeout: 5000
 
 - assertVisible:
     id: "cart-item-1"
@@ -91,7 +88,6 @@ tags:
 
 - assertVisible:
     id: "checkout-screen"
-    timeout: 5000
 
 # ============================================
 # STEP 1: Shipping Address
@@ -135,7 +131,6 @@ tags:
 
 - assertVisible:
     id: "payment-form"
-    timeout: 5000
 
 # Fill payment details
 - tapOn:
@@ -164,7 +159,6 @@ tags:
 
 - assertVisible:
     id: "order-review"
-    timeout: 5000
 
 # Verify shipping address is shown
 - assertVisible:
@@ -187,18 +181,17 @@ tags:
 
 - assertVisible:
     id: "payment-form"
-    timeout: 4000
 
 - tapOn:
     id: "back-btn"
 
 - assertVisible:
     id: "shipping-form"
-    timeout: 4000
 
 # Edit shipping address
-- clearText:
+- tapOn:
     id: "shipping-street"
+- eraseText: 50
 - inputText: "456 Oak Avenue"
 
 # Go forward again
@@ -206,13 +199,11 @@ tags:
     id: "next-btn"
 - assertVisible:
     id: "payment-form"
-    timeout: 4000
 
 - tapOn:
     id: "next-btn"
 - assertVisible:
     id: "order-review"
-    timeout: 4000
 
 # Verify updated address
 - assertVisible:
@@ -228,7 +219,6 @@ tags:
 # Success alert
 - assertVisible:
     text: "Order Placed"
-    timeout: 5000
 
 - tapOn:
     text: "View Orders"
@@ -239,7 +229,6 @@ tags:
 
 - assertVisible:
     id: "orders-screen"
-    timeout: 5000
 
 - assertVisible:
     id: "orders-list"
@@ -247,7 +236,6 @@ tags:
 # Most recent order should show "Processing" status
 - assertVisible:
     text: "Processing"
-    timeout: 4000
 
 # ============================================
 # TEST: Cart is now empty
@@ -258,4 +246,3 @@ tags:
 
 - assertVisible:
     id: "cart-screen-empty"
-    timeout: 5000

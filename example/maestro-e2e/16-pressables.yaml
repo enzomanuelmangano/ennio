@@ -3,7 +3,7 @@ name: Pressables — every RN pressable variant
 ---
 - launchApp
 - tapOn:
-    text: "Playground"
+    text: "Gauntlet"
 - tapOn:
     id: "open-pressables-btn"
 - assertVisible: "Pressables"

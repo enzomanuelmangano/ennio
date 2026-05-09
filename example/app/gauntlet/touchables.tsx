@@ -4,7 +4,7 @@
 
 import { useState } from 'react';
 import { View, Text, Pressable, TouchableOpacity, TouchableHighlight, StyleSheet } from 'react-native';
-import { BaseButton, RawButton } from 'react-native-gesture-handler';
+import { BaseButton } from 'react-native-gesture-handler';
 import { PressableScale } from 'pressto';
 
 export default function TouchablesScreen() {
@@ -58,19 +58,21 @@ export default function TouchablesScreen() {
         )}
       />
       <Row
-        name="RawButton"
-        render={() => (
-          <RawButton testID="touch-rawButton" style={styles.btn} onPress={() => inc('RawButton')}>
-            <Text style={styles.btnText}>Tap</Text>
-          </RawButton>
-        )}
-      />
-      <Row
         name="PressableScale"
         render={() => (
           <PressableScale testID="touch-pressableScale" style={styles.btn} onPress={() => inc('PressableScale')}>
             <Text style={styles.btnText}>Tap</Text>
           </PressableScale>
+        )}
+      />
+      <Row
+        name="Blocked"
+        render={() => (
+          <View pointerEvents="none">
+            <Pressable testID="touch-blocked" style={styles.btn} onPress={() => inc('Blocked')}>
+              <Text style={styles.btnText}>Tap</Text>
+            </Pressable>
+          </View>
         )}
       />
     </View>

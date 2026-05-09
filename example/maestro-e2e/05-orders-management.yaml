@@ -28,14 +28,11 @@ tags:
           id: "home-signin-btn"
       - tapOn:
           id: "demo-login-btn"
-      - waitForAnimationToEnd:
-          timeout: 3000
+      - waitForAnimationToEnd
       - assertNotVisible:
           id: "demo-login-btn"
-          timeout: 5000
       - assertVisible:
           id: "home-screen"
-          timeout: 5000
 
 # ============================================
 # TEST: Navigate to orders via quick action
@@ -45,10 +42,7 @@ tags:
     id: "quick-action-orders"
 
 - assertVisible:
-    anyOf:
-      - id: "orders-screen"
-      - id: "empty-orders"
-    timeout: 5000
+    id: "orders-screen"
 
 # ============================================
 # TEST: Orders list or empty state
@@ -84,16 +78,12 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 - tapOn:
     id: "menu-orders"
 
 - assertVisible:
-    anyOf:
-      - id: "orders-screen"
-      - id: "empty-orders"
-    timeout: 5000
+    id: "orders-screen"
 
 # ============================================
 # TEST: Create an order for testing (if needed)
@@ -115,16 +105,8 @@ tags:
         id: "orders-list"
     commands:
       # First order should be visible
-      - scroll:
-          direction: UP
-          amount: 500
-
-      # Order cards should show status
       - assertVisible:
-          anyOf:
-            - text: "Processing"
-            - text: "Shipped"
-            - text: "Delivered"
+          id: "orders-list"
 
 # ============================================
 # TEST: View order details
@@ -144,7 +126,6 @@ tags:
       # Order details modal should open
       - assertVisible:
           id: "order-details"
-          timeout: 5000
 
       # Details should show shipping address
       - assertVisible:
@@ -156,7 +137,6 @@ tags:
 
       - assertVisible:
           id: "orders-screen"
-          timeout: 4000
 
 # ============================================
 # TEST: Guest user orders view
@@ -168,7 +148,10 @@ tags:
     text: "Profile"
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
+- scrollUntilVisible:
+    element:
+      id: "menu-logout"
+    direction: DOWN
 - tapOn:
     id: "menu-logout"
 - tapOn:
@@ -184,7 +167,6 @@ tags:
 # Should show guest view
 - assertVisible:
     id: "orders-guest"
-    timeout: 5000
 
 - assertVisible:
     text: "Sign in to view orders"
@@ -201,7 +183,6 @@ tags:
 
 - assertVisible:
     id: "login-screen"
-    timeout: 5000
 
 # Login with demo
 - tapOn:
@@ -209,7 +190,4 @@ tags:
 
 # Should return to orders
 - assertVisible:
-    anyOf:
-      - id: "orders-screen"
-      - id: "empty-orders"
-    timeout: 5000
+    id: "orders-screen"

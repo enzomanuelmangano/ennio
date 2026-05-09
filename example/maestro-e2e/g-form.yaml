@@ -4,6 +4,10 @@ name: "Gauntlet — Form validation"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-form"
+    direction: DOWN
 - tapOn:
     id: "g-form"
 - assertVisible:
@@ -32,10 +36,9 @@ name: "Gauntlet — Form validation"
     id: "form-email-error"
 
 # Fix age → submit succeeds.
-- clearText:
-    id: "form-age"
 - tapOn:
     id: "form-age"
+- eraseText: 50
 - inputText: "30"
 - tapOn:
     id: "form-submit"

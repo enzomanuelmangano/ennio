@@ -11,4 +11,3 @@ appId: com.ennio.example
     text: "Products"
 - assertVisible:
     id: "products-screen"
-    timeout: 5000

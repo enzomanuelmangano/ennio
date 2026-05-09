@@ -3,7 +3,7 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
 ---
 - launchApp
 - tapOn:
-    text: "Playground"
+    text: "Gauntlet"
 - assertVisible: "Navigation patterns"
 
 # formSheet

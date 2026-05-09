@@ -4,6 +4,10 @@ name: "Gauntlet — Multi-line TextInput"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-multiline"
+    direction: DOWN
 - tapOn:
     id: "g-multiline"
 - assertVisible:

@@ -36,7 +36,6 @@ tags:
 
 - assertVisible:
     id: "cart-screen-empty"
-    timeout: 5000
 
 - assertVisible:
     text: "Your cart is empty"
@@ -53,7 +52,6 @@ tags:
 
 - assertVisible:
     id: "products-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Add product to cart from products list
@@ -69,7 +67,6 @@ tags:
 
 - assertVisible:
     id: "cart-screen"
-    timeout: 5000
 
 - assertVisible:
     id: "cart-item-1"
@@ -86,7 +83,6 @@ tags:
 
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 5000
 
 # Increase quantity before adding
 - tapOn:
@@ -100,7 +96,6 @@ tags:
 # Handle alert
 - assertVisible:
     text: "Added to Cart"
-    timeout: 4000
 - tapOn:
     text: "View Cart"
 
@@ -110,7 +105,6 @@ tags:
 
 - assertVisible:
     id: "cart-screen"
-    timeout: 5000
 
 - assertVisible:
     id: "cart-item-1"
@@ -152,7 +146,6 @@ tags:
 # Item 2 should be gone
 - assertNotVisible:
     id: "cart-item-2"
-    timeout: 4000
 
 # Item 1 should still be there
 - assertVisible:
@@ -165,6 +158,14 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
+- scrollUntilVisible:
+    element:
+      id: "featured-product-1"
+    direction: UP
+- scrollUntilVisible:
+    element:
+      id: "add-to-cart-featured-3"
+    direction: RIGHT
 - tapOn:
     id: "add-to-cart-featured-3"
 
@@ -174,7 +175,6 @@ tags:
 
 - assertVisible:
     id: "cart-item-3"
-    timeout: 5000
 
 # ============================================
 # TEST: Clear entire cart
@@ -186,14 +186,12 @@ tags:
 # Confirm clear
 - assertVisible:
     text: "Clear Cart"
-    timeout: 4000
 - tapOn:
     text: "Clear"
 
 # Should show empty state
 - assertVisible:
     id: "cart-screen-empty"
-    timeout: 5000
 
 # ============================================
 # TEST: Add from trending products
@@ -203,16 +201,16 @@ tags:
     file: subflows/navigate-home.yaml
 
 # Scroll to trending section
-- scroll:
+- scrollUntilVisible:
+    element:
+      id: "trending-product-4"
     direction: DOWN
-    amount: 300
 
 - tapOn:
     id: "trending-product-4"
 
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 5000
 
 - tapOn:
     id: "add-to-cart-btn"
@@ -223,11 +221,9 @@ tags:
 - scrollUntilVisible:
     element:
       id: "cart-item-4"
-    timeout: 8000
 
 - assertVisible:
     id: "cart-item-4"
-    timeout: 5000
 
 # ============================================
 # TEST: Checkout button visible

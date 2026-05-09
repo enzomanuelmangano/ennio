@@ -3,7 +3,7 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 ---
 - launchApp
 - tapOn:
-    text: "Playground"
+    text: "Gauntlet"
 
 # Native alert + dismissAlert (bare string)
 - tapOn:

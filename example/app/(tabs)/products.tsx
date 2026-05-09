@@ -144,6 +144,7 @@ function SortDropdown({
         style={[styles.sortButton, darkMode && styles.sortButtonDark]}
         onPress={handleOpen}
         testID="sort-dropdown"
+        accessibilityIdentifier="sort-dropdown"
       >
         <Text style={[styles.sortButtonText, darkMode && styles.textLight]}>{selectedLabel}</Text>
         <Text style={styles.sortArrow}>▼</Text>
@@ -165,6 +166,7 @@ function SortDropdown({
                 style={[styles.sortOption, value === o.value && styles.sortOptionActive]}
                 onPress={() => handleSelect(o.value)}
                 testID={`sort-option-${o.value}`}
+                accessibilityIdentifier={`sort-option-${o.value}`}
               >
                 <Text style={[styles.sortOptionText, darkMode && styles.textLight]}>
                   {o.label}

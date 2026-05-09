@@ -30,7 +30,6 @@ tags:
 
 - assertVisible:
     text: "Wireless Headphones"
-    timeout: 4000
 
 - tapOn:
     id: "clear-search"
@@ -46,7 +45,6 @@ tags:
 # Should find products with "Pro" in name
 - assertVisible:
     text: "Pro"
-    timeout: 4000
 
 - tapOn:
     id: "clear-search"
@@ -61,7 +59,6 @@ tags:
 
 - assertVisible:
     text: "Wireless"
-    timeout: 4000
 
 - tapOn:
     id: "clear-search"
@@ -77,7 +74,6 @@ tags:
 
 - assertVisible:
     id: "no-products"
-    timeout: 4000
 
 - assertVisible:
     text: "No products found"
@@ -100,28 +96,24 @@ tags:
     id: "filter-category-electronics"
 - assertVisible:
     id: "products-list"
-    timeout: 4000
 
 # Sports
 - tapOn:
     id: "filter-category-sports"
 - assertVisible:
     id: "products-list"
-    timeout: 4000
 
 # Home
 - tapOn:
     id: "filter-category-home"
 - assertVisible:
     id: "products-list"
-    timeout: 4000
 
 # Accessories
 - tapOn:
     id: "filter-category-accessories"
 - assertVisible:
     id: "products-list"
-    timeout: 4000
 
 # Back to All
 - tapOn:
@@ -136,14 +128,12 @@ tags:
     id: "sort-dropdown"
 - assertVisible:
     id: "sort-options"
-    timeout: 1000
 
 # Price: Low to High
 - tapOn:
     id: "sort-option-price-asc"
 - assertNotVisible:
     id: "sort-options"
-    timeout: 5000
 
 # Price: High to Low
 - tapOn:
@@ -175,7 +165,6 @@ tags:
 
 - assertVisible:
     id: "products-list"
-    timeout: 4000
 
 - tapOn:
     id: "clear-search"
@@ -193,7 +182,6 @@ tags:
 
 - assertVisible:
     id: "products-list"
-    timeout: 4000
 
 # ============================================
 # TEST: Triple combo - Category + Search + Sort
@@ -211,7 +199,6 @@ tags:
 
 - assertVisible:
     id: "products-list"
-    timeout: 4000
 
 # ============================================
 # TEST: Reset filters button
@@ -225,7 +212,6 @@ tags:
 # After reset, should show all products with default sort
 - assertVisible:
     id: "products-list"
-    timeout: 4000
 
 # ============================================
 # TEST: Filter persists when viewing product
@@ -238,7 +224,6 @@ tags:
 
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 5000
 
 # Go back
 - back
@@ -246,7 +231,6 @@ tags:
 # Filter should still be applied
 - assertVisible:
     id: "products-screen"
-    timeout: 4000
 
 # ============================================
 # TEST: Search from home category cards
@@ -260,7 +244,6 @@ tags:
 
 - assertVisible:
     id: "products-screen"
-    timeout: 5000
 
 # Sports filter should be active
 - assertVisible:
@@ -272,18 +255,6 @@ tags:
 
 - tapOn:
     id: "filter-category-all"
-
-- scroll:
-    direction: DOWN
-    amount: 500
-
-- scroll:
-    direction: DOWN
-    amount: 500
-
-- scroll:
-    direction: UP
-    amount: 1000
 
 - assertVisible:
     id: "products-list"

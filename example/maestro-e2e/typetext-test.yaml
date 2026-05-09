@@ -5,10 +5,8 @@ name: "TypeText Test"
     text: "Products"
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
 - tapOn:
     id: "search-input"
 - inputText: "Wireless"
 - assertVisible:
     text: "Wireless"
-    timeout: 3000

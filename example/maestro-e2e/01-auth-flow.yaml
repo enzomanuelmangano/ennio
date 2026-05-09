@@ -21,7 +21,6 @@ tags:
 
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Demo login flow
@@ -34,7 +33,6 @@ tags:
 # Wait for login screen
 - assertVisible:
     id: "login-screen"
-    timeout: 5000
 
 # Use demo login
 - tapOn:
@@ -43,4 +41,3 @@ tags:
 # Should return to home with greeting
 - assertVisible:
     id: "home-screen"
-    timeout: 5000

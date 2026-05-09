@@ -4,6 +4,10 @@ name: "Gauntlet — BottomSheet"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-bottomsheet"
+    direction: DOWN
 - tapOn:
     id: "g-bottomsheet"
 - assertVisible:
@@ -14,6 +18,5 @@ name: "Gauntlet — BottomSheet"
     id: "bottomsheet-opened-marker"
 - assertVisible:
     id: "bottomsheet-body"
-    timeout: 3000
 - tapOn:
     id: "bottomsheet-close"
