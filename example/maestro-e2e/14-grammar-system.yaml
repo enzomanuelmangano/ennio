@@ -4,8 +4,18 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 - launchApp
 - tapOn:
     text: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-playground"
+    direction: DOWN
+- tapOn:
+    id: "g-playground"
 
 # Native alert + dismissAlert (bare string)
+- scrollUntilVisible:
+    element:
+      id: "open-alert-btn"
+    direction: DOWN
 - tapOn:
     id: "open-alert-btn"
 - assertVisible: "Playground Alert"

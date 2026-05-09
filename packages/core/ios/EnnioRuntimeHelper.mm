@@ -736,7 +736,12 @@ static BOOL viewIsTappable(UIView* view) {
 // matches the testID. Hidden / size-zero views skipped because they're not
 // interactable.
 static UIView* findViewByTestID(UIView* root, NSString* testID) {
-    if (!root || root.hidden || root.alpha < 0.01) return nil;
+    if (!root || root.hidden) return nil;
+    // Don't filter on alpha here: a Modal mid-fade-in has parent
+    // UITransitionView at alpha=0..1, and rejecting alpha<0.01 hides every
+    // descendant during the animation. The "is this actually visible to a
+    // user / a real tap" decision lives in isViewOnscreen via convertRect
+    // + window-bounds intersection.
     if ([root.accessibilityIdentifier isEqualToString:testID]) return root;
     for (UIView* sub in root.subviews) {
         UIView* hit = findViewByTestID(sub, testID);

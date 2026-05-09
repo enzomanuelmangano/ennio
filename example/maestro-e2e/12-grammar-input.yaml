@@ -4,6 +4,12 @@ name: Grammar — input commands (text, random, erase, clear, paste, key)
 - launchApp
 - tapOn:
     text: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-playground"
+    direction: DOWN
+- tapOn:
+    id: "g-playground"
 - assertVisible: "Search"
 
 # inputText — basic

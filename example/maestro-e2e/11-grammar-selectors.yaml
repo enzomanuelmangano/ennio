@@ -3,7 +3,14 @@ name: Grammar — selectors (id, text, label, index, relational, state)
 ---
 - launchApp
 - tapOn: "Gauntlet"
-- assertVisible: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-playground"
+    direction: DOWN
+- tapOn:
+    id: "g-playground"
+- assertVisible:
+    id: "playground-scroll"
 
 # id selector
 - assertVisible:

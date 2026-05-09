@@ -800,7 +800,12 @@ class MaestroExecutor {
 
     // assertVisible (with anyOf support)
     if ('assertVisible' in cmd) {
-      const assertCmd = cmd.assertVisible as MaestroSelector & { timeout?: number; anyOf?: MaestroSelector[] };
+      // Bare-string form `assertVisible: "Foo"` is text-shorthand —
+      // normalize before reading `timeout`/`anyOf` so we don't spread the
+      // string into per-character keys.
+      const raw = cmd.assertVisible as MaestroSelector | string;
+      const normalized = normalizeSelector(raw);
+      const assertCmd = normalized as MaestroSelector & { timeout?: number; anyOf?: MaestroSelector[] };
       const timeout = assertCmd.timeout ?? DEFAULT_VISIBLE_TIMEOUT;
       this.log(`assertVisible: ${JSON.stringify(assertCmd)}`);
 
@@ -832,7 +837,12 @@ class MaestroExecutor {
     }
 
     if ('assertNotVisible' in cmd) {
-      const { timeout = DEFAULT_TIMEOUT, ...selector } = cmd.assertNotVisible;
+      // Bare-string form `assertNotVisible: "Foo"` is a Maestro shorthand
+      // for `text: "Foo"` — normalize before destructuring `timeout` so we
+      // don't spread the string into per-character keys.
+      const raw = cmd.assertNotVisible as MaestroSelector | string;
+      const normalized = normalizeSelector(raw);
+      const { timeout = DEFAULT_TIMEOUT, ...selector } = normalized;
       await this.waitFor(
         () => this.selectorVisible(selector).then((v) => !v),
         timeout,

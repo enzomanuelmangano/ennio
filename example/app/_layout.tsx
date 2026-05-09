@@ -66,6 +66,22 @@ export default function RootLayout() {
             title: 'Settings',
           }}
         />
+        <Stack.Screen
+          name="gauntlet/sheet-form"
+          options={{ presentation: 'formSheet', title: 'formSheet' }}
+        />
+        <Stack.Screen
+          name="gauntlet/sheet-page"
+          options={{ presentation: 'pageSheet', title: 'pageSheet' }}
+        />
+        <Stack.Screen
+          name="gauntlet/sheet-stacked"
+          options={{ presentation: 'modal', title: 'Stacked modal' }}
+        />
+        <Stack.Screen
+          name="gauntlet/sheet-transparent"
+          options={{ presentation: 'transparentModal', headerShown: false, animation: 'fade' }}
+        />
       </Stack>
       </PressablesConfig>
     </GestureHandlerRootView>
