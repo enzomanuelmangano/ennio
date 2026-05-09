@@ -1034,13 +1034,20 @@ bool EnnioRuntimeHelper::swipeAtPoints(double x1, double y1, double x2, double y
             CGPoint newOffset = scrollView.contentOffset;
             newOffset.x -= dx;
             newOffset.y -= dy;
-            // Clamp into [0, contentSize - frame] so we don't end up in
-            // bounce territory.
             CGFloat maxX = MAX(0, scrollView.contentSize.width - scrollView.bounds.size.width);
             CGFloat maxY = MAX(0, scrollView.contentSize.height - scrollView.bounds.size.height);
             newOffset.x = MAX(0, MIN(newOffset.x, maxX));
             newOffset.y = MAX(0, MIN(newOffset.y, maxY));
-            [scrollView setContentOffset:newOffset animated:NO];
+            // Pagination snapping is driven by the pan recogniser
+            // deciding "this gesture crossed a page boundary". A direct
+            // `setContentOffset:animated:NO` skips the recogniser
+            // entirely; RN's RCTScrollView (Fabric) sees the offset
+            // change before any RCTScrollEvent fires and re-syncs from
+            // the React-side state — page snaps back to 0. Use the
+            // animated setter so the UIScrollView fires the proper
+            // begin/end-decelerating events; momentumScrollEnd then
+            // updates React state and the page advances cleanly.
+            [scrollView setContentOffset:newOffset animated:scrollView.pagingEnabled];
             ok = YES;
             return;
         }

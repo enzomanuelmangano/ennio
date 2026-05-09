@@ -611,38 +611,71 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
                 ::ennio::json::parseString(req.payload, "testID"));
         }},
         { "invokeOnPress", [](HybridEnnio* self, const auto& req, auto& r) {
-            // Visibility gate. The fiber walk would happily call onPress
-            // on a fiber whose host view is offscreen / not laid out — a
-            // tap a real finger could never deliver. Refuse, force the
-            // caller to scroll first. Some custom button libraries (RNGH
-            // BaseButton, pressto) don't propagate testID to UIView's
-            // accessibilityIdentifier consistently — when the UIView
-            // can't be located by id, fall back to the Fabric shadow
-            // tree's visibility instead of refusing outright. That
-            // covers Modal-rendered options whose UIView mount lags the
-            // shadow tree by a frame.
+            // Two-path viewport gate. Parity with Maestro / a real
+            // finger: refuse taps on elements outside the visible
+            // viewport, allow taps on visible ones — including custom
+            // button libraries whose UIView doesn't expose its testID
+            // via accessibilityIdentifier (RNGH BaseButton, pressto).
+            //
+            // Path 1 — UIView findable via accessibilityIdentifier:
+            //   strict window-frame intersection with key-window bounds.
+            //
+            // Path 2 — UIView not findable: fall back to Fabric shadow
+            //   tree. Accept when the testID's accumulated screenY/X
+            //   (relative to the React surface) places its frame inside
+            //   the surface rect. This is approximate — it doesn't
+            //   subtract ScrollView contentOffset, so an element
+            //   scrolled off the TOP can still pass. The bottom-of-fold
+            //   cheat (category-electronics on first home render) is
+            //   correctly refused because its accumulated screenY sits
+            //   below surfaceHeight.
             auto testID = ::ennio::json::parseString(req.payload, "testID");
             auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
-            bool viewOnscreen = helper.isViewOnscreen(testID);
-            if (!viewOnscreen) {
+            auto frame = helper.getViewWindowFrame(testID);
+            double fx = std::get<0>(frame), fy = std::get<1>(frame);
+            double fw = std::get<2>(frame), fh = std::get<3>(frame);
+            bool viewFound = (fw > 0 && fh > 0);
+            bool inViewport = false;
+            if (viewFound) {
+                auto winSize = helper.getKeyWindowSize();
+                double wW = winSize.first, wH = winSize.second;
+                inViewport =
+                    (fx + fw > 0) && (fy + fh > 0) && (fx < wW) && (fy < wH);
+            } else {
                 auto layoutVariant = self->getLayoutMetrics(testID);
-                bool fabricOnscreen = false;
                 if (auto layout = std::get_if<LayoutMetrics>(&layoutVariant)) {
                     if (layout->width > 0 && layout->height > 0) {
-                        fabricOnscreen = true;
+                        auto winSize = helper.getKeyWindowSize();
+                        double wW = winSize.first, wH = winSize.second;
+                        inViewport =
+                            (layout->screenX + layout->width > 0) &&
+                            (layout->screenY + layout->height > 0) &&
+                            (layout->screenX < wW) &&
+                            (layout->screenY < wH);
                     }
                 }
-                if (!fabricOnscreen) {
-                    r.success = false;
-                    r.error = "Element not in viewport: " + testID;
-                    return;
-                }
+            }
+            if (!inViewport) {
+                r.success = false;
+                r.error = "Element not in viewport: " + testID;
+                return;
             }
             // Schedules the Fiber walk on the JS thread via the Nitro
             // Dispatcher captured by `bindRuntime` at boot. Blocks the WS
             // thread on a condition variable until JS signals completion
             // or the 1500 ms timeout fires.
             r.success = HybridEnnio::invokeOnPressFromCpp(testID);
+        }},
+        { "invokeOnPressByText", [](HybridEnnio*, const auto& req, auto& r) {
+            // Tap-by-text fallback for elements whose UIView gesture
+            // recogniser refuses synthesised UITouches (pressto's
+            // PressableScale, RNGH BaseButton). Walks the React fiber
+            // tree to find a node whose RawText / stateNode equals the
+            // selector text, then invokes the surrounding Pressable's
+            // onPress directly. Skips iOS HID, the gesture coordinator,
+            // and UIPresentationController's hit-test gating.
+            auto text = ::ennio::json::parseString(req.payload, "text");
+            r.success = HybridEnnio::invokeOnPressByTextFromCpp(text);
         }},
         { "getReadyCoord", [](HybridEnnio*, const auto& req, auto& r) {
             auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getReadyCoord(
@@ -1211,7 +1244,54 @@ namespace {
     }
     return false;
   }
-  globalThis.__ennio_invokeOnPress = function (testID) {
+  function invokeFromFiber(fiber) {
+    if (!fiber) return false;
+    if (pointerEventsBlocks(fiber)) return false;
+    // Walk up the fiber chain (.return) until we find a node with an
+    // onPress / onLongPress closure. Text-anchored taps land on the
+    // Paragraph fiber whose own props don't carry onPress; the
+    // surrounding Pressable / TouchableOpacity / RNGH BaseButton
+    // (pressto's PressableScale) is the actual touch target.
+    for (var cursor = fiber; cursor; cursor = cursor.return) {
+      var props = cursor.memoizedProps || {};
+      var onPress = props.onPress || props.onLongPress;
+      if (typeof onPress === 'function') {
+        try {
+          onPress({
+            nativeEvent: {},
+            currentTarget: null,
+            target: null,
+            preventDefault: function () {},
+            stopPropagation: function () {},
+            persist: function () {},
+          });
+          return true;
+        } catch (e) { return false; }
+      }
+    }
+    return false;
+  }
+  function findFiberByText(fiber, needle) {
+    if (!fiber) return null;
+    var props = fiber.memoizedProps;
+    // Match strategies, in order of specificity:
+    //   1. RawText fiber: memoizedProps.text equals needle.
+    //   2. Text fiber: a single string child equals needle (RawText
+    //      wrapped one level up).
+    //   3. memoizedProps.children equals needle (a `<Text>foo</Text>`
+    //      with a primitive child).
+    //   4. Substring match against any non-empty string memoizedProps
+    //      key — covers `accessibilityLabel`, `aria-label` etc.
+    if (props) {
+      if (typeof props.text === 'string' && props.text === needle) return fiber;
+      if (typeof props.children === 'string' && props.children === needle) return fiber;
+      if (typeof props.accessibilityLabel === 'string' && props.accessibilityLabel === needle) return fiber;
+    }
+    var found = findFiberByText(fiber.child, needle);
+    if (found) return found;
+    return findFiberByText(fiber.sibling, needle);
+  }
+  function eachFiberRoot(fn) {
     var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
     if (!hook || !hook.renderers || !hook.getFiberRoots) return false;
     var iter = hook.renderers.entries();
@@ -1226,31 +1306,26 @@ namespace {
       while (true) {
         var r = rootsIter.next();
         if (r.done) break;
-        var fiber = findFiberByTestID(r.value && r.value.current, testID);
-        if (!fiber) continue;
-        if (pointerEventsBlocks(fiber)) return false;
-        var props = fiber.memoizedProps || {};
-        // Pressables that only declare onLongPress should still respond
-        // to a tap dispatch — the runner can't always tell from the
-        // selector whether to call onPress or onLongPress, and a real
-        // long-press synthesised via this path is just a tap that fired.
-        var onPress = props.onPress || props.onLongPress;
-        if (typeof onPress === 'function') {
-          try {
-            onPress({
-              nativeEvent: {},
-              currentTarget: null,
-              target: null,
-              preventDefault: function () {},
-              stopPropagation: function () {},
-              persist: function () {},
-            });
-            return true;
-          } catch (e) { return false; }
-        }
+        var current = r.value && r.value.current;
+        if (!current) continue;
+        if (fn(current) === true) return true;
       }
     }
     return false;
+  }
+  globalThis.__ennio_invokeOnPress = function (testID) {
+    return eachFiberRoot(function (root) {
+      var fiber = findFiberByTestID(root, testID);
+      if (!fiber) return false;
+      return invokeFromFiber(fiber);
+    });
+  };
+  globalThis.__ennio_invokeOnPressByText = function (text) {
+    return eachFiberRoot(function (root) {
+      var fiber = findFiberByText(root, text);
+      if (!fiber) return false;
+      return invokeFromFiber(fiber);
+    });
   };
 })();
 )JS";
@@ -1307,52 +1382,63 @@ void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
     }
 }
 
-bool HybridEnnio::invokeOnPressFromCpp(const std::string& testID) {
-    JSThreadExecutor executor;
-    {
-        std::lock_guard<std::mutex> lock(g_jsContextMutex);
-        executor = g_jsExecutor;
-    }
-    if (!executor) {
-        // Bootstrap hasn't run yet — caller falls back to idb HID tap.
-        return false;
-    }
-
-    // Schedule on JS thread, block here on a heap-allocated cv slot
-    // (closure may outlive the waiter on timeout, so the slot can't
-    // live on the WS thread's stack).
-    struct Slot {
-        std::mutex m;
-        std::condition_variable cv;
-        bool ready = false;
-        bool success = false;
-    };
-    auto slot = std::make_shared<Slot>();
-    std::string id = testID;
-
-    executor([slot, id](facebook::jsi::Runtime& rt) {
-        bool ok = false;
-        try {
-            auto fn = rt.global().getProperty(rt, "__ennio_invokeOnPress");
-            if (fn.isObject() && fn.asObject(rt).isFunction(rt)) {
-                auto result = fn.asObject(rt)
-                    .asFunction(rt)
-                    .call(rt, facebook::jsi::String::createFromUtf8(rt, id));
-                ok = result.isBool() && result.getBool();
-            }
-        } catch (...) {
-            ok = false;
+namespace {
+    bool invokeJSStringFn(const std::string& funcName, const std::string& arg) {
+        HybridEnnio::JSThreadExecutor executor;
+        {
+            std::lock_guard<std::mutex> lock(g_jsContextMutex);
+            executor = g_jsExecutor;
         }
-        std::lock_guard<std::mutex> lock(slot->m);
-        slot->success = ok;
-        slot->ready = true;
-        slot->cv.notify_one();
-    });
+        if (!executor) {
+            // Bootstrap hasn't run yet — caller falls back to idb HID tap.
+            return false;
+        }
 
-    std::unique_lock<std::mutex> lock(slot->m);
-    bool finished = slot->cv.wait_for(lock, std::chrono::milliseconds(1500),
-                                       [&]() { return slot->ready; });
-    return finished && slot->success;
+        // Schedule on JS thread, block here on a heap-allocated cv slot
+        // (closure may outlive the waiter on timeout, so the slot can't
+        // live on the WS thread's stack).
+        struct Slot {
+            std::mutex m;
+            std::condition_variable cv;
+            bool ready = false;
+            bool success = false;
+        };
+        auto slot = std::make_shared<Slot>();
+        std::string fname = funcName;
+        std::string a = arg;
+
+        executor([slot, fname, a](facebook::jsi::Runtime& rt) {
+            bool ok = false;
+            try {
+                auto fn = rt.global().getProperty(rt, fname.c_str());
+                if (fn.isObject() && fn.asObject(rt).isFunction(rt)) {
+                    auto result = fn.asObject(rt)
+                        .asFunction(rt)
+                        .call(rt, facebook::jsi::String::createFromUtf8(rt, a));
+                    ok = result.isBool() && result.getBool();
+                }
+            } catch (...) {
+                ok = false;
+            }
+            std::lock_guard<std::mutex> lock(slot->m);
+            slot->success = ok;
+            slot->ready = true;
+            slot->cv.notify_one();
+        });
+
+        std::unique_lock<std::mutex> lock(slot->m);
+        bool finished = slot->cv.wait_for(lock, std::chrono::milliseconds(1500),
+                                           [&]() { return slot->ready; });
+        return finished && slot->success;
+    }
+}
+
+bool HybridEnnio::invokeOnPressFromCpp(const std::string& testID) {
+    return invokeJSStringFn("__ennio_invokeOnPress", testID);
+}
+
+bool HybridEnnio::invokeOnPressByTextFromCpp(const std::string& text) {
+    return invokeJSStringFn("__ennio_invokeOnPressByText", text);
 }
 
 } // namespace margelo::nitro::ennio
