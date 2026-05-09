@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, Image, Modal, Pressable } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../../store';
 import { useTheme, type Theme } from '../../../theme';
@@ -209,9 +208,6 @@ export default function ProductsScreen() {
     });
   }, [allProducts, selectedCategory, searchQuery, sortBy]);
 
-  const insets = useSafeAreaInsets();
-  const TAB_BAR_HEIGHT = 49;
-
   const ListHeader = (
     <>
       <View style={styles.searchContainer}>
@@ -261,9 +257,7 @@ export default function ProductsScreen() {
   );
 
   return (
-    <View
-      style={[styles.container, { paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]}
-      testID="products-screen">
+    <View style={styles.container} testID="products-screen">
       <FlatList
         data={products}
         numColumns={2}
@@ -405,7 +399,7 @@ const createStyles = (theme: Theme) =>
     },
     productsList: {
       paddingHorizontal: 12,
-      paddingBottom: 80,
+      paddingBottom: theme.spacing.lg,
     },
     productsRow: {
       justifyContent: 'space-between',
