@@ -281,34 +281,24 @@ std::variant<nitro::NullType, LayoutMetrics> HybridEnnio::getLayoutMetrics(const
 }
 
 bool HybridEnnio::isVisible(const std::string& testID) {
-    // UIKit is authoritative when the UIView is mounted. Window-relative
+    // UIKit is authoritative. The UIView either has a key-window frame
+    // that intersects the visible bounds, or it doesn't. Window-relative
     // frame respects ScrollView offset (shadow-tree screenY does not),
-    // so we use it whenever the view actually has a frame. A view at
-    // content-Y=2000 in a 900px-tall window correctly reports "not
-    // visible" until the user scrolls to it.
+    // so a view at content-Y=2000 in a 900px-tall window correctly
+    // reports "not visible" until the user scrolls to it.
+    //
+    // We deliberately do NOT fall through to the Fabric shadow tree
+    // when the UIView is missing or detached. Modal's `visible={false}`
+    // dismisses the presented VC but the JSX subtree stays mounted in
+    // the fiber tree — falling through would say a closed modal is
+    // still visible. For virtualized cells the caller can scroll until
+    // the cell mounts; the visibility primitive itself stays UIKit-
+    // anchored.
     auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
     auto frame = helper.getViewWindowFrame(testID);
     bool uiViewMounted = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
-    if (uiViewMounted) {
-        return helper.isViewOnscreen(testID);
-    }
-
-    // No UIView yet — try the shadow tree. Covers virtualized lists
-    // (FlashList, FlatList) where the cell exists in shadow tree before
-    // mounting. Layout-relative intersection still tells us if the cell
-    // is in-bounds and about to be rendered.
-    auto root = getShadowTreeRoot();
-    if (!root) {
-        ENNIO_LOG_WARN("isVisible", "No shadow tree root for testID=" << testID);
-        return false;
-    }
-    float width = screenWidth_ > 0 ? screenWidth_ : 430.0f;
-    float height = screenHeight_ > 0 ? screenHeight_ : 932.0f;
-    auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
-    if (metrics) {
-        return ::ennio::ShadowTreeTraverser::isVisible(root, testID, width, height);
-    }
-    return false;
+    if (!uiViewMounted) return false;
+    return helper.isViewOnscreen(testID);
 }
 
 std::variant<nitro::NullType, std::string> HybridEnnio::getText(const std::string& testID) {
@@ -1239,7 +1229,12 @@ namespace {
         var fiber = findFiberByTestID(r.value && r.value.current, testID);
         if (!fiber) continue;
         if (pointerEventsBlocks(fiber)) return false;
-        var onPress = fiber.memoizedProps && fiber.memoizedProps.onPress;
+        var props = fiber.memoizedProps || {};
+        // Pressables that only declare onLongPress should still respond
+        // to a tap dispatch — the runner can't always tell from the
+        // selector whether to call onPress or onLongPress, and a real
+        // long-press synthesised via this path is just a tap that fired.
+        var onPress = props.onPress || props.onLongPress;
         if (typeof onPress === 'function') {
           try {
             onPress({

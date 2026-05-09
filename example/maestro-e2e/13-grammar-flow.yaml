@@ -4,6 +4,12 @@ name: Grammar — flow control (waitFor, repeat, retry, runFlow when, assertTrue
 - launchApp
 - tapOn:
     text: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-playground"
+    direction: DOWN
+- tapOn:
+    id: "g-playground"
 
 # repeat: increment counter 5 times
 - tapOn:

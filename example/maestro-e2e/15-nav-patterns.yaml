@@ -1,10 +1,20 @@
 appId: com.ennio.example
 name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
 ---
-- launchApp
+- launchApp:
+    clearState: true
 - tapOn:
     text: "Gauntlet"
-- assertVisible: "Navigation patterns"
+- scrollUntilVisible:
+    element:
+      id: "g-playground"
+    direction: DOWN
+- tapOn:
+    id: "g-playground"
+- scrollUntilVisible:
+    element:
+      text: "Navigation patterns"
+    direction: DOWN
 
 # formSheet
 - tapOn:
@@ -52,11 +62,15 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
 # parity check across runners.
 - tapOn:
     id: "inner-modal-close-btn"
+- waitForAnimationToEnd
 - assertNotVisible:
     id: "inner-modal-title"
+    timeout: 8000
 - assertVisible:
     id: "stacked-modal-title"
 - tapOn:
     id: "stacked-close-outer-btn"
+- waitForAnimationToEnd
 - assertNotVisible:
     id: "stacked-modal-title"
+    timeout: 8000

@@ -24,6 +24,7 @@ const PATTERNS: { id: string; label: string; route: string }[] = [
   { id: 'g-form',              label: 'Form validation',               route: '/gauntlet/form' },
   { id: 'g-modal-stack',       label: 'Modal stacking',                route: '/gauntlet/modal-stack' },
   { id: 'g-deep-link',         label: 'Deep link target',              route: '/gauntlet/deep-link' },
+  { id: 'g-playground',        label: 'Playground sandbox',            route: '/gauntlet/playground' },
 ];
 
 export default function GauntletIndex() {

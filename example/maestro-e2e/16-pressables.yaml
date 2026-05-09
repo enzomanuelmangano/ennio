@@ -4,6 +4,16 @@ name: Pressables — every RN pressable variant
 - launchApp
 - tapOn:
     text: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-playground"
+    direction: DOWN
+- tapOn:
+    id: "g-playground"
+- scrollUntilVisible:
+    element:
+      id: "open-pressables-btn"
+    direction: DOWN
 - tapOn:
     id: "open-pressables-btn"
 - assertVisible: "Pressables"

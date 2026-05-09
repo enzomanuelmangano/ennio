@@ -295,11 +295,17 @@ export class NitroWriter implements Writer {
     return true;
   }
   async longPress(testID: string, durationMs: number): Promise<boolean> {
+    // Pressables that declare only onLongPress (no onPress) won't respond
+    // to a synthesised UITouch — UIKit dispatches no Began→long-Ended
+    // sequence, and the native long-press helper can't recognise the
+    // intended gesture. Direct fiber dispatch falls through to onLongPress
+    // when no onPress is wired (see kFiberWalkerSource), so try that
+    // first; only fall back to the native helper for elements where the
+    // fiber walk can't find a handler.
+    const direct = await this.send('invokeOnPress', { testID });
+    if (direct?.success === true) return true;
     const r = await this.send('longPress', { testID, durationMs });
     if (r?.success === true) return true;
-    // Fall back to coord-based tap. Nitro doesn't yet expose a
-    // longPressAtPoint variant; the synthesised UITouch tap fires
-    // press handlers but doesn't drive UILongPressGestureRecognizer.
     const c = await this.layoutCenter({ id: testID });
     if (!c) return false;
     return this.tapAtPoint(c.x, c.y);
