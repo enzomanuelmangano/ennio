@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, FlatList, Image, Alert, Pressable } from 'react
 import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useCartStore, useAuthStore, useSettingsStore } from '../../store';
+import { useCartStore, useAuthStore, useSettingsStore } from '../../../store';
 import * as Haptics from 'expo-haptics';
 
 function CartItem({ item }: { item: ReturnType<typeof useCartStore.getState>['items'][0] }) {
@@ -132,7 +132,7 @@ export default function CartScreen() {
   if (items.length === 0) {
     return (
       <View style={{ flex: 1 }} testID="cart-root">
-        <View style={[styles.emptyContainer, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen-empty">
+        <View style={[styles.emptyContainer, darkMode && styles.containerDark, { paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen-empty">
           <Text style={styles.emptyIcon}>🛒</Text>
           <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>Your cart is empty</Text>
           <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
@@ -140,7 +140,7 @@ export default function CartScreen() {
           </Text>
           <PressableScale
             style={styles.shopButton}
-            onPress={() => router.push('/products')}
+            onPress={() => router.push('/(tabs)/(products)')}
             testID="browse-products-btn"
           >
             <Text style={styles.shopButtonText}>Browse Products</Text>
@@ -152,22 +152,24 @@ export default function CartScreen() {
 
   return (
     <View style={{ flex: 1 }} testID="cart-root">
-    <View style={[styles.container, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen">
-      <View style={styles.header}>
-        <Text style={[styles.headerTitle, darkMode && styles.textLight]}>
-          {items.length} {items.length === 1 ? 'item' : 'items'}
-        </Text>
-        <PressableScale onPress={handleClearCart} testID="clear-cart-btn">
-          <Text style={styles.clearText}>Clear All</Text>
-        </PressableScale>
-      </View>
-
+    <View style={[styles.container, darkMode && styles.containerDark, { paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen">
       <FlatList
         data={items}
         keyExtractor={item => item.product.id}
         renderItem={({ item }) => <CartItem item={item} />}
         contentContainerStyle={styles.list}
         testID="cart-items-list"
+        contentInsetAdjustmentBehavior="automatic"
+        ListHeaderComponent={
+          <View style={styles.header}>
+            <Text style={[styles.headerTitle, darkMode && styles.textLight]}>
+              {items.length} {items.length === 1 ? 'item' : 'items'}
+            </Text>
+            <PressableScale onPress={handleClearCart} testID="clear-cart-btn">
+              <Text style={styles.clearText}>Clear All</Text>
+            </PressableScale>
+          </View>
+        }
       />
 
       <View style={styles.footer}>

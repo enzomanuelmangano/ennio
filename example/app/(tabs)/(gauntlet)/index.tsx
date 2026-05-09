@@ -29,8 +29,11 @@ const PATTERNS: { id: string; label: string; route: string }[] = [
 
 export default function GauntletIndex() {
   return (
-    <ScrollView style={styles.container} testID="gauntlet-screen">
-      <Text style={styles.heading}>Compatibility gauntlet</Text>
+    <ScrollView
+      style={styles.container}
+      contentInsetAdjustmentBehavior="automatic"
+      testID="gauntlet-screen"
+    >
       <Text style={styles.subheading}>One screen per UI pattern.</Text>
       {PATTERNS.map((p) => (
         <PressableScale

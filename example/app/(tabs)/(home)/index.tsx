@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, ScrollView, Image, Pressable } from 'react-nati
 import { PressableScale } from 'pressto';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuthStore, useProductsStore, useCartStore, useSettingsStore } from '../../store';
+import { useAuthStore, useProductsStore, useCartStore, useSettingsStore } from '../../../store';
 import * as Haptics from 'expo-haptics';
 
 function FeaturedProduct({ product }: { product: ReturnType<typeof useProductsStore.getState>['products'][0] }) {
@@ -73,20 +73,15 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={[styles.container, darkMode && styles.containerDark]}
-      contentContainerStyle={{ paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
+      contentContainerStyle={{ paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
+      contentInsetAdjustmentBehavior="automatic"
       testID="home-screen"
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={[styles.greeting, darkMode && styles.textLight]}>
-            {isAuthenticated ? `Hello, ${user?.name?.split(' ')[0]}!` : 'Welcome!'}
-          </Text>
+      {!isAuthenticated && (
+        <View style={styles.signInRow}>
           <Text style={[styles.subtitle, darkMode && styles.subtitleDark]}>
-            Discover amazing products
+            Welcome — sign in to personalize your shop.
           </Text>
-        </View>
-        {!isAuthenticated && (
           <PressableScale
             style={styles.signInButton}
             onPress={() => router.push('/auth/login')}
@@ -94,21 +89,26 @@ export default function HomeScreen() {
           >
             <Text style={styles.signInText}>Sign In</Text>
           </PressableScale>
-        )}
-      </View>
+        </View>
+      )}
+      {isAuthenticated && (
+        <Text style={[styles.subtitleAuthed, darkMode && styles.subtitleDark]}>
+          Hello, {user?.name?.split(' ')[0]} — discover amazing products
+        </Text>
+      )}
 
       {/* Quick Actions */}
       <View style={styles.quickActionsContainer}>
         <QuickAction
           icon="🔍"
           label="Search"
-          onPress={() => router.push('/products')}
+          onPress={() => router.push('/(tabs)/(products)')}
           testID="quick-action-search"
         />
         <QuickAction
           icon="🛒"
           label={`Cart (${cartItemCount})`}
-          onPress={() => router.push('/cart')}
+          onPress={() => router.push('/(tabs)/(cart)')}
           testID="quick-action-cart"
         />
         <QuickAction
@@ -129,7 +129,7 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Featured Products</Text>
-          <Link href="/products" asChild>
+          <Link href="/(tabs)/(products)" asChild>
             <PressableScale testID="see-all-featured">
               <Text style={styles.seeAll}>See All</Text>
             </PressableScale>
@@ -179,7 +179,7 @@ export default function HomeScreen() {
               style={[styles.categoryCard, darkMode && styles.cardDark]}
               onPress={() => {
                 useProductsStore.getState().setCategory(category);
-                router.push('/products');
+                router.push('/(tabs)/(products)');
               }}
               testID={`category-${category.toLowerCase()}`}
             >
@@ -198,7 +198,7 @@ export default function HomeScreen() {
       <View style={styles.promoBanner} testID="promo-banner">
         <Text style={styles.promoTitle}>🎉 Summer Sale!</Text>
         <Text style={styles.promoSubtitle}>Up to 50% off on selected items</Text>
-        <Link href="/products" asChild>
+        <Link href="/(tabs)/(products)" asChild>
           <PressableScale style={styles.promoButton} testID="promo-shop-now">
             <Text style={styles.promoButtonText}>Shop Now</Text>
           </PressableScale>
@@ -218,22 +218,26 @@ const styles = StyleSheet.create({
   containerDark: {
     backgroundColor: '#16213e',
   },
-  header: {
+  signInRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: 10,
-  },
-  greeting: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
+    gap: 12,
   },
   subtitle: {
-    fontSize: 16,
+    flex: 1,
+    fontSize: 14,
     color: '#666',
-    marginTop: 4,
+  },
+  subtitleAuthed: {
+    fontSize: 14,
+    color: '#666',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
   subtitleDark: {
     color: '#aaa',
