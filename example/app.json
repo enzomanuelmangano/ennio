@@ -23,7 +23,16 @@
       },
       "package": "com.ennio.example"
     },
-    "plugins": ["expo-router", "@ennio/expo-plugin"],
+    "plugins": [
+      "expo-router",
+      "@ennio/expo-plugin",
+      [
+        "expo-color-space-plugin",
+        {
+          "colorSpace": "displayP3"
+        }
+      ]
+    ],
     "experiments": {
       "typedRoutes": true
     }
