@@ -108,7 +108,8 @@ export default function ProductDetailScreen() {
               <Pressable
                 style={styles.quantityBtn}
                 onPress={() => handleQuantityChange(-1)}
-                testID="decrease-quantity" hitSlop={2}
+                testID="decrease-quantity"
+                hitSlop={2}
               >
                 <Text style={styles.quantityBtnText}>−</Text>
               </Pressable>
@@ -121,7 +122,8 @@ export default function ProductDetailScreen() {
               <Pressable
                 style={styles.quantityBtn}
                 onPress={() => handleQuantityChange(1)}
-                testID="increase-quantity" hitSlop={2}
+                testID="increase-quantity"
+                hitSlop={2}
               >
                 <Text style={styles.quantityBtnText}>+</Text>
               </Pressable>

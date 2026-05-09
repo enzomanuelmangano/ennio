@@ -41,10 +41,20 @@ export default function KeyboardAvoidingScreen() {
 const styles = StyleSheet.create({
   spacer: { flex: 1 },
   bottom: { padding: 20, gap: 12 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 12,
-  borderCurve: 'continuous' },
-  button: { backgroundColor: '#007AFF', padding: 14, borderRadius: 10, alignItems: 'center',
-  borderCurve: 'continuous' },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    padding: 12,
+    borderCurve: 'continuous',
+  },
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderCurve: 'continuous',
+  },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   submitted: { color: '#34C759' },
 });

@@ -52,7 +52,8 @@ function FeaturedProduct({
           <Pressable
             style={styles.featuredAddBtn}
             onPress={handleAddToCart}
-            testID={`add-to-cart-featured-${product.id}`} hitSlop={3}
+            testID={`add-to-cart-featured-${product.id}`}
+            hitSlop={3}
           >
             <Ionicons name="add" size={18} color={theme.colors.text.onAccent} />
           </Pressable>

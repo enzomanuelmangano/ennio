@@ -62,7 +62,8 @@ function ProductCard({
             style={[styles.addToCartBtn, !product.inStock && styles.addToCartBtnDisabled]}
             onPress={handleAddToCart}
             disabled={!product.inStock}
-            testID={`add-to-cart-${product.id}`} hitSlop={4}
+            testID={`add-to-cart-${product.id}`}
+            hitSlop={4}
           >
             <Ionicons name="add" size={20} color={theme.colors.text.onAccent} />
           </Pressable>

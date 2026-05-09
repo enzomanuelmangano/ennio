@@ -57,7 +57,8 @@ function CartItem({
             <Pressable
               style={styles.quantityBtn}
               onPress={() => handleQuantityChange(-1)}
-              testID={`decrease-qty-${item.product.id}`} hitSlop={6}
+              testID={`decrease-qty-${item.product.id}`}
+              hitSlop={6}
             >
               <Ionicons name="remove" size={16} color={theme.colors.text.primary} />
             </Pressable>
@@ -67,7 +68,8 @@ function CartItem({
             <Pressable
               style={styles.quantityBtn}
               onPress={() => handleQuantityChange(1)}
-              testID={`increase-qty-${item.product.id}`} hitSlop={6}
+              testID={`increase-qty-${item.product.id}`}
+              hitSlop={6}
             >
               <Ionicons name="add" size={16} color={theme.colors.text.primary} />
             </Pressable>

@@ -94,8 +94,13 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 20 },
   title: { fontSize: 22, fontWeight: '600', marginBottom: 16 },
   label: { fontSize: 14, color: '#666', marginTop: 12, marginBottom: 4 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 12,
-  borderCurve: 'continuous' },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    padding: 12,
+    borderCurve: 'continuous',
+  },
   error: { color: '#FF3B30', marginTop: 4, fontSize: 12 },
   button: {
     backgroundColor: '#007AFF',

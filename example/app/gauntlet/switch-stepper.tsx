@@ -24,7 +24,8 @@ export default function SwitchStepperScreen() {
           <PressableScale
             testID="stepper-dec"
             style={styles.stepperBtn}
-            onPress={() => setCount((c) => Math.max(0, c - 1))} hitSlop={2}
+            onPress={() => setCount((c) => Math.max(0, c - 1))}
+            hitSlop={2}
           >
             <Text style={styles.stepperBtnText}>−</Text>
           </PressableScale>
@@ -34,7 +35,8 @@ export default function SwitchStepperScreen() {
           <PressableScale
             testID="stepper-inc"
             style={styles.stepperBtn}
-            onPress={() => setCount((c) => c + 1)} hitSlop={2}
+            onPress={() => setCount((c) => c + 1)}
+            hitSlop={2}
           >
             <Text style={styles.stepperBtnText}>+</Text>
           </PressableScale>
