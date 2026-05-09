@@ -173,7 +173,7 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, darkMode && styles.textLight]}>Shop by Category</Text>
         <View style={styles.categoriesGrid}>
-          {['Electronics', 'Sports', 'Home', 'Accessories'].map(category => (
+          {['Electronics', 'Sports', 'Decor', 'Accessories'].map(category => (
             <PressableScale
               key={category}
               style={[styles.categoryCard, darkMode && styles.cardDark]}
@@ -186,7 +186,7 @@ export default function HomeScreen() {
               <Text style={styles.categoryIcon}>
                 {category === 'Electronics' ? '📱' :
                  category === 'Sports' ? '⚽' :
-                 category === 'Home' ? '🏠' : '👜'}
+                 category === 'Decor' ? '🏠' : '👜'}
               </Text>
               <Text style={[styles.categoryLabel, darkMode && styles.textLight]}>{category}</Text>
             </PressableScale>
