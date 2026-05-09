@@ -46,6 +46,7 @@
     "@babel/core": "^7.24.0",
     "@ennio/cli": "*",
     "@types/react": "~19.2.10",
+    "expo-color-space-plugin": "^0.1.0",
     "typescript": "~5.9.2"
   }
 }
