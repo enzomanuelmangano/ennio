@@ -596,6 +596,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    borderCurve: 'continuous',
   },
   inputDark: {
     backgroundColor: '#1a1a2e',
@@ -626,6 +627,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     marginTop: 8,
+    borderCurve: 'continuous',
   },
   securityIcon: {
     fontSize: 16,
@@ -641,6 +643,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
+    borderCurve: 'continuous',
   },
   reviewLabel: {
     fontSize: 12,
@@ -679,6 +682,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
+    borderCurve: 'continuous',
   },
   totalRow: {
     flexDirection: 'row',
@@ -734,6 +738,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    borderCurve: 'continuous',
   },
   backButtonDark: {
     borderColor: '#2a2a3e',
@@ -749,6 +754,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     borderRadius: 10,
+    borderCurve: 'continuous',
   },
   nextButtonFull: {
     flex: 1,

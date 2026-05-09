@@ -275,6 +275,7 @@ const baseStyles = StyleSheet.create({
     padding: 12,
     fontSize: 16,
     marginBottom: 8,
+    borderCurve: 'continuous',
   },
   muted: { fontSize: 13, marginBottom: 8 },
   listItem: { fontSize: 15, paddingVertical: 4 },
@@ -284,6 +285,7 @@ const baseStyles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     marginBottom: 8,
+    borderCurve: 'continuous',
   },
   btnDisabled: { opacity: 0.5 },
   btnText: { fontSize: 15, fontWeight: '600' },
@@ -296,6 +298,7 @@ const baseStyles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     marginHorizontal: 4,
+    borderCurve: 'continuous',
   },
   stepText: { fontSize: 14, fontWeight: '600' },
 });

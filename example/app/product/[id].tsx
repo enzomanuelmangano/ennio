@@ -108,7 +108,7 @@ export default function ProductDetailScreen() {
               <Pressable
                 style={styles.quantityBtn}
                 onPress={() => handleQuantityChange(-1)}
-                testID="decrease-quantity"
+                testID="decrease-quantity" hitSlop={2}
               >
                 <Text style={styles.quantityBtnText}>−</Text>
               </Pressable>
@@ -121,7 +121,7 @@ export default function ProductDetailScreen() {
               <Pressable
                 style={styles.quantityBtn}
                 onPress={() => handleQuantityChange(1)}
-                testID="increase-quantity"
+                testID="increase-quantity" hitSlop={2}
               >
                 <Text style={styles.quantityBtnText}>+</Text>
               </Pressable>
@@ -298,6 +298,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
+    borderCurve: 'continuous',
   },
   backButtonText: {
     color: '#fff',
@@ -337,6 +338,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   ratingText: {
     fontSize: 14,
@@ -371,6 +373,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginBottom: 20,
+    borderCurve: 'continuous',
   },
   quantityLabel: {
     fontSize: 16,
@@ -429,6 +432,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginBottom: 20,
+    borderCurve: 'continuous',
   },
   description: {
     fontSize: 15,
@@ -486,6 +490,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   inCartText: {
     color: '#4CAF50',
@@ -520,6 +525,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   addToCartButtonDisabled: {
     backgroundColor: '#ccc',

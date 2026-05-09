@@ -5,49 +5,25 @@ export type Theme = typeof lightTheme;
 
 const lightShadows = {
   soft: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    elevation: 2,
+    boxShadow: '0px 2px 10px rgba(0, 0, 0, 0.04)',
   } satisfies ViewStyle,
   depth: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.07,
-    shadowRadius: 18,
-    elevation: 6,
+    boxShadow: '0px 6px 18px rgba(0, 0, 0, 0.07)',
   } satisfies ViewStyle,
   inset: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 1,
+    boxShadow: '0px 1px 4px rgba(0, 0, 0, 0.03)',
   } satisfies ViewStyle,
 };
 
 const darkShadows = {
   soft: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 2,
+    boxShadow: '0px 2px 12px rgba(0, 0, 0, 0.25)',
   } satisfies ViewStyle,
   depth: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 22,
-    elevation: 6,
+    boxShadow: '0px 6px 22px rgba(0, 0, 0, 0.35)',
   } satisfies ViewStyle,
   inset: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 1,
+    boxShadow: '0px 1px 6px rgba(0, 0, 0, 0.2)',
   } satisfies ViewStyle,
 };
 

@@ -316,6 +316,7 @@ const createStyles = (theme: Theme) =>
       marginTop: 8,
       padding: 18,
       borderRadius: theme.radii.lg,
+      borderCurve: 'continuous',
       ...theme.shadows.soft,
     },
     avatar: {
@@ -355,6 +356,7 @@ const createStyles = (theme: Theme) =>
       marginTop: 12,
       paddingVertical: 20,
       borderRadius: theme.radii.lg,
+      borderCurve: 'continuous',
       ...theme.shadows.soft,
     },
     statItem: {
@@ -398,6 +400,7 @@ const createStyles = (theme: Theme) =>
       marginHorizontal: 16,
       borderRadius: theme.radii.lg,
       overflow: 'hidden',
+      borderCurve: 'continuous',
       ...theme.shadows.soft,
     },
     menuItem: {
@@ -424,6 +427,7 @@ const createStyles = (theme: Theme) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 14,
+      borderCurve: 'continuous',
     },
     menuIconWrapDanger: {
       backgroundColor: theme.isDark ? 'rgba(213,91,79,0.14)' : 'rgba(184,58,46,0.08)',
@@ -491,6 +495,7 @@ const createStyles = (theme: Theme) =>
       paddingVertical: 14,
       borderRadius: theme.radii.pill,
       marginBottom: 14,
+      borderCurve: 'continuous',
     },
     signInBtnText: {
       color: theme.colors.text.onAccent,

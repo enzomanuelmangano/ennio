@@ -31,6 +31,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     alignItems: 'center',
     marginTop: 8,
+    borderCurve: 'continuous',
   },
   btnText: { color: '#fff', fontWeight: '600' },
 });

@@ -64,6 +64,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginBottom: 6,
     borderRadius: 10,
+    borderCurve: 'continuous',
   },
   rowLabel: { fontSize: 16, color: '#000' },
   chevron: { fontSize: 22, color: '#c7c7cc' },

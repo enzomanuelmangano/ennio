@@ -52,7 +52,7 @@ function FeaturedProduct({
           <Pressable
             style={styles.featuredAddBtn}
             onPress={handleAddToCart}
-            testID={`add-to-cart-featured-${product.id}`}
+            testID={`add-to-cart-featured-${product.id}`} hitSlop={3}
           >
             <Ionicons name="add" size={18} color={theme.colors.text.onAccent} />
           </Pressable>
@@ -284,6 +284,7 @@ const createStyles = (theme: Theme) =>
       paddingHorizontal: 18,
       paddingVertical: 10,
       borderRadius: theme.radii.pill,
+      borderCurve: 'continuous',
     },
     signInText: {
       color: theme.colors.text.onAccent,
@@ -309,6 +310,7 @@ const createStyles = (theme: Theme) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 8,
+      borderCurve: 'continuous',
       ...theme.shadows.inset,
     },
     quickActionLabel: {
@@ -362,6 +364,7 @@ const createStyles = (theme: Theme) =>
       width: 220,
       backgroundColor: theme.colors.background.elevated,
       borderRadius: theme.radii.lg,
+      borderCurve: 'continuous',
       ...theme.shadows.depth,
     },
     featuredImage: {
@@ -370,6 +373,7 @@ const createStyles = (theme: Theme) =>
       backgroundColor: theme.colors.background.tonal,
       borderTopLeftRadius: theme.radii.lg,
       borderTopRightRadius: theme.radii.lg,
+      borderCurve: 'continuous',
     },
     featuredContent: {
       padding: 14,
@@ -406,6 +410,7 @@ const createStyles = (theme: Theme) =>
       backgroundColor: theme.colors.accent.ink,
       alignItems: 'center',
       justifyContent: 'center',
+      borderCurve: 'continuous',
     },
 
     trendingItem: {
@@ -413,6 +418,7 @@ const createStyles = (theme: Theme) =>
       backgroundColor: theme.colors.background.elevated,
       borderRadius: theme.radii.lg,
       marginBottom: 14,
+      borderCurve: 'continuous',
       ...theme.shadows.soft,
     },
     trendingImage: {
@@ -421,6 +427,7 @@ const createStyles = (theme: Theme) =>
       backgroundColor: theme.colors.background.tonal,
       borderTopLeftRadius: theme.radii.lg,
       borderBottomLeftRadius: theme.radii.lg,
+      borderCurve: 'continuous',
     },
     trendingContent: {
       flex: 1,
@@ -460,6 +467,7 @@ const createStyles = (theme: Theme) =>
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: theme.radii.pill,
+      borderCurve: 'continuous',
     },
     ratingText: {
       fontSize: 11,
@@ -479,6 +487,7 @@ const createStyles = (theme: Theme) =>
       borderRadius: theme.radii.lg,
       paddingVertical: 22,
       alignItems: 'center',
+      borderCurve: 'continuous',
       ...theme.shadows.soft,
     },
     categoryIconWrap: {
@@ -489,6 +498,7 @@ const createStyles = (theme: Theme) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 10,
+      borderCurve: 'continuous',
     },
     categoryLabel: {
       fontSize: 14,
@@ -503,6 +513,7 @@ const createStyles = (theme: Theme) =>
       padding: 28,
       backgroundColor: theme.colors.accent.ink,
       borderRadius: theme.radii.xl,
+      borderCurve: 'continuous',
       ...theme.shadows.depth,
     },
     promoEyebrow: {
@@ -534,6 +545,7 @@ const createStyles = (theme: Theme) =>
       borderRadius: theme.radii.pill,
       marginTop: 18,
       alignSelf: 'flex-start',
+      borderCurve: 'continuous',
     },
     promoButtonText: {
       color: theme.colors.accent.ink,

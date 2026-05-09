@@ -44,6 +44,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     marginTop: 16,
+    borderCurve: 'continuous',
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   committed: { marginTop: 16, color: '#34C759', textAlign: 'center' },

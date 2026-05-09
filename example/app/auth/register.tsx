@@ -376,6 +376,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    borderCurve: 'continuous',
   },
   inputDark: {
     backgroundColor: '#1a1a2e',
@@ -427,6 +428,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
     marginTop: 2,
+    borderCurve: 'continuous',
   },
   checkboxChecked: {
     backgroundColor: '#007AFF',
@@ -452,6 +454,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
+    borderCurve: 'continuous',
   },
   registerButtonDisabled: {
     backgroundColor: '#99c9ff',
