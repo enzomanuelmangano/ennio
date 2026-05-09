@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, Image, Modal, Pressable } from 'react-native';
+import { useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, TextInput, Image, Pressable } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as DropdownMenu from 'zeego/dropdown-menu';
 import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../../store';
 import { useTheme, type Theme } from '../../../theme';
 import * as Haptics from 'expo-haptics';
@@ -104,6 +105,13 @@ function CategoryFilter({ styles }: { styles: ReturnType<typeof createStyles> })
   );
 }
 
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'rating', label: 'Top Rated' },
+  { value: 'price-asc', label: 'Price: Low to High' },
+  { value: 'price-desc', label: 'Price: High to Low' },
+  { value: 'name', label: 'Name: A to Z' },
+];
+
 function SortDropdown({
   value,
   onChange,
@@ -116,62 +124,40 @@ function SortDropdown({
   theme: Theme;
 }) {
   const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
-  const [open, setOpen] = useState(false);
-
-  const options: { value: SortOption; label: string }[] = [
-    { value: 'rating', label: 'Top Rated' },
-    { value: 'price-asc', label: 'Price: Low to High' },
-    { value: 'price-desc', label: 'Price: High to Low' },
-    { value: 'name', label: 'Name: A to Z' },
-  ];
-
-  const selectedLabel = options.find((o) => o.value === value)?.label || 'Sort By';
-
-  const handleOpen = () => {
-    if (hapticEnabled) Haptics.selectionAsync();
-    setOpen(true);
-  };
+  const selectedLabel = SORT_OPTIONS.find((o) => o.value === value)?.label || 'Sort By';
 
   const handleSelect = (val: SortOption) => {
     onChange(val);
-    setOpen(false);
     if (hapticEnabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   return (
-    <>
-      <PressableScale
-        style={styles.sortButton}
-        onPress={handleOpen}
-        testID="sort-dropdown"
-        // @ts-expect-error pressto patch propagates accessibilityIdentifier at runtime; types omit it
-        accessibilityIdentifier="sort-dropdown"
-      >
-        <Text style={styles.sortButtonText}>{selectedLabel}</Text>
-        <Ionicons name="chevron-down" size={14} color={theme.colors.text.muted} />
-      </PressableScale>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <PressableScale style={styles.sortBackdrop} onPress={() => setOpen(false)}>
-          <View style={styles.sortMenu} testID="sort-options">
-            {options.map((o) => (
-              <PressableScale
-                key={o.value}
-                style={[styles.sortOption, value === o.value && styles.sortOptionActive]}
-                onPress={() => handleSelect(o.value)}
-                testID={`sort-option-${o.value}`}
-                // @ts-expect-error pressto patch propagates accessibilityIdentifier at runtime; types omit it
-                accessibilityIdentifier={`sort-option-${o.value}`}
-              >
-                <Text style={styles.sortOptionText}>{o.label}</Text>
-                {value === o.value && (
-                  <Ionicons name="checkmark" size={18} color={theme.colors.accent.ink} />
-                )}
-              </PressableScale>
-            ))}
-          </View>
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger>
+        <PressableScale
+          style={styles.sortButton}
+          testID="sort-dropdown"
+          // @ts-expect-error pressto patch propagates accessibilityIdentifier at runtime; types omit it
+          accessibilityIdentifier="sort-dropdown"
+        >
+          <Text style={styles.sortButtonText}>{selectedLabel}</Text>
+          <Ionicons name="chevron-down" size={14} color={theme.colors.text.muted} />
         </PressableScale>
-      </Modal>
-    </>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content>
+        <DropdownMenu.Label>Sort by</DropdownMenu.Label>
+        {SORT_OPTIONS.map((o) => (
+          <DropdownMenu.CheckboxItem
+            key={o.value}
+            value={value === o.value ? 'on' : 'off'}
+            onValueChange={() => handleSelect(o.value)}
+          >
+            <DropdownMenu.ItemTitle>{o.label}</DropdownMenu.ItemTitle>
+            <DropdownMenu.ItemIndicator />
+          </DropdownMenu.CheckboxItem>
+        ))}
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
   );
 }
 
@@ -381,34 +367,6 @@ const createStyles = (theme: Theme) =>
       fontSize: 13,
       color: theme.colors.text.primary,
       fontWeight: '500',
-    },
-    sortBackdrop: {
-      flex: 1,
-      backgroundColor: theme.colors.overlay,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    sortMenu: {
-      backgroundColor: theme.colors.background.elevated,
-      borderRadius: theme.radii.lg,
-      width: '82%',
-      paddingVertical: 6,
-      borderCurve: 'continuous',
-      ...theme.shadows.depth,
-    },
-    sortOption: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-    },
-    sortOptionActive: {
-      backgroundColor: theme.colors.background.tonal,
-    },
-    sortOptionText: {
-      fontSize: 15,
-      color: theme.colors.text.primary,
     },
     productsList: {
       paddingHorizontal: 12,
