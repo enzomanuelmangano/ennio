@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, FlatList, Image } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
-import { useCartStore, useSettingsStore, useAuthStore } from '../store';
+import { useCartStore, useSettingsStore, useAuthStore } from '../../store';
 import { useState } from 'react';
 
 type OrderStatus = 'processing' | 'shipped' | 'delivered' | 'cancelled';
@@ -217,13 +217,7 @@ export default function OrdersScreen() {
   if (!isAuthenticated) {
     return (
       <>
-        <Stack.Screen
-          options={{
-            title: 'Orders',
-            headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-            headerTintColor: darkMode ? '#ffffff' : '#000000',
-          }}
-        />
+        <Stack.Screen options={{ title: 'Orders' }} />
         <View style={[styles.emptyContainer, darkMode && styles.containerDark]} testID="orders-guest">
           <Text style={styles.emptyIcon}>🔒</Text>
           <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>Sign in to view orders</Text>
@@ -247,13 +241,11 @@ export default function OrdersScreen() {
       <Stack.Screen
         options={{
           title: 'My Orders',
-          headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
         }}
       />
       <View style={[styles.container, darkMode && styles.containerDark]} testID="orders-screen">
         {sortedOrders.length === 0 ? (
-          <EmptyOrders darkMode={darkMode} onBrowse={() => router.push('/products')} />
+          <EmptyOrders darkMode={darkMode} onBrowse={() => router.push('/(tabs)/(products)')} />
         ) : (
           <>
             <View style={styles.header}>
@@ -272,6 +264,7 @@ export default function OrdersScreen() {
                 />
               )}
               contentContainerStyle={styles.list}
+              contentInsetAdjustmentBehavior="automatic"
               testID="orders-list"
             />
           </>

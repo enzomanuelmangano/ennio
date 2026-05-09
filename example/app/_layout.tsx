@@ -17,10 +17,8 @@ export default function RootLayout() {
       <StatusBar style={darkMode ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
-          headerStyle: {
-            backgroundColor: darkMode ? '#1a1a2e' : '#ffffff',
-          },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
+          headerLargeTitleShadowVisible: false,
+          headerShadowVisible: false,
           contentStyle: {
             backgroundColor: darkMode ? '#16213e' : '#f5f5f5',
           },
@@ -41,12 +39,7 @@ export default function RootLayout() {
             presentation: 'modal',
           }}
         />
-        <Stack.Screen
-          name="product/[id]"
-          options={{
-            title: 'Product Details',
-          }}
-        />
+        <Stack.Screen name="product" options={{ headerShown: false }} />
         <Stack.Screen
           name="checkout"
           options={{
@@ -54,18 +47,8 @@ export default function RootLayout() {
             presentation: 'modal',
           }}
         />
-        <Stack.Screen
-          name="orders"
-          options={{
-            title: 'Order History',
-          }}
-        />
-        <Stack.Screen
-          name="settings"
-          options={{
-            title: 'Settings',
-          }}
-        />
+        <Stack.Screen name="orders" options={{ headerShown: false }} />
+        <Stack.Screen name="settings" options={{ headerShown: false }} />
         <Stack.Screen
           name="gauntlet/sheet-form"
           options={{ presentation: 'formSheet', title: 'formSheet' }}
