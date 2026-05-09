@@ -9,4 +9,3 @@ appId: com.ennio.example
     id: "demo-login-btn"
 - assertVisible:
     id: "home-screen"
-    timeout: 5000

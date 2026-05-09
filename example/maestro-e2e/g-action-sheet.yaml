@@ -4,6 +4,10 @@ name: "Gauntlet — Action sheet"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-action-sheet"
+    direction: DOWN
 - tapOn:
     id: "g-action-sheet"
 - assertVisible:

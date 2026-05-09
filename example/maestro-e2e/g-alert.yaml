@@ -4,6 +4,10 @@ name: "Gauntlet — Alert variants"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-alert"
+    direction: DOWN
 - tapOn:
     id: "g-alert"
 - assertVisible:

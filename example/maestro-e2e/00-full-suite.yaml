@@ -20,7 +20,6 @@ tags:
     text: "Home"
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
 
 # Logout if logged in (check profile first)
 - tapOn:
@@ -32,27 +31,24 @@ tags:
       visible:
         id: "profile-header"
     commands:
-      # Scroll to find logout button
-      - scroll:
+      - scrollUntilVisible:
+          element:
+            id: "menu-logout"
           direction: DOWN
-          amount: 500
       - tapOn:
           id: "menu-logout"
       - assertVisible:
           text: "Sign Out"
-          timeout: 2000
       - tapOn:
           text: "Sign Out"
       - assertVisible:
           id: "guest-view"
-          timeout: 3000
 
 # Back to home
 - tapOn:
     text: "Home"
 - assertVisible:
     id: "home-screen"
-    timeout: 3000
 
 # ============================================
 # PHASE 2: HOME SCREEN - Guest View
@@ -75,12 +71,10 @@ tags:
 # Featured products section
 - assertVisible:
     text: "Featured Products"
-    timeout: 3000
 
 # Sign in button should be visible for guest
 - assertVisible:
     id: "home-signin-btn"
-    timeout: 3000
 
 # ============================================
 # PHASE 3: AUTHENTICATION - Login Flow
@@ -91,7 +85,6 @@ tags:
     id: "home-signin-btn"
 - assertVisible:
     id: "login-screen"
-    timeout: 3000
 
 # Verify login form elements
 - assertVisible:
@@ -108,14 +101,12 @@ tags:
     id: "login-btn"
 - assertVisible:
     id: "email-error"
-    timeout: 2000
 
 # Navigate to registration
 - tapOn:
     id: "go-to-register"
 - assertVisible:
     id: "register-screen"
-    timeout: 3000
 
 # Verify registration form
 - assertVisible:
@@ -132,19 +123,16 @@ tags:
     id: "go-to-login"
 - assertVisible:
     id: "login-screen"
-    timeout: 3000
 
 # Use demo login
 - tapOn:
     id: "demo-login-btn"
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
 
 # Verify logged in state
 - assertVisible:
     text: "Hello"
-    timeout: 3000
 
 # ============================================
 # PHASE 4: PRODUCTS - Browse & Search
@@ -155,7 +143,6 @@ tags:
     text: "Products"
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
 
 # Verify products screen elements
 - assertVisible:
@@ -171,34 +158,29 @@ tags:
 - inputText: "Wireless"
 - assertVisible:
     text: "Wireless"
-    timeout: 3000
 
 # Clear search
 - tapOn:
     id: "clear-search"
 - assertVisible:
     id: "products-list"
-    timeout: 2000
 
 # Test category filters
 - tapOn:
     id: "filter-category-electronics"
 - assertVisible:
     id: "products-list"
-    timeout: 2000
 
 - tapOn:
     id: "filter-category-all"
 - assertVisible:
     id: "products-list"
-    timeout: 2000
 
 # Test sort
 - tapOn:
     id: "sort-dropdown"
 - assertVisible:
     id: "sort-options"
-    timeout: 2000
 - tapOn:
     id: "sort-option-price-asc"
 
@@ -211,7 +193,6 @@ tags:
     id: "product-card-1"
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 3000
 
 # Verify product detail elements
 - assertVisible:
@@ -226,19 +207,16 @@ tags:
     id: "tab-description"
 - assertVisible:
     id: "product-description"
-    timeout: 2000
 
 - tapOn:
     id: "tab-specs"
 - assertVisible:
     id: "product-specs"
-    timeout: 2000
 
 - tapOn:
     id: "tab-reviews"
 - assertVisible:
     id: "product-reviews"
-    timeout: 2000
 
 # Test quantity
 - tapOn:
@@ -253,7 +231,6 @@ tags:
     id: "add-to-cart-btn"
 - assertVisible:
     text: "Added to Cart"
-    timeout: 3000
 - tapOn:
     text: "Continue Shopping"
 
@@ -266,7 +243,6 @@ tags:
     text: "Cart"
 - assertVisible:
     id: "cart-screen"
-    timeout: 3000
 
 # Verify cart has items
 - assertVisible:
@@ -298,7 +274,6 @@ tags:
     id: "checkout-btn"
 - assertVisible:
     id: "checkout-screen"
-    timeout: 3000
 
 # Step 1: Shipping
 - assertVisible:
@@ -334,7 +309,6 @@ tags:
 # Step 2: Payment
 - assertVisible:
     id: "payment-form"
-    timeout: 3000
 
 - tapOn:
     id: "payment-card-number"
@@ -358,7 +332,6 @@ tags:
 # Step 3: Review
 - assertVisible:
     id: "order-review"
-    timeout: 3000
 
 - assertVisible:
     text: "123 Test Street"
@@ -372,7 +345,6 @@ tags:
 # Order confirmation
 - assertVisible:
     text: "Order Placed"
-    timeout: 5000
 
 - tapOn:
     text: "View Orders"
@@ -383,7 +355,6 @@ tags:
 
 - assertVisible:
     id: "orders-screen"
-    timeout: 3000
 
 - assertVisible:
     id: "orders-list"
@@ -391,7 +362,6 @@ tags:
 # Verify order status
 - assertVisible:
     text: "Processing"
-    timeout: 3000
 
 # ============================================
 # PHASE 9: PROFILE
@@ -401,7 +371,6 @@ tags:
     text: "Profile"
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
 
 # Verify profile elements
 - assertVisible:
@@ -425,7 +394,6 @@ tags:
     id: "menu-settings"
 - assertVisible:
     id: "settings-screen"
-    timeout: 3000
 
 # Test dark mode toggle
 - tapOn:
@@ -438,7 +406,6 @@ tags:
     text: "Profile"
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
 
 # ============================================
 # PHASE 11: CART IS EMPTY AFTER ORDER
@@ -448,7 +415,6 @@ tags:
     text: "Cart"
 - assertVisible:
     id: "cart-screen-empty"
-    timeout: 3000
 
 - assertVisible:
     text: "Your cart is empty"
@@ -461,19 +427,16 @@ tags:
     text: "Profile"
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
 
 - tapOn:
     id: "menu-logout"
 - assertVisible:
     text: "Sign Out"
-    timeout: 2000
 - tapOn:
     text: "Sign Out"
 
 - assertVisible:
     id: "guest-view"
-    timeout: 3000
 
 # ============================================
 # SUITE COMPLETE

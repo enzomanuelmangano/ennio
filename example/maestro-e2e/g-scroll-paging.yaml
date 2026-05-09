@@ -4,6 +4,10 @@ name: "Gauntlet — ScrollView paging"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-scroll-paging"
+    direction: DOWN
 - tapOn:
     id: "g-scroll-paging"
 - assertVisible:
@@ -14,4 +18,3 @@ name: "Gauntlet — ScrollView paging"
     direction: LEFT
 - assertVisible:
     id: "scroll-page-1"
-    timeout: 3000

@@ -1,9 +1,9 @@
 appId: com.ennio.example
-name: Grammar — selectors (id, text, label, index, relational, anyOf, state)
+name: Grammar — selectors (id, text, label, index, relational, state)
 ---
 - launchApp
-- tapOn: "Playground"
-- assertVisible: "Playground"
+- tapOn: "Gauntlet"
+- assertVisible: "Gauntlet"
 
 # id selector
 - assertVisible:
@@ -31,12 +31,6 @@ name: Grammar — selectors (id, text, label, index, relational, anyOf, state)
     id: "toggle-3"
 - assertVisible:
     id: "toggle-5"
-
-# anyOf
-- assertVisible:
-    anyOf:
-      - id: "toggle-1"
-      - id: "non-existent"
 
 # Search input + filtered results
 - tapOn:

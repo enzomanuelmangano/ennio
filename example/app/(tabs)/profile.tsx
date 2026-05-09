@@ -147,10 +147,15 @@ export default function ProfileScreen() {
   };
 
   if (!isAuthenticated) {
-    return <GuestView />;
+    return (
+      <View style={{ flex: 1 }} testID="profile-root">
+        <GuestView />
+      </View>
+    );
   }
 
   return (
+    <View style={{ flex: 1 }} testID="profile-root">
     <ScrollView
       style={[styles.container, darkMode && styles.containerDark]}
       contentContainerStyle={{ paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
@@ -241,6 +246,7 @@ export default function ProfileScreen() {
 
       <Text style={[styles.version, darkMode && styles.subtitleDark]}>Version 1.0.0</Text>
     </ScrollView>
+    </View>
   );
 }
 

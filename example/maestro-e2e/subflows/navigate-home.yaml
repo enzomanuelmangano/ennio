@@ -4,12 +4,18 @@ appId: com.ennio.example
 
 ---
 
-# Pop any Stack-pushed screen so the tab bar is reachable. No-op when
-# already at the tabs root (no nav stack to pop, no presented VC).
-- back
+# Pop any Stack-pushed screen so the tab bar is reachable. Maestro's
+# `back` on iOS doesn't always pop RNScreens stacks reliably; if the
+# tab bar isn't yet visible, skip — the next tapOn will fail clearly.
+- runFlow:
+    when:
+      notVisible:
+        id: "home-screen"
+    commands:
+      - back
+      - waitForAnimationToEnd
 
 - tapOn:
     text: "Home"
 - assertVisible:
     id: "home-screen"
-    timeout: 5000

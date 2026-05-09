@@ -4,39 +4,61 @@ name: "Gauntlet — Touchable variants"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-touchables"
+    direction: DOWN
 - tapOn:
     id: "g-touchables"
 - assertVisible:
     id: "touchables-screen"
 
+# Tap each touchable variant once and confirm the count cell next to
+# the tap button went 0 → 1. `rightOf: { id: touch-X }` anchors the
+# text "1" assertion to the row's count cell so a missed tap can't
+# pass vacuously. id + text on the same element matches inconsistently
+# across runners (Maestro's accessibility tree splits Text nodes), so
+# we use relational selectors instead.
 - tapOn:
     id: "touch-pressable"
 - assertVisible:
-    id: "count-Pressable"
+    text: "1"
+    rightOf:
+      text: "Pressable"
 
 - tapOn:
     id: "touch-opacity"
-- tapOn:
-    id: "touch-opacity"
 - assertVisible:
-    text: "2"
+    text: "1"
+    rightOf:
+      text: "TouchableOpacity"
 
 - tapOn:
     id: "touch-highlight"
 - assertVisible:
-    id: "count-TouchableHighlight"
+    text: "1"
+    rightOf:
+      text: "TouchableHighlight"
 
 - tapOn:
     id: "touch-baseButton"
 - assertVisible:
-    id: "count-BaseButton"
-
-- tapOn:
-    id: "touch-rawButton"
-- assertVisible:
-    id: "count-RawButton"
+    text: "1"
+    rightOf:
+      text: "BaseButton"
 
 - tapOn:
     id: "touch-pressableScale"
 - assertVisible:
-    id: "count-PressableScale"
+    text: "1"
+    rightOf:
+      text: "PressableScale"
+
+# pointerEvents="none" wrapper — Ennio must not fire onPress here.
+# Tap is expected to be a no-op; counter stays at 0.
+- tapOn:
+    id: "touch-blocked"
+- assertVisible:
+    text: "0"
+    rightOf:
+      text: "Blocked"

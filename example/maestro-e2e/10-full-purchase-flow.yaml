@@ -28,6 +28,10 @@ tags:
     commands:
       - tapOn:
           text: "Profile"
+      - scrollUntilVisible:
+          element:
+            id: "menu-logout"
+          direction: DOWN
       - tapOn:
           id: "menu-logout"
       - tapOn:
@@ -59,15 +63,17 @@ tags:
 # Explore featured products
 - assertVisible:
     id: "featured-product-1"
-    timeout: 3000
 
 # Navigate via category
+- scrollUntilVisible:
+    element:
+      id: "category-electronics"
+    direction: DOWN
 - tapOn:
     id: "category-electronics"
 
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
 
 # Search for specific product
 - tapOn:
@@ -76,7 +82,6 @@ tags:
 
 - assertVisible:
     text: "Wireless"
-    timeout: 2000
 
 # ============================================
 # PHASE 3: Add Multiple Products to Cart
@@ -88,7 +93,6 @@ tags:
 
 - assertVisible:
     id: "product-detail-screen"
-    timeout: 3000
 
 # Check product details
 - assertVisible:
@@ -116,7 +120,6 @@ tags:
 - back
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
 
 # Clear search and find another product
 - tapOn:
@@ -137,7 +140,6 @@ tags:
 
 - assertVisible:
     id: "cart-screen"
-    timeout: 3000
 
 # Should have multiple items
 - assertVisible:
@@ -167,17 +169,14 @@ tags:
 
 - assertVisible:
     id: "login-screen"
-    timeout: 3000
 
 - tapOn:
     id: "demo-login-btn"
 
-- waitForAnimationToEnd:
-    timeout: 3000
+- waitForAnimationToEnd
 
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
 
 # ============================================
 # PHASE 7: Cart Still Has Items
@@ -188,7 +187,6 @@ tags:
 
 - assertVisible:
     id: "cart-screen"
-    timeout: 3000
 
 # Items should still be there
 - assertVisible:
@@ -201,12 +199,10 @@ tags:
 - tapOn:
     id: "checkout-btn"
 
-- waitForAnimationToEnd:
-    timeout: 3000
+- waitForAnimationToEnd
 
 - assertVisible:
     id: "checkout-screen"
-    timeout: 8000
 
 # STEP 1: Shipping
 - assertVisible:
@@ -242,7 +238,6 @@ tags:
 # STEP 2: Payment
 - assertVisible:
     id: "payment-form"
-    timeout: 3000
 
 - tapOn:
     id: "payment-card-number"
@@ -266,7 +261,6 @@ tags:
 # STEP 3: Review
 - assertVisible:
     id: "order-review"
-    timeout: 3000
 
 # Verify shipping shown
 - assertVisible:
@@ -286,7 +280,6 @@ tags:
 
 - assertVisible:
     text: "Order Placed"
-    timeout: 5000
 
 - tapOn:
     text: "View Orders"
@@ -297,7 +290,6 @@ tags:
 
 - assertVisible:
     id: "orders-screen"
-    timeout: 3000
 
 - assertVisible:
     id: "orders-list"
@@ -314,7 +306,6 @@ tags:
 
 - assertVisible:
     id: "order-details"
-    timeout: 3000
 
 # Verify order contains our items
 - assertVisible:
@@ -332,7 +323,6 @@ tags:
 
 - assertVisible:
     id: "cart-screen-empty"
-    timeout: 3000
 
 # ============================================
 # PHASE 12: Continue Shopping
@@ -343,7 +333,6 @@ tags:
 
 - assertVisible:
     id: "products-screen"
-    timeout: 3000
 
 # ============================================
 # PHASE 13: Quick Reorder Flow
@@ -362,7 +351,6 @@ tags:
 
 - assertVisible:
     id: "cart-screen"
-    timeout: 3000
 
 # Clear for next test
 - tapOn:
@@ -379,7 +367,6 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 3000
 
 # Stats should reflect the order
 - assertVisible:
@@ -389,6 +376,10 @@ tags:
 # CLEANUP: Logout
 # ============================================
 
+- scrollUntilVisible:
+    element:
+      id: "menu-logout"
+    direction: DOWN
 - tapOn:
     id: "menu-logout"
 - tapOn:
@@ -396,4 +387,3 @@ tags:
 
 - assertVisible:
     id: "guest-view"
-    timeout: 3000

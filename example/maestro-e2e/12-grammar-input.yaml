@@ -3,7 +3,7 @@ name: Grammar — input commands (text, random, erase, clear, paste, key)
 ---
 - launchApp
 - tapOn:
-    text: "Playground"
+    text: "Gauntlet"
 - assertVisible: "Search"
 
 # inputText — basic

@@ -4,6 +4,10 @@ name: "Gauntlet — Reanimated worklet button"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-reanimated"
+    direction: DOWN
 - tapOn:
     id: "g-reanimated"
 - assertVisible:

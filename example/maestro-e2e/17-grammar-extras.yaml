@@ -35,7 +35,6 @@ onFlowComplete:
 # Wait for the app to settle on Home.
 - assertVisible:
     id: "home-screen"
-    timeout: 5000
 
 # Optional tap on a non-existent element — must not fail.
 - tapOn:
@@ -74,7 +73,6 @@ onFlowComplete:
     id: "home-signin-btn"
 - assertVisible:
     id: "login-screen"
-    timeout: 4000
 - tapOn:
     id: "email-input"
 - inputRandomEmail
@@ -99,4 +97,3 @@ onFlowComplete:
 - launchApp
 - assertVisible:
     id: "home-screen"
-    timeout: 5000

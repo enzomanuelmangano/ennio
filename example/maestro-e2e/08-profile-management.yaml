@@ -52,12 +52,10 @@ tags:
           id: "guest-signin-btn"
       - assertVisible:
           id: "login-screen"
-          timeout: 5000
       - tapOn:
           id: "demo-login-btn"
       - assertVisible:
           id: "home-screen"
-          timeout: 5000
 
 # Navigate back to profile
 - tapOn:
@@ -65,7 +63,6 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Authenticated profile header
@@ -109,9 +106,10 @@ tags:
     id: "menu-addresses"
 
 # Preferences section
-- scroll:
+- scrollUntilVisible:
+    element:
+      id: "menu-settings"
     direction: DOWN
-    amount: 200
 
 - assertVisible:
     id: "menu-settings"
@@ -121,9 +119,10 @@ tags:
     id: "menu-appearance"
 
 # Support section
-- scroll:
+- scrollUntilVisible:
+    element:
+      id: "menu-help"
     direction: DOWN
-    amount: 200
 
 - assertVisible:
     id: "menu-help"
@@ -140,24 +139,21 @@ tags:
 # TEST: Navigate to orders from profile
 # ============================================
 
-- scroll:
+- scrollUntilVisible:
+    element:
+      id: "menu-orders"
     direction: UP
-    amount: 400
 
 - tapOn:
     id: "menu-orders"
 
 - assertVisible:
-    anyOf:
-      - id: "orders-screen"
-      - id: "empty-orders"
-    timeout: 5000
+    id: "orders-screen"
 
 # Go back to profile
 - back
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Navigate to settings from profile
@@ -168,13 +164,11 @@ tags:
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 5000
 
 # Go back
 - back
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Navigate to appearance from profile
@@ -186,35 +180,31 @@ tags:
 # Should go to settings (appearance section)
 - assertVisible:
     id: "settings-screen"
-    timeout: 5000
 
 - back
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Navigate to help from profile
 # ============================================
 
-- scroll:
+- scrollUntilVisible:
+    element:
+      id: "menu-help"
     direction: DOWN
-    amount: 300
 
 - tapOn:
     id: "menu-help"
 
-# Help screen or modal
+# Help alert
 - assertVisible:
-    anyOf:
-      - text: "Help"
-      - text: "Support"
-    timeout: 5000
+    text: "Help Center"
+- tapOn:
+    text: "OK"
 
-- back
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Navigate to terms from profile
@@ -224,27 +214,27 @@ tags:
     id: "menu-terms"
 
 - assertVisible:
-    anyOf:
-      - text: "Terms"
-      - text: "Privacy"
-    timeout: 5000
+    text: "Terms & Privacy"
+- tapOn:
+    text: "OK"
 
-- back
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Logout confirmation
 # ============================================
 
+- scrollUntilVisible:
+    element:
+      id: "menu-logout"
+    direction: DOWN
 - tapOn:
     id: "menu-logout"
 
 # Confirmation dialog
 - assertVisible:
     text: "Sign Out"
-    timeout: 4000
 
 # Cancel logout
 - tapOn:
@@ -253,12 +243,15 @@ tags:
 # Should still be on profile
 - assertVisible:
     id: "profile-screen"
-    timeout: 4000
 
 # ============================================
 # TEST: Complete logout
 # ============================================
 
+- scrollUntilVisible:
+    element:
+      id: "menu-logout"
+    direction: DOWN
 - tapOn:
     id: "menu-logout"
 
@@ -268,4 +261,3 @@ tags:
 # Should show guest view
 - assertVisible:
     id: "guest-view"
-    timeout: 5000

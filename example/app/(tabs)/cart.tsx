@@ -131,24 +131,27 @@ export default function CartScreen() {
 
   if (items.length === 0) {
     return (
-      <View style={[styles.emptyContainer, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen-empty">
-        <Text style={styles.emptyIcon}>🛒</Text>
-        <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>Your cart is empty</Text>
-        <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
-          Add some products to get started
-        </Text>
-        <PressableScale
-          style={styles.shopButton}
-          onPress={() => router.push('/products')}
-          testID="browse-products-btn"
-        >
-          <Text style={styles.shopButtonText}>Browse Products</Text>
-        </PressableScale>
+      <View style={{ flex: 1 }} testID="cart-root">
+        <View style={[styles.emptyContainer, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen-empty">
+          <Text style={styles.emptyIcon}>🛒</Text>
+          <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>Your cart is empty</Text>
+          <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
+            Add some products to get started
+          </Text>
+          <PressableScale
+            style={styles.shopButton}
+            onPress={() => router.push('/products')}
+            testID="browse-products-btn"
+          >
+            <Text style={styles.shopButtonText}>Browse Products</Text>
+          </PressableScale>
+        </View>
       </View>
     );
   }
 
   return (
+    <View style={{ flex: 1 }} testID="cart-root">
     <View style={[styles.container, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="cart-screen">
       <View style={styles.header}>
         <Text style={[styles.headerTitle, darkMode && styles.textLight]}>
@@ -177,6 +180,7 @@ export default function CartScreen() {
           <Text style={styles.checkoutText}>Proceed to Checkout</Text>
         </PressableScale>
       </View>
+    </View>
     </View>
   );
 }

@@ -31,10 +31,8 @@ tags:
           id: "demo-login-btn"
       - assertNotVisible:
           id: "demo-login-btn"
-          timeout: 5000
       - assertVisible:
           id: "home-screen"
-          timeout: 5000
 
 # ============================================
 # TEST: Navigate to settings via quick action
@@ -45,7 +43,6 @@ tags:
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Appearance settings
@@ -83,9 +80,10 @@ tags:
 # TEST: Notification settings
 # ============================================
 
-- scroll:
+- scrollUntilVisible:
+    element:
+      id: "toggle-order-updates"
     direction: DOWN
-    amount: 200
 
 # Order updates
 - assertVisible:
@@ -121,9 +119,10 @@ tags:
 # TEST: Privacy settings
 # ============================================
 
-- scroll:
+- scrollUntilVisible:
+    element:
+      id: "toggle-analytics"
     direction: DOWN
-    amount: 200
 
 # Analytics
 - assertVisible:
@@ -163,24 +162,20 @@ tags:
           id: "home-signin-btn"
       - tapOn:
           id: "demo-login-btn"
-      - waitForAnimationToEnd:
-          timeout: 3000
+      - waitForAnimationToEnd
       - assertNotVisible:
           id: "demo-login-btn"
-          timeout: 5000
 
 - tapOn:
     id: "quick-action-settings"
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 5000
 
 - scrollUntilVisible:
     element:
       id: "edit-profile"
     direction: DOWN
-    timeout: 15000
 
 # Edit profile button
 - assertVisible:
@@ -196,29 +191,25 @@ tags:
     element:
       id: "sign-out"
     direction: DOWN
-    timeout: 8000
 
 # ============================================
 # TEST: App info and legal
 # ============================================
 
-- scroll:
+# Scroll the help row (the last asserted) into view; the earlier rows
+# (app-version / terms / privacy-policy) sit above it in the same
+# scrollable, so they're already visible by the time we land.
+- scrollUntilVisible:
+    element:
+      id: "help"
     direction: DOWN
-    amount: 300
 
-# App version
 - assertVisible:
     id: "app-version"
-
-# Terms of service
 - assertVisible:
     id: "terms"
-
-# Privacy policy
 - assertVisible:
     id: "privacy-policy"
-
-# Help & support
 - assertVisible:
     id: "help"
 
@@ -232,7 +223,6 @@ tags:
     element:
       id: "reset-settings"
     direction: DOWN
-    timeout: 8000
 
 # Clear cart & orders
 - assertVisible:
@@ -248,7 +238,6 @@ tags:
 
 - assertVisible:
     text: "Reset Settings"
-    timeout: 4000
 
 # Cancel the reset
 - tapOn:
@@ -270,22 +259,21 @@ tags:
 
 - assertVisible:
     id: "profile-screen"
-    timeout: 5000
 
 - tapOn:
     id: "menu-settings"
 
 - assertVisible:
     id: "settings-screen"
-    timeout: 5000
 
 # ============================================
 # TEST: Dark mode persists across screens
 # ============================================
 
-- scroll:
+- scrollUntilVisible:
+    element:
+      id: "toggle-dark-mode"
     direction: UP
-    amount: 500
 
 - tapOn:
     id: "toggle-dark-mode"

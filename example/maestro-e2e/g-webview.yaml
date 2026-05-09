@@ -4,10 +4,13 @@ name: "Gauntlet — WebView"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-webview"
+    direction: DOWN
 - tapOn:
     id: "g-webview"
 - assertVisible:
     id: "webview-screen"
 - assertVisible:
     id: "webview-loaded-marker"
-    timeout: 8000

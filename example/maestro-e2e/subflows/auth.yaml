@@ -11,13 +11,3 @@ appId: com.ennio.example
       visible:
         id: "login-screen"
     file: login-demo.yaml
-
----
-
-# Login with demo credentials subflow
-# Usage: runFlow: subflows/login-demo.yaml
-- tapOn:
-    id: "demo-login-btn"
-- assertVisible:
-    id: "home-screen"
-    timeout: 5000

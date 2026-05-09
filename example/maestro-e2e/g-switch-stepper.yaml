@@ -4,6 +4,10 @@ name: "Gauntlet — Switch + Stepper"
 - launchApp:
     clearState: true
 - tapOn: "Gauntlet"
+- scrollUntilVisible:
+    element:
+      id: "g-switch"
+    direction: DOWN
 - tapOn:
     id: "g-switch"
 - assertVisible:
