@@ -66,10 +66,36 @@ static void sha1Hash(const std::string& input, unsigned char* output) {
 #endif
 }
 
+// JSON escape for response fields populated from external input (request
+// id, exception messages). Keeps the toJSON() output well-formed when an
+// id or error contains '"', '\', or a control character.
+static std::string jsonEscape(const std::string& str) {
+    std::string out;
+    out.reserve(str.size() + 8);
+    for (char c : str) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+
 std::string Response::toJSON() const {
     std::ostringstream oss;
     oss << "{";
-    oss << "\"id\":\"" << id << "\",";
+    oss << "\"id\":\"" << jsonEscape(id) << "\",";
     oss << "\"success\":" << (success ? "true" : "false");
 
     if (!data.empty()) {
@@ -77,7 +103,7 @@ std::string Response::toJSON() const {
     }
 
     if (!error.empty()) {
-        oss << ",\"error\":\"" << error << "\"";
+        oss << ",\"error\":\"" << jsonEscape(error) << "\"";
     }
 
     oss << "}";
@@ -97,6 +123,10 @@ WebSocketServer::~WebSocketServer() {
 bool WebSocketServer::start(int port) {
     WS_LOG("start() called with port=%d", port);
 
+    if (port < 1 || port > 65535) {
+        WS_LOG("start() - invalid port %d", port);
+        return false;
+    }
     if (running_) {
         WS_LOG("start() - already running");
         return false;
@@ -211,6 +241,9 @@ int WebSocketServer::getClientCount() const {
 void WebSocketServer::serverLoop() {
     WS_LOG("serverLoop() - started, waiting for connections");
 
+    // Exponential backoff on accept errors so an EMFILE / fd-exhaustion
+    // doesn't pin a CPU spinning on the failing accept().
+    int acceptBackoffMs = 0;
     while (running_) {
         struct sockaddr_in clientAddr;
         socklen_t clientLen = sizeof(clientAddr);
@@ -219,11 +252,16 @@ void WebSocketServer::serverLoop() {
         if (clientSocket < 0) {
             if (!running_) {
                 WS_LOG("serverLoop() - server stopped");
-                break; // Server was stopped
+                break;
             }
-            WS_LOG("serverLoop() - accept error, continuing");
+            WS_LOG("serverLoop() - accept error errno=%d, backoff=%dms", errno, acceptBackoffMs);
+            if (acceptBackoffMs > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(acceptBackoffMs));
+            }
+            acceptBackoffMs = acceptBackoffMs == 0 ? 10 : std::min(acceptBackoffMs * 2, 1000);
             continue;
         }
+        acceptBackoffMs = 0;
 
         WS_LOG("serverLoop() - accepted connection, socket=%d", clientSocket);
 
@@ -259,51 +297,49 @@ void WebSocketServer::handleClient(int clientSocket) {
         clients_.push_back(clientSocket);
     }
 
-    // Read loop
-    std::vector<uint8_t> buffer(4096);
+    // Per-connection accumulator. WebSocket frames can split across
+    // recv() calls (large request body, congested loopback, RN's bridge
+    // chunking) — without this, parseFrame would see only the half it
+    // got, return "", and the second half would arrive on the next recv
+    // with no header and be silently dropped.
+    std::vector<uint8_t> accum;
+    uint8_t recvBuf[4096];
     while (running_) {
-        ssize_t bytesRead = recv(clientSocket, buffer.data(), buffer.size(), 0);
-
+        ssize_t bytesRead = recv(clientSocket, recvBuf, sizeof(recvBuf), 0);
         if (bytesRead < 0) {
-            // Check if it's a timeout (EAGAIN/EWOULDBLOCK)
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                WS_LOG("handleClient() - recv timeout, sending ping");
-                // Could send WebSocket ping here, for now just continue
-                continue;
-            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
             WS_LOG("handleClient() - recv error: %d", errno);
             break;
         }
-
         if (bytesRead == 0) {
             WS_LOG("handleClient() - connection closed by client");
             break;
         }
+        accum.insert(accum.end(), recvBuf, recvBuf + bytesRead);
 
-        WS_LOG("handleClient() - recv returned %zd bytes", bytesRead);
+        // Drain as many complete frames as the buffer holds. parseFrame
+        // returns ("", consumed=0) when more bytes are needed.
+        while (true) {
+            size_t consumed = 0;
+            std::string message = parseFrame(accum, &consumed);
+            if (consumed == 0) break;
+            accum.erase(accum.begin(), accum.begin() + consumed);
+            if (message.empty()) continue; // ping/pong/close — skipped at protocol layer
 
-        buffer.resize(bytesRead);
-        std::string message = parseFrame(buffer);
-        buffer.resize(4096);
+            WS_LOG("handleClient() - received message: %.100s...", message.c_str());
+            Request request = parseRequest(message);
+            WS_LOG("handleClient() - parsed request type=%s id=%s", request.type.c_str(), request.id.c_str());
 
-        if (message.empty()) {
-            WS_LOG("handleClient() - empty message after parseFrame");
-            continue;
-        }
+            CommandHandler handler;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                handler = commandHandler_;
+            }
 
-        WS_LOG("handleClient() - received message: %.100s...", message.c_str());
-
-        // Parse and handle request
-        Request request = parseRequest(message);
-        WS_LOG("handleClient() - parsed request type=%s id=%s", request.type.c_str(), request.id.c_str());
-
-        CommandHandler handler;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            handler = commandHandler_;
-        }
-
-        if (handler) {
+            if (!handler) {
+                WS_LOG("handleClient() - no command handler set!");
+                continue;
+            }
             WS_LOG("handleClient() - calling command handler");
             try {
                 Response response = handler(request);
@@ -325,8 +361,6 @@ void WebSocketServer::handleClient(int clientSocket) {
                 errorResponse.error = "Internal error: unknown exception";
                 sendResponse(clientSocket, errorResponse);
             }
-        } else {
-            WS_LOG("handleClient() - no command handler set!");
         }
     }
 
@@ -342,21 +376,18 @@ void WebSocketServer::handleClient(int clientSocket) {
     close(clientSocket);
 }
 
-std::string WebSocketServer::parseFrame(const std::vector<uint8_t>& data) {
-    if (data.size() < 2) {
-        return "";
-    }
+std::string WebSocketServer::parseFrame(const std::vector<uint8_t>& data, size_t* consumed) {
+    if (consumed) *consumed = 0;
+    if (data.size() < 2) return "";
 
-    // Parse WebSocket frame header
     uint8_t opcode = data[0] & 0x0F;
     bool masked = (data[1] & 0x80) != 0;
     uint64_t payloadLen = data[1] & 0x7F;
-
     size_t offset = 2;
 
     if (payloadLen == 126) {
         if (data.size() < 4) return "";
-        payloadLen = (data[2] << 8) | data[3];
+        payloadLen = (uint64_t(data[2]) << 8) | data[3];
         offset = 4;
     } else if (payloadLen == 127) {
         if (data.size() < 10) return "";
@@ -367,7 +398,6 @@ std::string WebSocketServer::parseFrame(const std::vector<uint8_t>& data) {
         offset = 10;
     }
 
-    // Get masking key if masked
     uint8_t maskKey[4] = {0, 0, 0, 0};
     if (masked) {
         if (data.size() < offset + 4) return "";
@@ -375,21 +405,24 @@ std::string WebSocketServer::parseFrame(const std::vector<uint8_t>& data) {
         offset += 4;
     }
 
-    if (data.size() < offset + payloadLen) {
-        return "";
-    }
+    if (data.size() < offset + payloadLen) return "";
 
-    // Decode payload
+    // Frame complete. Caller advances by the full header+payload size.
+    if (consumed) *consumed = offset + static_cast<size_t>(payloadLen);
+
+    // Opcode 0x8 = close. Signal by returning empty string with consumed > 0;
+    // caller treats empty-but-consumed as "control frame, not a message".
+    // 0x9/0xA = ping/pong, similarly ignored. Only 0x1 (text) routes to the
+    // command handler.
+    if (opcode != 0x1) return "";
+
     std::string result;
-    result.reserve(payloadLen);
+    result.reserve(static_cast<size_t>(payloadLen));
     for (uint64_t i = 0; i < payloadLen; i++) {
-        char c = data[offset + i];
-        if (masked) {
-            c ^= maskKey[i % 4];
-        }
+        char c = static_cast<char>(data[offset + i]);
+        if (masked) c ^= maskKey[i % 4];
         result += c;
     }
-
     return result;
 }
 

@@ -14,31 +14,28 @@
 // Timeout for main thread dispatch (5 seconds)
 static const int64_t MAIN_THREAD_TIMEOUT_NS = 5 * NSEC_PER_SEC;
 
-/**
- * Dispatch a block to the main thread with timeout.
- * Returns YES if completed, NO if timed out.
- * If already on main thread, executes immediately.
- */
+// Dispatch `block` to the main thread, wait up to MAIN_THREAD_TIMEOUT_NS.
+// Inline-runs on the main thread to avoid deadlock if the caller is
+// already there.
+//
+// Memory: the semaphore is dispatch_object_t under ARC — the async block
+// captures it strongly, so it stays alive until the block signals (even
+// if we time out and return). No explicit dispatch_release needed.
 static BOOL dispatchSyncMainWithTimeout(void (^block)(void)) {
     if ([NSThread isMainThread]) {
         block();
         return YES;
     }
-
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-
     dispatch_async(dispatch_get_main_queue(), ^{
         block();
         dispatch_semaphore_signal(semaphore);
     });
-
     long result = dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MAIN_THREAD_TIMEOUT_NS));
-
     if (result != 0) {
         NSLog(@"[Ennio] WARNING: Main thread dispatch timed out after 5 seconds");
         return NO;
     }
-
     return YES;
 }
 
@@ -55,122 +52,85 @@ void EnnioRuntimeHelper::setSurfacePresenter(void* surfacePresenter) {
 }
 
 // Helper to find surface presenter by looking through runtime objects
-static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
-    NSLog(@"[Ennio] Searching for surface presenter...");
+// Read-only `[obj performSelector:NSSelectorFromString(name)]` with the
+// ARC leak warning quieted. All call sites here are getters; ARC's
+// retain-leak heuristic is overcautious for these.
+static id performGetter(id obj, NSString* name) {
+    SEL sel = NSSelectorFromString(name);
+    if (![obj respondsToSelector:sel]) return nil;
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    id result = [obj performSelector:sel];
+    #pragma clang diagnostic pop
+    return result;
+}
 
-    // Try to access through the app delegate
-    UIApplication* app = [UIApplication sharedApplication];
-    id appDelegate = app.delegate;
-
+// Newer Expo / RN: AppDelegate exposes reactNativeFactory whose reactHost
+// (or the factory itself in older Expo) carries the surfacePresenter.
+static RCTSurfacePresenter* presenterViaAppDelegate() {
+    id appDelegate = [UIApplication sharedApplication].delegate;
     NSLog(@"[Ennio] AppDelegate class: %@", NSStringFromClass([appDelegate class]));
+    id factory = performGetter(appDelegate, @"reactNativeFactory");
+    if (!factory) return nil;
+    NSLog(@"[Ennio] Found reactNativeFactory: %@", NSStringFromClass([factory class]));
 
-    // Method 1: Try reactNativeFactory -> reactHost -> surfacePresenter (newer Expo pattern)
-    SEL factorySel = NSSelectorFromString(@"reactNativeFactory");
-    if ([appDelegate respondsToSelector:factorySel]) {
-        #pragma clang diagnostic push
-        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        id factory = [appDelegate performSelector:factorySel];
-        #pragma clang diagnostic pop
-
-        if (factory) {
-            NSLog(@"[Ennio] Found reactNativeFactory: %@", NSStringFromClass([factory class]));
-
-            // Try reactHost first
-            SEL hostSel = NSSelectorFromString(@"reactHost");
-            if ([factory respondsToSelector:hostSel]) {
-                #pragma clang diagnostic push
-                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                id host = [factory performSelector:hostSel];
-                #pragma clang diagnostic pop
-
-                if (host) {
-                    NSLog(@"[Ennio] Found reactHost: %@", NSStringFromClass([host class]));
-
-                    SEL presenterSel = NSSelectorFromString(@"surfacePresenter");
-                    if ([host respondsToSelector:presenterSel]) {
-                        #pragma clang diagnostic push
-                        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                        id presenter = [host performSelector:presenterSel];
-                        #pragma clang diagnostic pop
-
-                        if (presenter) {
-                            NSLog(@"[Ennio] Found surfacePresenter via host: %@", presenter);
-                            return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
-                        }
-                    }
-                }
-            }
-
-            // Try surfacePresenter directly on factory
-            SEL presenterSel = NSSelectorFromString(@"surfacePresenter");
-            if ([factory respondsToSelector:presenterSel]) {
-                #pragma clang diagnostic push
-                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                id presenter = [factory performSelector:presenterSel];
-                #pragma clang diagnostic pop
-
-                if (presenter) {
-                    NSLog(@"[Ennio] Found surfacePresenter on factory: %@", presenter);
-                    return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
-                }
-            }
-
-            // Log available methods on factory for debugging
-            NSLog(@"[Ennio] Factory methods:");
-            unsigned int count;
-            Method *methods = class_copyMethodList([factory class], &count);
-            for (unsigned int i = 0; i < count && i < 20; i++) {
-                NSLog(@"[Ennio]   - %@", NSStringFromSelector(method_getName(methods[i])));
-            }
-            free(methods);
+    id host = performGetter(factory, @"reactHost");
+    if (host) {
+        NSLog(@"[Ennio] Found reactHost: %@", NSStringFromClass([host class]));
+        id presenter = performGetter(host, @"surfacePresenter");
+        if (presenter) {
+            NSLog(@"[Ennio] Found surfacePresenter via host: %@", presenter);
+            return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
         }
     }
+    id presenter = performGetter(factory, @"surfacePresenter");
+    if (presenter) {
+        NSLog(@"[Ennio] Found surfacePresenter on factory: %@", presenter);
+        return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
+    }
 
-    // Method 2: Search windows for RCTSurfaceHostingView
+    // Diagnostic: print factory's method list so a future RN/Expo bump
+    // doesn't leave us guessing which selector was renamed.
+    NSLog(@"[Ennio] Factory methods:");
+    unsigned int count;
+    Method* methods = class_copyMethodList([factory class], &count);
+    for (unsigned int i = 0; i < count && i < 20; i++) {
+        NSLog(@"[Ennio]   - %@", NSStringFromSelector(method_getName(methods[i])));
+    }
+    free(methods);
+    return nil;
+}
+
+// Fallback: scan every window for an RCTSurface*View and pull the
+// presenter via its surface. Catches setups where the AppDelegate path
+// is unavailable (third-party RN host, older Expo, naked RN).
+static RCTSurfacePresenter* presenterViaWindowScan() {
     NSLog(@"[Ennio] Searching windows for RCTSurfaceHostingView...");
     for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
-        if ([scene isKindOfClass:[UIWindowScene class]]) {
-            UIWindowScene* windowScene = (UIWindowScene*)scene;
-            for (UIWindow* window in windowScene.windows) {
-                UIViewController* rootVC = window.rootViewController;
-                if (rootVC && rootVC.view) {
-                    // Look for RCTRootContentView or RCTSurfaceHostingView
-                    for (UIView* subview in rootVC.view.subviews) {
-                        NSString* className = NSStringFromClass([subview class]);
-                        NSLog(@"[Ennio] Found view: %@", className);
-
-                        if ([className containsString:@"RCTSurface"] ||
-                            [className containsString:@"RCTRoot"]) {
-                            // Try to get surface from this view
-                            SEL surfaceSel = NSSelectorFromString(@"surface");
-                            if ([subview respondsToSelector:surfaceSel]) {
-                                #pragma clang diagnostic push
-                                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                                id surface = [subview performSelector:surfaceSel];
-                                #pragma clang diagnostic pop
-
-                                if (surface) {
-                                    SEL presenterSel = NSSelectorFromString(@"surfacePresenter");
-                                    if ([surface respondsToSelector:presenterSel]) {
-                                        #pragma clang diagnostic push
-                                        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                                        id presenter = [surface performSelector:presenterSel];
-                                        #pragma clang diagnostic pop
-
-                                        if (presenter) {
-                                            NSLog(@"[Ennio] Found surfacePresenter via view: %@", presenter);
-                                            return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow* window in ((UIWindowScene*)scene).windows) {
+            UIViewController* rootVC = window.rootViewController;
+            if (!rootVC || !rootVC.view) continue;
+            for (UIView* subview in rootVC.view.subviews) {
+                NSString* className = NSStringFromClass([subview class]);
+                NSLog(@"[Ennio] Found view: %@", className);
+                if (![className containsString:@"RCTSurface"] && ![className containsString:@"RCTRoot"]) continue;
+                id surface = performGetter(subview, @"surface");
+                if (!surface) continue;
+                id presenter = performGetter(surface, @"surfacePresenter");
+                if (!presenter) continue;
+                NSLog(@"[Ennio] Found surfacePresenter via view: %@", presenter);
+                return (__bridge RCTSurfacePresenter *)(__bridge void *)presenter;
             }
         }
     }
+    return nil;
+}
 
+static RCTSurfacePresenter* findSurfacePresenterInRuntime() {
+    NSLog(@"[Ennio] Searching for surface presenter...");
+    if (RCTSurfacePresenter* p = presenterViaAppDelegate()) return p;
+    if (RCTSurfacePresenter* p = presenterViaWindowScan()) return p;
     NSLog(@"[Ennio] Could not find surface presenter");
     return nil;
 }
@@ -294,12 +254,10 @@ bool EnnioRuntimeHelper::isInitialized() const {
 // Alert/Modal Handling
 // ============================================
 
-// Helper to find the presented alert controller
 static UIAlertController* findPresentedAlertController() {
-    // Walk EVERY connected window, not just the key window. The XCTest
-    // helper presents its own UIWindow when running, which can take key
-    // status away from the user app — so the alert lives on a non-key
-    // window and the old key-window-only lookup misses it entirely.
+    // Walk every connected window. UIAlertController on iOS 13+ is hosted
+    // on its own UIWindowLevelAlert window — not on the app's key window —
+    // so a key-window-only lookup misses it.
     for (UIScene* scene in [[UIApplication sharedApplication] connectedScenes]) {
         if (![scene isKindOfClass:[UIWindowScene class]]) continue;
         for (UIWindow* window in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
@@ -425,117 +383,118 @@ std::vector<std::string> EnnioRuntimeHelper::getAlertButtons() {
  * point. UIKit's hit-test routes the touch through the responder chain,
  * which fires Pressable / UIControl / accessibilityActivate handlers
  * regardless of which view owns the gesture. ~5 ms in-process, no HID,
- * no XCTest.
+ * no out-of-process driver.
+ *
+ * Strategy is layered: UIControl chain → tap GR walk-up → RN Gesture
+ * Handler direct dispatch → bare sendEvent fallback. Each layer is its
+ * own static helper below; `synthesizeTouchAtPoint` is just the wiring.
  */
-// Forward declaration: invokeTapGestureRecognizers is defined further
-// down (with the rest of the activation helpers) but synthesizeTouchAtPoint
-// needs to call it as part of its UIControl-walk fallback chain.
 static BOOL invokeTapGestureRecognizers(UIView* view);
 
-static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
+static UIWindow* findKeyWindow(void) {
     UIApplication* app = [UIApplication sharedApplication];
-    UIWindow* window = nil;
+    for (UIScene* scene in app.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow* w in ((UIWindowScene*)scene).windows) {
+            if (w.isKeyWindow) return w;
+        }
+    }
     for (UIScene* scene in app.connectedScenes) {
         if (![scene isKindOfClass:[UIWindowScene class]]) continue;
         UIWindowScene* ws = (UIWindowScene*)scene;
-        for (UIWindow* w in ws.windows) {
-            if (w.isKeyWindow) { window = w; break; }
-        }
-        if (window) break;
-        if (ws.windows.count > 0) window = ws.windows.firstObject;
+        if (ws.windows.count > 0) return ws.windows.firstObject;
     }
-    if (!window) return NO;
+    return nil;
+}
 
-    UIView* hit = [window hitTest:locationInWindow withEvent:nil];
-    if (!hit) hit = window;
-    // RN Pressable's touch processor inspects touch.view to decide which
-    // shadow node owns the gesture. Hit-test can return an inner Text /
-    // Image leaf that has no React responder; walk up to the nearest
-    // RCTViewComponentView so the touch is attributed to the wrapper
-    // React renders.
-    UIView* reactView = hit;
-    while (reactView && ![NSStringFromClass([reactView class]) hasPrefix:@"RCT"]) {
-        reactView = reactView.superview;
+// RN Pressable's touch processor inspects touch.view to decide which
+// shadow node owns the gesture. Hit-test can return an inner Text /
+// Image leaf with no React responder; walk to the nearest RCT* ancestor
+// so the touch is attributed to the wrapper React rendered.
+static UIView* walkToReactView(UIView* hit) {
+    UIView* cursor = hit;
+    while (cursor && ![NSStringFromClass([cursor class]) hasPrefix:@"RCT"]) {
+        cursor = cursor.superview;
     }
-    if (reactView) hit = reactView;
-    NSLog(@"[Ennio] tapAtPoint window=(%.1f,%.1f) hit=%@",
-          locationInWindow.x, locationInWindow.y, NSStringFromClass([hit class]));
+    return cursor ?: hit;
+}
 
-    // UIControl subclasses (UIButton, RNGestureHandlerButton with
-    // RNNativeViewGestureHandler bound to it, etc.) wire `onPress` to
-    // a UIControlEvent action chain. Walk up to find the nearest
-    // enabled UIControl with at least one TouchUpInside target. Then
-    // fire TouchDown FIRST, then TouchUpInside — RNGH's
-    // RNNativeViewGestureHandler maps TouchDown → JS-side State.Active
-    // and TouchUpInside → JS-side State.End, and `BaseButton.onPress`
-    // only fires when the JS sees `oldState === Active && state === End`.
-    // A bare TouchUpInside lands as End-without-Active and is silently
-    // dropped. UIButton (no GR binding) ignores TouchDown, so this is
-    // a no-op cost there.
+// UIControl subclasses (UIButton, RNGestureHandlerButton bound to
+// RNNativeViewGestureHandler) wire `onPress` to a UIControlEvent action
+// chain. RNGH's BaseButton.onPress only fires when JS sees
+// `oldState===Active && state===End`, so plain TouchUpInside is dropped
+// as End-without-Active — fire TouchDown first. UIButton ignores the
+// extra TouchDown so this is a no-op cost there.
+static BOOL tryUIControlChain(UIView* hit) {
     for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
-        if ([cursor isKindOfClass:[UIControl class]]) {
-            UIControl* ctrl = (UIControl*)cursor;
-            if (!ctrl.enabled) continue;
-            BOOL hasAction = NO;
-            for (id t in ctrl.allTargets) {
-                NSArray* actions = [ctrl actionsForTarget:t forControlEvent:UIControlEventTouchUpInside];
-                if (actions.count > 0) { hasAction = YES; break; }
-            }
-            if (hasAction) {
-                // RNNativeViewGestureHandler binds via UIControlEventTouchDown
-                // → State.Active and UIControlEventTouchUpInside → State.End
-                // on the JS side. BaseButton.onPress only fires when the JS
-                // sees `oldState === Active && state === End`, so a bare
-                // TouchUpInside is dropped — fire TouchDown first.
-                [ctrl sendActionsForControlEvents:UIControlEventTouchDown];
-                [ctrl sendActionsForControlEvents:UIControlEventTouchUpInside];
-                return YES;
+        if (![cursor isKindOfClass:[UIControl class]]) continue;
+        UIControl* ctrl = (UIControl*)cursor;
+        if (!ctrl.enabled) continue;
+        BOOL hasAction = NO;
+        for (id t in ctrl.allTargets) {
+            if ([ctrl actionsForTarget:t forControlEvent:UIControlEventTouchUpInside].count > 0) {
+                hasAction = YES;
+                break;
             }
         }
+        if (!hasAction) continue;
+        [ctrl sendActionsForControlEvents:UIControlEventTouchDown];
+        [ctrl sendActionsForControlEvents:UIControlEventTouchUpInside];
+        return YES;
     }
+    return NO;
+}
 
-    // Pressable / TouchableOpacity / RN-Gesture-Handler attach a
-    // UITapGestureRecognizer to a wrapper view higher up the tree.
-    // Synthesised UITouches reach UIWindow.sendEvent, but the GR system
-    // doesn't always engage on private-API touches the way it does on
-    // real HID events — so walk up looking for any tap-class GR and
-    // invoke its action target directly via KVC. Solves the case where
-    // a hit lands on an inner Text leaf (e.g. a status badge "Processing"
-    // inside a Pressable order card) and we need the wrapper's onPress
-    // to fire, not the leaf's own (absent) handler.
+// Pressable / TouchableOpacity / RNGH attach a UITapGestureRecognizer to
+// a wrapper view higher up. Synthesised UITouches reach sendEvent, but
+// the GR system doesn't always engage on private-API touches the way it
+// does on real HID — walk up invoking any tap-class GR's target directly.
+static BOOL tryAncestorTapGestures(UIView* hit) {
     for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
         if (invokeTapGestureRecognizers(cursor)) return YES;
     }
+    return NO;
+}
 
-    UIEvent* event = nil;
-    if ([app respondsToSelector:@selector(_touchesEvent)]) {
-        event = [app _touchesEvent];
-    }
-    if (!event) return NO;
-
+static UITouch* makeSynthTouchAtPoint(CGPoint locationInWindow, UIWindow* window, UIView* targetView) {
     UITouch* touch = [[UITouch alloc] init];
-    if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
-        [touch _setLocationInWindow:locationInWindow resetPrevious:NO];
-    } else {
-        [touch setValue:[NSValue valueWithCGPoint:locationInWindow] forKey:@"locationInWindow"];
+    // Each KVC group is wrapped: a future iOS could rename or remove any
+    // of these private keys, and a bare setValue:forKey: throws an
+    // NSException that escapes silently from the only outer @try (the
+    // sendEvent path much further down). One log per missed key beats a
+    // silent broken tap.
+    @try {
+        if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
+            [touch _setLocationInWindow:locationInWindow resetPrevious:NO];
+        } else {
+            [touch setValue:[NSValue valueWithCGPoint:locationInWindow] forKey:@"locationInWindow"];
+        }
+    } @catch (NSException* e) {
+        NSLog(@"[Ennio] makeSynthTouch: failed to set location: %@", e.reason);
     }
+    @try {
+        [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
+        [touch setValue:window forKey:@"window"];
+        [touch setValue:targetView forKey:@"view"];
+        [touch setValue:@(1) forKey:@"tapCount"];
+        [touch setValue:@([[NSProcessInfo processInfo] systemUptime]) forKey:@"timestamp"];
+    } @catch (NSException* e) {
+        NSLog(@"[Ennio] makeSynthTouch: failed to set core fields: %@", e.reason);
+    }
+    return touch;
+}
 
-    // RN-Gesture-Handler's `RNDummyGestureRecognizer` (used by every
-    // NativeViewGestureHandler-bound view — pressto's PressableScale,
-    // RNGH RawButton, BaseButton on non-UIControl views) only fires
-    // `onPress` when its `touchesBegan:withEvent:` and `touchesEnded:withEvent:`
-    // overrides run with a real touch. UIKit's gesture pipeline doesn't
-    // always deliver synthesised touches to the GR's overrides — so
-    // forward the touch directly via the public UIGestureRecognizerSubclass
-    // entry points. Detect by class-name prefix to avoid coupling to RNGH
-    // headers from inside Ennio's pod target.
+// RNDummyGestureRecognizer (NativeViewGestureHandler — pressto's
+// PressableScale, RNGH RawButton, BaseButton on non-UIControl views)
+// only fires `onPress` when its touchesBegan:/touchesEnded: overrides
+// run with a real touch. UIKit's GR pipeline doesn't always deliver
+// synthesised touches to the overrides — forward via the public
+// UIGestureRecognizerSubclass entry points. Class-name prefix detection
+// avoids coupling to RNGH headers from inside Ennio's pod target.
+static BOOL tryRNGestureHandlerDirect(UIView* hit, UIWindow* window, UIEvent* event, CGPoint locationInWindow) {
+    UITouch* touch = makeSynthTouchAtPoint(locationInWindow, window, hit);
     NSSet<UITouch*>* touchSet = [NSSet setWithObject:touch];
-    [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
-    [touch setValue:window forKey:@"window"];
-    [touch setValue:hit forKey:@"view"];
-    [touch setValue:@(1) forKey:@"tapCount"];
-    NSTimeInterval rngBeganAt = [[NSProcessInfo processInfo] systemUptime];
-    [touch setValue:@(rngBeganAt) forKey:@"timestamp"];
+    NSTimeInterval beganAt = [[touch valueForKey:@"timestamp"] doubleValue];
     for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
         for (UIGestureRecognizer* gr in cursor.gestureRecognizers) {
             if (!gr.enabled) continue;
@@ -546,7 +505,7 @@ static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
                     [gr touchesBegan:touchSet withEvent:event];
                 }
                 [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
-                [touch setValue:@(rngBeganAt + 0.030) forKey:@"timestamp"];
+                [touch setValue:@(beganAt + 0.030) forKey:@"timestamp"];
                 if ([gr respondsToSelector:@selector(touchesEnded:withEvent:)]) {
                     [gr touchesEnded:touchSet withEvent:event];
                 }
@@ -556,14 +515,22 @@ static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
             }
         }
     }
-    // Reset for standard send-event fallback below.
-    [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
-    [touch setValue:@(rngBeganAt) forKey:@"timestamp"];
-    [touch setValue:window forKey:@"window"];
-    [touch setValue:hit forKey:@"view"];
-    [touch setValue:@(1) forKey:@"tapCount"];
-    NSTimeInterval beganAt = [[NSProcessInfo processInfo] systemUptime];
-    [touch setValue:@(beganAt) forKey:@"timestamp"];
+    return NO;
+}
+
+// Bare Began → 30 ms runloop tick → Ended via UIApplication sendEvent.
+// 30 ms is the minimum gap RN's touch handler needs to register Began
+// before Ended arrives — shorter gets flagged as touchCancelled, longer
+// runs unrelated timers. End uses a fresh UIEvent because reusing
+// Began's event is hash-deduped by RN's iOS 26 touch handler.
+static BOOL sendSynthUITouchSequence(UIView* targetView, UIWindow* window, CGPoint locationInWindow) {
+    UIApplication* app = [UIApplication sharedApplication];
+    if (![app respondsToSelector:@selector(_touchesEvent)]) return NO;
+    UIEvent* event = [app _touchesEvent];
+    if (!event) return NO;
+
+    UITouch* touch = makeSynthTouchAtPoint(locationInWindow, window, targetView);
+    NSTimeInterval beganAt = [[touch valueForKey:@"timestamp"] doubleValue];
     if ([touch respondsToSelector:@selector(_setIsFirstTouchForView:)]) {
         [touch _setIsFirstTouchForView:YES];
     }
@@ -587,77 +554,36 @@ static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
         [app sendEvent:endEvent];
         return YES;
     } @catch (NSException* e) {
-        NSLog(@"[Ennio] synthesizeTouchAtPoint: %@", e.reason);
+        NSLog(@"[Ennio] sendSynthUITouchSequence: %@", e.reason);
         return NO;
     }
 }
 
-static BOOL synthesizeTouchAtViewCenter(UIView* view) {
-    if (!view || !view.window) return NO;
-    UIWindow* window = view.window;
-    CGPoint center = CGPointMake(view.bounds.size.width / 2, view.bounds.size.height / 2);
-    CGPoint locationInWindow = [view convertPoint:center toView:window];
+static BOOL synthesizeTouchAtPoint(CGPoint locationInWindow) {
+    UIWindow* window = findKeyWindow();
+    if (!window) return NO;
+    UIView* hit = [window hitTest:locationInWindow withEvent:nil] ?: window;
+    hit = walkToReactView(hit);
+    NSLog(@"[Ennio] tapAtPoint window=(%.1f,%.1f) hit=%@",
+          locationInWindow.x, locationInWindow.y, NSStringFromClass([hit class]));
+
+    if (tryUIControlChain(hit)) return YES;
+    if (tryAncestorTapGestures(hit)) return YES;
 
     UIApplication* app = [UIApplication sharedApplication];
-    UIEvent* event = nil;
-    if ([app respondsToSelector:@selector(_touchesEvent)]) {
-        event = [app _touchesEvent];
-    }
+    if (![app respondsToSelector:@selector(_touchesEvent)]) return NO;
+    UIEvent* event = [app _touchesEvent];
     if (!event) return NO;
 
-    UITouch* touch = [[UITouch alloc] init];
-    if ([touch respondsToSelector:@selector(_setLocationInWindow:resetPrevious:)]) {
-        [touch _setLocationInWindow:locationInWindow resetPrevious:NO];
-    } else {
-        [touch setValue:[NSValue valueWithCGPoint:locationInWindow] forKey:@"locationInWindow"];
-    }
-    [touch setValue:@(UITouchPhaseBegan) forKey:@"phase"];
-    [touch setValue:window forKey:@"window"];
-    [touch setValue:view forKey:@"view"];
-    [touch setValue:@(1) forKey:@"tapCount"];
-    NSTimeInterval beganAt = [[NSProcessInfo processInfo] systemUptime];
-    [touch setValue:@(beganAt) forKey:@"timestamp"];
-    if ([touch respondsToSelector:@selector(_setIsFirstTouchForView:)]) {
-        [touch _setIsFirstTouchForView:YES];
-    }
+    if (tryRNGestureHandlerDirect(hit, window, event, locationInWindow)) return YES;
+    return sendSynthUITouchSequence(hit, window, locationInWindow);
+}
 
-    @try {
-        if ([event respondsToSelector:@selector(_clearTouches)]) {
-            [event _clearTouches];
-        }
-        if ([event respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
-            [event _addTouch:touch forDelayedDelivery:NO];
-        }
-        [app sendEvent:event];
-
-        // Tiny runloop iteration so RN's touch handler registers Began
-        // before Ended arrives. Too long and the runloop runs unrelated
-        // timers; too short and Pressable's gesture system flags it as
-        // touchCancelled. 30ms covers small Pressables (clear-X, switch
-        // toggles) reliably while still feeling instantaneous.
-        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.030]];
-
-        // Fresh UIEvent for the End phase. Reusing the Began event has
-        // been observed to drop the second sendEvent on iOS 26 — the
-        // touch handler dedupes by event hash and skips the second one.
-        UIEvent* endEvent = [app respondsToSelector:@selector(_touchesEvent)]
-            ? [app _touchesEvent] : event;
-        [touch setValue:@(UITouchPhaseEnded) forKey:@"phase"];
-        [touch setValue:@(beganAt + 0.030) forKey:@"timestamp"];
-        if (endEvent != event) {
-            if ([endEvent respondsToSelector:@selector(_clearTouches)]) {
-                [endEvent _clearTouches];
-            }
-            if ([endEvent respondsToSelector:@selector(_addTouch:forDelayedDelivery:)]) {
-                [endEvent _addTouch:touch forDelayedDelivery:NO];
-            }
-        }
-        [app sendEvent:endEvent];
-        return YES;
-    } @catch (NSException* e) {
-        NSLog(@"[Ennio] synthesizeTouchAtViewCenter: %@", e.reason);
-        return NO;
-    }
+static BOOL synthesizeTouchAtViewCenter(UIView* view) {
+    if (!view || !view.window) return NO;
+    CGPoint center = CGPointMake(view.bounds.size.width / 2, view.bounds.size.height / 2);
+    CGPoint locationInWindow = [view convertPoint:center toView:view.window];
+    return sendSynthUITouchSequence(view, view.window, locationInWindow);
 }
 
 // Try every reasonable activation path on a view. Returns YES on the first
@@ -778,6 +704,34 @@ static BOOL fireActivation(UIView* view) {
     return NO;
 }
 
+// Mirror UIKit touch-routing rules. Two paths block a tap:
+//   1. UIKit's own gate: hidden / alpha~0 / userInteractionEnabled=NO
+//      anywhere up the superview chain.
+//   2. RN Fabric's pointerEvents="none": implemented as a hitTest:
+//      override on the host view, leaving userInteractionEnabled alone.
+//      Only a real hit-test from the window catches this.
+// Activation paths (sendActionsForControlEvents, GR target invoke,
+// accessibilityActivate) bypass both, so we gate explicitly to avoid
+// firing a tap that a finger never could.
+static BOOL viewIsTappable(UIView* view) {
+    if (!view || !view.window) return NO;
+    for (UIView* v = view; v; v = v.superview) {
+        if (v.hidden || v.alpha < 0.01) return NO;
+        if (!v.userInteractionEnabled) return NO;
+        // RN Fabric implements pointerEvents="none" on RCTViewComponentView
+        // by overriding hitTest: rather than touching userInteractionEnabled.
+        // Read the prop via KVC so we reject the tap explicitly.
+        @try {
+            id pe = [v valueForKey:@"pointerEvents"];
+            if ([pe isKindOfClass:[NSString class]] &&
+                [(NSString*)pe isEqualToString:@"none"]) return NO;
+            if ([pe isKindOfClass:[NSNumber class]] &&
+                [(NSNumber*)pe integerValue] == 1) return NO;
+        } @catch (__unused NSException* e) {}
+    }
+    return YES;
+}
+
 // Recursively search the view tree for a UIView whose accessibilityIdentifier
 // matches the testID. Hidden / size-zero views skipped because they're not
 // interactable.
@@ -895,6 +849,29 @@ static void invokeAlertAction(UIAlertController* alert, UIAlertAction* action) {
 
 namespace ennio {
 
+// BFS the descendant subtree looking for a definite activation target.
+// Handles RNGH BaseButton: testID lives on the wrapper, but the actual
+// UIControl that fires onPress is a child a couple levels in.
+static BOOL activateInSubtree(UIView* root) {
+    NSMutableArray* queue = [NSMutableArray arrayWithArray:root.subviews];
+    while (queue.count > 0) {
+        UIView* next = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if (tryDefiniteActivation(next)) return YES;
+        [queue addObjectsFromArray:next.subviews];
+    }
+    return NO;
+}
+
+// Climb superview chain. Catches the case where testID is on an inner
+// Text leaf and the actual handler is a Pressable wrapper a few levels up.
+static BOOL activateInAncestors(UIView* leaf) {
+    for (UIView* cursor = leaf.superview; cursor; cursor = cursor.superview) {
+        if (tryDefiniteActivation(cursor)) return YES;
+    }
+    return NO;
+}
+
 bool EnnioRuntimeHelper::tap(const std::string& testID) {
     NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
     __block bool ok = false;
@@ -904,29 +881,17 @@ bool EnnioRuntimeHelper::tap(const std::string& testID) {
             NSLog(@"[Ennio] tap: testID '%@' not found in view tree", tid);
             return;
         }
-        // Phase 1: walk view + descendants + ancestors looking for a
-        // definite activation target (UIControl, gesture recogniser,
-        // accessibilityActivate). This handles RNGH BaseButton (which is
-        // a UIControl subview wrapped by an RN view that holds the
-        // testID) without triggering synthesise on the wrapper.
+        if (!viewIsTappable(view)) {
+            NSLog(@"[Ennio] tap: '%@' blocked (pointerEvents=none / hidden / userInteractionEnabled=NO on view or ancestor)", tid);
+            return;
+        }
         if (tryDefiniteActivation(view)) { ok = true; return; }
-        NSMutableArray* queue = [NSMutableArray arrayWithArray:view.subviews];
-        while (queue.count > 0) {
-            UIView* next = queue.firstObject;
-            [queue removeObjectAtIndex:0];
-            if (tryDefiniteActivation(next)) { ok = true; return; }
-            [queue addObjectsFromArray:next.subviews];
-        }
-        UIView* cursor = view.superview;
-        while (cursor) {
-            if (tryDefiniteActivation(cursor)) { ok = true; return; }
-            cursor = cursor.superview;
-        }
-        // Phase 2: no UIControl / GR found anywhere in the subtree —
-        // synthesise a UITouch on the original view. Reaches vanilla RN
-        // Pressable via RCTSurfaceTouchHandler. We treat this as the
-        // last-resort fallback because synthesizeTouchAtViewCenter
-        // always returns YES even when no responder picks the touch up.
+        if (activateInSubtree(view))     { ok = true; return; }
+        if (activateInAncestors(view))   { ok = true; return; }
+        // Last resort: synthesise a UITouch on the view itself. Reaches
+        // vanilla Pressable via RCTSurfaceTouchHandler. Always reports YES
+        // even if no responder claims the touch — keep this last so a
+        // false-positive doesn't pre-empt a real activation path.
         if (synthesizeTouchAtViewCenter(view)) { ok = true; return; }
         NSLog(@"[Ennio] tap: '%@' has no activation path (class=%@, traits=0x%llx, isAccessibilityElement=%d)",
               tid, NSStringFromClass([view class]), (unsigned long long)view.accessibilityTraits, view.isAccessibilityElement);
@@ -955,17 +920,7 @@ EnnioRuntimeHelper::getViewWindowFrame(const std::string& testID) {
 std::pair<double, double> EnnioRuntimeHelper::getSurfaceOffset() {
     __block double ox = 0, oy = 0;
     void (^block)(void) = ^{
-        UIWindow* window = nil;
-        UIApplication* app = [UIApplication sharedApplication];
-        for (UIScene* scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            UIWindowScene* ws = (UIWindowScene*)scene;
-            for (UIWindow* w in ws.windows) {
-                if (w.isKeyWindow) { window = w; break; }
-            }
-            if (window) break;
-            if (ws.windows.count > 0) window = ws.windows.firstObject;
-        }
+        UIWindow* window = findKeyWindow();
         if (!window) return;
         UIView* root = window.rootViewController.view;
         if (!root) return;
@@ -977,6 +932,35 @@ std::pair<double, double> EnnioRuntimeHelper::getSurfaceOffset() {
     return {ox, oy};
 }
 
+std::pair<double, double> EnnioRuntimeHelper::getKeyWindowSize() {
+    __block double w = 0, h = 0;
+    void (^block)(void) = ^{
+        UIWindow* window = findKeyWindow();
+        if (!window) return;
+        w = window.bounds.size.width;
+        h = window.bounds.size.height;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return {w, h};
+}
+
+bool EnnioRuntimeHelper::isViewOnscreen(const std::string& testID) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool onscreen = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view || !view.window) return;
+        CGRect viewRect = [view convertRect:view.bounds toView:view.window];
+        if (viewRect.size.width <= 0 || viewRect.size.height <= 0) return;
+        CGRect winRect = view.window.bounds;
+        // Require any overlap — partial visibility (e.g. button at the
+        // very bottom) still counts. CGRectIntersectsRect handles edges.
+        onscreen = CGRectIntersectsRect(viewRect, winRect);
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return onscreen;
+}
+
 bool EnnioRuntimeHelper::tapAtScreenPoint(double x, double y) {
     __block bool ok = false;
     void (^block)(void) = ^{
@@ -984,16 +968,7 @@ bool EnnioRuntimeHelper::tapAtScreenPoint(double x, double y) {
         // below the system status bar / notch. UIWindow.sendEvent
         // expects window coords, so add the surface's offset within
         // its window before synthesising the touch.
-        UIWindow* keyWindow = nil;
-        UIApplication* app = [UIApplication sharedApplication];
-        for (UIScene* scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            UIWindowScene* ws = (UIWindowScene*)scene;
-            for (UIWindow* w in ws.windows) {
-                if (w.isKeyWindow) { keyWindow = w; break; }
-            }
-            if (keyWindow) break;
-        }
+        UIWindow* keyWindow = findKeyWindow();
         CGPoint point = CGPointMake((CGFloat)x, (CGFloat)y);
         if (keyWindow) {
             // The React surface is the first non-trivial child of the
@@ -1012,21 +987,17 @@ bool EnnioRuntimeHelper::tapAtScreenPoint(double x, double y) {
 }
 
 bool EnnioRuntimeHelper::swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs) {
+    if (durationMs <= 0) {
+        NSLog(@"[Ennio] swipeAtPoints: invalid durationMs=%.1f, must be > 0", durationMs);
+        return false;
+    }
     __block bool ok = false;
     void (^block)(void) = ^{
         // Resolve the React surface offset the same way tapAtScreenPoint
         // does — both endpoints are React-surface-relative when the caller
         // is forwarding maestro yaml `swipe: start: ...` coords.
         UIApplication* app = [UIApplication sharedApplication];
-        UIWindow* keyWindow = nil;
-        for (UIScene* scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            UIWindowScene* ws = (UIWindowScene*)scene;
-            for (UIWindow* w in ws.windows) {
-                if (w.isKeyWindow) { keyWindow = w; break; }
-            }
-            if (keyWindow) break;
-        }
+        UIWindow* keyWindow = findKeyWindow();
         CGFloat offX = 0, offY = 0;
         if (keyWindow && keyWindow.rootViewController.view) {
             UIView* surface = keyWindow.rootViewController.view;
@@ -1159,16 +1130,7 @@ bool EnnioRuntimeHelper::pressHardwareKey(double keyCode) {
         // Walk the key window's responder chain to the current first
         // responder. UIKeyInput is the protocol UITextInput descends
         // from; insertText: / deleteBackward are the standard hooks.
-        UIApplication* app = [UIApplication sharedApplication];
-        UIWindow* keyWindow = nil;
-        for (UIScene* scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            UIWindowScene* ws = (UIWindowScene*)scene;
-            for (UIWindow* w in ws.windows) {
-                if (w.isKeyWindow) { keyWindow = w; break; }
-            }
-            if (keyWindow) break;
-        }
+        UIWindow* keyWindow = findKeyWindow();
         if (!keyWindow) { ok = NO; return; }
 
         UIResponder* fr = nil;
@@ -1223,50 +1185,44 @@ bool EnnioRuntimeHelper::doubleTap(const std::string& testID) {
 //
 // VoiceOver / UITabBar augment accessibilityLabel with extra context
 // ("Home, Tab, 1 of 4"), so we try exact match first then CONTAINS.
+// Match `label` against `needle`: exact, then whole-word case-insensitive
+// CONTAINS so "Home" matches "Home, Tab" but not "Welcome Home".
+static BOOL labelMatchesText(NSString* label, NSString* needle) {
+    if (!label) return NO;
+    if ([label isEqualToString:needle]) return YES;
+    NSRange r = [label rangeOfString:needle options:NSCaseInsensitiveSearch];
+    if (r.location == NSNotFound) return NO;
+    NSCharacterSet* letters = [NSCharacterSet letterCharacterSet];
+    BOOL leftOk = r.location == 0 || ![letters characterIsMember:[label characterAtIndex:r.location - 1]];
+    BOOL rightOk = r.location + r.length == label.length
+                   || ![letters characterIsMember:[label characterAtIndex:r.location + r.length]];
+    return leftOk && rightOk;
+}
+
+// Hit-test at the candidate's centre and confirm it (or a descendant) is
+// the topmost view. A Stack-pushed screen leaves the predecessor's
+// UIViews in the tree but covers them — without this guard the label
+// finder taps a hidden tab bar.
+static BOOL viewIsHittableAtCenter(UIView* view) {
+    UIWindow* win = view.window;
+    if (!win) return YES;
+    CGRect inWindow = [view convertRect:view.bounds toView:win];
+    CGPoint centre = CGPointMake(CGRectGetMidX(inWindow), CGRectGetMidY(inWindow));
+    UIView* topMost = [win hitTest:centre withEvent:nil];
+    for (UIView* cursor = topMost; cursor; cursor = cursor.superview) {
+        if (cursor == view) return YES;
+    }
+    return NO;
+}
+
+// Smallest hittable view whose accessibility label matches `text`.
+// Caller iterates root windows; this recurses into one tree.
 static UIView* findLabelMatch(UIView* root, NSString* text, UIView* best) {
     if (!root || root.hidden || root.alpha < 0.01) return best;
-    NSString* label = root.accessibilityLabel;
-    BOOL matches = NO;
-    if (label) {
-        if ([label isEqualToString:text]) {
-            matches = YES;
-        } else if ([label rangeOfString:text options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            // CONTAINS, but require the match to be a whole word so "Home"
-            // doesn't match "Welcome Home". Word boundaries: start of
-            // string, end of string, or non-letter neighbour.
-            NSRange r = [label rangeOfString:text options:NSCaseInsensitiveSearch];
-            BOOL leftOk = r.location == 0 || ![[NSCharacterSet letterCharacterSet] characterIsMember:[label characterAtIndex:r.location - 1]];
-            BOOL rightOk = r.location + r.length == label.length || ![[NSCharacterSet letterCharacterSet] characterIsMember:[label characterAtIndex:r.location + r.length]];
-            matches = leftOk && rightOk;
-        }
-    }
-    if (matches) {
-        // Verify the match is actually hittable — a Stack-pushed screen
-        // leaves its predecessor's UIViews in the tree but covers them
-        // with a new top-level view. accessibility-label finder still
-        // walks the predecessor and would tap a hidden tab bar item.
-        // Hit-test at the centre and confirm the candidate (or one of
-        // its descendants) is the topmost view.
-        BOOL hittable = YES;
-        UIWindow* win = root.window;
-        if (win) {
-            CGRect inWindow = [root convertRect:root.bounds toView:win];
-            CGPoint centre = CGPointMake(CGRectGetMidX(inWindow), CGRectGetMidY(inWindow));
-            UIView* topMost = [win hitTest:centre withEvent:nil];
-            UIView* cursor = topMost;
-            BOOL contains = NO;
-            while (cursor) {
-                if (cursor == root) { contains = YES; break; }
-                cursor = cursor.superview;
-            }
-            hittable = contains;
-        }
-        if (hittable) {
-            if (!best || root.bounds.size.width * root.bounds.size.height
-                         < best.bounds.size.width * best.bounds.size.height) {
-                best = root;
-            }
-        }
+    if (labelMatchesText(root.accessibilityLabel, text) && viewIsHittableAtCenter(root)) {
+        CGFloat rootArea = root.bounds.size.width * root.bounds.size.height;
+        CGFloat bestArea = best ? best.bounds.size.width * best.bounds.size.height : CGFLOAT_MAX;
+        if (rootArea < bestArea) best = root;
     }
     for (UIView* sub in root.subviews) {
         best = findLabelMatch(sub, text, best);
@@ -1484,28 +1440,34 @@ static UIScrollView* findTopmostScrollView(UIView* root) {
     return nil;
 }
 
+// testID-less scroll: pick the deepest scrollable on screen, mirroring
+// what a user would touch. Iterates windows in reverse so the most-
+// recently-presented (modal/sheet) scroll view wins over the underlying.
+static UIScrollView* findFirstVisibleScrollView() {
+    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+            UIScrollView* sv = findTopmostScrollView(win);
+            if (sv) return sv;
+        }
+    }
+    return nil;
+}
+
+static UIScrollView* resolveScrollTarget(NSString* tid) {
+    if (tid.length > 0) {
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (view) {
+            return [view isKindOfClass:[UIScrollView class]] ? (UIScrollView*)view : findEnclosingScrollView(view);
+        }
+    }
+    return findFirstVisibleScrollView();
+}
+
 static bool scrollImpl(NSString* tid, NSString* direction, double distance) {
     __block bool ok = false;
     void (^block)(void) = ^{
-        UIScrollView* sv = nil;
-        if (tid.length > 0) {
-            UIView* view = findViewByTestIDInAllWindows(tid);
-            if (view) {
-                sv = [view isKindOfClass:[UIScrollView class]] ? (UIScrollView*)view : findEnclosingScrollView(view);
-            }
-        }
-        if (!sv) {
-            // testID-less scroll: pick the deepest scrollable view on
-            // screen and scroll it. Mirrors what the user would do.
-            for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
-                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-                for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
-                    sv = findTopmostScrollView(win);
-                    if (sv) break;
-                }
-                if (sv) break;
-            }
-        }
+        UIScrollView* sv = resolveScrollTarget(tid);
         if (!sv) return;
         CGPoint offset = sv.contentOffset;
         CGFloat dx = 0, dy = 0;
@@ -1553,6 +1515,24 @@ bool EnnioRuntimeHelper::scrollTo(const std::string& scrollViewTestID, const std
     return ok;
 }
 
+// Plain explicit recursion. The previous implementation used a
+// self-referential block (`__block find = …; findWeak = find;`) where
+// the weak capture happened before assignment — if the block ran via a
+// dispatched continuation before the assignment was observable on the
+// executing thread, `findWeak` was nil and the recursion no-op'd.
+static UITabBarController* findTabBarController(UIViewController* vc) {
+    if (!vc) return nil;
+    if ([vc isKindOfClass:[UITabBarController class]]) return (UITabBarController*)vc;
+    for (UIViewController* child in vc.childViewControllers) {
+        UITabBarController* found = findTabBarController(child);
+        if (found) return found;
+    }
+    if (vc.presentedViewController) {
+        return findTabBarController(vc.presentedViewController);
+    }
+    return nil;
+}
+
 bool EnnioRuntimeHelper::tapTabByName(const std::string& name) {
     NSString* needle = [NSString stringWithUTF8String:name.c_str()];
     __block bool ok = false;
@@ -1560,20 +1540,7 @@ bool EnnioRuntimeHelper::tapTabByName(const std::string& name) {
         for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow* win in ((UIWindowScene*)scene).windows) {
-                UIViewController* root = win.rootViewController;
-                __block UITabBarController* tab = nil;
-                __block __weak void (^findWeak)(UIViewController*) = nil;
-                void (^find)(UIViewController*) = ^(UIViewController* vc) {
-                    if (!vc || tab) return;
-                    if ([vc isKindOfClass:[UITabBarController class]]) {
-                        tab = (UITabBarController*)vc;
-                        return;
-                    }
-                    for (UIViewController* child in vc.childViewControllers) findWeak(child);
-                    if (vc.presentedViewController) findWeak(vc.presentedViewController);
-                };
-                findWeak = find;
-                find(root);
+                UITabBarController* tab = findTabBarController(win.rootViewController);
                 if (!tab) continue;
                 NSUInteger idx = 0;
                 for (UIViewController* vc in tab.viewControllers) {
@@ -1629,22 +1596,10 @@ bool EnnioRuntimeHelper::tapTabByName(const std::string& name) {
 bool EnnioRuntimeHelper::tapTab(int index) {
     __block bool ok = false;
     void (^block)(void) = ^{
-        // Walk every window for a UITabBarController, pick the index.
         for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow* win in ((UIWindowScene*)scene).windows) {
-                UIViewController* root = win.rootViewController;
-                __block UITabBarController* tab = nil;
-                void (^find)(UIViewController*) = ^(UIViewController* vc) {};
-                __block __weak void (^findWeak)(UIViewController*) = nil;
-                find = ^(UIViewController* vc) {
-                    if (!vc || tab) return;
-                    if ([vc isKindOfClass:[UITabBarController class]]) { tab = (UITabBarController*)vc; return; }
-                    for (UIViewController* child in vc.childViewControllers) findWeak(child);
-                    if (vc.presentedViewController) findWeak(vc.presentedViewController);
-                };
-                findWeak = find;
-                find(root);
+                UITabBarController* tab = findTabBarController(win.rootViewController);
                 if (tab && index >= 0 && index < (int)tab.viewControllers.count) {
                     UIViewController* vc = tab.viewControllers[index];
                     if ([tab.delegate respondsToSelector:@selector(tabBarController:shouldSelectViewController:)]) {
@@ -1767,9 +1722,12 @@ static UITouch* makeSynthTouch(UIView* view, UIWindow* window, CGPoint location,
 // attaches its handler's recognizer (RNNativeViewGestureRecognizer /
 // RNDummyGestureRecognizer) to the host view itself or a hidden child,
 // so a superview-only walk misses it.
-static void appendRecognizersFromSubtree(UIView* view, NSMutableArray* out, NSMutableSet* seen) {
-    if (!view || [seen containsObject:[NSValue valueWithNonretainedObject:view]]) return;
-    [seen addObject:[NSValue valueWithNonretainedObject:view]];
+static void appendRecognizersFromSubtree(UIView* view, NSMutableArray* out, NSHashTable* seen) {
+    // NSHashTable.weakObjectsHashTable holds zeroing weak refs. If a
+    // descendant view dealloc's mid-walk the entry self-clears, so
+    // there's no dangling-pointer hazard the prior NSValue-based set had.
+    if (!view || [seen containsObject:view]) return;
+    [seen addObject:view];
     for (UIGestureRecognizer* r in view.gestureRecognizers) {
         if (r.enabled) [out addObject:r];
     }
@@ -1783,8 +1741,7 @@ static void appendRecognizersFromSubtree(UIView* view, NSMutableArray* out, NSMu
 // recogniser wins gesture-coordinator ties.
 static NSArray<UIGestureRecognizer*>* collectRecognizersDeepestFirst(UIView* view) {
     NSMutableArray* out = [NSMutableArray array];
-    NSMutableSet* seen = [NSMutableSet set];
-    // Subtree first (deepest).
+    NSHashTable* seen = [NSHashTable weakObjectsHashTable];
     appendRecognizersFromSubtree(view, out, seen);
     // Then ancestors.
     for (UIView* v = view.superview; v != nil; v = v.superview) {

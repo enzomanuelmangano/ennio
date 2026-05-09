@@ -8,6 +8,9 @@
 #include <sstream>
 #include <atomic>
 #include <condition_variable>
+#include <type_traits>
+#include <unordered_map>
+#include <functional>
 
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/UIManager.h>
@@ -45,6 +48,48 @@ static std::string escapeJsonString(const std::string& str) {
                 }
         }
     }
+    return oss.str();
+}
+
+// SFINAE: detect ExtendedElementInfo (has `checked` / `focused` /
+// `selected`). If the type doesn't, those keys are skipped — keeps
+// findByTestID's plain ElementInfo response untouched while
+// findBySelector / findAllBySelector emit the fuller payload.
+template <typename T, typename = void>
+struct hasExtendedFlags : std::false_type {};
+template <typename T>
+struct hasExtendedFlags<T, std::void_t<decltype(std::declval<T>().checked)>> : std::true_type {};
+
+// Serialise an ElementInfo (or ExtendedElementInfo) to a JSON object
+// literal. Centralised so findByTestID / findBySelector /
+// findAllBySelector share one truth instead of three near-identical
+// hand-written serialisers (the audit found drift between sites).
+template <typename Info>
+static std::string elementInfoToJson(const Info& info) {
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"testID\":\"" << escapeJsonString(info.testID) << "\",";
+    oss << "\"type\":\"" << escapeJsonString(info.type) << "\",";
+    if (info.text.has_value()) {
+        oss << "\"text\":\"" << escapeJsonString(info.text.value()) << "\",";
+    } else {
+        oss << "\"text\":null,";
+    }
+    oss << "\"accessible\":" << (info.accessible ? "true" : "false") << ",";
+    oss << "\"enabled\":" << (info.enabled ? "true" : "false");
+    if constexpr (hasExtendedFlags<Info>::value) {
+        oss << ",\"checked\":" << (info.checked ? "true" : "false");
+        oss << ",\"focused\":" << (info.focused ? "true" : "false");
+        oss << ",\"selected\":" << (info.selected ? "true" : "false");
+    }
+    oss << ",\"layout\":{";
+    oss << "\"x\":" << info.layout.x << ",";
+    oss << "\"y\":" << info.layout.y << ",";
+    oss << "\"width\":" << info.layout.width << ",";
+    oss << "\"height\":" << info.layout.height << ",";
+    oss << "\"screenX\":" << info.layout.screenX << ",";
+    oss << "\"screenY\":" << info.layout.screenY;
+    oss << "}}";
     return oss.str();
 }
 
@@ -236,26 +281,33 @@ std::variant<nitro::NullType, LayoutMetrics> HybridEnnio::getLayoutMetrics(const
 }
 
 bool HybridEnnio::isVisible(const std::string& testID) {
+    // UIKit is authoritative when the UIView is mounted. Window-relative
+    // frame respects ScrollView offset (shadow-tree screenY does not),
+    // so we use it whenever the view actually has a frame. A view at
+    // content-Y=2000 in a 900px-tall window correctly reports "not
+    // visible" until the user scrolls to it.
+    auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
+    auto frame = helper.getViewWindowFrame(testID);
+    bool uiViewMounted = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+    if (uiViewMounted) {
+        return helper.isViewOnscreen(testID);
+    }
+
+    // No UIView yet — try the shadow tree. Covers virtualized lists
+    // (FlashList, FlatList) where the cell exists in shadow tree before
+    // mounting. Layout-relative intersection still tells us if the cell
+    // is in-bounds and about to be rendered.
     auto root = getShadowTreeRoot();
     if (!root) {
         ENNIO_LOG_WARN("isVisible", "No shadow tree root for testID=" << testID);
         return false;
     }
-
-    // Use screen dimensions if set, otherwise use reasonable defaults
-    float width = screenWidth_ > 0 ? screenWidth_ : 430.0f;   // iPhone 17 Pro
+    float width = screenWidth_ > 0 ? screenWidth_ : 430.0f;
     float height = screenHeight_ > 0 ? screenHeight_ : 932.0f;
-
-    // Get metrics for debugging
     auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
     if (metrics) {
-        ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisible: testID=%s screenX=%.1f screenY=%.1f w=%.1f h=%.1f (screen: %.0fx%.0f)",
-            testID.c_str(), metrics->screenX, metrics->screenY, metrics->width, metrics->height, width, height);
         return ::ennio::ShadowTreeTraverser::isVisible(root, testID, width, height);
     }
-
-    // Fallback: testID not found in shadow tree.
-    ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisible: testID=%s not in shadow tree, returning false", testID.c_str());
     return false;
 }
 
@@ -277,145 +329,109 @@ std::variant<nitro::NullType, std::string> HybridEnnio::getText(const std::strin
 // Synchronization
 // ============================================
 
-bool HybridEnnio::waitForIdle(double timeoutMs) {
-    auto& monitor = ::ennio::IdleMonitor::getInstance();
+// Idle-detection knobs. Stability is the duration we require the system
+// to stay continuously idle before returning. waitForIdle is the
+// long-budget probe (assertVisible after a launch); synchronize is the
+// short one between commands (just drains pending commits/mounts).
+//
+// Network and animations are excluded by default: tests may have
+// background polling timers, and a Reanimated worklet running a spinner
+// would block forever.
+static constexpr int IDLE_STABILITY_MS = 100;
+static constexpr int SYNCHRONIZE_TIMEOUT_MS = 500;
+static constexpr int SYNCHRONIZE_STABILITY_MS = 50;
 
-    // Wait for idle state with stability requirement
-    // Don't include network requests by default (tests may have background polling)
-    // Don't include animations by default (they may run continuously)
-    return monitor.waitForIdle(
+bool HybridEnnio::waitForIdle(double timeoutMs) {
+    return ::ennio::IdleMonitor::getInstance().waitForIdle(
         static_cast<int>(timeoutMs),
-        false,  // includeNetwork
-        false,  // includeAnimations
-        100     // stabilityMs - require 100ms of stable idle state
+        /* includeNetwork */ false,
+        /* includeAnimations */ false,
+        IDLE_STABILITY_MS
     );
 }
 
 void HybridEnnio::synchronize() {
-    auto& monitor = ::ennio::IdleMonitor::getInstance();
-
-    // Quick synchronization - just wait for pending commits/mounts
-    // Use a shorter timeout and shorter stability requirement
-    monitor.waitForIdle(
-        500,    // timeoutMs
-        false,  // includeNetwork
-        false,  // includeAnimations
-        50      // stabilityMs
+    ::ennio::IdleMonitor::getInstance().waitForIdle(
+        SYNCHRONIZE_TIMEOUT_MS,
+        /* includeNetwork */ false,
+        /* includeAnimations */ false,
+        SYNCHRONIZE_STABILITY_MS
     );
 }
 
 // ============================================
 // WebSocket Command Handler
 // ============================================
+//
+// Replaces the legacy 445-line if-chain with a string→lambda dispatch
+// table. Each handler is small (parse args → call method → fill
+// response). Adding a new command is one map entry. Hot-loop cost: a
+// single unordered_map lookup per request, vs the previous O(n)
+// string compare cascade.
 
-::ennio::Response HybridEnnio::handleCommand(const ::ennio::Request& request) {
-    ::ennio::Response response;
-    response.id = request.id;
+using HandlerFn = std::function<void(HybridEnnio*, const ::ennio::Request&, ::ennio::Response&)>;
 
-    ENNIO_LOG_DEBUG_F(LOG_TAG, "handleCommand: type=%s", request.type.c_str());
-
-    try {
-        const std::string& type = request.type;
-        const std::string& payload = request.payload;
-
-        if (type == "findByTestID") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            auto result = findByTestID(testID);
-
+static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
+    auto& helper = ::ennio::EnnioRuntimeHelper::getInstance;
+    static const std::unordered_map<std::string, HandlerFn> handlers = {
+        // ---- Read queries ----
+        { "findByTestID", [](HybridEnnio* self, const auto& req, auto& r) {
+            auto result = self->findByTestID(::ennio::json::parseString(req.payload, "testID"));
+            r.success = true;
+            r.data = std::holds_alternative<nitro::NullType>(result)
+                     ? "null"
+                     : elementInfoToJson(std::get<ElementInfo>(result));
+        }},
+        { "exists", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = true;
+            r.data = self->exists(::ennio::json::parseString(req.payload, "testID")) ? "true" : "false";
+        }},
+        { "isVisible", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = true;
+            r.data = self->isVisible(::ennio::json::parseString(req.payload, "testID")) ? "true" : "false";
+        }},
+        { "getText", [](HybridEnnio* self, const auto& req, auto& r) {
+            auto result = self->getText(::ennio::json::parseString(req.payload, "testID"));
+            r.success = true;
+            r.data = std::holds_alternative<nitro::NullType>(result)
+                     ? "null"
+                     : "\"" + escapeJsonString(std::get<std::string>(result)) + "\"";
+        }},
+        { "getLayoutMetrics", [](HybridEnnio* self, const auto& req, auto& r) {
+            auto result = self->getLayoutMetrics(::ennio::json::parseString(req.payload, "testID"));
+            r.success = true;
             if (std::holds_alternative<nitro::NullType>(result)) {
-                response.success = true;
-                response.data = "null";
-            } else {
-                auto& info = std::get<ElementInfo>(result);
-                std::ostringstream oss;
-                oss << "{";
-                oss << "\"testID\":\"" << info.testID << "\",";
-                oss << "\"type\":\"" << info.type << "\",";
-                if (info.text.has_value()) {
-                    oss << "\"text\":\"" << info.text.value() << "\",";
-                } else {
-                    oss << "\"text\":null,";
-                }
-                oss << "\"accessible\":" << (info.accessible ? "true" : "false") << ",";
-                oss << "\"enabled\":" << (info.enabled ? "true" : "false") << ",";
-                oss << "\"layout\":{";
-                oss << "\"x\":" << info.layout.x << ",";
-                oss << "\"y\":" << info.layout.y << ",";
-                oss << "\"width\":" << info.layout.width << ",";
-                oss << "\"height\":" << info.layout.height << ",";
-                oss << "\"screenX\":" << info.layout.screenX << ",";
-                oss << "\"screenY\":" << info.layout.screenY;
-                oss << "}}";
-                response.success = true;
-                response.data = oss.str();
+                r.data = "null";
+                return;
             }
-        }
-        else if (type == "exists") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            bool result = exists(testID);
-            response.success = true;
-            response.data = result ? "true" : "false";
-        }
-        else if (type == "isVisible") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            bool result = isVisible(testID);
-            response.success = true;
-            response.data = result ? "true" : "false";
-        }
-        else if (type == "getText") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            auto result = getText(testID);
-            response.success = true;
-            if (std::holds_alternative<nitro::NullType>(result)) {
-                response.data = "null";
-            } else {
-                response.data = "\"" + std::get<std::string>(result) + "\"";
-            }
-        }
-        else if (type == "getLayoutMetrics") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            auto result = getLayoutMetrics(testID);
+            auto& m = std::get<LayoutMetrics>(result);
+            std::ostringstream oss;
+            oss << "{\"x\":" << m.x << ",\"y\":" << m.y
+                << ",\"width\":" << m.width << ",\"height\":" << m.height
+                << ",\"screenX\":" << m.screenX << ",\"screenY\":" << m.screenY << "}";
+            r.data = oss.str();
+        }},
 
-            if (std::holds_alternative<nitro::NullType>(result)) {
-                response.success = true;
-                response.data = "null";
-            } else {
-                auto& metrics = std::get<LayoutMetrics>(result);
-                std::ostringstream oss;
-                oss << "{";
-                oss << "\"x\":" << metrics.x << ",";
-                oss << "\"y\":" << metrics.y << ",";
-                oss << "\"width\":" << metrics.width << ",";
-                oss << "\"height\":" << metrics.height << ",";
-                oss << "\"screenX\":" << metrics.screenX << ",";
-                oss << "\"screenY\":" << metrics.screenY;
-                oss << "}";
-                response.success = true;
-                response.data = oss.str();
-            }
-        }
-        else if (type == "waitForIdle") {
-            double timeout = ::ennio::json::parseDouble(payload, "timeout");
-            bool result = waitForIdle(timeout);
-            response.success = result;
-        }
-        else if (type == "synchronize") {
-            synchronize();
-            response.success = true;
-        }
-        // Alert/Modal handling
-        else if (type == "isAlertPresent") {
-            bool result = isAlertPresent();
-            response.success = true;
-            response.data = result ? "true" : "false";
-        }
-        else if (type == "getAlertText") {
-            std::string text = getAlertText();
-            response.success = true;
-            response.data = "\"" + escapeJsonString(text) + "\"";
-        }
-        else if (type == "getAlertButtons") {
-            auto buttons = getAlertButtons();
+        // ---- Synchronization ----
+        { "waitForIdle", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->waitForIdle(::ennio::json::parseDouble(req.payload, "timeout"));
+        }},
+        { "synchronize", [](HybridEnnio* self, const auto&, auto& r) {
+            self->synchronize();
+            r.success = true;
+        }},
+
+        // ---- Alerts ----
+        { "isAlertPresent", [](HybridEnnio* self, const auto&, auto& r) {
+            r.success = true;
+            r.data = self->isAlertPresent() ? "true" : "false";
+        }},
+        { "getAlertText", [](HybridEnnio* self, const auto&, auto& r) {
+            r.success = true;
+            r.data = "\"" + escapeJsonString(self->getAlertText()) + "\"";
+        }},
+        { "getAlertButtons", [](HybridEnnio* self, const auto&, auto& r) {
+            auto buttons = self->getAlertButtons();
             std::ostringstream oss;
             oss << "[";
             for (size_t i = 0; i < buttons.size(); i++) {
@@ -423,336 +439,291 @@ void HybridEnnio::synchronize() {
                 oss << "\"" << escapeJsonString(buttons[i]) << "\"";
             }
             oss << "]";
-            response.success = true;
-            response.data = oss.str();
-        }
-        // ============================================
-        // Selector-based Commands
-        // ============================================
-        else if (type == "findBySelector") {
-            std::string selector = ::ennio::json::parseString(payload, "selector");
-            auto result = findBySelector(selector);
+            r.success = true;
+            r.data = oss.str();
+        }},
+        { "tapAlertButton", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->tapAlertButton(::ennio::json::parseString(req.payload, "buttonText"));
+        }},
+        { "dismissAlert", [](HybridEnnio* self, const auto&, auto& r) {
+            r.success = self->dismissAlert();
+        }},
 
-            if (std::holds_alternative<nitro::NullType>(result)) {
-                response.success = true;
-                response.data = "null";
-            } else {
-                auto& info = std::get<ExtendedElementInfo>(result);
-                std::ostringstream oss;
-                oss << "{";
-                oss << "\"testID\":\"" << info.testID << "\",";
-                oss << "\"type\":\"" << info.type << "\",";
-                if (info.text.has_value()) {
-                    oss << "\"text\":\"" << info.text.value() << "\",";
-                } else {
-                    oss << "\"text\":null,";
-                }
-                oss << "\"accessible\":" << (info.accessible ? "true" : "false") << ",";
-                oss << "\"enabled\":" << (info.enabled ? "true" : "false") << ",";
-                oss << "\"checked\":" << (info.checked ? "true" : "false") << ",";
-                oss << "\"focused\":" << (info.focused ? "true" : "false") << ",";
-                oss << "\"selected\":" << (info.selected ? "true" : "false") << ",";
-                oss << "\"layout\":{";
-                oss << "\"x\":" << info.layout.x << ",";
-                oss << "\"y\":" << info.layout.y << ",";
-                oss << "\"width\":" << info.layout.width << ",";
-                oss << "\"height\":" << info.layout.height << ",";
-                oss << "\"screenX\":" << info.layout.screenX << ",";
-                oss << "\"screenY\":" << info.layout.screenY;
-                oss << "}}";
-                response.success = true;
-                response.data = oss.str();
-            }
-        }
-        else if (type == "findAllBySelector") {
-            std::string selector = ::ennio::json::parseString(payload, "selector");
-            auto results = findAllBySelector(selector);
-
+        // ---- Selector queries ----
+        { "findBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            auto result = self->findBySelector(::ennio::json::parseString(req.payload, "selector"));
+            r.success = true;
+            r.data = std::holds_alternative<nitro::NullType>(result)
+                     ? "null"
+                     : elementInfoToJson(std::get<ExtendedElementInfo>(result));
+        }},
+        { "findAllBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            auto results = self->findAllBySelector(::ennio::json::parseString(req.payload, "selector"));
             std::ostringstream oss;
             oss << "[";
             for (size_t i = 0; i < results.size(); i++) {
                 if (i > 0) oss << ",";
-                auto& info = results[i];
-                oss << "{";
-                oss << "\"testID\":\"" << info.testID << "\",";
-                oss << "\"type\":\"" << info.type << "\",";
-                if (info.text.has_value()) {
-                    oss << "\"text\":\"" << info.text.value() << "\",";
-                } else {
-                    oss << "\"text\":null,";
-                }
-                oss << "\"accessible\":" << (info.accessible ? "true" : "false") << ",";
-                oss << "\"enabled\":" << (info.enabled ? "true" : "false") << ",";
-                oss << "\"checked\":" << (info.checked ? "true" : "false") << ",";
-                oss << "\"focused\":" << (info.focused ? "true" : "false") << ",";
-                oss << "\"selected\":" << (info.selected ? "true" : "false") << ",";
-                oss << "\"layout\":{";
-                oss << "\"x\":" << info.layout.x << ",";
-                oss << "\"y\":" << info.layout.y << ",";
-                oss << "\"width\":" << info.layout.width << ",";
-                oss << "\"height\":" << info.layout.height << ",";
-                oss << "\"screenX\":" << info.layout.screenX << ",";
-                oss << "\"screenY\":" << info.layout.screenY;
-                oss << "}}";
+                oss << elementInfoToJson(results[i]);
             }
             oss << "]";
-            response.success = true;
-            response.data = oss.str();
-        }
-        else if (type == "existsBySelector") {
-            std::string selector = ::ennio::json::parseString(payload, "selector");
-            bool result = existsBySelector(selector);
-            response.success = true;
-            response.data = result ? "true" : "false";
-        }
-        else if (type == "getTextBySelector") {
-            std::string selector = ::ennio::json::parseString(payload, "selector");
-            auto result = getTextBySelector(selector);
-            response.success = true;
-            if (std::holds_alternative<nitro::NullType>(result)) {
-                response.data = "null";
-            } else {
-                response.data = "\"" + std::get<std::string>(result) + "\"";
-            }
-        }
-        else if (type == "isVisibleBySelector") {
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector parsing selector from payload");
-            std::string selector = ::ennio::json::parseString(payload, "selector");
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector selector=%s", selector.c_str());
-            bool result = isVisibleBySelector(selector);
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector result=%d", result);
-            response.success = true;
-            response.data = result ? "true" : "false";
-            ENNIO_LOG_DEBUG_F(LOG_TAG, "handleCommand: isVisibleBySelector response ready success=%d data=%s",
-                response.success, response.data.c_str());
-        }
-        // ============================================
-        // Fast-mode write dispatch (NitroWriter -> WS -> here)
-        // ============================================
-        else if (type == "tap") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            response.success = tap(testID);
-        }
-        else if (type == "tapAtPoint") {
+            r.success = true;
+            r.data = oss.str();
+        }},
+        { "existsBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = true;
+            r.data = self->existsBySelector(::ennio::json::parseString(req.payload, "selector")) ? "true" : "false";
+        }},
+        { "getTextBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            auto result = self->getTextBySelector(::ennio::json::parseString(req.payload, "selector"));
+            r.success = true;
+            r.data = std::holds_alternative<nitro::NullType>(result)
+                     ? "null"
+                     : "\"" + escapeJsonString(std::get<std::string>(result)) + "\"";
+        }},
+        { "isVisibleBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = true;
+            r.data = self->isVisibleBySelector(::ennio::json::parseString(req.payload, "selector")) ? "true" : "false";
+        }},
+
+        // ---- Direct writes (UIKit/Fabric in-process) ----
+        { "tap", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->tap(::ennio::json::parseString(req.payload, "testID"));
+        }},
+        { "tapAtPoint", [](HybridEnnio*, const auto& req, auto& r) {
             // Window-coordinate tap. CLI sends absolute logical points.
-            double x = ::ennio::json::parseDouble(payload, "x");
-            double y = ::ennio::json::parseDouble(payload, "y");
-            response.success = ::ennio::EnnioRuntimeHelper::getInstance()
-                .tapAtScreenPoint(x, y);
-        }
-        else if (type == "swipeAtPoints") {
+            r.success = ::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(
+                ::ennio::json::parseDouble(req.payload, "x"),
+                ::ennio::json::parseDouble(req.payload, "y"));
+        }},
+        { "swipeAtPoints", [](HybridEnnio*, const auto& req, auto& r) {
             // Window-coordinate pan: (x1,y1)→(x2,y2) over durationMs.
             // Replaces idb HID swipe — used for cross-screen drags and
             // horizontal carousel panning that doesn't bind to a
             // UIScrollView's scroll axis.
-            double x1 = ::ennio::json::parseDouble(payload, "x1");
-            double y1 = ::ennio::json::parseDouble(payload, "y1");
-            double x2 = ::ennio::json::parseDouble(payload, "x2");
-            double y2 = ::ennio::json::parseDouble(payload, "y2");
-            int durationMs = (int)::ennio::json::parseDouble(payload, "durationMs");
-            response.success = ::ennio::EnnioRuntimeHelper::getInstance()
-                .swipeAtPoints(x1, y1, x2, y2, durationMs);
-        }
-        else if (type == "pressHardwareKey") {
-            // Hardware-key press by HID keycode against the focused
-            // first responder. Replaces idb.pressKey for in-app fields.
-            int keyCode = (int)::ennio::json::parseDouble(payload, "keyCode");
-            response.success = ::ennio::EnnioRuntimeHelper::getInstance()
-                .pressHardwareKey(keyCode);
-        }
-        else if (type == "getSurfaceOffset") {
+            r.success = ::ennio::EnnioRuntimeHelper::getInstance().swipeAtPoints(
+                ::ennio::json::parseDouble(req.payload, "x1"),
+                ::ennio::json::parseDouble(req.payload, "y1"),
+                ::ennio::json::parseDouble(req.payload, "x2"),
+                ::ennio::json::parseDouble(req.payload, "y2"),
+                static_cast<int>(::ennio::json::parseDouble(req.payload, "durationMs")));
+        }},
+        { "pressHardwareKey", [](HybridEnnio*, const auto& req, auto& r) {
+            r.success = ::ennio::EnnioRuntimeHelper::getInstance().pressHardwareKey(
+                static_cast<int>(::ennio::json::parseDouble(req.payload, "keyCode")));
+        }},
+        { "getSurfaceOffset", [](HybridEnnio*, const auto&, auto& r) {
             // React-surface origin in the user app's window. Lets the
             // CLI translate Fabric's surface-relative `screenX/screenY`
             // into idb's window-relative coords.
             auto offset = ::ennio::EnnioRuntimeHelper::getInstance().getSurfaceOffset();
             std::ostringstream oss;
             oss << "{\"x\":" << offset.first << ",\"y\":" << offset.second << "}";
-            response.data = oss.str();
-            response.success = true;
-        }
-        else if (type == "getViewWindowFrameByLabel") {
-            std::string text = ::ennio::json::parseString(payload, "text");
-            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getViewWindowFrameByLabel(text);
+            r.data = oss.str();
+            r.success = true;
+        }},
+        { "getViewWindowFrameByLabel", [](HybridEnnio*, const auto& req, auto& r) {
+            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getViewWindowFrameByLabel(
+                ::ennio::json::parseString(req.payload, "text"));
             std::ostringstream oss;
-            oss << "{\"x\":" << std::get<0>(frame)
-                << ",\"y\":" << std::get<1>(frame)
-                << ",\"width\":" << std::get<2>(frame)
-                << ",\"height\":" << std::get<3>(frame) << "}";
-            response.data = oss.str();
-            response.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
-        }
-        else if (type == "getViewWindowFrame") {
-            // Window-relative UIView frame for a testID. Bypasses
-            // Fabric's surface-relative layout — the result already
-            // accounts for ScrollView contentInsetAdjustment, safe-area
-            // padding, modal presentations, and any other runtime offsets
-            // UIKit applies. Caller (idb-based tap) feeds the centre of
-            // this frame straight to `idb ui tap`.
-            std::string tid = ::ennio::json::parseString(payload, "testID");
-            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getViewWindowFrame(tid);
+            oss << "{\"x\":" << std::get<0>(frame) << ",\"y\":" << std::get<1>(frame)
+                << ",\"width\":" << std::get<2>(frame) << ",\"height\":" << std::get<3>(frame) << "}";
+            r.data = oss.str();
+            r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+        }},
+        { "getViewWindowFrame", [](HybridEnnio*, const auto& req, auto& r) {
+            // Window-relative UIView frame for a testID. Bypasses Fabric's
+            // surface-relative layout — already accounts for ScrollView
+            // contentInsetAdjustment, safe-area, modal presentations,
+            // and any other runtime offsets UIKit applies.
+            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getViewWindowFrame(
+                ::ennio::json::parseString(req.payload, "testID"));
             std::ostringstream oss;
-            oss << "{\"x\":" << std::get<0>(frame)
-                << ",\"y\":" << std::get<1>(frame)
-                << ",\"width\":" << std::get<2>(frame)
-                << ",\"height\":" << std::get<3>(frame) << "}";
-            response.data = oss.str();
-            response.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
-        }
-        else if (type == "tapByLabel") {
-            std::string text = ::ennio::json::parseString(payload, "text");
-            response.success = tapByLabel(text);
-        }
-        else if (type == "doubleTap") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            response.success = doubleTap(testID);
-        }
-        else if (type == "longPress") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            double duration = ::ennio::json::parseDouble(payload, "duration");
-            if (duration <= 0) duration = 500;
-            response.success = longPress(testID, duration);
-        }
-        else if (type == "typeText") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            std::string text = ::ennio::json::parseString(payload, "text");
-            response.success = typeText(testID, text);
-        }
-        else if (type == "clearText") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            response.success = clearText(testID);
-        }
-        else if (type == "eraseText") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            double count = ::ennio::json::parseDouble(payload, "count");
+            oss << "{\"x\":" << std::get<0>(frame) << ",\"y\":" << std::get<1>(frame)
+                << ",\"width\":" << std::get<2>(frame) << ",\"height\":" << std::get<3>(frame) << "}";
+            r.data = oss.str();
+            r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+        }},
+        { "tapByLabel", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->tapByLabel(::ennio::json::parseString(req.payload, "text"));
+        }},
+        { "doubleTap", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->doubleTap(::ennio::json::parseString(req.payload, "testID"));
+        }},
+        { "longPress", [](HybridEnnio* self, const auto& req, auto& r) {
+            std::string tid = ::ennio::json::parseString(req.payload, "testID");
+            double duration = ::ennio::json::parseDouble(req.payload, "duration");
+            // Caller didn't supply a positive duration — use the maestro
+            // default rather than passing 0 down to the gesture (which
+            // would make it a tap). Log so caller bugs are visible.
+            if (duration <= 0) {
+                ENNIO_LOG_DEBUG_F(LOG_TAG, "longPress: duration<=0, defaulting to 500ms");
+                duration = 500;
+            }
+            r.success = self->longPress(tid, duration);
+        }},
+        { "typeText", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->typeText(
+                ::ennio::json::parseString(req.payload, "testID"),
+                ::ennio::json::parseString(req.payload, "text"));
+        }},
+        { "clearText", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->clearText(::ennio::json::parseString(req.payload, "testID"));
+        }},
+        { "eraseText", [](HybridEnnio* self, const auto& req, auto& r) {
+            std::string tid = ::ennio::json::parseString(req.payload, "testID");
+            double count = ::ennio::json::parseDouble(req.payload, "count");
             if (count <= 0) count = 1;
-            response.success = eraseText(testID, count);
-        }
-        else if (type == "pressKey") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            std::string keyName = ::ennio::json::parseString(payload, "keyName");
-            response.success = pressKey(testID, keyName);
-        }
-        else if (type == "scroll") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            std::string dir = ::ennio::json::parseString(payload, "direction");
+            r.success = self->eraseText(tid, count);
+        }},
+        { "pressKey", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->pressKey(
+                ::ennio::json::parseString(req.payload, "testID"),
+                ::ennio::json::parseString(req.payload, "keyName"));
+        }},
+        { "scroll", [](HybridEnnio* self, const auto& req, auto& r) {
+            std::string tid = ::ennio::json::parseString(req.payload, "testID");
+            std::string dir = ::ennio::json::parseString(req.payload, "direction");
             if (dir.empty()) dir = "down";
-            double distance = ::ennio::json::parseDouble(payload, "distance");
-            if (distance <= 0) distance = 200;
+            double dist = ::ennio::json::parseDouble(req.payload, "distance");
+            if (dist <= 0) dist = 200;
             ScrollDirection sd = ScrollDirection::DOWN;
             if (dir == "up") sd = ScrollDirection::UP;
-            else if (dir == "down") sd = ScrollDirection::DOWN;
             else if (dir == "left") sd = ScrollDirection::LEFT;
             else if (dir == "right") sd = ScrollDirection::RIGHT;
-            response.success = scroll(testID, sd, distance);
-        }
-        else if (type == "swipe") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            std::string dir = ::ennio::json::parseString(payload, "direction");
+            r.success = self->scroll(tid, sd, dist);
+        }},
+        { "swipe", [](HybridEnnio* self, const auto& req, auto& r) {
+            std::string tid = ::ennio::json::parseString(req.payload, "testID");
+            std::string dir = ::ennio::json::parseString(req.payload, "direction");
             if (dir.empty()) dir = "down";
-            double distance = ::ennio::json::parseDouble(payload, "distance");
-            if (distance <= 0) distance = 200;
+            double dist = ::ennio::json::parseDouble(req.payload, "distance");
+            if (dist <= 0) dist = 200;
             ScrollDirection sd = ScrollDirection::DOWN;
             if (dir == "up") sd = ScrollDirection::UP;
-            else if (dir == "down") sd = ScrollDirection::DOWN;
             else if (dir == "left") sd = ScrollDirection::LEFT;
             else if (dir == "right") sd = ScrollDirection::RIGHT;
-            response.success = swipe(testID, sd, distance);
-        }
-        else if (type == "scrollTo") {
-            std::string sv = ::ennio::json::parseString(payload, "scrollViewTestID");
-            std::string el = ::ennio::json::parseString(payload, "elementTestID");
-            response.success = scrollTo(sv, el);
-        }
-        else if (type == "tapTab") {
-            double idx = ::ennio::json::parseDouble(payload, "index");
-            response.success = tapTab(idx);
-        }
-        else if (type == "tapTabByName") {
-            std::string name = ::ennio::json::parseString(payload, "name");
-            response.success = ::ennio::EnnioRuntimeHelper::getInstance().tapTabByName(name);
-        }
-        else if (type == "fireTap") {
-            std::string tid = ::ennio::json::parseString(payload, "testID");
-            response.success = ::ennio::EnnioRuntimeHelper::getInstance().fireTapByTestID(tid);
-        }
-        else if (type == "invokeOnPress") {
-            std::string tid = ::ennio::json::parseString(payload, "testID");
-            // Schedule the Fiber walk on the JS thread via the Nitro
-            // Dispatcher captured by `bindRuntime` at boot. Blocks this
-            // WS thread on a condition variable until the JS thread
-            // signals completion or the 1500 ms timeout fires.
-            response.success = HybridEnnio::invokeOnPressFromCpp(tid);
-        }
-        else if (type == "getReadyCoord") {
-            std::string tid = ::ennio::json::parseString(payload, "testID");
-            double maxMs = ::ennio::json::parseDouble(payload, "maxWaitMs");
-            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getReadyCoord(tid, static_cast<int>(maxMs));
+            r.success = self->swipe(tid, sd, dist);
+        }},
+        { "scrollTo", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->scrollTo(
+                ::ennio::json::parseString(req.payload, "scrollViewTestID"),
+                ::ennio::json::parseString(req.payload, "elementTestID"));
+        }},
+        { "tapTab", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->tapTab(::ennio::json::parseDouble(req.payload, "index"));
+        }},
+        { "tapTabByName", [](HybridEnnio*, const auto& req, auto& r) {
+            r.success = ::ennio::EnnioRuntimeHelper::getInstance().tapTabByName(
+                ::ennio::json::parseString(req.payload, "name"));
+        }},
+        { "fireTap", [](HybridEnnio*, const auto& req, auto& r) {
+            r.success = ::ennio::EnnioRuntimeHelper::getInstance().fireTapByTestID(
+                ::ennio::json::parseString(req.payload, "testID"));
+        }},
+        { "invokeOnPress", [](HybridEnnio* self, const auto& req, auto& r) {
+            // Visibility gate. The fiber walk would happily call onPress
+            // on a fiber whose host view is offscreen / not laid out — a
+            // tap a real finger could never deliver. Refuse, force the
+            // caller to scroll first. Some custom button libraries (RNGH
+            // BaseButton, pressto) don't propagate testID to UIView's
+            // accessibilityIdentifier consistently — when the UIView
+            // can't be located by id, fall back to the Fabric shadow
+            // tree's visibility instead of refusing outright. That
+            // covers Modal-rendered options whose UIView mount lags the
+            // shadow tree by a frame.
+            auto testID = ::ennio::json::parseString(req.payload, "testID");
+            auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
+            bool viewOnscreen = helper.isViewOnscreen(testID);
+            if (!viewOnscreen) {
+                auto layoutVariant = self->getLayoutMetrics(testID);
+                bool fabricOnscreen = false;
+                if (auto layout = std::get_if<LayoutMetrics>(&layoutVariant)) {
+                    if (layout->width > 0 && layout->height > 0) {
+                        fabricOnscreen = true;
+                    }
+                }
+                if (!fabricOnscreen) {
+                    r.success = false;
+                    r.error = "Element not in viewport: " + testID;
+                    return;
+                }
+            }
+            // Schedules the Fiber walk on the JS thread via the Nitro
+            // Dispatcher captured by `bindRuntime` at boot. Blocks the WS
+            // thread on a condition variable until JS signals completion
+            // or the 1500 ms timeout fires.
+            r.success = HybridEnnio::invokeOnPressFromCpp(testID);
+        }},
+        { "getReadyCoord", [](HybridEnnio*, const auto& req, auto& r) {
+            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getReadyCoord(
+                ::ennio::json::parseString(req.payload, "testID"),
+                static_cast<int>(::ennio::json::parseDouble(req.payload, "maxWaitMs")));
             std::ostringstream oss;
-            oss << "{\"x\":" << std::get<0>(frame)
-                << ",\"y\":" << std::get<1>(frame)
-                << ",\"width\":" << std::get<2>(frame)
-                << ",\"height\":" << std::get<3>(frame) << "}";
-            response.data = oss.str();
-            response.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
-        }
-        else if (type == "backGesture") {
-            response.success = backGesture();
-        }
-        else if (type == "hideKeyboard") {
-            response.success = hideKeyboard();
-        }
-        else if (type == "tapBySelector") {
-            std::string sel = ::ennio::json::parseString(payload, "selector");
-            response.success = tapBySelector(sel);
-        }
-        else if (type == "doubleTapBySelector") {
-            std::string sel = ::ennio::json::parseString(payload, "selector");
-            response.success = doubleTapBySelector(sel);
-        }
-        else if (type == "longPressBySelector") {
-            std::string sel = ::ennio::json::parseString(payload, "selector");
-            double duration = ::ennio::json::parseDouble(payload, "duration");
+            oss << "{\"x\":" << std::get<0>(frame) << ",\"y\":" << std::get<1>(frame)
+                << ",\"width\":" << std::get<2>(frame) << ",\"height\":" << std::get<3>(frame) << "}";
+            r.data = oss.str();
+            r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+        }},
+        { "backGesture",  [](HybridEnnio* self, const auto&, auto& r) { r.success = self->backGesture(); }},
+        { "hideKeyboard", [](HybridEnnio* self, const auto&, auto& r) { r.success = self->hideKeyboard(); }},
+
+        // ---- Selector-anchored writes ----
+        { "tapBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->tapBySelector(::ennio::json::parseString(req.payload, "selector"));
+        }},
+        { "doubleTapBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->doubleTapBySelector(::ennio::json::parseString(req.payload, "selector"));
+        }},
+        { "longPressBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            std::string sel = ::ennio::json::parseString(req.payload, "selector");
+            double duration = ::ennio::json::parseDouble(req.payload, "duration");
             if (duration <= 0) duration = 500;
-            response.success = longPressBySelector(sel, duration);
-        }
-        else if (type == "typeTextBySelector") {
-            std::string sel = ::ennio::json::parseString(payload, "selector");
-            std::string text = ::ennio::json::parseString(payload, "text");
-            response.success = typeTextBySelector(sel, text);
-        }
-        else if (type == "clearTextBySelector") {
-            std::string sel = ::ennio::json::parseString(payload, "selector");
-            response.success = clearTextBySelector(sel);
-        }
-        else if (type == "tapAlertButton") {
-            std::string btn = ::ennio::json::parseString(payload, "buttonText");
-            response.success = tapAlertButton(btn);
-        }
-        else if (type == "dismissAlert") {
-            response.success = dismissAlert();
-        }
-        else if (type == "copyToClipboard") {
-            std::string text = ::ennio::json::parseString(payload, "text");
-            response.success = copyToClipboard(text);
-        }
-        else if (type == "pasteFromClipboard") {
-            std::string testID = ::ennio::json::parseString(payload, "testID");
-            response.success = pasteFromClipboard(testID);
-        }
-        else if (type == "getClipboardText") {
-            std::string text = getClipboardText();
-            response.success = true;
-            response.data = "\"" + text + "\"";
-        }
-        else {
-            response.success = false;
-            response.error = "Unknown command: " + type;
-        }
+            r.success = self->longPressBySelector(sel, duration);
+        }},
+        { "typeTextBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->typeTextBySelector(
+                ::ennio::json::parseString(req.payload, "selector"),
+                ::ennio::json::parseString(req.payload, "text"));
+        }},
+        { "clearTextBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->clearTextBySelector(::ennio::json::parseString(req.payload, "selector"));
+        }},
+
+        // ---- Pasteboard ----
+        { "copyToClipboard", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->copyToClipboard(::ennio::json::parseString(req.payload, "text"));
+        }},
+        { "pasteFromClipboard", [](HybridEnnio* self, const auto& req, auto& r) {
+            r.success = self->pasteFromClipboard(::ennio::json::parseString(req.payload, "testID"));
+        }},
+        { "getClipboardText", [](HybridEnnio* self, const auto&, auto& r) {
+            r.success = true;
+            r.data = "\"" + escapeJsonString(self->getClipboardText()) + "\"";
+        }},
+    };
+    (void)helper;  // suppress unused-capture-style warnings on some compilers.
+    return handlers;
+}
+
+::ennio::Response HybridEnnio::handleCommand(const ::ennio::Request& request) {
+    ::ennio::Response response;
+    response.id = request.id;
+
+    ENNIO_LOG_DEBUG_F(LOG_TAG, "handleCommand: type=%s", request.type.c_str());
+
+    const auto& handlers = commandHandlers();
+    auto it = handlers.find(request.type);
+    if (it == handlers.end()) {
+        response.success = false;
+        response.error = "Unknown command: " + request.type;
+        return response;
+    }
+    try {
+        it->second(this, request, response);
     } catch (const std::exception& e) {
         response.success = false;
         response.error = e.what();
     }
-
     return response;
 }
 
@@ -1134,9 +1105,8 @@ std::string HybridEnnio::getClipboardText() {
 
 #else
 
-// Non-Apple stubs so the spec can still build. Android fast mode is out
-// of scope (the helper-less path needs UIAutomator + a different write
-// surface).
+// Non-Apple stubs so the spec can still build. Android writes are out
+// of scope — they need UIAutomator + a different in-process surface.
 bool HybridEnnio::tap(const std::string&) { return false; }
 bool HybridEnnio::tapByLabel(const std::string&) { return false; }
 bool HybridEnnio::doubleTap(const std::string&) { return false; }
@@ -1168,14 +1138,15 @@ std::string HybridEnnio::getClipboardText() { return ""; }
 
 namespace {
 
+// Pass `self` by mutable reference: `findBySelector` acquires the
+// instance mutex internally, so it can't be called from a const context.
+// Callers all hold a non-const `*this`, so this is a pure type-system
+// fix — no `const_cast`, no behavioural change.
 std::optional<std::string> resolveSelectorToTestID(
-    const HybridEnnio& self,
+    HybridEnnio& self,
     const std::string& selectorJson
 ) {
-    // We can't call findBySelector across const (it acquires the mutex);
-    // cast away the const safely because we own the instance.
-    auto& mutSelf = const_cast<HybridEnnio&>(self);
-    auto found = mutSelf.findBySelector(selectorJson);
+    auto found = self.findBySelector(selectorJson);
     if (std::holds_alternative<nitro::NullType>(found)) return std::nullopt;
     auto info = std::get<ExtendedElementInfo>(found);
     if (info.testID.empty()) return std::nullopt;
@@ -1235,6 +1206,21 @@ namespace {
     if (found) return found;
     return findFiberByTestID(fiber.sibling, testID);
   }
+  // pointerEvents semantics (RN matches web):
+  //   "none"     — view + descendants are not touch targets.
+  //   "box-only" — view is a target, descendants are not.
+  //   "box-none" — view is not a target, descendants are.
+  //   "auto"     — both target.
+  // Walk the fiber chain (.return) and reject if the target's chain has
+  // a pointerEvents value that would block a real finger.
+  function pointerEventsBlocks(target) {
+    for (var cursor = target; cursor; cursor = cursor.return) {
+      var pe = cursor.memoizedProps && cursor.memoizedProps.pointerEvents;
+      if (pe === 'none') return true;
+      if (pe === 'box-only' && cursor !== target) return true;
+    }
+    return false;
+  }
   globalThis.__ennio_invokeOnPress = function (testID) {
     var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
     if (!hook || !hook.renderers || !hook.getFiberRoots) return false;
@@ -1252,6 +1238,7 @@ namespace {
         if (r.done) break;
         var fiber = findFiberByTestID(r.value && r.value.current, testID);
         if (!fiber) continue;
+        if (pointerEventsBlocks(fiber)) return false;
         var onPress = fiber.memoizedProps && fiber.memoizedProps.onPress;
         if (typeof onPress === 'function') {
           try {
