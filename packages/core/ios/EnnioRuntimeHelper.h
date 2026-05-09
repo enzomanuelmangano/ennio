@@ -117,6 +117,20 @@ public:
      */
     std::pair<double, double> getSurfaceOffset();
     /**
+     * Logical-point bounds of the key UIWindow. (width, height) — origin
+     * is always (0,0). Used by tap-time visibility gates: a view whose
+     * window-frame falls fully outside this rect is unreachable by a
+     * real finger and should fail the tap.
+     */
+    std::pair<double, double> getKeyWindowSize();
+    /**
+     * Returns true iff the testID-bearing view exists, has non-zero size,
+     * and overlaps the key window's visible bounds. Mirrors what a real
+     * finger could reach: an offscreen / not-yet-laid-out element returns
+     * false. Skips the gesture / responder tree — purely a layout check.
+     */
+    bool isViewOnscreen(const std::string& testID);
+    /**
      * Window-relative frame of the UIView with the given testID. Returns
      * (x, y, w, h) all in logical points. Width/height = 0 when not
      * found. This bypasses Fabric's surface-relative layout entirely:

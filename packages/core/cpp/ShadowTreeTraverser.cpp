@@ -174,9 +174,26 @@ std::optional<std::string> ShadowTreeTraverser::getText(ShadowNodePtr node) {
         }
     }
 
-    // For Text components, traverse children to find RawText
-    std::string combinedText;
+    // Only recurse for actual Text components (Fabric component name
+    // "Paragraph"). Recursing for arbitrary Views concatenates the entire
+    // subtree's text, which causes containers to falsely match short
+    // patterns like "1" — e.g. a screen-root View whose combined-text
+    // happens to include a price digit. Spatial selectors then evaluate
+    // those bogus matches against the wrong layout box.
+    const char* compName = node->getComponentName();
+    if (!compName) {
+        return std::nullopt;
+    }
+    std::string name(compName);
+    // Paragraph: top-level Fabric Text. Text: nested-inline Text inside
+    // another Text. Both should aggregate their RawText children. Other
+    // components (View, ScrollView, etc) must NOT recurse — otherwise a
+    // container's combined text causes false matches against descendants.
+    if (name != "Paragraph" && name != "Text") {
+        return std::nullopt;
+    }
 
+    std::string combinedText;
     for (const auto& child : node->getChildren()) {
         auto childText = getText(child);
         if (childText) {

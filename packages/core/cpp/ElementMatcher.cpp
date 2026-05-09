@@ -269,9 +269,6 @@ bool ElementMatcher::matchesPrimary(
         if (!matchesText(*nodeText, *criteria.text)) {
             return false;
         }
-        // Debug: log matched text
-        EM_LOG("matchesPrimary: text match! pattern='%s' nodeText='%.50s'",
-            criteria.text->pattern.c_str(), nodeText->c_str());
     }
 
     // Point matching is handled separately (coordinate-based selection)

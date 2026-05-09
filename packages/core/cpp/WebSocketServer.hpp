@@ -111,9 +111,12 @@ private:
     void handleClient(int clientSocket);
 
     /**
-     * Parse a WebSocket frame
+     * Parse one WebSocket frame from `data`. On success sets *consumed
+     * to the number of leading bytes the frame occupied; caller drops
+     * those before re-parsing. On incomplete frame returns "" and sets
+     * *consumed to 0 — caller buffers more bytes and retries.
      */
-    std::string parseFrame(const std::vector<uint8_t>& data);
+    std::string parseFrame(const std::vector<uint8_t>& data, size_t* consumed);
 
     /**
      * Build a WebSocket frame

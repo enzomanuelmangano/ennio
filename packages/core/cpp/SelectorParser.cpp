@@ -53,6 +53,43 @@ namespace {
         return std::string::npos;
     }
 
+    // Locate `"key"` at the top level of the given JSON object. Skips
+    // occurrences nested inside child objects or arrays — without this,
+    // outer hasKey/extractString hits keys belonging to a nested
+    // selector (e.g. `rightOf: {id: ...}` would leak its `id` into the
+    // outer criteria.id and corrupt the match). Returns npos if absent.
+    size_t findTopLevelKey(const std::string& json, const std::string& key) {
+        std::string searchKey = "\"" + key + "\"";
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+        for (size_t i = 0; i < json.size(); i++) {
+            char c = json[i];
+            if (escaped) { escaped = false; continue; }
+            if (inString) {
+                if (c == '\\') { escaped = true; continue; }
+                if (c == '"') { inString = false; }
+                continue;
+            }
+            if (c == '"') {
+                if (depth == 1 &&
+                    json.compare(i, searchKey.size(), searchKey) == 0) {
+                    // Confirm the next non-space char is ':' (key, not value).
+                    size_t after = i + searchKey.size();
+                    while (after < json.size() && std::isspace(json[after])) after++;
+                    if (after < json.size() && json[after] == ':') {
+                        return i;
+                    }
+                }
+                inString = true;
+                continue;
+            }
+            if (c == '{' || c == '[') depth++;
+            else if (c == '}' || c == ']') depth--;
+        }
+        return std::string::npos;
+    }
+
     // Escape string for JSON output
     std::string escapeString(const std::string& str) {
         std::ostringstream oss;
@@ -210,7 +247,7 @@ SelectorCriteriaPtr SelectorParser::parseNested(const std::string& json, const s
 
 std::string SelectorParser::extractString(const std::string& json, const std::string& key) {
     std::string searchKey = "\"" + key + "\"";
-    size_t keyPos = json.find(searchKey);
+    size_t keyPos = findTopLevelKey(json, key);
     if (keyPos == std::string::npos) {
         return "";
     }
@@ -264,7 +301,7 @@ std::string SelectorParser::extractString(const std::string& json, const std::st
 
 std::optional<bool> SelectorParser::extractBool(const std::string& json, const std::string& key) {
     std::string searchKey = "\"" + key + "\"";
-    size_t keyPos = json.find(searchKey);
+    size_t keyPos = findTopLevelKey(json, key);
     if (keyPos == std::string::npos) {
         return std::nullopt;
     }
@@ -291,7 +328,7 @@ std::optional<bool> SelectorParser::extractBool(const std::string& json, const s
 
 std::optional<double> SelectorParser::extractNumber(const std::string& json, const std::string& key) {
     std::string searchKey = "\"" + key + "\"";
-    size_t keyPos = json.find(searchKey);
+    size_t keyPos = findTopLevelKey(json, key);
     if (keyPos == std::string::npos) {
         return std::nullopt;
     }
@@ -325,7 +362,7 @@ std::optional<double> SelectorParser::extractNumber(const std::string& json, con
 
 std::string SelectorParser::extractObject(const std::string& json, const std::string& key) {
     std::string searchKey = "\"" + key + "\"";
-    size_t keyPos = json.find(searchKey);
+    size_t keyPos = findTopLevelKey(json, key);
     if (keyPos == std::string::npos) {
         return "";
     }
@@ -356,7 +393,7 @@ std::vector<std::string> SelectorParser::extractArray(const std::string& json, c
     std::vector<std::string> result;
 
     std::string searchKey = "\"" + key + "\"";
-    size_t keyPos = json.find(searchKey);
+    size_t keyPos = findTopLevelKey(json, key);
     if (keyPos == std::string::npos) {
         return result;
     }
@@ -427,8 +464,7 @@ std::vector<std::string> SelectorParser::extractArray(const std::string& json, c
 }
 
 bool SelectorParser::hasKey(const std::string& json, const std::string& key) {
-    std::string searchKey = "\"" + key + "\"";
-    return json.find(searchKey) != std::string::npos;
+    return findTopLevelKey(json, key) != std::string::npos;
 }
 
 TextMatchMode SelectorParser::parseTextMatchMode(const std::string& mode) {
