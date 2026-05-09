@@ -9,7 +9,7 @@ export default function TabLayout() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <NativeTabs tintColor="#007AFF">
-        <NativeTabs.Trigger name="index" testID="tab-home">
+        <NativeTabs.Trigger name="(home)" testID="tab-home">
           <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
           <NativeTabs.Trigger.Icon
             sf={{
@@ -19,7 +19,7 @@ export default function TabLayout() {
             md="home"
           />
         </NativeTabs.Trigger>
-        <NativeTabs.Trigger name="products" testID="tab-products">
+        <NativeTabs.Trigger name="(products)" testID="tab-products">
           <NativeTabs.Trigger.Label>Products</NativeTabs.Trigger.Label>
           <NativeTabs.Trigger.Icon
             sf={{
@@ -29,7 +29,7 @@ export default function TabLayout() {
             md="shopping_bag"
           />
         </NativeTabs.Trigger>
-        <NativeTabs.Trigger name="cart" testID="tab-cart">
+        <NativeTabs.Trigger name="(cart)" testID="tab-cart">
           <NativeTabs.Trigger.Label>Cart</NativeTabs.Trigger.Label>
           <NativeTabs.Trigger.Icon
             sf={{
@@ -40,7 +40,7 @@ export default function TabLayout() {
             badge={cartItemCount > 0 ? String(cartItemCount) : undefined}
           />
         </NativeTabs.Trigger>
-        <NativeTabs.Trigger name="profile" testID="tab-profile">
+        <NativeTabs.Trigger name="(profile)" testID="tab-profile">
           <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
           <NativeTabs.Trigger.Icon
             sf={{
@@ -50,7 +50,7 @@ export default function TabLayout() {
             md="person"
           />
         </NativeTabs.Trigger>
-        <NativeTabs.Trigger name="gauntlet" testID="tab-gauntlet">
+        <NativeTabs.Trigger name="(gauntlet)" testID="tab-gauntlet">
           <NativeTabs.Trigger.Label>Gauntlet</NativeTabs.Trigger.Label>
           <NativeTabs.Trigger.Icon
             sf={{

@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, ScrollView, Switch, Alert } from 'react-native';
 import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
-import { useSettingsStore, useAuthStore, useCartStore } from '../store';
+import { useSettingsStore, useAuthStore, useCartStore } from '../../store';
 import * as Haptics from 'expo-haptics';
 
 function SettingRow({
@@ -177,15 +177,10 @@ export default function SettingsScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title: 'Settings',
-          headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
-        }}
-      />
+      <Stack.Screen options={{ title: 'Settings' }} />
       <ScrollView
         style={[styles.container, darkMode && styles.containerDark]}
+        contentInsetAdjustmentBehavior="automatic"
         testID="settings-screen"
       >
         {/* Appearance */}

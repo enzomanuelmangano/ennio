@@ -45,7 +45,7 @@ export default function ProductDetailScreen() {
       `${quantity}x ${product.name} added to your cart.`,
       [
         { text: 'Continue Shopping', style: 'cancel' },
-        { text: 'View Cart', onPress: () => { router.dismissAll(); router.push('/cart'); } },
+        { text: 'View Cart', onPress: () => { router.dismissAll(); router.push('/(tabs)/(cart)'); } },
       ]
     );
   };
@@ -60,15 +60,10 @@ export default function ProductDetailScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title: product.name,
-          headerStyle: { backgroundColor: darkMode ? '#1a1a2e' : '#ffffff' },
-          headerTintColor: darkMode ? '#ffffff' : '#000000',
-        }}
-      />
+      <Stack.Screen options={{ title: product.name }} />
       <ScrollView
         style={[styles.container, darkMode && styles.containerDark]}
+        contentInsetAdjustmentBehavior="automatic"
         testID="product-detail-screen"
       >
         <Image source={{ uri: product.image }} style={styles.productImage} />

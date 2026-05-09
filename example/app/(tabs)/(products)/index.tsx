@@ -12,7 +12,7 @@ import {
 import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../store';
+import { useProductsStore, useCartStore, useSettingsStore, categories } from '../../../store';
 import * as Haptics from 'expo-haptics';
 
 type SortOption = 'price-asc' | 'price-desc' | 'rating' | 'name';
@@ -229,9 +229,8 @@ export default function ProductsScreen() {
   const insets = useSafeAreaInsets();
   const TAB_BAR_HEIGHT = 49;
 
-  return (
-    <View style={[styles.container, darkMode && styles.containerDark, { paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="products-screen">
-      {/* Search Bar */}
+  const ListHeader = (
+    <>
       <View style={styles.searchContainer}>
         <TextInput
           style={[styles.searchInput, darkMode && styles.searchInputDark]}
@@ -254,22 +253,13 @@ export default function ProductsScreen() {
           </PressableScale>
         )}
       </View>
-
-      {/* Category Filter */}
       <CategoryFilter />
-
-      {/* Sort & Results Count */}
       <View style={styles.toolbar}>
         <Text style={[styles.resultsCount, darkMode && styles.subtitleDark]}>
           {products.length} products
         </Text>
         <SortDropdown value={sortBy} onChange={setSortBy} />
       </View>
-
-      {/* Reset all filters / search — visible whenever either is active.
-          Distinct testID from `reset-filters` (which only renders inside
-          the empty state) so flows that conditionally check the empty
-          state still work. */}
       {(searchQuery.length > 0 || selectedCategory !== 'All') && (
         <PressableScale
           style={[styles.resetTopButton, darkMode && styles.resetTopButtonDark]}
@@ -284,37 +274,41 @@ export default function ProductsScreen() {
           </Text>
         </PressableScale>
       )}
+    </>
+  );
 
-      {/* Products Grid */}
-      {products.length > 0 ? (
-        <FlatList
-          data={products}
-          numColumns={2}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.productsList}
-          columnWrapperStyle={styles.productsRow}
-          renderItem={({ item }) => <ProductCard product={item} />}
-          testID="products-list"
-        />
-      ) : (
-        <View style={styles.emptyState} testID="no-products">
-          <Text style={styles.emptyIcon}>🔍</Text>
-          <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>No products found</Text>
-          <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
-            Try adjusting your search or filters
-          </Text>
-          <PressableScale
-            style={styles.resetButton}
-            onPress={() => {
-              setSearchQuery('');
-              useProductsStore.getState().setCategory('All');
-            }}
-            testID="reset-filters"
-          >
-            <Text style={styles.resetButtonText}>Reset Filters</Text>
-          </PressableScale>
-        </View>
-      )}
+  return (
+    <View style={[styles.container, darkMode && styles.containerDark, { paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]} testID="products-screen">
+      <FlatList
+        data={products}
+        numColumns={2}
+        keyExtractor={item => item.id}
+        contentContainerStyle={styles.productsList}
+        columnWrapperStyle={products.length > 0 ? styles.productsRow : undefined}
+        renderItem={({ item }) => <ProductCard product={item} />}
+        testID="products-list"
+        contentInsetAdjustmentBehavior="automatic"
+        ListHeaderComponent={ListHeader}
+        ListEmptyComponent={
+          <View style={styles.emptyState} testID="no-products">
+            <Text style={styles.emptyIcon}>🔍</Text>
+            <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>No products found</Text>
+            <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
+              Try adjusting your search or filters
+            </Text>
+            <PressableScale
+              style={styles.resetButton}
+              onPress={() => {
+                setSearchQuery('');
+                useProductsStore.getState().setCategory('All');
+              }}
+              testID="reset-filters"
+            >
+              <Text style={styles.resetButtonText}>Reset Filters</Text>
+            </PressableScale>
+          </View>
+        }
+      />
     </View>
   );
 }

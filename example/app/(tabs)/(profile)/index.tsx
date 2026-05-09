@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, ScrollView, Image, Alert } from 'react-native';
 import { PressableScale } from 'pressto';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuthStore, useCartStore, useSettingsStore } from '../../store';
+import { useAuthStore, useCartStore, useSettingsStore } from '../../../store';
 import * as Haptics from 'expo-haptics';
 
 function MenuItem({
@@ -158,7 +158,8 @@ export default function ProfileScreen() {
     <View style={{ flex: 1 }} testID="profile-root">
     <ScrollView
       style={[styles.container, darkMode && styles.containerDark]}
-      contentContainerStyle={{ paddingTop: insets.top, paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
+      contentContainerStyle={{ paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
+      contentInsetAdjustmentBehavior="automatic"
       testID="profile-screen"
     >
       <ProfileHeader />
