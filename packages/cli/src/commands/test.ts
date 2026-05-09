@@ -58,18 +58,17 @@ async function runTestFile(
 ): Promise<TestFileResultWithClient> {
   const fileName = basename(filePath);
   console.log(`▸ ${fileName}`);
-  try {
-    const results = await runMaestroTests(client, writer, reader, filePath, options);
-    for (const test of results.tests) {
-      if (test.passed) console.log(`  [PASS] ${test.name}`);
-      else console.log(`  [FAIL] ${test.name}: ${test.error || 'unknown error'}`);
-    }
-    console.log(`  ${results.passed} passed, ${results.failed} failed\n`);
-    return { file: fileName, passed: results.passed, failed: results.failed, client: results.client };
-  } catch (err) {
-    console.error(`  Error: ${err}\n`);
-    return { file: fileName, passed: 0, failed: 1 };
+  // Don't catch here. `runMaestroTests` returns assertion failures as
+  // `results.tests[i].passed === false`; a thrown error means the runner
+  // itself crashed (bad yaml, WS dead, etc.) and is not a flow failure.
+  // Surfacing it as one would mask infrastructure breakage.
+  const results = await runMaestroTests(client, writer, reader, filePath, options);
+  for (const test of results.tests) {
+    if (test.passed) console.log(`  [PASS] ${test.name}`);
+    else console.log(`  [FAIL] ${test.name}: ${test.error || 'unknown error'}`);
   }
+  console.log(`  ${results.passed} passed, ${results.failed} failed\n`);
+  return { file: fileName, passed: results.passed, failed: results.failed, client: results.client };
 }
 
 export async function runTestCommand(positional: string[], flags: Flags): Promise<number> {

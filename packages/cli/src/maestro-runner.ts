@@ -33,12 +33,9 @@ import {
 // Configuration
 // ============================================
 
-/**
- * Parse a Maestro point spec — either "X%,Y%" / "X,Y" string or
- * { x, y } object — into normalised 0..1 screen coords. Percentages
- * map directly. Bare numbers are treated as percentages too (Maestro
- * convention).
- */
+// Maestro convention: a bare number "50" is interpreted as 50% (not as
+// 50 pixels), so values > 1 are normalised to 0..1 fractions. A trailing
+// "%" is accepted but not required.
 function parseMaestroPoint(p: string | { x: number | string; y: number | string }): { x: number; y: number } {
   const parseFrac = (v: string | number): number => {
     if (typeof v === 'number') return v > 1 ? v / 100 : v;
@@ -59,6 +56,25 @@ const DEFAULT_TIMEOUT = 3000;
 const DEFAULT_VISIBLE_TIMEOUT = 5000;
 const DEFAULT_RETRY_INTERVAL = 30;
 const DEFAULT_RECONNECT_TIMEOUT = 30000;
+
+// Per-command timing constants. All in ms unless noted. Pulled from the
+// magic numbers the audit flagged inside executeCommand — naming them
+// here makes intent explicit and the values tune-able from one place.
+const ALERT_TAP_SETTLE_MS = 150;        // Wait for alert-button tap to dismiss the alert.
+const ALERT_DISMISS_DELAY_MS = 120;     // Settle between dismissAlert and the next assertion.
+const RUNLOOP_TICK_MS = 30;             // UITouch begin→end gap; matches the native sendSynth tick.
+const TAP_NAV_SETTLE_MS = 200;          // Tab/Link nav settle before the next assertVisible.
+const TAP_BACK_RECOVER_DELAY_MS = 250;  // Pause between back-pop and retry tap.
+const KEYBOARD_DISMISS_SETTLE_MS = 120; // Settle after hideKeyboard before re-tapping the field.
+const POST_LAUNCH_SETTLE_MS = 800;      // Wait for sim teardown after clearState before relaunch.
+const POST_LAUNCH_IDLE_BUDGET_MS = 3000;// First waitForIdle after a launch.
+const POST_LAUNCH_SHADOW_COMMIT_MS = 400;// First shadow-tree commit settle after reconnect.
+const RETRY_POLL_MS = 100;              // Predicate retry tick for waitFor / extendedWaitUntil.
+const POINT_TAP_SETTLE_MS = 60;         // Quick settle after tapAt — no tab-nav animation.
+const RECORDING_SETTLE_MS = 500;        // Settle after start/stopRecording so the next step sees a stable IO state.
+const RETRY_BACKOFF_MS = 500;           // Pause between retry attempts inside `retry` block.
+const TRAVEL_WAYPOINT_GAP_MS = 200;     // Gap between successive simctl location fixes during `travel`.
+const OPENLINK_SETTLE_MS = 500;         // Wait for SpringBoard to switch contexts after openurl.
 const DEFAULT_WS_PORT = 9876;
 
 /**
@@ -88,7 +104,8 @@ function isOptional(cmd: unknown): boolean {
  */
 export function getBootedSimulatorId(): string | null {
   // Honor ENNIO_UDID env override so tests pin to a specific simulator
-  // even when other sims are booted (avoid argent / xcrun picking wrong one).
+  // even when other sims are booted (xcrun's first-booted heuristic
+  // can otherwise pick the wrong one on multi-sim setups).
   if (process.env.ENNIO_UDID) return process.env.ENNIO_UDID;
   try {
     const output = execSync('xcrun simctl list devices booted -j', { encoding: 'utf-8' });
@@ -372,8 +389,8 @@ class MaestroExecutor {
   private async selectorExists(selector: MaestroSelector): Promise<boolean> {
     const ennioSelector = toEnnioSelector(selector);
 
-    // Native alert check first — UIAlertController contents only the
-    // in-app helper sees (not Fabric, not XCUI's label search reliably).
+    // Native alert check first — UIAlertController contents are visible
+    // to the in-app helper but not to Fabric's shadow tree.
     if (selector.text && !selector.id) {
       if (await this.reader.isAlertPresent()) {
         const alertText = await this.reader.getAlertText();
@@ -418,7 +435,7 @@ class MaestroExecutor {
         if (buttons.includes(buttonText)) {
           this.log(`(tapping alert button: "${buttonText}")`);
           await this.writer.tapAlertButton(buttonText);
-          await this.sleep(150);
+          await this.sleep(ALERT_TAP_SETTLE_MS);
           // Drain any queued / re-presented alerts. A synthesized
           // touch can occasionally double-fire the trigger handler,
           // queueing a second alert behind the first one. Dismiss in
@@ -426,12 +443,12 @@ class MaestroExecutor {
           for (let i = 0; i < 8; i++) {
             if (!(await this.client.isAlertPresent())) return true;
             await this.writer.dismissAlert();
-            await this.sleep(120);
+            await this.sleep(ALERT_DISMISS_DELAY_MS);
           }
           return true;
         }
       }
-      await this.sleep(30);
+      await this.sleep(RUNLOOP_TICK_MS);
     }
     return false;
   }
@@ -444,7 +461,7 @@ class MaestroExecutor {
       this.log(`tap: point ${(x * 100).toFixed(1)}%,${(y * 100).toFixed(1)}%`);
       await this.writer.tapAt(x, y);
       this.lastTappedSelector = selector;
-      await this.sleep(60);
+      await this.sleep(POINT_TAP_SETTLE_MS);
       return;
     }
     // Text-only selectors: try alert button tap first. Polls long enough
@@ -464,7 +481,7 @@ class MaestroExecutor {
       if (await this.reader.isAlertPresent()) {
         this.log('(auto-dismissing stale alert before id-tap)');
         await this.writer.dismissAlert();
-        await this.sleep(200);
+        await this.sleep(TAP_NAV_SETTLE_MS);
       }
       await this.waitFor(
         () => this.selectorExists(selector),
@@ -499,11 +516,12 @@ class MaestroExecutor {
         backAttempts++;
         this.log(`tap retry: popping stack (attempt ${backAttempts})`);
         await this.writer.back();
-        await this.sleep(250);
+        await this.sleep(TAP_BACK_RECOVER_DELAY_MS);
         continue;
       }
       // If an alert IS up and we still can't tap it, retry the alert
-      // button path — XCUI may have missed the button on the first sweep.
+      // button path — the alert may have appeared mid-poll and the first
+      // sweep raced its presentation.
       if (alertUp) {
         const alertOk = await this.tryTapAlertButton(selector.text!, 1500);
         if (alertOk) return;
@@ -517,13 +535,13 @@ class MaestroExecutor {
     // the resulting React work — setState, transition commit, native tab
     // switch animation — is not. Tab-switching taps and Link navigation
     // need ~150-250 ms before the destination surface is queryable.
-    await this.sleep(200);
+    await this.sleep(TAP_NAV_SETTLE_MS);
   }
 
   /**
    * waitFor with exponential-backoff retry. If `predicate` returns false
    * for `maxMs` total, re-runs `recover` and tries again. Used by
-   * assertVisible/assertNotVisible-after-tap so a missed idb gesture
+   * assertVisible/assertNotVisible-after-tap so a dropped synth touch
    * (RNGH coordinator race on a fresh modal Pressable) gets the tap
    * re-fired automatically instead of failing the flow.
    */
@@ -561,10 +579,10 @@ class MaestroExecutor {
           await this.writer.tapBySelector(toEnnioSelector(targetSelector));
         }
         this.lastTappedSelector = targetSelector;
-        await this.sleep(120);
+        await this.sleep(KEYBOARD_DISMISS_SETTLE_MS);
       }
-      // Direct typeText into the targeted field (fast path) or focused
-      // field (stable path - testID is ignored by XCTestWriter).
+      // typeText into the resolved field's testID. Falls back to the
+      // currently-focused responder (id=null) if no testID was found.
       const id = targetSelector.id ?? null;
       await this.writer.typeText(id, text);
     } else {
@@ -573,7 +591,7 @@ class MaestroExecutor {
     // Allow the iOS bridge to flush onChangeText for the last few keys —
     // RN commits text input asynchronously and a tight subsequent button
     // tap (e.g. submit) reads stale state otherwise.
-    await this.sleep(250);
+    await this.sleep(TAP_BACK_RECOVER_DELAY_MS);
   }
 
   private async clearText(selector: MaestroSelector): Promise<void> {
@@ -612,7 +630,7 @@ class MaestroExecutor {
       return;
     }
     await this.writer.scroll(null, dir, amount);
-    await this.sleep(120);
+    await this.sleep(KEYBOARD_DISMISS_SETTLE_MS);
   }
 
   /**
@@ -692,10 +710,10 @@ class MaestroExecutor {
         // become a no-op, leaving a stale alert blocking subsequent taps.
         if (await this.reader.isAlertPresent()) {
           await this.writer.dismissAlert();
-          await this.sleep(150);
+          await this.sleep(ALERT_TAP_SETTLE_MS);
         }
         await this.writer.back();
-        await this.sleep(120);
+        await this.sleep(KEYBOARD_DISMISS_SETTLE_MS);
         return;
       }
       if (processedCmd === 'waitForAnimationToEnd') {
@@ -732,7 +750,6 @@ class MaestroExecutor {
       throw new Error(`Unsupported command type: ${typeof processedCmd}`);
     }
 
-    // evalScript
     if ('evalScript' in processedCmd) {
       const script = (processedCmd as { evalScript: string }).evalScript;
       this.log(`evalScript: ${script.substring(0, 50)}...`);
@@ -740,7 +757,6 @@ class MaestroExecutor {
       return;
     }
 
-    // runScript
     if ('runScript' in processedCmd) {
       const runCmd = (processedCmd as { runScript: { file: string; env?: Record<string, string> } }).runScript;
       this.log(`runScript: ${runCmd.file}`);
@@ -750,7 +766,6 @@ class MaestroExecutor {
       return;
     }
 
-    // assertTrue
     if ('assertTrue' in processedCmd) {
       const expr = (processedCmd as { assertTrue: string }).assertTrue;
       this.log(`assertTrue: ${expr}`);
@@ -769,7 +784,6 @@ class MaestroExecutor {
     // Use processedCmd for the rest (expressions already evaluated)
     cmd = processedCmd;
 
-    // tapOn
     if ('tapOn' in cmd) {
       const selector = normalizeSelector(cmd.tapOn as MaestroSelector | string);
       this.log(`tapOn: ${JSON.stringify(selector)}`);
@@ -777,7 +791,6 @@ class MaestroExecutor {
       return;
     }
 
-    // doubleTapOn
     if ('doubleTapOn' in cmd) {
       const selector = normalizeSelector(cmd.doubleTapOn as MaestroSelector | string);
       this.log(`doubleTapOn: ${JSON.stringify(selector)}`);
@@ -818,7 +831,6 @@ class MaestroExecutor {
       return;
     }
 
-    // assertNotVisible
     if ('assertNotVisible' in cmd) {
       const { timeout = DEFAULT_TIMEOUT, ...selector } = cmd.assertNotVisible;
       await this.waitFor(
@@ -837,48 +849,25 @@ class MaestroExecutor {
       return;
     }
 
-    // clearText
     if ('clearText' in cmd) {
       const selector = normalizeSelector(cmd.clearText as MaestroSelector | string);
       await this.clearText(selector);
       return;
     }
 
-    // scroll
     if ('scroll' in cmd) {
       const { direction, amount = 200 } = cmd.scroll;
       await this.scroll(direction, amount);
       return;
     }
 
-    // scrollUntilVisible
     if ('scrollUntilVisible' in cmd) {
-      const scrollCmd = cmd.scrollUntilVisible as
+      await this.handleScrollUntilVisible(cmd.scrollUntilVisible as
         | MaestroSelector
-        | { element: MaestroSelector; direction?: string; timeout?: number };
-      const hasElement = typeof scrollCmd === 'object' && 'element' in scrollCmd;
-      const selector = normalizeSelector(hasElement ? scrollCmd.element : scrollCmd as MaestroSelector);
-      const direction = (hasElement ? scrollCmd.direction || 'DOWN' : 'DOWN').toLowerCase();
-      const timeout = hasElement ? scrollCmd.timeout || 10000 : 10000;
-      const scrollAmount = 300;
-
-      this.log(`scrollUntilVisible: ${JSON.stringify(selector)}`);
-
-      const startTime = Date.now();
-      while (Date.now() - startTime < timeout) {
-        // Check if element is visible
-        if (await this.selectorVisible(selector)) {
-          return;
-        }
-        // Scroll in direction
-        await this.scroll(direction, scrollAmount);
-        await this.sleep(200);
-      }
-
-      throw new Error(`scrollUntilVisible timeout: ${JSON.stringify(selector)}`);
+        | { element: MaestroSelector; direction?: string; timeout?: number });
+      return;
     }
 
-    // swipe
     if ('swipe' in cmd) {
       const swipeCmd = cmd.swipe;
       if (swipeCmd.direction) {
@@ -892,14 +881,12 @@ class MaestroExecutor {
       return;
     }
 
-    // longPress
     if ('longPress' in cmd) {
       const selector = normalizeSelector(cmd.longPress as MaestroSelector | string);
       await this.longPress(selector);
       return;
     }
 
-    // runFlow
     if ('runFlow' in cmd) {
       if (cmd.runFlow.file) {
         this.log(`runFlow: ${cmd.runFlow.file}`);
@@ -910,7 +897,6 @@ class MaestroExecutor {
       return;
     }
 
-    // waitFor
     if ('waitFor' in cmd) {
       const { timeout = DEFAULT_VISIBLE_TIMEOUT, ...selector } = cmd.waitFor;
       await this.waitFor(
@@ -923,151 +909,25 @@ class MaestroExecutor {
 
     // launchApp - restart the app
     if ('launchApp' in cmd) {
-      const launchCmd = cmd.launchApp;
-      const shouldClearState = typeof launchCmd === 'object' && launchCmd.clearState === true;
-      const targetAppId = (typeof launchCmd === 'object' && launchCmd.appId) || this.appId;
-
-      if (!targetAppId) {
-        throw new Error('launchApp: No appId specified in command or flow metadata');
-      }
-
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('launchApp: No booted iOS simulator found');
-      }
-
-      this.log(`launchApp: ${targetAppId}${shouldClearState ? ' (clearState)' : ''}`);
-
-      // Disconnect current WebSocket
-      this.client.disconnect();
-
-      // Clear state if requested. clearAppState already terminates the app.
-      if (shouldClearState) {
-        clearAppState(deviceId, targetAppId);
-      } else {
-        terminateApp(deviceId, targetAppId);
-      }
-
-      // Brief settle so the simulator finishes wiping data containers
-      // before we launch the next instance. Skipping this on iOS 26 sim
-      // can produce a Hermes BCProvider SIGSEGV when the new process
-      // races the previous one's teardown.
-      await this.sleep(800);
-
-      launchAppOnSimulator(deviceId, targetAppId);
-
-      // Reconnect with patience. App needs to: cold-start, load JS bundle
-      // (Metro served), fire RCTHost.start, then bind WS server.
-      let connected = false;
-      const startTime = Date.now();
-      while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
-        try {
-          this.client = await this.reconnectClient();
-          connected = true;
-        } catch {
-          await this.sleep(200);
-        }
-      }
-
-      if (!connected) {
-        throw new Error('launchApp: Failed to reconnect to app after restart');
-      }
-
-      // Wait for first shadow tree commit so the next assertVisible has
-      // something to query.
-      await this.sleep(400);
-      try {
-        await this.client.waitForIdle(3000);
-      } catch {
-        // Continue even if waitForIdle times out
-      }
-
-      this.log('launchApp: Reconnected');
+      await this.handleLaunchApp(cmd.launchApp);
       return;
     }
 
-    // clearState - clear app data without full restart
     if ('clearState' in cmd) {
-      const clearCmd = cmd.clearState;
-      const targetAppId = (typeof clearCmd === 'object' && clearCmd.appId) || this.appId;
-
-      if (!targetAppId) {
-        throw new Error('clearState: No appId specified in command or flow metadata');
-      }
-
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('clearState: No booted iOS simulator found');
-      }
-
-      this.log(`clearState: ${targetAppId}`);
-
-      this.client.disconnect();
-      clearAppState(deviceId, targetAppId);
-      launchAppOnSimulator(deviceId, targetAppId);
-
-      let connected = false;
-      const startTime = Date.now();
-      while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
-        try {
-          this.client = await this.reconnectClient();
-          connected = true;
-        } catch {
-          await this.sleep(100);
-        }
-      }
-      if (!connected) {
-        throw new Error('clearState: Failed to reconnect to app after restart');
-      }
-      try {
-        await this.client.waitForIdle(3000);
-      } catch {
-        // Continue even if waitForIdle times out
-      }
-
-      this.log('clearState: App restarted with fresh state');
+      await this.handleClearState(cmd.clearState);
       return;
     }
 
     // stopApp / killApp (maestro alias — same behaviour, different name).
     if ('stopApp' in cmd || 'killApp' in cmd) {
       const subCmd = ('stopApp' in cmd ? cmd.stopApp : (cmd as { killApp: typeof cmd extends { stopApp: infer S } ? S : unknown }).killApp) as
-        | true
-        | { appId?: string }
-        | undefined;
-      const targetAppId = (typeof subCmd === 'object' && subCmd?.appId) || this.appId;
-
-      if (!targetAppId) {
-        throw new Error('stopApp: No appId specified in command or flow metadata');
-      }
-
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('stopApp: No booted iOS simulator found');
-      }
-
-      this.log(`stopApp: ${targetAppId}`);
-      terminateApp(deviceId, targetAppId);
+        | true | { appId?: string } | undefined;
+      this.handleStopApp(subCmd);
       return;
     }
 
-    // clearKeychain — wipe the booted sim's keychain. Maestro semantics:
-    // applies to whatever device is targeted. We don't need an appId
-    // because `simctl keychain reset` is sim-wide.
     if ('clearKeychain' in cmd) {
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('clearKeychain: No booted iOS simulator found');
-      }
-      this.log('clearKeychain');
-      try {
-        execSync(`xcrun simctl keychain ${deviceId} reset`, { encoding: 'utf-8', stdio: 'pipe' });
-      } catch (e) {
-        // Older sims occasionally return non-zero on a no-op reset; fall
-        // through silently — the next launch will see a fresh keychain
-        // anyway from the rm-rf+launch path.
-        if (process.env.ENNIO_VERBOSE) console.error(`clearKeychain: ${e}`);
-      }
+      this.handleClearKeychain();
       return;
     }
 
@@ -1082,87 +942,250 @@ class MaestroExecutor {
       return;
     }
 
-    // setAirplaneMode — sim-only via `simctl status_bar override`.
-    // Maestro accepts boolean or 'enabled'/'disabled'. We translate to
-    // status_bar dataNetworkType=airplane (on) or clear (off).
     if ('setAirplaneMode' in cmd) {
       const value = (cmd as { setAirplaneMode: boolean | 'enabled' | 'disabled' }).setAirplaneMode;
-      const enabled = value === true || value === 'enabled';
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('setAirplaneMode: No booted iOS simulator found');
-      }
-      this.log(`setAirplaneMode: ${enabled ? 'on' : 'off'}`);
-      try {
-        if (enabled) {
-          execSync(
-            `xcrun simctl status_bar ${deviceId} override --dataNetworkType none --wifiMode failed --cellularMode notSupported`,
-            { encoding: 'utf-8', stdio: 'pipe' },
-          );
-        } else {
-          execSync(`xcrun simctl status_bar ${deviceId} clear`, { encoding: 'utf-8', stdio: 'pipe' });
-        }
-      } catch (e) {
-        if (process.env.ENNIO_VERBOSE) console.error(`setAirplaneMode: ${e}`);
-      }
+      this.applyAirplaneMode(value === true || value === 'enabled', 'setAirplaneMode');
       return;
     }
-
-    // toggleAirplaneMode — flip whatever the current sim status bar
-    // shows. We don't read state back (`simctl status_bar list` is
-    // brittle); track an in-runner flag and flip it.
     if ('toggleAirplaneMode' in cmd) {
       this.airplaneOn = !this.airplaneOn;
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) throw new Error('toggleAirplaneMode: No booted iOS simulator found');
-      this.log(`toggleAirplaneMode → ${this.airplaneOn ? 'on' : 'off'}`);
-      try {
-        if (this.airplaneOn) {
-          execSync(
-            `xcrun simctl status_bar ${deviceId} override --dataNetworkType none --wifiMode failed --cellularMode notSupported`,
-            { encoding: 'utf-8', stdio: 'pipe' },
-          );
-        } else {
-          execSync(`xcrun simctl status_bar ${deviceId} clear`, { encoding: 'utf-8', stdio: 'pipe' });
-        }
-      } catch (e) {
-        if (process.env.ENNIO_VERBOSE) console.error(`toggleAirplaneMode: ${e}`);
-      }
+      this.applyAirplaneMode(this.airplaneOn, 'toggleAirplaneMode');
       return;
     }
 
-    // travel — iterate setLocation across waypoints. Maestro's grammar
-    // takes a list of {lat, lon} pairs; we walk them with a small fixed
-    // delay (200 ms) so observers (CLLocationManagerDelegate) see a
-    // sequence of fixes rather than a teleport. `speed` is informational;
-    // sim-side simctl location takes a single fix at a time.
     if ('travel' in cmd) {
       const travelCmd = (cmd as { travel: { points: Array<{ latitude: number; longitude: number } | string>; speed?: number } }).travel;
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) throw new Error('travel: No booted iOS simulator found');
-      this.log(`travel: ${travelCmd.points.length} waypoints`);
-      for (const p of travelCmd.points) {
-        let lat: number, lon: number;
-        if (typeof p === 'string') {
-          const [latStr, lonStr] = p.split(',').map((s) => s.trim());
-          lat = parseFloat(latStr);
-          lon = parseFloat(lonStr);
-        } else {
-          lat = p.latitude;
-          lon = p.longitude;
-        }
-        try {
-          execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, { encoding: 'utf-8', stdio: 'pipe' });
-        } catch (e) {
-          if (process.env.ENNIO_VERBOSE) console.error(`travel: ${e}`);
-        }
-        await this.sleep(200);
-      }
+      await this.handleTravel(travelCmd);
       return;
     }
 
     // inputRandomEmail / Number / Text / PersonName — generate a value
     // and route through typeText so the field receives a normal change.
+    if ('inputRandomEmail' in cmd || 'inputRandomNumber' in cmd
+        || 'inputRandomText' in cmd || 'inputRandomPersonName' in cmd) {
+      await this.handleInputRandom(cmd as MaestroCommand);
+      return;
+    }
+
+    if ('openLink' in cmd) {
+      await this.handleOpenLink(cmd.openLink);
+      return;
+    }
+    if ('takeScreenshot' in cmd) {
+      this.handleTakeScreenshot(cmd.takeScreenshot);
+      return;
+    }
+
+    if ('eraseText' in cmd) {
+      const eraseCmd = cmd.eraseText;
+      const chars = typeof eraseCmd === 'number' ? eraseCmd : (eraseCmd.characters || 50);
+      this.log(`eraseText: ${chars} characters`);
+      await this.writer.eraseText(this.lastTappedSelector?.id ?? null, chars);
+      return;
+    }
+
+    if ('hideKeyboard' in cmd) {
+      this.log('hideKeyboard');
+      await this.writer.hideKeyboard();
+      return;
+    }
+
+    if ('pressKey' in cmd) {
+      const keyName = cmd.pressKey as string;
+      this.log(`pressKey: ${keyName}`);
+      await this.writer.pressKey(this.lastTappedSelector?.id ?? null, keyName);
+      return;
+    }
+
+    if ('copyTextFrom' in cmd) {
+      const target = cmd.copyTextFrom as MaestroSelector;
+      this.log(`copyTextFrom: ${JSON.stringify(target)}`);
+      const selector = toEnnioSelector(target);
+      const text = await this.client.getTextBySelector(selector);
+      if (text) {
+        await this.writer.setClipboard(text);
+      }
+      return;
+    }
+
+    if ('pasteText' in cmd) {
+      this.log('pasteText');
+      await this.writer.pasteToFocused();
+      return;
+    }
+
+    if ('setClipboard' in cmd) {
+      const text = cmd.setClipboard as string;
+      this.log(`setClipboard: ${text}`);
+      await this.writer.setClipboard(text);
+      return;
+    }
+
+    // back (iOS back gesture)
+    if ('back' in cmd) {
+      this.log('back gesture');
+      await this.writer.back();
+      return;
+    }
+
+    if ('repeat' in cmd) {
+      const { times, commands } = cmd.repeat;
+      this.log(`repeat: ${times} times`);
+      for (let i = 0; i < times; i++) {
+        await this.executeCommands(commands);
+      }
+      return;
+    }
+
+    if ('retry' in cmd) {
+      await this.handleRetry(cmd.retry);
+      return;
+    }
+
+    if ('setLocation' in cmd) {
+      this.handleSetLocation(cmd.setLocation);
+      return;
+    }
+
+    if ('setPermissions' in cmd) {
+      this.handleSetPermissions(cmd.setPermissions);
+      return;
+    }
+
+    if ('startRecording' in cmd) {
+      await this.handleStartRecording(cmd.startRecording);
+      return;
+    }
+    if ('stopRecording' in cmd) {
+      await this.handleStopRecording();
+      return;
+    }
+
+    if ('addMedia' in cmd) {
+      this.handleAddMedia(cmd.addMedia);
+      return;
+    }
+
+    if ('waitForAnimationToEnd' in cmd) {
+      const waitCmd = cmd.waitForAnimationToEnd;
+      // Bare-form `- waitForAnimationToEnd:` parses to `null`; typeof null
+      // === 'object' so the prior check let null through and `null.timeout`
+      // threw. Explicit null guard.
+      const timeout = (waitCmd && typeof waitCmd === 'object' && waitCmd.timeout) ? waitCmd.timeout : 500;
+      this.log(`waitForAnimationToEnd: timeout=${timeout}ms`);
+      try {
+        await this.client.waitForIdle(timeout);
+      } catch {
+        // Continue even if idle detection times out
+      }
+      return;
+    }
+
+    if ('extendedWaitUntil' in cmd) {
+      await this.handleExtendedWaitUntil(cmd.extendedWaitUntil);
+      return;
+    }
+
+    console.log(`  (unknown command: ${JSON.stringify(cmd)})`);
+  }
+
+  // ============================================
+  // Per-command handlers (extracted from executeCommand)
+  //
+  // Long blocks were lifted out one at a time; each preserves the
+  // original semantics 1:1. Thin handlers (≤ 15 lines, no quirks) stay
+  // inline in executeCommand to avoid pointless indirection.
+  // ============================================
+
+  // Map maestro permission names to `xcrun simctl privacy` service names.
+  // Most are 1:1 except medialibrary → media-library.
+  private static readonly PERMISSION_SERVICE_MAP: Record<string, string> = {
+    notifications: 'notifications',
+    photos: 'photos',
+    camera: 'camera',
+    microphone: 'microphone',
+    location: 'location',
+    contacts: 'contacts',
+    calendar: 'calendar',
+    reminders: 'reminders',
+    medialibrary: 'media-library',
+    bluetooth: 'bluetooth',
+  };
+
+  private handleSetPermissions(permissions: Record<string, 'allow' | 'deny' | 'unset'>): void {
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('setPermissions: No booted iOS simulator found');
+    const targetAppId = this.appId;
+    if (!targetAppId) throw new Error('setPermissions: No appId specified');
+
+    this.log(`setPermissions: ${JSON.stringify(permissions)}`);
+    for (const [perm, action] of Object.entries(permissions)) {
+      const service = MaestroExecutor.PERMISSION_SERVICE_MAP[perm.toLowerCase()] || perm;
+      const simctlAction = action === 'allow' ? 'grant' : action === 'deny' ? 'revoke' : 'reset';
+      try {
+        execSync(`xcrun simctl privacy ${deviceId} ${simctlAction} ${service} ${targetAppId}`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        });
+      } catch {
+        // Some permissions aren't supported on every iOS version — log + continue.
+        this.log(`setPermissions: ${perm} - ${action} (may not be supported)`);
+      }
+    }
+  }
+
+  private async handleScrollUntilVisible(scrollCmd:
+    | MaestroSelector
+    | { element: MaestroSelector; direction?: string; timeout?: number }): Promise<void> {
+    const hasElement = typeof scrollCmd === 'object' && 'element' in scrollCmd;
+    const selector = normalizeSelector(hasElement ? scrollCmd.element : scrollCmd as MaestroSelector);
+    const direction = (hasElement ? scrollCmd.direction || 'DOWN' : 'DOWN').toLowerCase();
+    const timeout = hasElement ? scrollCmd.timeout || 10000 : 10000;
+    const scrollAmount = 300;
+
+    this.log(`scrollUntilVisible: ${JSON.stringify(selector)}`);
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      if (await this.selectorVisible(selector)) return;
+      await this.scroll(direction, scrollAmount);
+      await this.sleep(TAP_NAV_SETTLE_MS);
+    }
+    throw new Error(`scrollUntilVisible timeout: ${JSON.stringify(selector)}`);
+  }
+
+  private async handleOpenLink(linkCmd: string | { link: string }): Promise<void> {
+    const url = typeof linkCmd === 'string' ? linkCmd : linkCmd.link;
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('openLink: No booted iOS simulator found');
+    this.log(`openLink: ${url}`);
+    execSync(`xcrun simctl openurl ${deviceId} "${url}"`, { encoding: 'utf-8', stdio: 'pipe' });
+    await this.sleep(OPENLINK_SETTLE_MS);
+  }
+
+  private handleTakeScreenshot(screenshotCmd: string | { path: string }): void {
+    const path = typeof screenshotCmd === 'string' ? screenshotCmd : screenshotCmd.path;
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('takeScreenshot: No booted iOS simulator found');
+    this.log(`takeScreenshot: ${path}`);
+    execSync(`xcrun simctl io ${deviceId} screenshot "${path}"`, { encoding: 'utf-8', stdio: 'pipe' });
+  }
+
+  private handleAddMedia(mediaCmd: string[] | { files: string[] }): void {
+    const files = Array.isArray(mediaCmd) ? mediaCmd : mediaCmd.files;
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('addMedia: No booted iOS simulator found');
+    this.log(`addMedia: ${files.join(', ')}`);
+    for (const file of files) {
+      execSync(`xcrun simctl addmedia ${deviceId} "${file}"`, { encoding: 'utf-8', stdio: 'pipe' });
+    }
+  }
+
+  // Tiny fixed pool — deterministic enough for tests, varied enough not
+  // to clash with hardcoded "Test User" assertions.
+  private static readonly RANDOM_FIRST_NAMES = ['Alex', 'Jordan', 'Sam', 'Casey', 'Robin', 'Taylor'];
+  private static readonly RANDOM_LAST_NAMES = ['Smith', 'Jones', 'Brown', 'Davis', 'Wilson', 'Miller'];
+
+  private async handleInputRandom(cmd: MaestroCommand): Promise<void> {
     if ('inputRandomEmail' in cmd) {
       const text = `e2e-${Math.random().toString(36).slice(2, 10)}@example.com`;
       this.log(`inputRandomEmail: "${text}"`);
@@ -1189,293 +1212,224 @@ class MaestroExecutor {
       return;
     }
     if ('inputRandomPersonName' in cmd) {
-      // Tiny fixed pool — deterministic enough for tests, varied enough
-      // not to clash with hardcoded "Test User" assertions.
-      const first = ['Alex', 'Jordan', 'Sam', 'Casey', 'Robin', 'Taylor'];
-      const last = ['Smith', 'Jones', 'Brown', 'Davis', 'Wilson', 'Miller'];
+      const first = MaestroExecutor.RANDOM_FIRST_NAMES;
+      const last = MaestroExecutor.RANDOM_LAST_NAMES;
       const name = `${first[Math.floor(Math.random() * first.length)]} ${last[Math.floor(Math.random() * last.length)]}`;
       this.log(`inputRandomPersonName: "${name}"`);
       await this.typeText(name);
-      return;
     }
+  }
 
-    // openLink
-    if ('openLink' in cmd) {
-      const linkCmd = cmd.openLink;
-      const url = typeof linkCmd === 'string' ? linkCmd : linkCmd.link;
+  private handleStopApp(subCmd: true | { appId?: string } | undefined): void {
+    const targetAppId = (typeof subCmd === 'object' && subCmd?.appId) || this.appId;
+    if (!targetAppId) throw new Error('stopApp: No appId specified in command or flow metadata');
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('stopApp: No booted iOS simulator found');
+    this.log(`stopApp: ${targetAppId}`);
+    terminateApp(deviceId, targetAppId);
+  }
 
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('openLink: No booted iOS simulator found');
-      }
-
-      this.log(`openLink: ${url}`);
-      execSync(`xcrun simctl openurl ${deviceId} "${url}"`, { encoding: 'utf-8', stdio: 'pipe' });
-      await this.sleep(500);
-      return;
+  // Sim-wide keychain wipe. No appId — `simctl keychain reset` is a
+  // per-device operation, not per-app. Older sims occasionally return
+  // non-zero on a no-op reset; tolerated since the next launch sees a
+  // fresh keychain anyway via the rm-rf+launch path in clearState.
+  private handleClearKeychain(): void {
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('clearKeychain: No booted iOS simulator found');
+    this.log('clearKeychain');
+    try {
+      execSync(`xcrun simctl keychain ${deviceId} reset`, { encoding: 'utf-8', stdio: 'pipe' });
+    } catch (e) {
+      if (process.env.ENNIO_VERBOSE) console.error(`clearKeychain: ${e}`);
     }
+  }
 
-    // takeScreenshot
-    if ('takeScreenshot' in cmd) {
-      const screenshotCmd = cmd.takeScreenshot;
-      const path = typeof screenshotCmd === 'string' ? screenshotCmd : screenshotCmd.path;
-
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('takeScreenshot: No booted iOS simulator found');
-      }
-
-      this.log(`takeScreenshot: ${path}`);
-      execSync(`xcrun simctl io ${deviceId} screenshot "${path}"`, { encoding: 'utf-8', stdio: 'pipe' });
-      return;
-    }
-
-    // eraseText
-    if ('eraseText' in cmd) {
-      const eraseCmd = cmd.eraseText;
-      const chars = typeof eraseCmd === 'number' ? eraseCmd : (eraseCmd.characters || 50);
-      this.log(`eraseText: ${chars} characters`);
-      await this.writer.eraseText(this.lastTappedSelector?.id ?? null, chars);
-      return;
-    }
-
-    // hideKeyboard
-    if ('hideKeyboard' in cmd) {
-      this.log('hideKeyboard');
-      await this.writer.hideKeyboard();
-      return;
-    }
-
-    // pressKey
-    if ('pressKey' in cmd) {
-      const keyName = cmd.pressKey as string;
-      this.log(`pressKey: ${keyName}`);
-      await this.writer.pressKey(this.lastTappedSelector?.id ?? null, keyName);
-      return;
-    }
-
-    // copyTextFrom
-    if ('copyTextFrom' in cmd) {
-      const target = cmd.copyTextFrom as MaestroSelector;
-      this.log(`copyTextFrom: ${JSON.stringify(target)}`);
-      const selector = toEnnioSelector(target);
-      const text = await this.client.getTextBySelector(selector);
-      if (text) {
-        await this.writer.setClipboard(text);
-      }
-      return;
-    }
-
-    // pasteText
-    if ('pasteText' in cmd) {
-      this.log('pasteText');
-      await this.writer.pasteToFocused();
-      return;
-    }
-
-    // setClipboard
-    if ('setClipboard' in cmd) {
-      const text = cmd.setClipboard as string;
-      this.log(`setClipboard: ${text}`);
-      await this.writer.setClipboard(text);
-      return;
-    }
-
-    // back (iOS back gesture)
-    if ('back' in cmd) {
-      this.log('back gesture');
-      await this.writer.back();
-      return;
-    }
-
-    // repeat
-    if ('repeat' in cmd) {
-      const { times, commands } = cmd.repeat;
-      this.log(`repeat: ${times} times`);
-      for (let i = 0; i < times; i++) {
-        await this.executeCommands(commands);
-      }
-      return;
-    }
-
-    // retry
-    if ('retry' in cmd) {
-      const { maxRetries = 3, commands } = cmd.retry;
-      this.log(`retry: max ${maxRetries}`);
-      let lastError: Error | null = null;
-      for (let i = 0; i <= maxRetries; i++) {
-        try {
-          await this.executeCommands(commands);
-          return; // Success
-        } catch (err) {
-          lastError = err instanceof Error ? err : new Error(String(err));
-          if (i < maxRetries) {
-            this.log(`retry: attempt ${i + 1} failed, retrying...`);
-            await this.sleep(500);
-          }
-        }
-      }
-      throw lastError || new Error('retry: all attempts failed');
-    }
-
-    // setLocation
-    if ('setLocation' in cmd) {
-      const locCmd = cmd.setLocation;
-      let lat: number, lon: number;
-
-      if (typeof locCmd === 'string') {
-        // Parse "lat,lon" string
-        const [latStr, lonStr] = locCmd.split(',');
-        lat = parseFloat(latStr);
-        lon = parseFloat(lonStr);
+  // Sim-only via `simctl status_bar`. There's no `simctl status_bar list`
+  // we can read back reliably, so toggleAirplaneMode tracks state in
+  // `airplaneOn` and flips it. setAirplaneMode passes the explicit value.
+  private applyAirplaneMode(enabled: boolean, label: string): void {
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error(`${label}: No booted iOS simulator found`);
+    this.log(`${label}: ${enabled ? 'on' : 'off'}`);
+    try {
+      if (enabled) {
+        execSync(
+          `xcrun simctl status_bar ${deviceId} override --dataNetworkType none --wifiMode failed --cellularMode notSupported`,
+          { encoding: 'utf-8', stdio: 'pipe' },
+        );
       } else {
-        lat = locCmd.latitude;
-        lon = locCmd.longitude;
+        execSync(`xcrun simctl status_bar ${deviceId} clear`, { encoding: 'utf-8', stdio: 'pipe' });
       }
-
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('setLocation: No booted iOS simulator found');
-      }
-
-      this.log(`setLocation: ${lat}, ${lon}`);
-      execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, { encoding: 'utf-8', stdio: 'pipe' });
-      return;
+    } catch (e) {
+      if (process.env.ENNIO_VERBOSE) console.error(`${label}: ${e}`);
     }
+  }
 
-    // setPermissions
-    if ('setPermissions' in cmd) {
-      const permissions = cmd.setPermissions;
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('setPermissions: No booted iOS simulator found');
+  // Walk maestro waypoints with a 200 ms gap so a CLLocationManagerDelegate
+  // sees a sequence of fixes rather than a teleport. `speed` is informational;
+  // simctl location takes one fix at a time, no velocity model.
+  private async handleTravel(travelCmd: { points: Array<{ latitude: number; longitude: number } | string>; speed?: number }): Promise<void> {
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('travel: No booted iOS simulator found');
+    this.log(`travel: ${travelCmd.points.length} waypoints`);
+    for (const p of travelCmd.points) {
+      let lat: number, lon: number;
+      if (typeof p === 'string') {
+        const [latStr, lonStr] = p.split(',').map((s) => s.trim());
+        lat = parseFloat(latStr); lon = parseFloat(lonStr);
+      } else {
+        lat = p.latitude; lon = p.longitude;
       }
-
-      const targetAppId = this.appId;
-      if (!targetAppId) {
-        throw new Error('setPermissions: No appId specified');
+      try {
+        execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, { encoding: 'utf-8', stdio: 'pipe' });
+      } catch (e) {
+        if (process.env.ENNIO_VERBOSE) console.error(`travel: ${e}`);
       }
+      await this.sleep(TRAVEL_WAYPOINT_GAP_MS);
+    }
+  }
 
-      this.log(`setPermissions: ${JSON.stringify(permissions)}`);
-
-      // Map permission names to simctl privacy service names
-      const permissionMap: Record<string, string> = {
-        notifications: 'notifications',
-        photos: 'photos',
-        camera: 'camera',
-        microphone: 'microphone',
-        location: 'location',
-        contacts: 'contacts',
-        calendar: 'calendar',
-        reminders: 'reminders',
-        medialibrary: 'media-library',
-        bluetooth: 'bluetooth',
-      };
-
-      for (const [perm, action] of Object.entries(permissions)) {
-        const service = permissionMap[perm.toLowerCase()] || perm;
-        const simctlAction = action === 'allow' ? 'grant' : action === 'deny' ? 'revoke' : 'reset';
-        try {
-          execSync(`xcrun simctl privacy ${deviceId} ${simctlAction} ${service} ${targetAppId}`, {
-            encoding: 'utf-8',
-            stdio: 'pipe',
-          });
-        } catch {
-          // Some permissions may not be supported
-          this.log(`setPermissions: ${perm} - ${action} (may not be supported)`);
+  private async handleRetry(retryCmd: { maxRetries?: number; commands: MaestroCommand[] }): Promise<void> {
+    const { maxRetries = 3, commands } = retryCmd;
+    this.log(`retry: max ${maxRetries}`);
+    let lastError: Error | null = null;
+    for (let i = 0; i <= maxRetries; i++) {
+      try {
+        await this.executeCommands(commands);
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (i < maxRetries) {
+          this.log(`retry: attempt ${i + 1} failed, retrying...`);
+          await this.sleep(RETRY_BACKOFF_MS);
         }
       }
-      return;
     }
+    throw lastError || new Error('retry: all attempts failed');
+  }
 
-    // startRecording
-    if ('startRecording' in cmd) {
-      const recCmd = cmd.startRecording;
-      const path = typeof recCmd === 'string' ? recCmd : recCmd.path;
-
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('startRecording: No booted iOS simulator found');
-      }
-
-      this.log(`startRecording: ${path}`);
-      // Start recording in background - spawn without waiting
-      spawn('xcrun', ['simctl', 'io', deviceId, 'recordVideo', path], {
-        detached: true,
-        stdio: 'ignore',
-      }).unref();
-      await this.sleep(500);
-      return;
+  private handleSetLocation(locCmd: string | { latitude: number; longitude: number }): void {
+    let lat: number, lon: number;
+    if (typeof locCmd === 'string') {
+      const [latStr, lonStr] = locCmd.split(',');
+      lat = parseFloat(latStr); lon = parseFloat(lonStr);
+    } else {
+      lat = locCmd.latitude; lon = locCmd.longitude;
     }
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('setLocation: No booted iOS simulator found');
+    this.log(`setLocation: ${lat}, ${lon}`);
+    execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, { encoding: 'utf-8', stdio: 'pipe' });
+  }
 
-    // stopRecording
-    if ('stopRecording' in cmd) {
-      this.log('stopRecording');
-      // Kill any running simctl recordVideo processes
+  private async handleStartRecording(recCmd: string | { path: string }): Promise<void> {
+    const path = typeof recCmd === 'string' ? recCmd : recCmd.path;
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('startRecording: No booted iOS simulator found');
+    this.log(`startRecording: ${path}`);
+    // Background recording — `simctl io recordVideo` blocks until killed.
+    // unref() so the child doesn't keep the test runner alive after exit.
+    spawn('xcrun', ['simctl', 'io', deviceId, 'recordVideo', path], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+    await this.sleep(RECORDING_SETTLE_MS);
+  }
+
+  private async handleStopRecording(): Promise<void> {
+    this.log('stopRecording');
+    try {
+      execSync('pkill -f "simctl io.*recordVideo"', { encoding: 'utf-8', stdio: 'pipe' });
+    } catch {
+      // No recording process — fine.
+    }
+    await this.sleep(RECORDING_SETTLE_MS);
+  }
+
+  private async handleExtendedWaitUntil(waitCmd: { visible?: MaestroSelector; notVisible?: MaestroSelector; timeout?: number }): Promise<void> {
+    const { visible, notVisible, timeout = 10000 } = waitCmd;
+    this.log(`extendedWaitUntil: timeout=${timeout}ms`);
+    if (visible) {
+      const selector = normalizeSelector(visible);
+      await this.waitFor(
+        () => this.selectorVisible(selector),
+        timeout,
+        `Element not visible: ${JSON.stringify(selector)}`,
+      );
+    }
+    if (notVisible) {
+      const selector = normalizeSelector(notVisible);
+      await this.waitFor(
+        () => this.selectorVisible(selector).then((v) => !v),
+        timeout,
+        `Element still visible: ${JSON.stringify(selector)}`,
+      );
+    }
+  }
+
+  private async handleClearState(clearCmd: true | { appId?: string }): Promise<void> {
+    const targetAppId = (typeof clearCmd === 'object' && clearCmd.appId) || this.appId;
+    if (!targetAppId) throw new Error('clearState: No appId specified in command or flow metadata');
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('clearState: No booted iOS simulator found');
+
+    this.log(`clearState: ${targetAppId}`);
+    this.client.disconnect();
+    clearAppState(deviceId, targetAppId);
+    launchAppOnSimulator(deviceId, targetAppId);
+
+    let connected = false;
+    const startTime = Date.now();
+    while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
       try {
-        execSync('pkill -f "simctl io.*recordVideo"', { encoding: 'utf-8', stdio: 'pipe' });
+        this.client = await this.reconnectClient();
+        connected = true;
       } catch {
-        // Process may not exist
+        await this.sleep(RETRY_POLL_MS);
       }
-      await this.sleep(500);
-      return;
     }
+    if (!connected) throw new Error('clearState: Failed to reconnect to app after restart');
+    try { await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS); } catch { /* tolerate */ }
+    this.log('clearState: App restarted with fresh state');
+  }
 
-    // addMedia
-    if ('addMedia' in cmd) {
-      const mediaCmd = cmd.addMedia;
-      const files = Array.isArray(mediaCmd) ? mediaCmd : mediaCmd.files;
+  private async handleLaunchApp(launchCmd: true | { clearState?: boolean; appId?: string }): Promise<void> {
+    const shouldClearState = typeof launchCmd === 'object' && launchCmd.clearState === true;
+    const targetAppId = (typeof launchCmd === 'object' && launchCmd.appId) || this.appId;
+    if (!targetAppId) throw new Error('launchApp: No appId specified in command or flow metadata');
+    const deviceId = getBootedSimulatorId();
+    if (!deviceId) throw new Error('launchApp: No booted iOS simulator found');
 
-      const deviceId = getBootedSimulatorId();
-      if (!deviceId) {
-        throw new Error('addMedia: No booted iOS simulator found');
-      }
+    this.log(`launchApp: ${targetAppId}${shouldClearState ? ' (clearState)' : ''}`);
+    this.client.disconnect();
+    if (shouldClearState) clearAppState(deviceId, targetAppId);
+    else terminateApp(deviceId, targetAppId);
 
-      this.log(`addMedia: ${files.join(', ')}`);
-      for (const file of files) {
-        execSync(`xcrun simctl addmedia ${deviceId} "${file}"`, { encoding: 'utf-8', stdio: 'pipe' });
-      }
-      return;
-    }
+    // Brief settle so the simulator finishes wiping data containers
+    // before relaunch. Skipping this on iOS 26 sim can produce a Hermes
+    // BCProvider SIGSEGV when the new process races the prior teardown.
+    await this.sleep(POST_LAUNCH_SETTLE_MS);
+    launchAppOnSimulator(deviceId, targetAppId);
 
-    // waitForAnimationToEnd
-    if ('waitForAnimationToEnd' in cmd) {
-      const waitCmd = cmd.waitForAnimationToEnd;
-      const timeout = typeof waitCmd === 'object' && waitCmd.timeout ? waitCmd.timeout : 500;
-      this.log(`waitForAnimationToEnd: timeout=${timeout}ms`);
+    // Reconnect with patience. App must cold-start, load JS bundle,
+    // fire RCTHost.start, then bind WS server.
+    let connected = false;
+    const startTime = Date.now();
+    while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
       try {
-        await this.client.waitForIdle(timeout);
+        this.client = await this.reconnectClient();
+        connected = true;
       } catch {
-        // Continue even if idle detection times out
+        await this.sleep(TAP_NAV_SETTLE_MS);
       }
-      return;
     }
+    if (!connected) throw new Error('launchApp: Failed to reconnect to app after restart');
 
-    // extendedWaitUntil
-    if ('extendedWaitUntil' in cmd) {
-      const { visible, notVisible, timeout = 10000 } = cmd.extendedWaitUntil;
-      this.log(`extendedWaitUntil: timeout=${timeout}ms`);
-
-      if (visible) {
-        const selector = normalizeSelector(visible);
-        await this.waitFor(
-          () => this.selectorVisible(selector),
-          timeout,
-          `Element not visible: ${JSON.stringify(selector)}`
-        );
-      }
-      if (notVisible) {
-        const selector = normalizeSelector(notVisible);
-        await this.waitFor(
-          () => this.selectorVisible(selector).then((v) => !v),
-          timeout,
-          `Element still visible: ${JSON.stringify(selector)}`
-        );
-      }
-      return;
-    }
-
-    console.log(`  (unknown command: ${JSON.stringify(cmd)})`);
+    // Wait for first shadow tree commit so the next assertVisible has
+    // something to query.
+    await this.sleep(POST_LAUNCH_SHADOW_COMMIT_MS);
+    try { await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS); } catch { /* tolerate */ }
+    this.log('launchApp: Reconnected');
   }
 
   /**
@@ -1490,6 +1444,10 @@ class MaestroExecutor {
       try {
         await this.executeCommand(cmd);
       } catch (err) {
+        // Reset post-tap recovery state so a downstream `tap nearest` /
+        // `assertVisible` retry path doesn't re-tap a stale selector
+        // from the failed command.
+        this.lastTappedSelector = null;
         if (optional) {
           const cmdName = typeof cmd === 'string' ? cmd : Object.keys(cmd as object)[0];
           this.log(`  (optional ${cmdName} failed, continuing): ${(err as Error).message}`);
@@ -1503,12 +1461,8 @@ class MaestroExecutor {
     }
   }
 
-  /**
-   * Print a one-line trace marker between commands. We used to dump the
-   * iOS a11y tree here via `argent describe`, but argent is no longer a
-   * dependency. Keep the hook so flows can stay verbose-instrumented; the
-   * caller can extend this to call `client.findBySelector` for richer info.
-   */
+  // Hook for verbose-trace runs. Extended via `client.findBySelector` in
+  // forks that want a per-command shadow-tree dump; default is a marker.
   private async snapshotState(cmd: MaestroCommand): Promise<void> {
     if (!this.trace) return;
     const cmdName = typeof cmd === 'string' ? cmd : Object.keys(cmd as object)[0];

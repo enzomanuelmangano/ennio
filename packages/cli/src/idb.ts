@@ -91,6 +91,9 @@ export async function tapByLabelOOP(text: string): Promise<boolean> {
   const deadline = Date.now() + 3000;
   let nodes: unknown = null;
   let attempts = 0;
+  type Node = { AXLabel?: string; AXTitle?: string; AXValue?: string; frame?: { x: number; y: number; width: number; height: number } };
+  const norm = (s: unknown) => (typeof s === 'string' ? s : '').trim();
+
   while (Date.now() < deadline) {
     attempts++;
     let raw = '';
@@ -101,23 +104,19 @@ export async function tapByLabelOOP(text: string): Promise<boolean> {
       if (process.env.ENNIO_DEBUG_IDB) console.error(`[idb OOP] attempt ${attempts}: ${e}`);
       nodes = null;
     }
-    if (Array.isArray(nodes)) {
-      const norm = (s: unknown) => (typeof s === 'string' ? s : '').trim();
-      const found = (nodes as Array<{ AXLabel?: string; AXTitle?: string; AXValue?: string }>).some((n) => {
-        if (!n) return false;
-        return norm(n.AXLabel) === text || norm(n.AXTitle) === text || norm(n.AXValue) === text;
-      });
-      if (process.env.ENNIO_DEBUG_IDB) console.error(`[idb OOP] attempt ${attempts}: ${(nodes as unknown[]).length} nodes, found=${found}`);
-      if (found) break;
+    if (!Array.isArray(nodes)) {
+      await new Promise((r) => setTimeout(r, 200));
+      continue;
     }
+    const found = (nodes as Node[]).some((n) =>
+      !!n && (norm(n.AXLabel) === text || norm(n.AXTitle) === text || norm(n.AXValue) === text)
+    );
+    if (process.env.ENNIO_DEBUG_IDB) console.error(`[idb OOP] attempt ${attempts}: ${(nodes as unknown[]).length} nodes, found=${found}`);
+    if (found) break;
     await new Promise((r) => setTimeout(r, 200));
   }
   if (!Array.isArray(nodes)) return false;
-  // Each node: { AXLabel?: string, AXTitle?: string, AXValue?: string,
-  //               frame: { x, y, width, height }, type: string, ... }
-  // Match exact first, then case-insensitive contains, on AXLabel/Title/Value.
-  const norm = (s: unknown) => (typeof s === 'string' ? s : '').trim();
-  type Node = { AXLabel?: string; AXTitle?: string; AXValue?: string; frame?: { x: number; y: number; width: number; height: number } };
+
   let exact: Node | null = null;
   let partial: Node | null = null;
   for (const n of nodes as Node[]) {

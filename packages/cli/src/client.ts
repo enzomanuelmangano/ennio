@@ -1,14 +1,24 @@
 /**
  * Ennio WebSocket Client
  *
- * Connects directly to the native Ennio WebSocket server
- * running in the app. Works in both debug and release builds.
- *
- * Read-only surface: queries, selectors, alert state, and synchronization.
- * Write/HID operations live in the XCTest helper (see xctest-client.ts).
+ * Connects directly to the native Ennio WebSocket server running in the
+ * app. Works in both debug and release builds. Reads (queries, selectors,
+ * alert state, synchronization) and writes (taps, swipes, typeText, …)
+ * both flow through this single channel — the writer goes via NitroWriter
+ * which forwards command names to the in-app dispatch table over WS.
  */
 
+import { selectorToJson } from './selector';
+
 const DEFAULT_PORT = 9876;
+// Per-request hard cap. Long enough for an asset-heavy assertVisible
+// after a launchApp; short enough that a hung WS doesn't deadlock the
+// runner indefinitely. Cancelled if a reconnect succeeds first.
+const REQUEST_TIMEOUT_MS = 30_000;
+// Reconnect window when the WS drops mid-request (Metro reload, sim
+// hiccup). 6 s covers a JS bundle reload; longer would compete with
+// the request timeout above.
+const RECONNECT_TIMEOUT_MS = 6_000;
 
 interface EnnioRequest {
   id: string;
@@ -16,7 +26,7 @@ interface EnnioRequest {
   payload: Record<string, unknown>;
 }
 
-interface EnnioResponse {
+export interface EnnioResponse {
   id: string;
   success: boolean;
   data?: unknown;
@@ -115,7 +125,11 @@ export interface Selector {
 
 export class EnnioClient {
   private ws: WebSocket | null = null;
-  private pending = new Map<string, { resolve: (r: EnnioResponse) => void; reject: (e: Error) => void }>();
+  private pending = new Map<string, {
+    resolve: (r: EnnioResponse) => void;
+    reject: (e: Error) => void;
+    timeoutHandle?: ReturnType<typeof setTimeout>;
+  }>();
   private messageId = 0;
   private port: number;
 
@@ -137,16 +151,17 @@ export class EnnioClient {
           const handler = this.pending.get(response.id);
           if (handler) {
             this.pending.delete(response.id);
+            if (handler.timeoutHandle) clearTimeout(handler.timeoutHandle);
             handler.resolve(response);
           }
         } catch {
-          // Ignore malformed messages
+          // Malformed message — drop. Timeout will fire if no valid reply follows.
         }
       };
 
       this.ws.onclose = () => {
-        // Reject all pending requests
         for (const [id, handler] of this.pending) {
+          if (handler.timeoutHandle) clearTimeout(handler.timeoutHandle);
           handler.reject(new Error('Connection closed'));
           this.pending.delete(id);
         }
@@ -166,7 +181,7 @@ export class EnnioClient {
    * drop (RN bundle reload, sim hiccup). Polls until the app rebinds the
    * WS server, up to ~6s.
    */
-  async reconnect(maxWaitMs: number = 6000): Promise<boolean> {
+  async reconnect(maxWaitMs: number = RECONNECT_TIMEOUT_MS): Promise<boolean> {
     this.disconnect();
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
@@ -180,12 +195,19 @@ export class EnnioClient {
     return false;
   }
 
-  private async send(type: string, payload: Record<string, unknown> = {}): Promise<EnnioResponse> {
+  /**
+   * Public escape hatch for callers that need a command type not yet
+   * wrapped in a typed method (NitroWriter forwards arbitrary command
+   * names from the maestro-runner dispatch chain). Prefer adding a typed
+   * wrapper here when a use site stabilizes — direct send leaves the
+   * payload schema untyped, so typos surface only at runtime.
+   */
+  async send(type: string, payload: Record<string, unknown> = {}): Promise<EnnioResponse> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       // Best-effort transparent reconnect on cold/dropped socket. If the
       // app is up but rebound after a JS reload, this picks the connection
       // back up without forcing the runner to fail mid-flow.
-      const ok = await this.reconnect(6000);
+      const ok = await this.reconnect(RECONNECT_TIMEOUT_MS);
       if (!ok) throw new Error('Not connected to Ennio server');
     }
 
@@ -193,12 +215,15 @@ export class EnnioClient {
     const request: EnnioRequest = { id, type, payload };
 
     return new Promise((resolve, reject) => {
-      // Retry once on transient WS close: the JS bundle reload during
-      // normal RN dev cycles or simulator hiccups can drop the socket
-      // mid-request. Reconnect and re-send before bubbling the error.
+      // On `Connection closed` we reconnect and re-send; the recursive
+      // send installs its own fresh timeout, so the outer timeout below
+      // must be cleared first or it'll fire while the re-send is still
+      // in flight and produce a spurious "Request timeout".
       const wrappedReject = async (e: Error) => {
+        const entry = this.pending.get(id);
+        if (entry?.timeoutHandle) clearTimeout(entry.timeoutHandle);
         if (e.message === 'Connection closed') {
-          const ok = await this.reconnect(6000);
+          const ok = await this.reconnect(RECONNECT_TIMEOUT_MS);
           if (ok) {
             try {
               const res = await this.send(type, payload);
@@ -212,40 +237,61 @@ export class EnnioClient {
         }
         reject(e);
       };
-      this.pending.set(id, { resolve, reject: wrappedReject });
-      this.ws!.send(JSON.stringify(request));
 
-      // Timeout after 30 seconds
-      setTimeout(() => {
+      const timeoutHandle = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           reject(new Error(`Request timeout: ${type}`));
         }
-      }, 30000);
+      }, REQUEST_TIMEOUT_MS);
+
+      this.pending.set(id, { resolve, reject: wrappedReject, timeoutHandle });
+      this.ws!.send(JSON.stringify(request));
     });
   }
 
   // Element queries
+  //
+  // Native side embeds raw JSON literals into `Response::toJSON`'s data
+  // field via string concatenation (no extra escaping), so a C++ handler
+  // emitting `r.data = "true"` lands here as a parsed JS boolean — not
+  // the string "true". Stripping the historical `=== 'true'` defensive
+  // branches now to surface any genuine string-bool drift loudly via a
+  // type mismatch.
   async exists(testID: string): Promise<boolean> {
     const response = await this.send('exists', { testID });
-    return response.data === true || response.data === 'true';
+    return response.data === true;
   }
 
   async isVisible(testID: string): Promise<boolean> {
     const response = await this.send('isVisible', { testID });
-    return response.data === true || response.data === 'true';
+    return response.data === true;
   }
 
   async getText(testID: string): Promise<string | null> {
     const response = await this.send('getText', { testID });
-    if (response.data === null || response.data === 'null') return null;
-    return typeof response.data === 'string' ? response.data.replace(/^"|"$/g, '') : null;
+    if (response.data == null) return null;
+    return typeof response.data === 'string' ? response.data : null;
   }
 
   async getElementInfo(testID: string): Promise<ExtendedElementInfo | null> {
     const response = await this.send('getElementInfo', { testID });
     if (!response.success || !response.data) return null;
-    return (typeof response.data === 'string' ? JSON.parse(response.data) : response.data) as ExtendedElementInfo;
+    return response.data as ExtendedElementInfo;
+  }
+
+  /**
+   * UIKit-frame visibility check. Reader uses this instead of the
+   * Fabric-shadow `isVisible` because shadow node coords are surface-
+   * relative; Stack-pushed screens have a non-window-origin surface and
+   * the shadow comparison rejects elements that are clearly on screen.
+   */
+  async getViewWindowFrame(testID: string): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    const response = await this.send('getViewWindowFrame', { testID });
+    if (!response.success || !response.data || typeof response.data !== 'object') return null;
+    const r = response.data as { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
+    if (typeof r.x !== 'number' || typeof r.y !== 'number' || typeof r.width !== 'number' || typeof r.height !== 'number') return null;
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
   }
 
   // Synchronization
@@ -261,106 +307,28 @@ export class EnnioClient {
   // Alert handling (read-only)
   async isAlertPresent(): Promise<boolean> {
     const response = await this.send('isAlertPresent', {});
-    return response.data === true || response.data === 'true';
+    return response.data === true;
   }
 
   async getAlertText(): Promise<string> {
     const response = await this.send('getAlertText', {});
-    return typeof response.data === 'string' ? response.data.replace(/^"|"$/g, '') : '';
+    return typeof response.data === 'string' ? response.data : '';
   }
 
   async getAlertButtons(): Promise<string[]> {
     const response = await this.send('getAlertButtons', {});
-    if (!response.success || !response.data) return [];
-    try {
-      const buttons = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-      return Array.isArray(buttons) ? buttons : [];
-    } catch {
-      return [];
-    }
+    return Array.isArray(response.data) ? response.data : [];
   }
 
   // ============================================
   // Selector-based Methods (Full Maestro Parity)
   // ============================================
 
-  /**
-   * Convert selector to JSON string for native layer
-   */
-  private selectorToJson(selector: Selector): string {
-    const normalized: Record<string, unknown> = {};
-
-    if (selector.id !== undefined) normalized.id = selector.id;
-
-    if (selector.text !== undefined) {
-      if (typeof selector.text === 'string') {
-        normalized.text = selector.text;
-      } else {
-        normalized.text = selector.text.pattern;
-        if (selector.text.mode && selector.text.mode !== 'exact') {
-          normalized.textMatchMode = selector.text.mode;
-        }
-      }
-    }
-
-    if (selector.index !== undefined) normalized.index = selector.index;
-    if (selector.point !== undefined) {
-      normalized.point = typeof selector.point === 'string'
-        ? selector.point
-        : { x: selector.point.x, y: selector.point.y };
-    }
-
-    // State
-    if (selector.enabled !== undefined) normalized.enabled = selector.enabled;
-    if (selector.checked !== undefined) normalized.checked = selector.checked;
-    if (selector.focused !== undefined) normalized.focused = selector.focused;
-    if (selector.selected !== undefined) normalized.selected = selector.selected;
-
-    // Spatial (recursive)
-    if (selector.below) normalized.below = JSON.parse(this.selectorToJson(selector.below));
-    if (selector.above) normalized.above = JSON.parse(this.selectorToJson(selector.above));
-    if (selector.leftOf) normalized.leftOf = JSON.parse(this.selectorToJson(selector.leftOf));
-    if (selector.rightOf) normalized.rightOf = JSON.parse(this.selectorToJson(selector.rightOf));
-
-    // Hierarchical
-    if (selector.containsChild) {
-      normalized.containsChild = JSON.parse(this.selectorToJson(selector.containsChild));
-    }
-    if (selector.childOf) {
-      normalized.childOf = JSON.parse(this.selectorToJson(selector.childOf));
-    }
-    if (selector.containsDescendants) {
-      normalized.containsDescendants = selector.containsDescendants.map(
-        (s) => JSON.parse(this.selectorToJson(s))
-      );
-    }
-
-    // Dimensions
-    if (selector.width !== undefined) normalized.width = selector.width;
-    if (selector.height !== undefined) normalized.height = selector.height;
-    if (selector.tolerance !== undefined) normalized.tolerance = selector.tolerance;
-
-    // Traits
-    if (selector.traits) normalized.traits = selector.traits;
-
-    return JSON.stringify(normalized);
-  }
-
-  /**
-   * Find element by selector
-   */
   async findBySelector(selector: Selector): Promise<ExtendedElementInfo | null> {
-    const selectorJson = this.selectorToJson(selector);
+    const selectorJson = selectorToJson(selector);
     const response = await this.send('findBySelector', { selector: selectorJson });
 
-    if (!response.success || response.data === null || response.data === 'null') {
-      return null;
-    }
-
-    if (typeof response.data === 'string') {
-      return JSON.parse(response.data);
-    }
-
+    if (!response.success || response.data == null) return null;
     return response.data as ExtendedElementInfo;
   }
 
@@ -368,17 +336,10 @@ export class EnnioClient {
    * Find all elements by selector
    */
   async findAllBySelector(selector: Selector): Promise<ExtendedElementInfo[]> {
-    const selectorJson = this.selectorToJson(selector);
+    const selectorJson = selectorToJson(selector);
     const response = await this.send('findAllBySelector', { selector: selectorJson });
 
-    if (!response.success || !response.data) {
-      return [];
-    }
-
-    if (typeof response.data === 'string') {
-      return JSON.parse(response.data);
-    }
-
+    if (!response.success || !Array.isArray(response.data)) return [];
     return response.data as ExtendedElementInfo[];
   }
 
@@ -386,31 +347,28 @@ export class EnnioClient {
    * Check if element exists by selector
    */
   async existsBySelector(selector: Selector): Promise<boolean> {
-    const selectorJson = this.selectorToJson(selector);
+    const selectorJson = selectorToJson(selector);
     const response = await this.send('existsBySelector', { selector: selectorJson });
-    return response.data === true || response.data === 'true';
+    return response.data === true;
   }
 
   /**
    * Get text from element by selector
    */
   async getTextBySelector(selector: Selector): Promise<string | null> {
-    const selectorJson = this.selectorToJson(selector);
+    const selectorJson = selectorToJson(selector);
     const response = await this.send('getTextBySelector', { selector: selectorJson });
 
-    if (response.data === null || response.data === 'null') {
-      return null;
-    }
-
-    return typeof response.data === 'string' ? response.data.replace(/^"|"$/g, '') : null;
+    if (response.data == null) return null;
+    return typeof response.data === 'string' ? response.data : null;
   }
 
   /**
    * Check if element is visible by selector
    */
   async isVisibleBySelector(selector: Selector): Promise<boolean> {
-    const selectorJson = this.selectorToJson(selector);
+    const selectorJson = selectorToJson(selector);
     const response = await this.send('isVisibleBySelector', { selector: selectorJson });
-    return response.data === true || response.data === 'true';
+    return response.data === true;
   }
 }

@@ -8,13 +8,20 @@ import { EnnioClient } from '../client';
 import { getBootedSimulatorId, launchAppOnSimulator } from '../maestro-runner';
 
 export const DEFAULT_WS_PORT = 9876;
+// Initial connect probe — short, since "no listener" returns ECONNREFUSED
+// fast on a local socket. We retry-poll separately after auto-launch.
+const CONNECT_PROBE_TIMEOUT_MS = 2_000;
+// Auto-launch poll cadence + total. RN bridge + Nitro WS bind takes
+// ~3-6 s on a fresh launch; longer on the first launch after install.
+const LAUNCH_POLL_INTERVAL_MS = 500;
+const LAUNCH_TIMEOUT_DEFAULT_SEC = 10;
 
 export async function tryWebSocketConnection(port: number): Promise<EnnioClient | null> {
   const client = new EnnioClient(port);
   try {
     await Promise.race([
       client.connect(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), CONNECT_PROBE_TIMEOUT_MS)),
     ]);
     return client;
   } catch {
@@ -37,7 +44,7 @@ export type BootstrapResult =
   | { ok: false; reason: string };
 
 export async function connectOrLaunch(opts: BootstrapOptions): Promise<BootstrapResult> {
-  const { port, appId, launchTimeoutSec = 10, verbose = true } = opts;
+  const { port, appId, launchTimeoutSec = LAUNCH_TIMEOUT_DEFAULT_SEC, verbose = true } = opts;
   let client = await tryWebSocketConnection(port);
   if (client) return { ok: true, client, udid: getBootedSimulatorId(), autoLaunched: false };
 
@@ -66,7 +73,7 @@ export async function connectOrLaunch(opts: BootstrapOptions): Promise<Bootstrap
   }
   const deadline = Date.now() + launchTimeoutSec * 1000;
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, LAUNCH_POLL_INTERVAL_MS));
     client = await tryWebSocketConnection(port);
     if (client) return { ok: true, client, udid, autoLaunched: true };
   }

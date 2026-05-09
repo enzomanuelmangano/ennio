@@ -2,10 +2,15 @@
  * Reader abstraction
  *
  * Single backend: NitroReader — every read traverses the in-app Fabric
- * shadow tree via the @ennio/core WebSocket. No XCTest, no XCUI.
+ * shadow tree via the @ennio/core WebSocket.
  */
 
 import type { EnnioClient, Selector } from './client';
+
+// iPhone 17 Pro logical viewport. Generous-enough for any iPhone tested;
+// anything past this is unambiguously off-screen for visibility checks.
+const IPHONE_VIEWPORT_WIDTH = 440;
+const IPHONE_VIEWPORT_HEIGHT = 956;
 
 export interface Reader {
   /** Element with `testID` exists in the visible UI. */
@@ -33,21 +38,11 @@ export class NitroReader implements Reader {
     return this.client.exists(testID);
   }
   async isVisibleById(testID: string) {
-    // Fabric's isVisible compares the shadow node's screenX/Y (offset
-    // inside the React surface) against a hardcoded screen size — when
-    // the element lives in a Stack-pushed screen its surface origin
-    // differs from the window's, and the comparison rejects elements
-    // that are clearly on screen. Trust UIKit's window-frame instead.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const r: any = await (this.client as any).send('getViewWindowFrame', { testID });
-    const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
-    if (!data || data.width <= 0 || data.height <= 0) return false;
-    // iPhone 17 Pro logical viewport. Generous-enough for any iPhone
-    // tested; anything past this is unambiguously off-screen.
-    const w = 440, h = 956;
-    if (data.x + data.width < 0 || data.y + data.height < 0) return false;
-    if (data.x > w || data.y > h) return false;
-    return true;
+    // Native `isVisible` uses the real key UIWindow bounds (vs the
+    // hardcoded 440×956 we used to do in JS). It must agree with the
+    // tap-time viewport gate or scrollUntilVisible exits early on a view
+    // that's still offscreen and the subsequent tap fails.
+    return this.client.isVisible(testID);
   }
   existsBySelector(selector: Selector) {
     return this.client.existsBySelector(selector);

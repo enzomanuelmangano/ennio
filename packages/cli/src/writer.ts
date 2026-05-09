@@ -15,6 +15,7 @@
  */
 
 import type { EnnioClient, Selector } from './client';
+import { selectorToJson } from './selector';
 // Last-resort fallback for label-based taps on RNGH NativeViewGestureHandler-
 // wrapped Pressables (pressto's PressableScale). Their RNDummyGestureRecognizer
 // lives on RNGestureHandlerManager, not in any individual view's
@@ -23,6 +24,16 @@ import type { EnnioClient, Selector } from './client';
 // reach it. ~50 ms HID nudge is the only way short of linking RNGH headers
 // from Ennio's pod target.
 import * as idb from './idb';
+
+// Safe-area-ish centre for the 402x874 / 440x956 iPhone sims we run
+// against. Used as the swipe origin when scrollAuto / scrollAtPoint
+// fires without a concrete view-relative anchor.
+const SAFE_CENTER_X = 200;
+const SAFE_CENTER_Y = 450;
+// Default duration for synthesized swipes. ~200 ms is the cadence RNGH
+// + UIKit's pan recogniser expect for a "real" finger swipe — too quick
+// is filtered as a tap, too slow stalls the recogniser.
+const DEFAULT_SWIPE_DURATION_MS = 200;
 
 export interface Writer {
   /** Diagnostic / verbose-log description of how a tap was routed. */
@@ -78,10 +89,8 @@ export class NitroWriter implements Writer {
     return `nitro ${action}`;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private send(type: string, payload: Record<string, unknown> = {}): Promise<any> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (this.client as any).send(type, payload);
+  private send(type: string, payload: Record<string, unknown> = {}) {
+    return this.client.send(type, payload);
   }
 
   /**
@@ -144,10 +153,9 @@ export class NitroWriter implements Writer {
     // synthesised swipe at the centre — UIKit hands it to whichever
     // recogniser claims it. Finger direction inverts vs content.
     if (direction === 'left' || direction === 'right') {
-      const cx = 200, cy = 450;
-      const endX = direction === 'right' ? cx - distance : cx + distance;
+      const endX = direction === 'right' ? SAFE_CENTER_X - distance : SAFE_CENTER_X + distance;
       try {
-        await this.swipeAtPoints(cx, cy, endX, cy, 200);
+        await this.swipeAtPoints(SAFE_CENTER_X, SAFE_CENTER_Y, endX, SAFE_CENTER_Y, DEFAULT_SWIPE_DURATION_MS);
       } catch { /* best effort */ }
       return;
     }
@@ -166,6 +174,13 @@ export class NitroWriter implements Writer {
     // TextInput that needs becomeFirstResponder).
     const direct = await this.send('invokeOnPress', { testID });
     if (direct?.success === true) return true;
+    // Native side rejected because the view is offscreen / not laid
+    // out. Don't fall back to a coord tap — synthesising a touch at an
+    // offscreen point is meaningless. Surface a clear failure so the
+    // caller can scroll first.
+    if (typeof direct?.error === 'string' && direct.error.startsWith('Element not in viewport')) {
+      return false;
+    }
     const center = await this.layoutCenter({ id: testID });
     if (!center) return false;
     // The fiber walk found the testID but no onPress — typically a
@@ -343,18 +358,24 @@ export class NitroWriter implements Writer {
     const r = await this.send('pressHardwareKey', { keyCode: code });
     return r?.success === true;
   }
-  async scroll(_testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
-    // Scroll = swipe at the viewport centre. Finger direction inverts
-    // versus content direction: scrolling DOWN (revealing content
-    // further down the list) requires swiping the finger UP. Likewise
-    // scrolling RIGHT requires swiping LEFT.
-    const cx = 200, cy = 450; // safe-area-ish centre for 402x874 sims
-    let endX = cx, endY = cy;
-    if (direction === 'down') endY = cy - distance;
-    else if (direction === 'up') endY = cy + distance;
-    else if (direction === 'right') endX = cx - distance;
-    else if (direction === 'left') endX = cx + distance;
-    return this.swipeAtPoints(cx, cy, endX, endY, 200);
+  async scroll(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
+    // Vertical scroll: route through the native `scroll` cmd, which
+    // walks up to the enclosing UIScrollView and bumps contentOffset
+    // directly. A swipe-at-centre gesture risks being captured by an
+    // inner scroller (e.g. horizontal carousels nested in the page) and
+    // never reaching the outer page — that's why scrollUntilVisible was
+    // hanging on home-screen pages.
+    if (direction === 'up' || direction === 'down') {
+      await this.scrollAuto(direction, distance, testID ?? '');
+      return true;
+    }
+    // Horizontal: synthesise a swipe at viewport centre. UIKit hands it
+    // to whichever recogniser claims it. Native testID-anchored scroll
+    // doesn't reliably hit horizontal carousels.
+    let endX = SAFE_CENTER_X;
+    if (direction === 'right') endX = SAFE_CENTER_X - distance;
+    else if (direction === 'left') endX = SAFE_CENTER_X + distance;
+    return this.swipeAtPoints(SAFE_CENTER_X, SAFE_CENTER_Y, endX, SAFE_CENTER_Y, DEFAULT_SWIPE_DURATION_MS);
   }
   async swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
     return this.scroll(testID, direction, distance);
@@ -473,43 +494,3 @@ export class NitroWriter implements Writer {
   }
 }
 
-/**
- * Encode a Maestro selector for the in-app SelectorParser. Strips
- * undefined keys so the native side parses cleanly.
- */
-function selectorToJson(selector: Selector): string {
-  const out: Record<string, unknown> = {};
-  if (selector.id !== undefined) out.id = selector.id;
-  if (selector.text !== undefined) {
-    if (typeof selector.text === 'string') {
-      out.text = selector.text;
-    } else {
-      out.text = selector.text.pattern;
-      if (selector.text.mode && selector.text.mode !== 'exact') {
-        out.textMatchMode = selector.text.mode;
-      }
-    }
-  }
-  if (selector.index !== undefined) out.index = selector.index;
-  if (selector.point !== undefined) {
-    out.point = typeof selector.point === 'string'
-      ? selector.point
-      : { x: selector.point.x, y: selector.point.y };
-  }
-  if (selector.enabled !== undefined) out.enabled = selector.enabled;
-  if (selector.checked !== undefined) out.checked = selector.checked;
-  if (selector.focused !== undefined) out.focused = selector.focused;
-  if (selector.selected !== undefined) out.selected = selector.selected;
-  if (selector.below) out.below = JSON.parse(selectorToJson(selector.below));
-  if (selector.above) out.above = JSON.parse(selectorToJson(selector.above));
-  if (selector.leftOf) out.leftOf = JSON.parse(selectorToJson(selector.leftOf));
-  if (selector.rightOf) out.rightOf = JSON.parse(selectorToJson(selector.rightOf));
-  if (selector.containsChild) out.containsChild = JSON.parse(selectorToJson(selector.containsChild));
-  if (selector.childOf) out.childOf = JSON.parse(selectorToJson(selector.childOf));
-  if (selector.containsDescendants) out.containsDescendants = selector.containsDescendants.map((s) => JSON.parse(selectorToJson(s)));
-  if (selector.width !== undefined) out.width = selector.width;
-  if (selector.height !== undefined) out.height = selector.height;
-  if (selector.tolerance !== undefined) out.tolerance = selector.tolerance;
-  if (selector.traits) out.traits = selector.traits;
-  return JSON.stringify(out);
-}
