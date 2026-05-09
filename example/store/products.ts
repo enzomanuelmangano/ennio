@@ -17,7 +17,8 @@ export const mockProducts: Product[] = [
   {
     id: '1',
     name: 'Wireless Headphones',
-    description: 'Premium noise-canceling wireless headphones with 30-hour battery life. Features high-resolution audio and comfortable over-ear design.',
+    description:
+      'Premium noise-canceling wireless headphones with 30-hour battery life. Features high-resolution audio and comfortable over-ear design.',
     price: 299.99,
     image: 'https://picsum.photos/seed/headphones/400/400',
     category: 'Electronics',
@@ -29,7 +30,8 @@ export const mockProducts: Product[] = [
   {
     id: '2',
     name: 'Smart Watch Pro',
-    description: 'Advanced fitness tracking smartwatch with heart rate monitoring, GPS, and 7-day battery life.',
+    description:
+      'Advanced fitness tracking smartwatch with heart rate monitoring, GPS, and 7-day battery life.',
     price: 449.99,
     image: 'https://picsum.photos/seed/smartwatch/400/400',
     category: 'Electronics',
@@ -41,7 +43,8 @@ export const mockProducts: Product[] = [
   {
     id: '3',
     name: 'Leather Messenger Bag',
-    description: 'Handcrafted genuine leather messenger bag with laptop compartment. Perfect for professionals.',
+    description:
+      'Handcrafted genuine leather messenger bag with laptop compartment. Perfect for professionals.',
     price: 189.99,
     image: 'https://picsum.photos/seed/bag/400/400',
     category: 'Accessories',
@@ -53,7 +56,8 @@ export const mockProducts: Product[] = [
   {
     id: '4',
     name: 'Mechanical Keyboard',
-    description: 'RGB mechanical gaming keyboard with Cherry MX switches. Customizable macros and media controls.',
+    description:
+      'RGB mechanical gaming keyboard with Cherry MX switches. Customizable macros and media controls.',
     price: 159.99,
     image: 'https://picsum.photos/seed/keyboard/400/400',
     category: 'Electronics',
@@ -77,7 +81,8 @@ export const mockProducts: Product[] = [
   {
     id: '6',
     name: 'Portable Charger 20000mAh',
-    description: 'High-capacity portable charger with fast charging support. Charges up to 3 devices simultaneously.',
+    description:
+      'High-capacity portable charger with fast charging support. Charges up to 3 devices simultaneously.',
     price: 49.99,
     image: 'https://picsum.photos/seed/charger/400/400',
     category: 'Electronics',
@@ -89,7 +94,8 @@ export const mockProducts: Product[] = [
   {
     id: '7',
     name: 'Yoga Mat Premium',
-    description: 'Extra-thick eco-friendly yoga mat with alignment lines. Non-slip surface for all yoga styles.',
+    description:
+      'Extra-thick eco-friendly yoga mat with alignment lines. Non-slip surface for all yoga styles.',
     price: 79.99,
     image: 'https://picsum.photos/seed/yogamat/400/400',
     category: 'Sports',
@@ -101,7 +107,8 @@ export const mockProducts: Product[] = [
   {
     id: '8',
     name: 'Wireless Earbuds',
-    description: 'True wireless earbuds with active noise cancellation and transparency mode. IPX5 water resistant.',
+    description:
+      'True wireless earbuds with active noise cancellation and transparency mode. IPX5 water resistant.',
     price: 199.99,
     image: 'https://picsum.photos/seed/earbuds/400/400',
     category: 'Electronics',
@@ -113,7 +120,8 @@ export const mockProducts: Product[] = [
   {
     id: '9',
     name: 'Desk Lamp LED',
-    description: 'Adjustable LED desk lamp with multiple brightness levels and color temperatures. USB charging port included.',
+    description:
+      'Adjustable LED desk lamp with multiple brightness levels and color temperatures. USB charging port included.',
     price: 69.99,
     image: 'https://picsum.photos/seed/lamp/400/400',
     category: 'Decor',
@@ -125,7 +133,8 @@ export const mockProducts: Product[] = [
   {
     id: '10',
     name: 'Coffee Maker Pro',
-    description: 'Programmable coffee maker with built-in grinder. Makes up to 12 cups with thermal carafe.',
+    description:
+      'Programmable coffee maker with built-in grinder. Makes up to 12 cups with thermal carafe.',
     price: 249.99,
     image: 'https://picsum.photos/seed/coffee/400/400',
     category: 'Decor',
@@ -167,16 +176,17 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
 
     // Filter by category
     if (selectedCategory !== 'All') {
-      filtered = filtered.filter(p => p.category === selectedCategory);
+      filtered = filtered.filter((p) => p.category === selectedCategory);
     }
 
     // Filter by search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(p =>
-        p.name.toLowerCase().includes(query) ||
-        p.description.toLowerCase().includes(query) ||
-        p.tags.some(t => t.toLowerCase().includes(query))
+      filtered = filtered.filter(
+        (p) =>
+          p.name.toLowerCase().includes(query) ||
+          p.description.toLowerCase().includes(query) ||
+          p.tags.some((t) => t.toLowerCase().includes(query)),
       );
     }
 
@@ -200,6 +210,6 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
   },
 
   getProductById: (id: string) => {
-    return get().products.find(p => p.id === id);
+    return get().products.find((p) => p.id === id);
   },
 }));

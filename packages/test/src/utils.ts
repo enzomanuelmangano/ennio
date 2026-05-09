@@ -8,7 +8,7 @@ import { element } from './element';
  * Sleep for a given number of milliseconds
  */
 export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -16,7 +16,7 @@ export function sleep(ms: number): Promise<void> {
  */
 export async function waitForElement(
   testID: string,
-  options: { timeout?: number; interval?: number } = {}
+  options: { timeout?: number; interval?: number } = {},
 ): Promise<void> {
   const { timeout = 5000, interval = 100 } = options;
   const start = Date.now();
@@ -35,7 +35,7 @@ export async function waitForElement(
  */
 export async function waitForVisible(
   testID: string,
-  options: { timeout?: number; interval?: number } = {}
+  options: { timeout?: number; interval?: number } = {},
 ): Promise<void> {
   const { timeout = 5000, interval = 100 } = options;
   const start = Date.now();
@@ -54,7 +54,7 @@ export async function waitForVisible(
  */
 export async function waitForElementToDisappear(
   testID: string,
-  options: { timeout?: number; interval?: number } = {}
+  options: { timeout?: number; interval?: number } = {},
 ): Promise<void> {
   const { timeout = 5000, interval = 100 } = options;
   const start = Date.now();
@@ -71,7 +71,7 @@ export async function waitForElementToDisappear(
 /**
  * Wait for app to be idle (no pending updates)
  */
-export async function waitForIdle(timeout: number = 5000): Promise<void> {
+export async function waitForIdle(_timeout: number = 5000): Promise<void> {
   const ennio = getEnnioModule();
   if (!ennio) {
     throw new Error('[Ennio] Native module not available');

@@ -1,4 +1,4 @@
-const { withDangerousMod, withXcodeProject } = require('@expo/config-plugins');
+const { withDangerousMod } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -22,10 +22,7 @@ function withEnnioIOS(config) {
   return withDangerousMod(config, [
     'ios',
     async (config) => {
-      const podfilePath = path.join(
-        config.modRequest.platformProjectRoot,
-        'Podfile'
-      );
+      const podfilePath = path.join(config.modRequest.platformProjectRoot, 'Podfile');
 
       if (!fs.existsSync(podfilePath)) {
         return config;
@@ -66,7 +63,7 @@ function withEnnioIOS(config) {
       if (postInstallMatch) {
         podfile = podfile.replace(
           postInstallMatch[0],
-          postInstallMatch[1] + ennioConfig + postInstallMatch[2]
+          postInstallMatch[1] + ennioConfig + postInstallMatch[2],
         );
       } else {
         // Fallback: try to add before final 'end' of the target block
@@ -74,7 +71,7 @@ function withEnnioIOS(config) {
         if (targetEndMatch) {
           podfile = podfile.replace(
             targetEndMatch[0],
-            targetEndMatch[1] + '\n' + ennioConfig + targetEndMatch[2]
+            targetEndMatch[1] + '\n' + ennioConfig + targetEndMatch[2],
           );
         }
       }
@@ -94,7 +91,7 @@ function withEnnioAndroid(config) {
       const buildGradlePath = path.join(
         config.modRequest.platformProjectRoot,
         'app',
-        'build.gradle'
+        'build.gradle',
       );
 
       if (!fs.existsSync(buildGradlePath)) {
@@ -121,10 +118,7 @@ function withEnnioAndroid(config) {
       // Find dependencies block and add inside
       const depsMatch = buildGradle.match(/(dependencies\s*\{)/);
       if (depsMatch) {
-        buildGradle = buildGradle.replace(
-          depsMatch[0],
-          depsMatch[0] + ennioConfig
-        );
+        buildGradle = buildGradle.replace(depsMatch[0], depsMatch[0] + ennioConfig);
       }
 
       fs.writeFileSync(buildGradlePath, buildGradle);

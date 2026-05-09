@@ -1,7 +1,7 @@
 appId: com.ennio.example
-name: "Simple Test"
+name: 'Simple Test'
 ---
 - tapOn:
-    text: "Home"
+    text: 'Home'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'

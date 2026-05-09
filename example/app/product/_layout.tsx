@@ -8,7 +8,8 @@ export default function ProductLayout() {
         headerLargeTitle: true,
         headerLargeTitleShadowVisible: false,
         headerShadowVisible: false,
-      }}>
+      }}
+    >
       <Stack.Screen name="[id]" />
     </Stack>
   );

@@ -28,14 +28,14 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
       files.push(
         ...yamlMatches
           .filter((f) => isMaestroFile(f) && !f.includes('/subflows/'))
-          .map((f) => resolve(f))
+          .map((f) => resolve(f)),
       );
     } else {
       const matches = await glob(pattern);
       files.push(
         ...matches
           .filter((f) => isMaestroFile(f) && !f.includes('/subflows/'))
-          .map((f) => resolve(f))
+          .map((f) => resolve(f)),
       );
     }
   }
@@ -54,7 +54,7 @@ async function runTestFile(
   writer: Writer,
   reader: Reader,
   filePath: string,
-  options: { verbose?: boolean; trace?: boolean; port?: number }
+  options: { verbose?: boolean; trace?: boolean; port?: number },
 ): Promise<TestFileResultWithClient> {
   const fileName = basename(filePath);
   console.log(`▸ ${fileName}`);
@@ -90,7 +90,11 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   console.log('\n🧪 Ennio\n');
 
   let appId: string | undefined;
-  try { appId = parseMaestroFile(files[0]).appId; } catch { /* tolerate; bootstrap will surface */ }
+  try {
+    appId = parseMaestroFile(files[0]).appId;
+  } catch {
+    /* tolerate; bootstrap will surface */
+  }
 
   const result = await connectOrLaunch({ port, appId });
   if (!result.ok) {

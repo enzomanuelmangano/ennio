@@ -39,14 +39,14 @@ export const useCartStore = create<CartState>()(
 
       addToCart: (product: Product, quantity = 1) => {
         const { items } = get();
-        const existingItem = items.find(item => item.product.id === product.id);
+        const existingItem = items.find((item) => item.product.id === product.id);
 
         if (existingItem) {
           set({
-            items: items.map(item =>
+            items: items.map((item) =>
               item.product.id === product.id
                 ? { ...item, quantity: item.quantity + quantity }
-                : item
+                : item,
             ),
           });
         } else {
@@ -55,7 +55,7 @@ export const useCartStore = create<CartState>()(
       },
 
       removeFromCart: (productId: string) => {
-        set({ items: get().items.filter(item => item.product.id !== productId) });
+        set({ items: get().items.filter((item) => item.product.id !== productId) });
       },
 
       updateQuantity: (productId: string, quantity: number) => {
@@ -65,8 +65,8 @@ export const useCartStore = create<CartState>()(
         }
 
         set({
-          items: get().items.map(item =>
-            item.product.id === productId ? { ...item, quantity } : item
+          items: get().items.map((item) =>
+            item.product.id === productId ? { ...item, quantity } : item,
           ),
         });
       },
@@ -78,10 +78,7 @@ export const useCartStore = create<CartState>()(
       },
 
       getSubtotal: () => {
-        return get().items.reduce(
-          (sum, item) => sum + item.product.price * item.quantity,
-          0
-        );
+        return get().items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
       },
 
       getTax: () => {
@@ -96,7 +93,7 @@ export const useCartStore = create<CartState>()(
         const { items, getTotal } = get();
 
         // Simulate checkout API call
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
 
         const order: Order = {
           id: `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -107,7 +104,7 @@ export const useCartStore = create<CartState>()(
           shippingAddress,
         };
 
-        set(state => ({
+        set((state) => ({
           orders: [order, ...state.orders],
           items: [],
         }));
@@ -119,6 +116,6 @@ export const useCartStore = create<CartState>()(
       name: 'cart-storage',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({ items: state.items, orders: state.orders }),
-    }
-  )
+    },
+  ),
 );

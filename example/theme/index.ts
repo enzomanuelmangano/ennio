@@ -69,7 +69,7 @@ const spacing = {
 } as const;
 
 export const lightTheme = {
-  isDark: false as const,
+  isDark: false as boolean,
   colors: {
     background: {
       primary: '#FAFAF7',
@@ -141,6 +141,6 @@ export const darkTheme: Theme = {
 };
 
 export function useTheme(): Theme {
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const darkMode = useSettingsStore((state) => state.preferences.darkMode);
   return darkMode ? darkTheme : lightTheme;
 }

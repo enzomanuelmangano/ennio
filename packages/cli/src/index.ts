@@ -53,7 +53,8 @@ async function main() {
       // almost certainly a misspelled subcommand, not a file.
       if (positional.length === 1) {
         const a = positional[0];
-        const looksFileish = a.includes('/') || a.includes('*') || a.endsWith('.yaml') || a.endsWith('.yml');
+        const looksFileish =
+          a.includes('/') || a.includes('*') || a.endsWith('.yaml') || a.endsWith('.yml');
         if (!looksFileish) {
           console.error(`Unknown command: ${a}\n`);
           runHelpCommand([]);

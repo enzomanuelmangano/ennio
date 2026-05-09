@@ -3,13 +3,12 @@
 appId: com.ennio.example
 
 ---
-
 - tapOn:
-    text: "(tabs)"
+    text: '(tabs)'
     optional: true
 - waitForAnimationToEnd
 
 - tapOn:
-    text: "Products"
+    text: 'Products'
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'

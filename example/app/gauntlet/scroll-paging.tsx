@@ -8,8 +8,12 @@ export default function ScrollPagingScreen() {
   const [page, setPage] = useState(0);
   return (
     <View style={{ flex: 1 }} testID="scroll-paging-screen">
-      <Text style={styles.title}>Page: {page + 1} / {PAGES.length}</Text>
-      <Text style={styles.title} testID="scroll-page-index">{page}</Text>
+      <Text style={styles.title}>
+        Page: {page + 1} / {PAGES.length}
+      </Text>
+      <Text style={styles.title} testID="scroll-page-index">
+        {page}
+      </Text>
       <ScrollView
         testID="scroll-paging-scroll"
         horizontal

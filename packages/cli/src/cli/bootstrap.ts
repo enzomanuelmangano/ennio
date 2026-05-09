@@ -21,7 +21,9 @@ export async function tryWebSocketConnection(port: number): Promise<EnnioClient 
   try {
     await Promise.race([
       client.connect(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), CONNECT_PROBE_TIMEOUT_MS)),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), CONNECT_PROBE_TIMEOUT_MS),
+      ),
     ]);
     return client;
   } catch {

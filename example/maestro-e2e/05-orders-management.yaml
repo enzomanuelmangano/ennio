@@ -2,13 +2,12 @@
 # Tests order history, order details, tracking
 
 appId: com.ennio.example
-name: "Orders Management"
+name: 'Orders Management'
 tags:
   - orders
   - auth-required
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -20,24 +19,24 @@ tags:
     file: subflows/navigate-home.yaml
 
 - tapOn:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 - waitForAnimationToEnd
 - assertNotVisible:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # ============================================
 # TEST: Navigate to orders via quick action
 # ============================================
 
 - tapOn:
-    id: "quick-action-orders"
+    id: 'quick-action-orders'
 
 - assertVisible:
-    id: "orders-screen"
+    id: 'orders-screen'
 
 # ============================================
 # TEST: Orders list or empty state
@@ -45,9 +44,9 @@ tags:
 
 # Empty state assertions — fresh demo user has no orders.
 - assertVisible:
-    text: "No orders yet"
+    text: 'No orders yet'
 - assertVisible:
-    id: "browse-products"
+    id: 'browse-products'
 
 # ============================================
 # TEST: Navigate to orders via profile menu
@@ -57,16 +56,16 @@ tags:
 - back
 
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 
 - assertVisible:
-    id: "profile-screen"
+    id: 'profile-screen'
 
 - tapOn:
-    id: "menu-orders"
+    id: 'menu-orders'
 
 - assertVisible:
-    id: "orders-screen"
+    id: 'orders-screen'
 
 # ============================================
 # TEST: Create an order for testing (if needed)
@@ -78,19 +77,19 @@ tags:
 
 # Orders list now populated.
 - assertVisible:
-    id: "orders-list"
+    id: 'orders-list'
 
 # View order details.
 - tapOn:
-    text: "Processing"
+    text: 'Processing'
 - assertVisible:
-    id: "order-details"
+    id: 'order-details'
 - assertVisible:
-    text: "Shipping"
+    text: 'Shipping'
 - tapOn:
-    id: "close-details"
+    id: 'close-details'
 - assertVisible:
-    id: "orders-screen"
+    id: 'orders-screen'
 
 # ============================================
 # TEST: Guest user orders view
@@ -99,49 +98,49 @@ tags:
 # Logout first - pop the Stack-pushed orders screen so the tab bar is reachable.
 - back
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 - assertVisible:
-    id: "profile-screen"
+    id: 'profile-screen'
 - scrollUntilVisible:
     element:
-      id: "menu-logout"
+      id: 'menu-logout'
     direction: DOWN
 - tapOn:
-    id: "menu-logout"
+    id: 'menu-logout'
 - tapOn:
-    text: "Sign Out"
+    text: 'Sign Out'
 
 # Try to access orders
 - runFlow:
     file: subflows/navigate-home.yaml
 
 - tapOn:
-    id: "quick-action-orders"
+    id: 'quick-action-orders'
 
 # Should show guest view
 - assertVisible:
-    id: "orders-guest"
+    id: 'orders-guest'
 
 - assertVisible:
-    text: "Sign in to view orders"
+    text: 'Sign in to view orders'
 
 - assertVisible:
-    id: "sign-in-btn"
+    id: 'sign-in-btn'
 
 # ============================================
 # TEST: Sign in from orders guest view
 # ============================================
 
 - tapOn:
-    id: "sign-in-btn"
+    id: 'sign-in-btn'
 
 - assertVisible:
-    id: "login-screen"
+    id: 'login-screen'
 
 # Login with demo
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 
 # Should return to orders
 - assertVisible:
-    id: "orders-screen"
+    id: 'orders-screen'

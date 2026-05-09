@@ -9,8 +9,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  useColorScheme,
 } from 'react-native';
-import { useColorScheme } from 'react-native';
 import { router } from 'expo-router';
 import { useSettingsStore } from '../../store';
 
@@ -18,7 +18,7 @@ const TOGGLE_COUNT = 5;
 
 export default function Playground() {
   // Match other tabs: store override OR system scheme.
-  const darkPref = useSettingsStore(state => state.preferences.darkMode);
+  const darkPref = useSettingsStore((state) => state.preferences.darkMode);
   const systemScheme = useColorScheme();
   const isDark = darkPref || systemScheme === 'dark';
   const styles = isDark ? darkStyles : lightStyles;
@@ -31,7 +31,7 @@ export default function Playground() {
 
   const fruits = ['apple', 'banana', 'cherry', 'date', 'elderberry', 'fig', 'grape'];
   const filteredFruits = search
-    ? fruits.filter(f => f.toLowerCase().includes(search.toLowerCase()))
+    ? fruits.filter((f) => f.toLowerCase().includes(search.toLowerCase()))
     : fruits;
 
   const triggerLoading = () => {
@@ -56,15 +56,16 @@ export default function Playground() {
       contentContainerStyle={styles.content}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
-      testID="playground-scroll">
-
+      testID="playground-scroll"
+    >
       {/* Counter — exercises getText, assertVisible: text */}
       <Section title="Counter" styles={styles}>
         <View style={styles.counterRow}>
           <TouchableOpacity
             testID="counter-dec-btn"
-            onPress={() => setCount(c => c - 1)}
-            style={styles.btnSmall}>
+            onPress={() => setCount((c) => c - 1)}
+            style={styles.btnSmall}
+          >
             <Text style={styles.btnSmallText}>−</Text>
           </TouchableOpacity>
           <Text testID="counter-display" style={styles.counterValue}>
@@ -72,14 +73,16 @@ export default function Playground() {
           </Text>
           <TouchableOpacity
             testID="counter-inc-btn"
-            onPress={() => setCount(c => c + 1)}
-            style={styles.btnSmall}>
+            onPress={() => setCount((c) => c + 1)}
+            style={styles.btnSmall}
+          >
             <Text style={styles.btnSmallText}>+</Text>
           </TouchableOpacity>
           <TouchableOpacity
             testID="counter-reset-btn"
             onPress={() => setCount(0)}
-            style={styles.btnSmall}>
+            style={styles.btnSmall}
+          >
             <Text style={styles.btnSmallText}>↺</Text>
           </TouchableOpacity>
         </View>
@@ -93,9 +96,7 @@ export default function Playground() {
             <Switch
               testID={`toggle-${i + 1}`}
               value={on}
-              onValueChange={v =>
-                setToggles(prev => prev.map((p, idx) => (idx === i ? v : p)))
-              }
+              onValueChange={(v) => setToggles((prev) => prev.map((p, idx) => (idx === i ? v : p)))}
             />
           </View>
         ))}
@@ -116,7 +117,7 @@ export default function Playground() {
         <Text testID="search-count" style={styles.muted}>
           {filteredFruits.length} result{filteredFruits.length === 1 ? '' : 's'}
         </Text>
-        {filteredFruits.map(f => (
+        {filteredFruits.map((f) => (
           <Text key={f} testID={`fruit-${f}`} style={styles.listItem}>
             {f}
           </Text>
@@ -129,7 +130,8 @@ export default function Playground() {
           testID="loading-btn"
           onPress={triggerLoading}
           disabled={loading}
-          style={[styles.btn, loading && styles.btnDisabled]}>
+          style={[styles.btn, loading && styles.btnDisabled]}
+        >
           <Text style={styles.btnText}>{loading ? 'Loading...' : 'Start 2s task'}</Text>
         </TouchableOpacity>
         {loading && (

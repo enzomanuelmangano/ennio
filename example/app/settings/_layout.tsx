@@ -8,7 +8,8 @@ export default function SettingsLayout() {
         headerLargeTitle: true,
         headerLargeTitleShadowVisible: false,
         headerShadowVisible: false,
-      }}>
+      }}
+    >
       <Stack.Screen name="index" />
     </Stack>
   );

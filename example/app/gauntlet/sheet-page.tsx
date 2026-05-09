@@ -13,7 +13,8 @@ export default function SheetPage() {
       <TouchableOpacity
         testID="page-sheet-close-btn"
         onPress={() => router.back()}
-        style={styles.btn}>
+        style={styles.btn}
+      >
         <Text style={styles.btnText}>Close</Text>
       </TouchableOpacity>
     </View>

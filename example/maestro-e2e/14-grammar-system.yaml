@@ -3,25 +3,25 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 ---
 - launchApp
 - tapOn:
-    text: "Gauntlet"
+    text: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-playground"
+      id: 'g-playground'
     direction: DOWN
 - tapOn:
-    id: "g-playground"
+    id: 'g-playground'
 
 # Native alert (Maestro lacks dismissAlert; tap the OK button to dismiss)
 - scrollUntilVisible:
     element:
-      id: "open-alert-btn"
+      id: 'open-alert-btn'
     direction: DOWN
 - tapOn:
-    id: "open-alert-btn"
-- assertVisible: "Playground Alert"
+    id: 'open-alert-btn'
+- assertVisible: 'Playground Alert'
 - tapOn:
-    text: "OK"
-- assertNotVisible: "Playground Alert"
+    text: 'OK'
+- assertNotVisible: 'Playground Alert'
 
 # takeScreenshot
 - takeScreenshot: /tmp/grammar-system-pre-alert.png
@@ -30,23 +30,23 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 # alert button — scroll back up so it's in the viewport.
 - scrollUntilVisible:
     element:
-      id: "search-input"
+      id: 'search-input'
     direction: UP
 - tapOn:
-    id: "search-input"
-- inputText: "test"
+    id: 'search-input'
+- inputText: 'test'
 - hideKeyboard
 - tapOn:
-    id: "search-input"
+    id: 'search-input'
 - eraseText
 
 # doubleTap
 - doubleTapOn:
-    id: "counter-inc-btn"
+    id: 'counter-inc-btn'
 
 # longPress (Maestro uses longPressOn)
 - longPressOn:
-    id: "counter-display"
+    id: 'counter-display'
 
 # swipe (scroll the playground)
 - swipe:

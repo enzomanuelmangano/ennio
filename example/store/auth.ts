@@ -43,7 +43,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true });
 
         // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
         const mockUser = mockUsers[email.toLowerCase()];
         if (mockUser && mockUser.password === password) {
@@ -59,7 +59,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true });
 
         // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
 
         // Check if user exists
         if (mockUsers[email.toLowerCase()]) {
@@ -95,6 +95,6 @@ export const useAuthStore = create<AuthState>()(
       name: 'auth-storage',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
-    }
-  )
+    },
+  ),
 );

@@ -1,24 +1,24 @@
 appId: com.ennio.example
-name: "Gauntlet — Reanimated worklet button"
+name: 'Gauntlet — Reanimated worklet button'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-reanimated"
+      id: 'g-reanimated'
     direction: DOWN
 - tapOn:
-    id: "g-reanimated"
+    id: 'g-reanimated'
 - assertVisible:
-    id: "reanimated-screen"
+    id: 'reanimated-screen'
 - assertVisible:
-    text: "Pressed: 0"
+    text: 'Pressed: 0'
 - tapOn:
-    id: "reanimated-button"
+    id: 'reanimated-button'
 - tapOn:
-    id: "reanimated-button"
+    id: 'reanimated-button'
 - tapOn:
-    id: "reanimated-button"
+    id: 'reanimated-button'
 - assertVisible:
-    text: "Pressed: 3"
+    text: 'Pressed: 3'

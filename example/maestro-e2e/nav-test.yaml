@@ -1,5 +1,5 @@
 appId: com.ennio.example
-name: "Nav Test"
+name: 'Nav Test'
 ---
 - tapOn:
-    text: "Products"
+    text: 'Products'

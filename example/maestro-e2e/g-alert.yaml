@@ -1,35 +1,35 @@
 appId: com.ennio.example
-name: "Gauntlet — Alert variants"
+name: 'Gauntlet — Alert variants'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-alert"
+      id: 'g-alert'
     direction: DOWN
 - tapOn:
-    id: "g-alert"
+    id: 'g-alert'
 - assertVisible:
-    id: "alert-screen"
+    id: 'alert-screen'
 
 # Single button
 - tapOn:
-    id: "alert-single"
-- tapOn: "OK"
+    id: 'alert-single'
+- tapOn: 'OK'
 - assertVisible:
-    text: "single-ok"
+    text: 'single-ok'
 
 # Two button — destructive (Cancel)
 - tapOn:
-    id: "alert-two"
-- tapOn: "Cancel"
+    id: 'alert-two'
+- tapOn: 'Cancel'
 - assertVisible:
-    text: "two-cancel"
+    text: 'two-cancel'
 
 # Three button — Save
 - tapOn:
-    id: "alert-three"
-- tapOn: "Save"
+    id: 'alert-three'
+- tapOn: 'Save'
 - assertVisible:
-    text: "three-save"
+    text: 'three-save'

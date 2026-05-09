@@ -1,0 +1,17 @@
+**/node_modules
+**/lib
+**/dist
+**/.expo
+**/.turbo
+**/build
+android/build
+android/app/build
+ios/Pods
+packages/core/nitrogen/generated
+patches
+bun.lock
+*.log
+**/*.xcassets/**
+ios/Podfile.lock
+**/Pods
+

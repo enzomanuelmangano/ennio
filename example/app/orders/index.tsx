@@ -57,7 +57,9 @@ function OrderCard({
     >
       <View style={styles.orderHeader}>
         <View>
-          <Text style={[styles.orderId, darkMode && styles.textLight]}>Order #{order.id.slice(0, 8)}</Text>
+          <Text style={[styles.orderId, darkMode && styles.textLight]}>
+            Order #{order.id.slice(0, 8)}
+          </Text>
           <Text style={[styles.orderDate, darkMode && styles.subtitleDark]}>
             {new Date(order.date).toLocaleDateString('en-US', {
               month: 'short',
@@ -77,10 +79,7 @@ function OrderCard({
       <View style={styles.orderItems}>
         {firstItem && (
           <View style={styles.itemPreview}>
-            <Image
-              source={{ uri: firstItem.product.image }}
-              style={styles.itemImage}
-            />
+            <Image source={{ uri: firstItem.product.image }} style={styles.itemImage} />
             <View style={styles.itemInfo}>
               <Text style={[styles.itemName, darkMode && styles.textLight]} numberOfLines={1}>
                 {firstItem.product.name}
@@ -146,17 +145,24 @@ function OrderDetails({
         </View>
 
         <View style={styles.detailsSection}>
-          <Text style={[styles.detailsLabel, darkMode && styles.subtitleDark]}>Shipping Address</Text>
-          <Text style={[styles.detailsValue, darkMode && styles.textLight]}>{order.shippingAddress}</Text>
+          <Text style={[styles.detailsLabel, darkMode && styles.subtitleDark]}>
+            Shipping Address
+          </Text>
+          <Text style={[styles.detailsValue, darkMode && styles.textLight]}>
+            {order.shippingAddress}
+          </Text>
         </View>
 
         <View style={styles.detailsSection}>
           <Text style={[styles.detailsLabel, darkMode && styles.subtitleDark]}>Items</Text>
-          {order.items.map(item => (
+          {order.items.map((item) => (
             <View key={item.product.id} style={styles.detailItem}>
               <Image source={{ uri: item.product.image }} style={styles.detailItemImage} />
               <View style={styles.detailItemInfo}>
-                <Text style={[styles.detailItemName, darkMode && styles.textLight]} numberOfLines={1}>
+                <Text
+                  style={[styles.detailItemName, darkMode && styles.textLight]}
+                  numberOfLines={1}
+                >
                   {item.product.name}
                 </Text>
                 <Text style={[styles.detailItemMeta, darkMode && styles.subtitleDark]}>
@@ -175,11 +181,7 @@ function OrderDetails({
           <Text style={styles.detailsTotalValue}>${order.total.toFixed(2)}</Text>
         </View>
 
-        <PressableScale
-          style={styles.trackButton}
-          onPress={onClose}
-          testID="track-order"
-        >
+        <PressableScale style={styles.trackButton} onPress={onClose} testID="track-order">
           <Text style={styles.trackButtonText}>Track Order</Text>
         </PressableScale>
       </View>
@@ -204,23 +206,28 @@ function EmptyOrders({ darkMode, onBrowse }: { darkMode: boolean; onBrowse: () =
 
 export default function OrdersScreen() {
   const router = useRouter();
-  const orders = useCartStore(state => state.orders);
-  const isAuthenticated = useAuthStore(state => state.isAuthenticated);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
-  const [selectedOrder, setSelectedOrder] = useState<typeof orders[0] | null>(null);
+  const orders = useCartStore((state) => state.orders);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const darkMode = useSettingsStore((state) => state.preferences.darkMode);
+  const [selectedOrder, setSelectedOrder] = useState<(typeof orders)[0] | null>(null);
 
   // Sort orders by date (newest first)
-  const sortedOrders = [...orders].sort((a, b) =>
-    new Date(b.date).getTime() - new Date(a.date).getTime()
+  const sortedOrders = [...orders].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
   );
 
   if (!isAuthenticated) {
     return (
       <>
         <Stack.Screen options={{ title: 'Orders' }} />
-        <View style={[styles.emptyContainer, darkMode && styles.containerDark]} testID="orders-guest">
+        <View
+          style={[styles.emptyContainer, darkMode && styles.containerDark]}
+          testID="orders-guest"
+        >
           <Text style={styles.emptyIcon}>🔒</Text>
-          <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>Sign in to view orders</Text>
+          <Text style={[styles.emptyTitle, darkMode && styles.textLight]}>
+            Sign in to view orders
+          </Text>
           <Text style={[styles.emptySubtitle, darkMode && styles.subtitleDark]}>
             You need to be signed in to view your order history
           </Text>
@@ -255,7 +262,7 @@ export default function OrdersScreen() {
             </View>
             <FlatList
               data={sortedOrders}
-              keyExtractor={item => item.id}
+              keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
                 <OrderCard
                   order={item}

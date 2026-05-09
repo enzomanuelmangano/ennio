@@ -3,24 +3,24 @@ name: Grammar — flow control (waitFor, repeat, retry, runFlow when, assertTrue
 ---
 - launchApp
 - tapOn:
-    text: "Gauntlet"
+    text: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-playground"
+      id: 'g-playground'
     direction: DOWN
 - tapOn:
-    id: "g-playground"
+    id: 'g-playground'
 
 # repeat: increment counter 5 times
 - tapOn:
-    id: "counter-reset-btn"
+    id: 'counter-reset-btn'
 - repeat:
     times: 5
     commands:
       - tapOn:
-          id: "counter-inc-btn"
+          id: 'counter-inc-btn'
 - assertVisible:
-    text: "5"
+    text: '5'
 
 # extendedWaitUntil — Ennio gap: visibility primitive is not scroll-aware
 # so `scrollUntilVisible` short-circuits before the loading button is on
@@ -32,9 +32,9 @@ name: Grammar — flow control (waitFor, repeat, retry, runFlow when, assertTrue
 # wrapper — Maestro hangs on `runFlow when visible:` selectors that
 # aren't in the tree, and we want a fast no-fluff exercise here).
 - tapOn:
-    id: "counter-inc-btn"
+    id: 'counter-inc-btn'
 - assertVisible:
-    text: "6"
+    text: '6'
 
 # evalScript + assertTrue
 - evalScript: ${output.x = 42}
@@ -42,4 +42,4 @@ name: Grammar — flow control (waitFor, repeat, retry, runFlow when, assertTrue
 
 # retry — Maestro 1.36 lacks the `retry` field name; assert directly.
 - assertVisible:
-    id: "counter-display"
+    id: 'counter-display'

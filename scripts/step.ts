@@ -84,7 +84,16 @@ try {
       break;
     case 'scroll': {
       const [dir, px] = rest;
-      const candidates = ['scroll-view', 'flatlist', 'profile-screen', 'products-list', 'cart-items-list', 'orders-list', 'settings-screen', 'cart-screen'];
+      const candidates = [
+        'scroll-view',
+        'flatlist',
+        'profile-screen',
+        'products-list',
+        'cart-items-list',
+        'orders-list',
+        'settings-screen',
+        'cart-screen',
+      ];
       const direction = dir as 'up' | 'down' | 'left' | 'right';
       let done = false;
       for (const id of candidates) {

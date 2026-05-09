@@ -1,17 +1,17 @@
 appId: com.ennio.example
-name: "Gauntlet — Touchable variants"
+name: 'Gauntlet — Touchable variants'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-touchables"
+      id: 'g-touchables'
     direction: DOWN
 - tapOn:
-    id: "g-touchables"
+    id: 'g-touchables'
 - assertVisible:
-    id: "touchables-screen"
+    id: 'touchables-screen'
 
 # Tap each touchable variant once and confirm the count cell next to
 # the tap button went 0 → 1. `rightOf: { id: touch-X }` anchors the
@@ -20,45 +20,45 @@ name: "Gauntlet — Touchable variants"
 # across runners (Maestro's accessibility tree splits Text nodes), so
 # we use relational selectors instead.
 - tapOn:
-    id: "touch-pressable"
+    id: 'touch-pressable'
 - assertVisible:
-    text: "1"
+    text: '1'
     rightOf:
-      text: "Pressable"
+      text: 'Pressable'
 
 - tapOn:
-    id: "touch-opacity"
+    id: 'touch-opacity'
 - assertVisible:
-    text: "1"
+    text: '1'
     rightOf:
-      text: "TouchableOpacity"
+      text: 'TouchableOpacity'
 
 - tapOn:
-    id: "touch-highlight"
+    id: 'touch-highlight'
 - assertVisible:
-    text: "1"
+    text: '1'
     rightOf:
-      text: "TouchableHighlight"
+      text: 'TouchableHighlight'
 
 - tapOn:
-    id: "touch-baseButton"
+    id: 'touch-baseButton'
 - assertVisible:
-    text: "1"
+    text: '1'
     rightOf:
-      text: "BaseButton"
+      text: 'BaseButton'
 
 - tapOn:
-    id: "touch-pressableScale"
+    id: 'touch-pressableScale'
 - assertVisible:
-    text: "1"
+    text: '1'
     rightOf:
-      text: "PressableScale"
+      text: 'PressableScale'
 
 # pointerEvents="none" wrapper — Ennio must not fire onPress here.
 # Tap is expected to be a no-op; counter stays at 0.
 - tapOn:
-    id: "touch-blocked"
+    id: 'touch-blocked'
 - assertVisible:
-    text: "0"
+    text: '0'
     rightOf:
-      text: "Blocked"
+      text: 'Blocked'

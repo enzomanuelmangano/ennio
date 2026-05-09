@@ -8,9 +8,15 @@ import { execFile, execFileSync } from 'child_process';
 
 function runCapture(args: string[], timeoutMs = 10_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = execFile('idb', args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
-      if (err) reject(err); else resolve(String(stdout ?? ''));
-    });
+    const proc = execFile(
+      'idb',
+      args,
+      { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) reject(err);
+        else resolve(String(stdout ?? ''));
+      },
+    );
     proc.on('error', reject);
   });
 }
@@ -34,14 +40,17 @@ function getUDID(): string | null {
       cachedUDID = match[1];
       return cachedUDID;
     }
-  } catch { /* fall through */ }
+  } catch {
+    /* fall through */
+  }
   return null;
 }
 
 function run(args: string[], timeoutMs = 10_000): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = execFile('idb', args, { timeout: timeoutMs }, (err) => {
-      if (err) reject(err); else resolve();
+      if (err) reject(err);
+      else resolve();
     });
     proc.on('error', reject);
   });
@@ -58,7 +67,9 @@ export async function ensureCompanion(): Promise<void> {
   // Best-effort: connect (fast no-op if already connected).
   try {
     await run(['connect', udid], 5_000);
-  } catch { /* ignore — companion may already be up */ }
+  } catch {
+    /* ignore — companion may already be up */
+  }
 }
 
 export async function tap(x: number, y: number, durationMs?: number): Promise<void> {
@@ -70,16 +81,22 @@ export async function tap(x: number, y: number, durationMs?: number): Promise<vo
 }
 
 export async function swipe(
-  x1: number, y1: number,
-  x2: number, y2: number,
-  durationMs?: number
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  durationMs?: number,
 ): Promise<void> {
   const args = ['ui', 'swipe'];
   if (durationMs !== undefined) args.push('--duration', String(durationMs / 1000));
-  args.push(...withUdid([
-    String(Math.round(x1)), String(Math.round(y1)),
-    String(Math.round(x2)), String(Math.round(y2)),
-  ]));
+  args.push(
+    ...withUdid([
+      String(Math.round(x1)),
+      String(Math.round(y1)),
+      String(Math.round(x2)),
+      String(Math.round(y2)),
+    ]),
+  );
   await run(args);
 }
 
@@ -109,7 +126,12 @@ export async function tapByLabelOOP(text: string): Promise<boolean> {
   const deadline = Date.now() + 3000;
   let nodes: unknown = null;
   let attempts = 0;
-  type Node = { AXLabel?: string; AXTitle?: string; AXValue?: string; frame?: { x: number; y: number; width: number; height: number } };
+  type Node = {
+    AXLabel?: string;
+    AXTitle?: string;
+    AXValue?: string;
+    frame?: { x: number; y: number; width: number; height: number };
+  };
   const norm = (s: unknown) => (typeof s === 'string' ? s : '').trim();
 
   while (Date.now() < deadline) {
@@ -126,10 +148,14 @@ export async function tapByLabelOOP(text: string): Promise<boolean> {
       await new Promise((r) => setTimeout(r, 200));
       continue;
     }
-    const found = (nodes as Node[]).some((n) =>
-      !!n && (norm(n.AXLabel) === text || norm(n.AXTitle) === text || norm(n.AXValue) === text)
+    const found = (nodes as Node[]).some(
+      (n) =>
+        !!n && (norm(n.AXLabel) === text || norm(n.AXTitle) === text || norm(n.AXValue) === text),
     );
-    if (process.env.ENNIO_DEBUG_IDB) console.error(`[idb OOP] attempt ${attempts}: ${(nodes as unknown[]).length} nodes, found=${found}`);
+    if (process.env.ENNIO_DEBUG_IDB)
+      console.error(
+        `[idb OOP] attempt ${attempts}: ${(nodes as unknown[]).length} nodes, found=${found}`,
+      );
     if (found) break;
     await new Promise((r) => setTimeout(r, 200));
   }
@@ -138,11 +164,15 @@ export async function tapByLabelOOP(text: string): Promise<boolean> {
   let exact: Node | null = null;
   let partial: Node | null = null;
   for (const n of nodes as Node[]) {
-    if (!n || typeof n !== 'object' || !n.frame || n.frame.width <= 0 || n.frame.height <= 0) continue;
+    if (!n || typeof n !== 'object' || !n.frame || n.frame.width <= 0 || n.frame.height <= 0)
+      continue;
     const candidates = [norm(n.AXLabel), norm(n.AXTitle), norm(n.AXValue)];
     for (const c of candidates) {
       if (!c) continue;
-      if (c === text) { exact = n; break; }
+      if (c === text) {
+        exact = n;
+        break;
+      }
       if (!partial && c.toLowerCase().includes(text.toLowerCase())) partial = n;
     }
     if (exact) break;

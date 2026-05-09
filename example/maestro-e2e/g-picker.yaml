@@ -1,18 +1,18 @@
 appId: com.ennio.example
-name: "Gauntlet — Picker"
+name: 'Gauntlet — Picker'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-picker"
+      id: 'g-picker'
     direction: DOWN
 - tapOn:
-    id: "g-picker"
+    id: 'g-picker'
 - assertVisible:
-    id: "picker-screen"
+    id: 'picker-screen'
 - assertVisible:
-    text: "Selected: apple"
+    text: 'Selected: apple'
 - assertVisible:
-    id: "picker-control"
+    id: 'picker-control'

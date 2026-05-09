@@ -8,7 +8,8 @@ export default function OrdersLayout() {
         headerLargeTitle: true,
         headerLargeTitleShadowVisible: false,
         headerShadowVisible: false,
-      }}>
+      }}
+    >
       <Stack.Screen name="index" />
     </Stack>
   );

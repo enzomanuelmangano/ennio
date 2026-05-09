@@ -25,8 +25,8 @@ function FeaturedProduct({
   theme: Theme;
 }) {
   const router = useRouter();
-  const addToCart = useCartStore(state => state.addToCart);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const addToCart = useCartStore((state) => state.addToCart);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
 
   const handleAddToCart = () => {
     addToCart(product);
@@ -44,7 +44,9 @@ function FeaturedProduct({
       <Image source={{ uri: product.image }} style={styles.featuredImage} />
       <View style={styles.featuredContent}>
         <Text style={styles.featuredCategory}>{product.category.toUpperCase()}</Text>
-        <Text style={styles.featuredTitle} numberOfLines={1}>{product.name}</Text>
+        <Text style={styles.featuredTitle} numberOfLines={1}>
+          {product.name}
+        </Text>
         <View style={styles.featuredFooter}>
           <Text style={styles.featuredPrice}>${product.price.toFixed(2)}</Text>
           <Pressable
@@ -87,17 +89,17 @@ function QuickAction({
 
 export default function HomeScreen() {
   const router = useRouter();
-  const user = useAuthStore(state => state.user);
-  const isAuthenticated = useAuthStore(state => state.isAuthenticated);
-  const products = useProductsStore(state => state.products);
-  const cartItemCount = useCartStore(state => state.getItemCount());
+  const user = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const products = useProductsStore((state) => state.products);
+  const cartItemCount = useCartStore((state) => state.getItemCount());
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const insets = useSafeAreaInsets();
   const TAB_BAR_HEIGHT = 49;
 
   const featuredProducts = products.slice(0, 4);
-  const trendingProducts = products.filter(p => p.rating >= 4.7).slice(0, 3);
+  const trendingProducts = products.filter((p) => p.rating >= 4.7).slice(0, 3);
 
   return (
     <ScrollView
@@ -173,14 +175,14 @@ export default function HomeScreen() {
         contentContainerStyle={styles.featuredScroll}
         style={styles.featuredScrollOuter}
       >
-        {featuredProducts.map(product => (
+        {featuredProducts.map((product) => (
           <FeaturedProduct key={product.id} product={product} styles={styles} theme={theme} />
         ))}
       </ScrollView>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Trending Now</Text>
-        {trendingProducts.map(product => (
+        {trendingProducts.map((product) => (
           <PressableScale
             key={product.id}
             style={styles.trendingItem}
@@ -190,7 +192,9 @@ export default function HomeScreen() {
             <Image source={{ uri: product.image }} style={styles.trendingImage} />
             <View style={styles.trendingContent}>
               <Text style={styles.trendingCategory}>{product.category.toUpperCase()}</Text>
-              <Text style={styles.trendingTitle} numberOfLines={2}>{product.name}</Text>
+              <Text style={styles.trendingTitle} numberOfLines={2}>
+                {product.name}
+              </Text>
               <View style={styles.trendingBottom}>
                 <Text style={styles.trendingPrice}>${product.price.toFixed(2)}</Text>
                 <View style={styles.ratingPill}>
@@ -206,7 +210,7 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Shop by Category</Text>
         <View style={styles.categoriesGrid}>
-          {(['Electronics', 'Sports', 'Decor', 'Accessories'] as const).map(category => (
+          {(['Electronics', 'Sports', 'Decor', 'Accessories'] as const).map((category) => (
             <PressableScale
               key={category}
               style={styles.categoryCard}
@@ -217,7 +221,11 @@ export default function HomeScreen() {
               testID={`category-${category.toLowerCase()}`}
             >
               <View style={styles.categoryIconWrap}>
-                <Ionicons name={CATEGORY_ICON[category]} size={22} color={theme.colors.accent.champagneDeep} />
+                <Ionicons
+                  name={CATEGORY_ICON[category]}
+                  size={22}
+                  color={theme.colors.accent.champagneDeep}
+                />
               </View>
               <Text style={styles.categoryLabel}>{category}</Text>
             </PressableScale>

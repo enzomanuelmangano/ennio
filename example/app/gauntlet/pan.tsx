@@ -60,9 +60,23 @@ export default function PanScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20 },
   title: { fontSize: 18, marginBottom: 24, textAlign: 'center' },
-  box: { width: 100, height: 100, backgroundColor: '#007AFF', borderRadius: 12, alignSelf: 'center', alignItems: 'center', justifyContent: 'center' },
+  box: {
+    width: 100,
+    height: 100,
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   boxLabel: { color: '#fff', fontWeight: '600' },
-  button: { backgroundColor: '#FF3B30', padding: 14, borderRadius: 10, alignItems: 'center', marginTop: 32 },
+  button: {
+    backgroundColor: '#FF3B30',
+    padding: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 32,
+  },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   counter: { textAlign: 'center', marginTop: 12 },
 });

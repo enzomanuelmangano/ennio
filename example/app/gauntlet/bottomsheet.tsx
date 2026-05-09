@@ -58,7 +58,13 @@ export default function BottomSheetScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20 },
   title: { fontSize: 22, fontWeight: '600', marginBottom: 16 },
-  button: { backgroundColor: '#007AFF', padding: 14, borderRadius: 10, alignItems: 'center', marginTop: 12 },
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 12,
+  },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   opened: { marginTop: 12, color: '#34C759' },
   sheetBody: { flex: 1, padding: 20 },

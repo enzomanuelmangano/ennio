@@ -2,68 +2,67 @@
 # Tests native iOS Alert handling with login/logout flow
 
 appId: com.ennio.example
-name: "Native Alert Test"
+name: 'Native Alert Test'
 
 ---
-
 # Go to home first (use text selector for native tab bar)
 - tapOn:
-    text: "Home"
+    text: 'Home'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # Check profile state and login if needed (use text selector for native tab bar)
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 
 # If guest-view visible, need to login
 - runFlow:
     when:
       visible:
-        id: "guest-view"
+        id: 'guest-view'
     commands:
       # Go to home and login (use text selector for native tab bar)
       - tapOn:
-          text: "Home"
+          text: 'Home'
       - tapOn:
-          id: "home-signin-btn"
+          id: 'home-signin-btn'
       - assertVisible:
-          id: "login-screen"
+          id: 'login-screen'
       - tapOn:
-          id: "demo-login-btn"
+          id: 'demo-login-btn'
       - assertVisible:
-          id: "home-screen"
+          id: 'home-screen'
 
 # Now go to profile (should be logged in, use text selector for native tab bar)
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 
 # Verify logged in
 - assertVisible:
-    id: "profile-header"
+    id: 'profile-header'
 
 # Tap logout
 - scrollUntilVisible:
     element:
-      id: "menu-logout"
+      id: 'menu-logout'
     direction: DOWN
 - tapOn:
-    id: "menu-logout"
+    id: 'menu-logout'
 
 # Assert alert is visible with Sign Out button
 - assertVisible:
-    text: "Sign Out"
+    text: 'Sign Out'
 
 # Tap Sign Out (native alert button)
 - tapOn:
-    text: "Sign Out"
+    text: 'Sign Out'
 
 # Verify logged out
 - assertVisible:
-    id: "guest-view"
+    id: 'guest-view'
 
 # Back to home (use text selector for native tab bar)
 - tapOn:
-    text: "Home"
+    text: 'Home'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'

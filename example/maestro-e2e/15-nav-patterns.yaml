@@ -4,16 +4,16 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
 - launchApp:
     clearState: true
 - tapOn:
-    text: "Gauntlet"
+    text: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-playground"
+      id: 'g-playground'
     direction: DOWN
 - tapOn:
-    id: "g-playground"
+    id: 'g-playground'
 - scrollUntilVisible:
     element:
-      text: "Navigation patterns"
+      text: 'Navigation patterns'
     direction: DOWN
 
 # formSheet — header lands above the buttons; scroll a touch further so
@@ -21,60 +21,60 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
 # heading.
 - scrollUntilVisible:
     element:
-      id: "open-form-sheet-btn"
+      id: 'open-form-sheet-btn'
     direction: DOWN
 - tapOn:
-    id: "open-form-sheet-btn"
+    id: 'open-form-sheet-btn'
 - assertVisible:
-    id: "form-sheet-title"
+    id: 'form-sheet-title'
 - assertVisible:
-    id: "form-sheet-content"
+    id: 'form-sheet-content'
 - tapOn:
-    id: "form-sheet-close-btn"
+    id: 'form-sheet-close-btn'
 - assertNotVisible:
-    id: "form-sheet-title"
+    id: 'form-sheet-title'
 
 # pageSheet
 - tapOn:
-    id: "open-page-sheet-btn"
+    id: 'open-page-sheet-btn'
 - assertVisible:
-    id: "page-sheet-title"
+    id: 'page-sheet-title'
 - tapOn:
-    id: "page-sheet-close-btn"
+    id: 'page-sheet-close-btn'
 - assertNotVisible:
-    id: "page-sheet-title"
+    id: 'page-sheet-title'
 
 # transparentModal — backdrop visible + dismiss
 - tapOn:
-    id: "open-transparent-modal-btn"
+    id: 'open-transparent-modal-btn'
 - assertVisible:
-    id: "transparent-modal-title"
+    id: 'transparent-modal-title'
 - tapOn:
-    id: "transparent-modal-close-btn"
+    id: 'transparent-modal-close-btn'
 - assertNotVisible:
-    id: "transparent-modal-title"
+    id: 'transparent-modal-title'
 
 # Stacked modals — outer + inner, dismiss in reverse
 - tapOn:
-    id: "open-stacked-modal-btn"
+    id: 'open-stacked-modal-btn'
 - assertVisible:
-    id: "stacked-modal-title"
+    id: 'stacked-modal-title'
 - tapOn:
-    id: "stacked-open-inner-btn"
+    id: 'stacked-open-inner-btn'
 - assertVisible:
-    id: "inner-modal-title"
+    id: 'inner-modal-title'
 # Outer should still be present beneath inner — visibility primitive should
 # clamp queries to topmost presented VC. Inner-only assertion is the safer
 # parity check across runners.
 - tapOn:
-    id: "inner-modal-close-btn"
+    id: 'inner-modal-close-btn'
 - waitForAnimationToEnd
 - assertNotVisible:
-    id: "inner-modal-title"
+    id: 'inner-modal-title'
 - assertVisible:
-    id: "stacked-modal-title"
+    id: 'stacked-modal-title'
 - tapOn:
-    id: "stacked-close-outer-btn"
+    id: 'stacked-close-outer-btn'
 - waitForAnimationToEnd
 - assertNotVisible:
-    id: "stacked-modal-title"
+    id: 'stacked-modal-title'

@@ -1,22 +1,22 @@
 appId: com.ennio.example
-name: "Gauntlet — BottomSheet"
+name: 'Gauntlet — BottomSheet'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-bottomsheet"
+      id: 'g-bottomsheet'
     direction: DOWN
 - tapOn:
-    id: "g-bottomsheet"
+    id: 'g-bottomsheet'
 - assertVisible:
-    id: "bottomsheet-screen"
+    id: 'bottomsheet-screen'
 - tapOn:
-    id: "bottomsheet-open"
+    id: 'bottomsheet-open'
 - assertVisible:
-    id: "bottomsheet-opened-marker"
+    id: 'bottomsheet-opened-marker'
 - assertVisible:
-    id: "bottomsheet-body"
+    id: 'bottomsheet-body'
 - tapOn:
-    id: "bottomsheet-close"
+    id: 'bottomsheet-close'

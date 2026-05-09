@@ -4,19 +4,18 @@
 appId: com.ennio.example
 
 ---
-
 # Tap first product card to view details
 - tapOn:
-    id: "product-card-1"
+    id: 'product-card-1'
 - assertVisible:
-    id: "product-detail-screen"
+    id: 'product-detail-screen'
 
 # Add to cart
 - tapOn:
-    id: "add-to-cart-btn"
+    id: 'add-to-cart-btn'
 
 # Handle the alert
 - assertVisible:
-    text: "Added to Cart"
+    text: 'Added to Cart'
 - tapOn:
-    text: "Continue Shopping"
+    text: 'Continue Shopping'

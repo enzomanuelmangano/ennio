@@ -1,20 +1,20 @@
 appId: com.ennio.example
-name: "Gauntlet — ScrollView paging"
+name: 'Gauntlet — ScrollView paging'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-scroll-paging"
+      id: 'g-scroll-paging'
     direction: DOWN
 - tapOn:
-    id: "g-scroll-paging"
+    id: 'g-scroll-paging'
 - assertVisible:
-    id: "scroll-paging-screen"
+    id: 'scroll-paging-screen'
 - assertVisible:
-    id: "scroll-page-0"
+    id: 'scroll-page-0'
 - swipe:
     direction: LEFT
 - assertVisible:
-    id: "scroll-page-1"
+    id: 'scroll-page-1'

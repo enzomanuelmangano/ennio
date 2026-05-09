@@ -2,14 +2,13 @@
 # Comprehensive tests for product discovery
 
 appId: com.ennio.example
-name: "Search Filter Sort"
+name: 'Search Filter Sort'
 tags:
   - search
   - filter
   - sort
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -25,61 +24,61 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "search-input"
-- inputText: "Wireless Headphones"
+    id: 'search-input'
+- inputText: 'Wireless Headphones'
 
 - assertVisible:
-    text: "Wireless Headphones"
+    text: 'Wireless Headphones'
 
 - tapOn:
-    id: "clear-search"
+    id: 'clear-search'
 
 # ============================================
 # TEST: Search partial match
 # ============================================
 
 - tapOn:
-    id: "search-input"
-- inputText: "Pro"
+    id: 'search-input'
+- inputText: 'Pro'
 
 # Should find products with "Pro" in name
 - assertVisible:
-    text: "Pro"
+    text: 'Pro'
 
 - tapOn:
-    id: "clear-search"
+    id: 'clear-search'
 
 # ============================================
 # TEST: Search case insensitive
 # ============================================
 
 - tapOn:
-    id: "search-input"
-- inputText: "WIRELESS"
+    id: 'search-input'
+- inputText: 'WIRELESS'
 
 - assertVisible:
-    text: "Wireless"
+    text: 'Wireless'
 
 - tapOn:
-    id: "clear-search"
+    id: 'clear-search'
 
 # ============================================
 # TEST: Search no results
 # ============================================
 
 - tapOn:
-    id: "search-input"
-- inputText: "xyznonexistent123"
+    id: 'search-input'
+- inputText: 'xyznonexistent123'
 - hideKeyboard
 
 - assertVisible:
-    id: "no-products"
+    id: 'no-products'
 
 - assertVisible:
-    text: "No products found"
+    text: 'No products found'
 
 - tapOn:
-    id: "reset-filters"
+    id: 'reset-filters'
 
 # ============================================
 # TEST: Category filters
@@ -87,37 +86,37 @@ tags:
 
 # All categories
 - tapOn:
-    id: "filter-category-all"
+    id: 'filter-category-all'
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # Electronics
 - tapOn:
-    id: "filter-category-electronics"
+    id: 'filter-category-electronics'
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # Sports
 - tapOn:
-    id: "filter-category-sports"
+    id: 'filter-category-sports'
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # Home
 - tapOn:
-    id: "filter-category-decor"
+    id: 'filter-category-decor'
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # Accessories
 - tapOn:
-    id: "filter-category-accessories"
+    id: 'filter-category-accessories'
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # Back to All
 - tapOn:
-    id: "filter-category-all"
+    id: 'filter-category-all'
 
 # ============================================
 # TEST: Sort options
@@ -125,80 +124,80 @@ tags:
 
 # Open sort dropdown
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - assertVisible:
-    id: "sort-options"
+    id: 'sort-options'
 
 # Price: Low to High
 - tapOn:
-    id: "sort-option-price-asc"
+    id: 'sort-option-price-asc'
 - assertNotVisible:
-    id: "sort-options"
+    id: 'sort-options'
 
 # Price: High to Low
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - tapOn:
-    id: "sort-option-price-desc"
+    id: 'sort-option-price-desc'
 
 # Name: A to Z
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - tapOn:
-    id: "sort-option-name"
+    id: 'sort-option-name'
 
 # Top Rated
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - tapOn:
-    id: "sort-option-rating"
+    id: 'sort-option-rating'
 
 # ============================================
 # TEST: Combined filters - Electronics + search
 # ============================================
 
 - tapOn:
-    id: "filter-category-electronics"
+    id: 'filter-category-electronics'
 - tapOn:
-    id: "search-input"
-- inputText: "Phone"
+    id: 'search-input'
+- inputText: 'Phone'
 
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 - tapOn:
-    id: "clear-search"
+    id: 'clear-search'
 
 # ============================================
 # TEST: Combined filters - Category + Sort
 # ============================================
 
 - tapOn:
-    id: "filter-category-sports"
+    id: 'filter-category-sports'
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - tapOn:
-    id: "sort-option-price-asc"
+    id: 'sort-option-price-asc'
 
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # ============================================
 # TEST: Triple combo - Category + Search + Sort
 # ============================================
 
 - tapOn:
-    id: "filter-category-electronics"
+    id: 'filter-category-electronics'
 - tapOn:
-    id: "search-input"
-- inputText: "Wireless"
+    id: 'search-input'
+- inputText: 'Wireless'
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - tapOn:
-    id: "sort-option-price-desc"
+    id: 'sort-option-price-desc'
 
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # ============================================
 # TEST: Reset filters button
@@ -207,30 +206,30 @@ tags:
 # Should have filters applied — top reset button visible whenever a
 # filter or search is active.
 - tapOn:
-    id: "reset-all"
+    id: 'reset-all'
 
 # After reset, should show all products with default sort
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # ============================================
 # TEST: Filter persists when viewing product
 # ============================================
 
 - tapOn:
-    id: "filter-category-electronics"
+    id: 'filter-category-electronics'
 - tapOn:
-    id: "product-card-1"
+    id: 'product-card-1'
 
 - assertVisible:
-    id: "product-detail-screen"
+    id: 'product-detail-screen'
 
 # Go back
 - back
 
 # Filter should still be applied
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # ============================================
 # TEST: Search from home category cards
@@ -242,24 +241,24 @@ tags:
 # Shop-by-Category section is below the Featured carousel + Trending row.
 - scrollUntilVisible:
     element:
-      id: "category-sports"
+      id: 'category-sports'
     direction: DOWN
 - tapOn:
-    id: "category-sports"
+    id: 'category-sports'
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # Sports filter should be active
 - assertVisible:
-    id: "filter-category-sports"
+    id: 'filter-category-sports'
 
 # ============================================
 # TEST: Scroll through products
 # ============================================
 
 - tapOn:
-    id: "filter-category-all"
+    id: 'filter-category-all'
 
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'

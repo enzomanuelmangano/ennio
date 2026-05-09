@@ -24,9 +24,10 @@ export function selectorToJson(selector: Selector): string {
   }
   if (selector.index !== undefined) out.index = selector.index;
   if (selector.point !== undefined) {
-    out.point = typeof selector.point === 'string'
-      ? selector.point
-      : { x: selector.point.x, y: selector.point.y };
+    out.point =
+      typeof selector.point === 'string'
+        ? selector.point
+        : { x: selector.point.x, y: selector.point.y };
   }
   if (selector.enabled !== undefined) out.enabled = selector.enabled;
   if (selector.checked !== undefined) out.checked = selector.checked;
@@ -36,10 +37,13 @@ export function selectorToJson(selector: Selector): string {
   if (selector.above) out.above = JSON.parse(selectorToJson(selector.above));
   if (selector.leftOf) out.leftOf = JSON.parse(selectorToJson(selector.leftOf));
   if (selector.rightOf) out.rightOf = JSON.parse(selectorToJson(selector.rightOf));
-  if (selector.containsChild) out.containsChild = JSON.parse(selectorToJson(selector.containsChild));
+  if (selector.containsChild)
+    out.containsChild = JSON.parse(selectorToJson(selector.containsChild));
   if (selector.childOf) out.childOf = JSON.parse(selectorToJson(selector.childOf));
   if (selector.containsDescendants) {
-    out.containsDescendants = selector.containsDescendants.map((s) => JSON.parse(selectorToJson(s)));
+    out.containsDescendants = selector.containsDescendants.map((s) =>
+      JSON.parse(selectorToJson(s)),
+    );
   }
   if (selector.width !== undefined) out.width = selector.width;
   if (selector.height !== undefined) out.height = selector.height;

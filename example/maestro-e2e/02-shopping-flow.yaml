@@ -2,13 +2,12 @@
 # Tests browsing, searching, filtering, sorting, and product details
 
 appId: com.ennio.example
-name: "Shopping Flow"
+name: 'Shopping Flow'
 tags:
   - shopping
   - critical
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -24,67 +23,67 @@ tags:
 # ============================================
 
 - assertVisible:
-    id: "featured-product-1"
+    id: 'featured-product-1'
 
 - assertVisible:
-    id: "featured-product-2"
+    id: 'featured-product-2'
 
 - assertVisible:
-    text: "Featured Products"
+    text: 'Featured Products'
 
 # ============================================
 # TEST: Quick actions on home
 # ============================================
 
 - assertVisible:
-    id: "quick-action-search"
+    id: 'quick-action-search'
 - assertVisible:
-    id: "quick-action-cart"
+    id: 'quick-action-cart'
 - assertVisible:
-    id: "quick-action-orders"
+    id: 'quick-action-orders'
 - assertVisible:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 
 # ============================================
 # TEST: Navigate to products via "See All"
 # ============================================
 
 - tapOn:
-    id: "see-all-featured"
+    id: 'see-all-featured'
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # ============================================
 # TEST: Products screen displays correctly
 # ============================================
 
 - assertVisible:
-    id: "search-input"
+    id: 'search-input'
 - assertVisible:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # ============================================
 # TEST: Search functionality
 # ============================================
 
 - tapOn:
-    id: "search-input"
-- inputText: "Wireless"
+    id: 'search-input'
+- inputText: 'Wireless'
 
 # Should filter to wireless products
 - assertVisible:
-    text: "Wireless"
+    text: 'Wireless'
 
 # Clear search
 - tapOn:
-    id: "clear-search"
+    id: 'clear-search'
 
 # Products list should show all again
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # ============================================
 # TEST: Category filtering
@@ -92,83 +91,83 @@ tags:
 
 # Filter by Electronics
 - tapOn:
-    id: "filter-category-electronics"
+    id: 'filter-category-electronics'
 
 # Should show electronics only
 - assertVisible:
-    text: "Electronics"
+    text: 'Electronics'
 
 # Filter by Sports
 - tapOn:
-    id: "filter-category-sports"
+    id: 'filter-category-sports'
 
 # Should show sports products
 - assertVisible:
-    text: "Sports"
+    text: 'Sports'
 
 # Reset to All
 - tapOn:
-    id: "filter-category-all"
+    id: 'filter-category-all'
 
 # ============================================
 # TEST: Sort functionality
 # ============================================
 
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 
 - assertVisible:
-    id: "sort-options"
+    id: 'sort-options'
 
 # Sort by price low to high
 - tapOn:
-    id: "sort-option-price-asc"
+    id: 'sort-option-price-asc'
 
 # Dropdown should close
 - assertNotVisible:
-    id: "sort-options"
+    id: 'sort-options'
 
 # Sort by price high to low
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - tapOn:
-    id: "sort-option-price-desc"
+    id: 'sort-option-price-desc'
 
 # Sort by name
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - tapOn:
-    id: "sort-option-name"
+    id: 'sort-option-name'
 
 # Sort by rating (default)
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - assertVisible:
-    id: "sort-options"
+    id: 'sort-options'
 - tapOn:
-    id: "sort-option-rating"
+    id: 'sort-option-rating'
 
 # ============================================
 # TEST: Combined search + filter + sort
 # ============================================
 
 - tapOn:
-    id: "filter-category-electronics"
+    id: 'filter-category-electronics'
 - tapOn:
-    id: "search-input"
-- inputText: "Pro"
+    id: 'search-input'
+- inputText: 'Pro'
 - tapOn:
-    id: "sort-dropdown"
+    id: 'sort-dropdown'
 - tapOn:
-    id: "sort-option-price-desc"
+    id: 'sort-option-price-desc'
 
 # Should show filtered, searched, sorted results
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # Reset all filters (optional — only present when filters applied).
 - tapOn:
-    id: "reset-filters"
+    id: 'reset-filters'
     optional: true
 
 # ============================================
@@ -176,62 +175,62 @@ tags:
 # ============================================
 
 - tapOn:
-    id: "filter-category-all"
+    id: 'filter-category-all'
 - tapOn:
-    id: "clear-search"
+    id: 'clear-search'
 
 - tapOn:
-    id: "product-card-1"
+    id: 'product-card-1'
 
 - assertVisible:
-    id: "product-detail-screen"
+    id: 'product-detail-screen'
 
 # ============================================
 # TEST: Product detail content
 # ============================================
 
 - assertVisible:
-    id: "product-title"
+    id: 'product-title'
 - assertVisible:
-    id: "product-price"
+    id: 'product-price'
 - assertVisible:
-    id: "add-to-cart-btn"
+    id: 'add-to-cart-btn'
 
 # ============================================
 # TEST: Product tabs
 # ============================================
 
 - tapOn:
-    id: "tab-description"
+    id: 'tab-description'
 - assertVisible:
-    id: "product-description"
+    id: 'product-description'
 
 - tapOn:
-    id: "tab-specs"
+    id: 'tab-specs'
 - assertVisible:
-    id: "product-specs"
+    id: 'product-specs'
 
 - tapOn:
-    id: "tab-reviews"
+    id: 'tab-reviews'
 - assertVisible:
-    id: "product-reviews"
+    id: 'product-reviews'
 
 # ============================================
 # TEST: Quantity adjustment
 # ============================================
 
 - assertVisible:
-    id: "quantity-value"
+    id: 'quantity-value'
 
 # Increase quantity
 - tapOn:
-    id: "increase-quantity"
+    id: 'increase-quantity'
 - tapOn:
-    id: "increase-quantity"
+    id: 'increase-quantity'
 
 # Decrease quantity
 - tapOn:
-    id: "decrease-quantity"
+    id: 'decrease-quantity'
 
 # ============================================
 # TEST: Navigate back via categories
@@ -242,10 +241,10 @@ tags:
 # `(tabs)`; tap that title text instead of relying on Maestro's
 # `back` (which doesn't always reach RNScreens' nav controller).
 - tapOn:
-    text: "(tabs)"
+    text: '(tabs)'
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # Navigate back to home
 - runFlow:
@@ -260,14 +259,14 @@ tags:
 # render — scroll the home ScrollView first.
 - scrollUntilVisible:
     element:
-      id: "category-electronics"
+      id: 'category-electronics'
     direction: DOWN
 - tapOn:
-    id: "category-electronics"
+    id: 'category-electronics'
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # Should auto-filter to Electronics
 - assertVisible:
-    id: "filter-category-electronics"
+    id: 'filter-category-electronics'

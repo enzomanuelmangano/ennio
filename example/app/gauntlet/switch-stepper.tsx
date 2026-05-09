@@ -12,11 +12,7 @@ export default function SwitchStepperScreen() {
 
       <View style={styles.row}>
         <Text style={styles.label}>Notifications</Text>
-        <Switch
-          testID="switch-control"
-          value={enabled}
-          onValueChange={setEnabled}
-        />
+        <Switch testID="switch-control" value={enabled} onValueChange={setEnabled} />
       </View>
       <Text testID="switch-state" style={styles.value}>
         {enabled ? 'on' : 'off'}
@@ -55,7 +51,14 @@ const styles = StyleSheet.create({
   label: { fontSize: 16 },
   value: { fontSize: 14, color: '#666', marginTop: 8 },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  stepperBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center' },
+  stepperBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   stepperBtnText: { color: '#fff', fontSize: 22, fontWeight: '700' },
   stepperVal: { fontSize: 20, fontWeight: '600', minWidth: 30, textAlign: 'center' },
 });

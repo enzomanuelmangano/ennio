@@ -23,8 +23,14 @@ interface SettingsState {
     personalizedAds: boolean;
     locationServices: boolean;
   };
-  updateNotification: <K extends keyof SettingsState['notifications']>(key: K, value: boolean) => void;
-  updatePreference: <K extends keyof SettingsState['preferences']>(key: K, value: SettingsState['preferences'][K]) => void;
+  updateNotification: <K extends keyof SettingsState['notifications']>(
+    key: K,
+    value: boolean,
+  ) => void;
+  updatePreference: <K extends keyof SettingsState['preferences']>(
+    key: K,
+    value: SettingsState['preferences'][K],
+  ) => void;
   updatePrivacy: <K extends keyof SettingsState['privacy']>(key: K, value: boolean) => void;
   setLanguage: (language: string) => void;
   setCurrency: (currency: string) => void;
@@ -60,7 +66,7 @@ export const useSettingsStore = create<SettingsState>()(
       ...defaultSettings,
 
       updateNotification: (key, value) =>
-        set(state => ({
+        set((state) => ({
           notifications: {
             ...state.notifications,
             [key]: value,
@@ -68,7 +74,7 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       updatePreference: (key, value) =>
-        set(state => ({
+        set((state) => ({
           preferences: {
             ...state.preferences,
             [key]: value,
@@ -76,7 +82,7 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       updatePrivacy: (key, value) =>
-        set(state => ({
+        set((state) => ({
           privacy: {
             ...state.privacy,
             [key]: value,
@@ -84,12 +90,12 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       setLanguage: (language) =>
-        set(state => ({
+        set((state) => ({
           preferences: { ...state.preferences, language },
         })),
 
       setCurrency: (currency) =>
-        set(state => ({
+        set((state) => ({
           preferences: { ...state.preferences, currency },
         })),
 
@@ -98,8 +104,8 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => AsyncStorage),
-    }
-  )
+    },
+  ),
 );
 
 export const languages = ['English', 'Spanish', 'French', 'German', 'Japanese', 'Chinese'];

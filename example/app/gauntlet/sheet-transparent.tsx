@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, Pressable } from 'react-native';
+import { Text, TouchableOpacity, StyleSheet, Pressable } from 'react-native';
 import { router } from 'expo-router';
 
 export default function SheetTransparent() {
@@ -6,21 +6,18 @@ export default function SheetTransparent() {
     <Pressable
       testID="transparent-modal-backdrop"
       style={styles.backdrop}
-      onPress={() => router.back()}>
-      <Pressable
-        testID="transparent-modal-card"
-        onPress={() => {}}
-        style={styles.card}>
+      onPress={() => router.back()}
+    >
+      <Pressable testID="transparent-modal-card" onPress={() => {}} style={styles.card}>
         <Text testID="transparent-modal-title" style={styles.title}>
           transparentModal
         </Text>
-        <Text style={styles.body}>
-          Tap outside to dismiss, or use the close button.
-        </Text>
+        <Text style={styles.body}>Tap outside to dismiss, or use the close button.</Text>
         <TouchableOpacity
           testID="transparent-modal-close-btn"
           onPress={() => router.back()}
-          style={styles.btn}>
+          style={styles.btn}
+        >
           <Text style={styles.btnText}>Close</Text>
         </TouchableOpacity>
       </Pressable>

@@ -19,7 +19,7 @@ config.resolver.nodeModulesPaths = [
 // Force resolution of packages from workspace node_modules
 config.resolver.extraNodeModules = {
   'react-native': path.resolve(workspaceRoot, 'node_modules/react-native'),
-  'react': path.resolve(workspaceRoot, 'node_modules/react'),
+  react: path.resolve(workspaceRoot, 'node_modules/react'),
   'expo-router': path.resolve(workspaceRoot, 'node_modules/expo-router'),
 };
 

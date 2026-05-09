@@ -1,5 +1,5 @@
 appId: com.ennio.example
-name: "Gauntlet — Deep link route"
+name: 'Gauntlet — Deep link route'
 ---
 # Validates the deep-link route resolves and renders the target screen.
 # Note: `openLink` from `xcrun simctl openurl` triggers iOS 26+
@@ -11,14 +11,14 @@ name: "Gauntlet — Deep link route"
 # this still exercises the deep-link route's resolver + renderer.
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-deep-link"
+      id: 'g-deep-link'
     direction: DOWN
 - tapOn:
-    id: "g-deep-link"
+    id: 'g-deep-link'
 - assertVisible:
-    id: "deep-link-screen"
+    id: 'deep-link-screen'
 - assertVisible:
-    id: "deep-link-marker"
+    id: 'deep-link-marker'

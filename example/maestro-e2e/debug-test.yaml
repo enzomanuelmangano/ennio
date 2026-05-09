@@ -1,87 +1,86 @@
 appId: com.ennio.example
-name: "Debug Test"
+name: 'Debug Test'
 ---
 # Step 1
 - tapOn:
-    text: "Home"
+    text: 'Home'
 # Step 2
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 # Step 3
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 # Step 4 - Conditional
 - runFlow:
     when:
       visible:
-        id: "profile-header"
+        id: 'profile-header'
     commands:
       - scrollUntilVisible:
           element:
-            id: "menu-logout"
+            id: 'menu-logout'
           direction: DOWN
       - tapOn:
-          id: "menu-logout"
+          id: 'menu-logout'
       - assertVisible:
-          text: "Sign Out"
+          text: 'Sign Out'
       - tapOn:
-          text: "Sign Out"
+          text: 'Sign Out'
       - assertVisible:
-          id: "guest-view"
+          id: 'guest-view'
 
 # Back to home
 - tapOn:
-    text: "Home"
+    text: 'Home'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # Verify home screen elements
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 - assertVisible:
-    id: "quick-action-search"
+    id: 'quick-action-search'
 - assertVisible:
-    id: "quick-action-cart"
+    id: 'quick-action-cart'
 - assertVisible:
-    id: "quick-action-orders"
+    id: 'quick-action-orders'
 - assertVisible:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 
 # Featured products
 - assertVisible:
-    text: "Featured Products"
+    text: 'Featured Products'
 
 # Sign in button
 - assertVisible:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 
 # Login flow
 - tapOn:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 - assertVisible:
-    id: "login-screen"
+    id: 'login-screen'
 
 # Use demo login
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # Verify logged in
 - assertVisible:
-    text: "Hello"
+    text: 'Hello'
 
 # Navigate to products
 - tapOn:
-    text: "Products"
+    text: 'Products'
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # Test search
 - tapOn:
-    id: "search-input"
-- inputText: "Wireless"
+    id: 'search-input'
+- inputText: 'Wireless'
 - assertVisible:
-    text: "Wireless"
-
+    text: 'Wireless'
 # Nothing after

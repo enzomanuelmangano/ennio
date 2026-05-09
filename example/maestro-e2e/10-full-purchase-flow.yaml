@@ -2,14 +2,13 @@
 # Complete journey from browse to order delivery
 
 appId: com.ennio.example
-name: "Full Purchase Flow"
+name: 'Full Purchase Flow'
 tags:
   - e2e
   - critical
   - purchase
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -31,26 +30,26 @@ tags:
 
 # Explore featured products
 - assertVisible:
-    id: "featured-product-1"
+    id: 'featured-product-1'
 
 # Navigate via category
 - scrollUntilVisible:
     element:
-      id: "category-electronics"
+      id: 'category-electronics'
     direction: DOWN
 - tapOn:
-    id: "category-electronics"
+    id: 'category-electronics'
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # Search for specific product
 - tapOn:
-    id: "search-input"
-- inputText: "Wireless"
+    id: 'search-input'
+- inputText: 'Wireless'
 
 - assertVisible:
-    text: "Wireless"
+    text: 'Wireless'
 
 # ============================================
 # PHASE 3: Add Multiple Products to Cart
@@ -58,47 +57,47 @@ tags:
 
 # Add first search result
 - tapOn:
-    id: "product-card-1"
+    id: 'product-card-1'
 
 - assertVisible:
-    id: "product-detail-screen"
+    id: 'product-detail-screen'
 
 # Check product details
 - assertVisible:
-    id: "product-title"
+    id: 'product-title'
 - assertVisible:
-    id: "product-price"
+    id: 'product-price'
 
 # View description tab
 - tapOn:
-    id: "tab-description"
+    id: 'tab-description'
 - assertVisible:
-    id: "product-description"
+    id: 'product-description'
 
 # Add 2 of this item
 - tapOn:
-    id: "increase-quantity"
+    id: 'increase-quantity'
 - tapOn:
-    id: "add-to-cart-btn"
+    id: 'add-to-cart-btn'
 
 # Continue shopping
 - tapOn:
-    text: "Continue Shopping"
+    text: 'Continue Shopping'
 
 # Back to products
 - back
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # Clear search and find another product
 - tapOn:
-    id: "clear-search"
+    id: 'clear-search'
 - tapOn:
-    id: "filter-category-sports"
+    id: 'filter-category-sports'
 
 # Add another product from grid (id 5 = Running Shoes Elite, in Sports)
 - tapOn:
-    id: "add-to-cart-5"
+    id: 'add-to-cart-5'
 
 # ============================================
 # PHASE 4: Review Cart
@@ -108,21 +107,21 @@ tags:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-screen"
+    id: 'cart-screen'
 
 # Should have multiple items
 - assertVisible:
-    id: "cart-items-list"
+    id: 'cart-items-list'
 - assertVisible:
-    id: "cart-summary"
+    id: 'cart-summary'
 - assertVisible:
-    id: "cart-total"
+    id: 'cart-total'
 
 # Adjust quantity in cart
 - tapOn:
-    id: "increase-qty-1"
+    id: 'increase-qty-1'
 - tapOn:
-    id: "decrease-qty-1"
+    id: 'decrease-qty-1'
 
 # ============================================
 # PHASE 5: Sign in via Profile (we need an authenticated user before
@@ -131,21 +130,21 @@ tags:
 # ============================================
 
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 
 - tapOn:
-    id: "guest-signin-btn"
+    id: 'guest-signin-btn'
 
 - assertVisible:
-    id: "login-screen"
+    id: 'login-screen'
 
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 
 - waitForAnimationToEnd
 
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # ============================================
 # PHASE 7: Cart Still Has Items
@@ -155,133 +154,133 @@ tags:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-screen"
+    id: 'cart-screen'
 
 # Items should still be there
 - assertVisible:
-    id: "cart-items-list"
+    id: 'cart-items-list'
 
 # ============================================
 # PHASE 8: Complete Checkout
 # ============================================
 
 - tapOn:
-    id: "checkout-btn"
+    id: 'checkout-btn'
 
 - waitForAnimationToEnd
 
 - assertVisible:
-    id: "checkout-screen"
+    id: 'checkout-screen'
 
 # STEP 1: Shipping
 - assertVisible:
-    id: "shipping-form"
+    id: 'shipping-form'
 
 - tapOn:
-    id: "shipping-name"
-- inputText: "Jane Smith"
+    id: 'shipping-name'
+- inputText: 'Jane Smith'
 
 - tapOn:
-    id: "shipping-street"
-- inputText: "789 Pine Street"
+    id: 'shipping-street'
+- inputText: '789 Pine Street'
 
 - tapOn:
-    id: "shipping-city"
-- inputText: "Los Angeles"
+    id: 'shipping-city'
+- inputText: 'Los Angeles'
 
 - tapOn:
-    id: "shipping-state"
-- inputText: "CA"
+    id: 'shipping-state'
+- inputText: 'CA'
 
 - tapOn:
-    id: "shipping-zip"
-- inputText: "90001"
+    id: 'shipping-zip'
+- inputText: '90001'
 
 - tapOn:
-    id: "shipping-phone"
-- inputText: "310-555-0199"
+    id: 'shipping-phone'
+- inputText: '310-555-0199'
 
 - tapOn:
-    id: "next-btn"
+    id: 'next-btn'
 
 # STEP 2: Payment
 - assertVisible:
-    id: "payment-form"
+    id: 'payment-form'
 
 - tapOn:
-    id: "payment-card-number"
-- inputText: "5555555555554444"
+    id: 'payment-card-number'
+- inputText: '5555555555554444'
 
 - tapOn:
-    id: "payment-cardholder"
-- inputText: "Jane Smith"
+    id: 'payment-cardholder'
+- inputText: 'Jane Smith'
 
 - tapOn:
-    id: "payment-expiry"
-- inputText: "06/27"
+    id: 'payment-expiry'
+- inputText: '06/27'
 
 - tapOn:
-    id: "payment-cvv"
-- inputText: "321"
+    id: 'payment-cvv'
+- inputText: '321'
 
 - tapOn:
-    id: "next-btn"
+    id: 'next-btn'
 
 # STEP 3: Review
 - assertVisible:
-    id: "order-review"
+    id: 'order-review'
 
 # Verify shipping shown
 - assertVisible:
-    text: "789 Pine Street"
+    text: '789 Pine Street'
 
 # Verify payment masked
 - assertVisible:
-    text: "4444"
+    text: '4444'
 
 # Place the order
 - tapOn:
-    id: "place-order-btn"
+    id: 'place-order-btn'
 
 # ============================================
 # PHASE 9: Order Confirmation
 # ============================================
 
 - assertVisible:
-    text: "Order Placed"
+    text: 'Order Placed'
 
 - tapOn:
-    text: "View Orders"
+    text: 'View Orders'
 
 # ============================================
 # PHASE 10: Verify Order in History
 # ============================================
 
 - assertVisible:
-    id: "orders-screen"
+    id: 'orders-screen'
 
 - assertVisible:
-    id: "orders-list"
+    id: 'orders-list'
 
 # Latest order should be at top
 - assertVisible:
-    text: "Processing"
+    text: 'Processing'
 
 # View order details — tap the order card. Match by the order status
 # pill text "Processing" which is unique to the order card (cart and
 # product views don't render it).
 - tapOn:
-    text: "Processing"
+    text: 'Processing'
 
 - assertVisible:
-    id: "order-details"
+    id: 'order-details'
 
 # Verify order contains our items
 - assertVisible:
-    text: "789 Pine Street"
+    text: '789 Pine Street'
 
 - tapOn:
-    id: "close-details"
+    id: 'close-details'
 
 # ============================================
 # PHASE 11: Cart is Empty
@@ -291,17 +290,17 @@ tags:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-screen-empty"
+    id: 'cart-screen-empty'
 
 # ============================================
 # PHASE 12: Continue Shopping
 # ============================================
 
 - tapOn:
-    id: "browse-products-btn"
+    id: 'browse-products-btn'
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # ============================================
 # PHASE 13: Quick Reorder Flow
@@ -312,34 +311,34 @@ tags:
     file: subflows/navigate-home.yaml
 
 - tapOn:
-    id: "add-to-cart-featured-2"
+    id: 'add-to-cart-featured-2'
 
 # Verify cart updated
 - runFlow:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-screen"
+    id: 'cart-screen'
 
 # Clear for next test
 - tapOn:
-    id: "clear-cart-btn"
+    id: 'clear-cart-btn'
 - tapOn:
-    text: "Clear"
+    text: 'Clear'
 
 # ============================================
 # PHASE 14: Verify User Stats Updated
 # ============================================
 
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 
 - assertVisible:
-    id: "profile-screen"
+    id: 'profile-screen'
 
 # Stats should reflect the order
 - assertVisible:
-    id: "stats-card"
+    id: 'stats-card'
 
 # ============================================
 # CLEANUP: Logout
@@ -347,12 +346,12 @@ tags:
 
 - scrollUntilVisible:
     element:
-      id: "menu-logout"
+      id: 'menu-logout'
     direction: DOWN
 - tapOn:
-    id: "menu-logout"
+    id: 'menu-logout'
 - tapOn:
-    text: "Sign Out"
+    text: 'Sign Out'
 
 - assertVisible:
-    id: "guest-view"
+    id: 'guest-view'

@@ -15,13 +15,15 @@ export default function SheetStacked() {
       <TouchableOpacity
         testID="stacked-open-inner-btn"
         onPress={() => setInnerOpen(true)}
-        style={styles.btn}>
+        style={styles.btn}
+      >
         <Text style={styles.btnText}>Open inner modal</Text>
       </TouchableOpacity>
       <TouchableOpacity
         testID="stacked-close-outer-btn"
         onPress={() => router.back()}
-        style={styles.btnSecondary}>
+        style={styles.btnSecondary}
+      >
         <Text style={styles.btnText}>Close outer</Text>
       </TouchableOpacity>
 
@@ -29,7 +31,8 @@ export default function SheetStacked() {
         visible={innerOpen}
         transparent
         animationType="fade"
-        onRequestClose={() => setInnerOpen(false)}>
+        onRequestClose={() => setInnerOpen(false)}
+      >
         <View testID="inner-modal-backdrop" style={styles.innerBackdrop}>
           <View testID="inner-modal-card" style={styles.innerCard}>
             <Text testID="inner-modal-title" style={styles.innerTitle}>
@@ -41,7 +44,8 @@ export default function SheetStacked() {
             <TouchableOpacity
               testID="inner-modal-close-btn"
               onPress={() => setInnerOpen(false)}
-              style={styles.btn}>
+              style={styles.btn}
+            >
               <Text style={styles.btnText}>Close inner</Text>
             </TouchableOpacity>
           </View>

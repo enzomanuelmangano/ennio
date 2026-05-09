@@ -1,7 +1,7 @@
 /**
  * Shared helpers for Maestro-equivalent Ennio tests
  */
-import { element, sleep, waitForVisible, waitForNotVisible } from '@ennio/test';
+import { element, sleep, waitForVisible } from '@ennio/test';
 
 // Navigation helpers
 export async function goHome() {

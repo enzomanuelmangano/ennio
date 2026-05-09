@@ -90,14 +90,14 @@ has no `onPress` (TextInput) or no fiber match.
 
 ### Performance
 
-| operation | Maestro / XCUI | Ennio |
-|-----------|----------------|-------|
-| `assertVisible: id` | 200–400 ms | 5–10 ms |
-| `tapOn: id` | 200–400 ms | 5–15 ms |
-| `tapOn: text` (tab) | 200–400 ms | 5–15 ms |
-| `inputText` per char | ~50 ms | ~30 ms (idb HID) |
-| 30-step flow | 60–90 s | 5–15 s |
-| suite cold start | 10–15 s xcodebuild | 0 — already running |
+| operation            | Maestro / XCUI     | Ennio               |
+| -------------------- | ------------------ | ------------------- |
+| `assertVisible: id`  | 200–400 ms         | 5–10 ms             |
+| `tapOn: id`          | 200–400 ms         | 5–15 ms             |
+| `tapOn: text` (tab)  | 200–400 ms         | 5–15 ms             |
+| `inputText` per char | ~50 ms             | ~30 ms (idb HID)    |
+| 30-step flow         | 60–90 s            | 5–15 s              |
+| suite cold start     | 10–15 s xcodebuild | 0 — already running |
 
 ## Requirements
 
@@ -125,10 +125,7 @@ npm install -D @ennio/cli
 
 ```json
 {
-  "plugins": [
-    "expo-router",
-    "@ennio/expo-plugin"
-  ]
+  "plugins": ["expo-router", "@ennio/expo-plugin"]
 }
 ```
 
@@ -172,7 +169,8 @@ linked code, zero port listener.
 
 You never import `@ennio/core` anywhere. When enabled, autolinking
 includes the pod and a `+load` swizzle bootstraps the WebSocket server
-+ JSI fiber walker before your app's first frame.
+
+- JSI fiber walker before your app's first frame.
 
 Run a flow:
 
@@ -185,9 +183,9 @@ ennio e2e/01-auth-flow.yaml
 The plugin's only job: keep Ennio out of any build that doesn't
 explicitly opt in. Default behavior:
 
-| `ENNIO_ENABLED` value | Plugin action |
-|-----------------------|---------------|
-| `1` (iOS) / `true` (Android) | Adds `pod 'EnnioCore'` / Gradle dep — full runtime included |
+| `ENNIO_ENABLED` value                 | Plugin action                                                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `1` (iOS) / `true` (Android)          | Adds `pod 'EnnioCore'` / Gradle dep — full runtime included                                                                     |
 | `0`, `false`, unset, or anything else | Plugin no-ops — build contains **zero** Ennio code, symbols, or port listener (byte-equivalent to omitting the plugin entirely) |
 
 EAS:
@@ -196,8 +194,10 @@ EAS:
 {
   "build": {
     "development": { "env": { "ENNIO_ENABLED": "1" } },
-    "preview":     { "env": { "ENNIO_ENABLED": "1" } },
-    "production":  { /* unset → off */ }
+    "preview": { "env": { "ENNIO_ENABLED": "1" } },
+    "production": {
+      /* unset → off */
+    }
   }
 }
 ```
@@ -290,12 +290,12 @@ example/        Sample app + e2e/ flows (10 example flows, the
 
 ### Defense layers
 
-| Layer | Stage | Mechanism |
-|-------|-------|-----------|
-| 1 | Plugin (build time) | `@ennio/expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols. |
-| 2 | Runtime (app launch) | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`). |
-| 3 | Network (server bind) | Server binds to `127.0.0.1` only — off-host LAN traffic is refused at `bind()`. |
-| 4 | Visual | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot. |
+| Layer | Stage                 | Mechanism                                                                                                                                                                                         |
+| ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | Plugin (build time)   | `@ennio/expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                       |
+| 2     | Runtime (app launch)  | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`). |
+| 3     | Network (server bind) | Server binds to `127.0.0.1` only — off-host LAN traffic is refused at `bind()`.                                                                                                                   |
+| 4     | Visual                | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot.                                                                             |
 
 Layer 1 is the primary defense. Layers 2–4 are runtime backstops if a
 build with Ennio enabled accidentally escapes the gate. **Always set
@@ -307,8 +307,8 @@ the value-not-the-key.
 {
   "build": {
     "development": { "env": { "ENNIO_ENABLED": "1" } },
-    "preview":     { "env": { "ENNIO_ENABLED": "1" } },
-    "production":  { "env": { "ENNIO_ENABLED": "0" } }
+    "preview": { "env": { "ENNIO_ENABLED": "1" } },
+    "production": { "env": { "ENNIO_ENABLED": "0" } }
   }
 }
 ```

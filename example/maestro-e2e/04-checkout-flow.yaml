@@ -2,14 +2,13 @@
 # Tests multi-step checkout: shipping, payment, review, order
 
 appId: com.ennio.example
-name: "Checkout Flow"
+name: 'Checkout Flow'
 tags:
   - checkout
   - critical
   - auth-required
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -23,11 +22,11 @@ tags:
 # Login with demo account. clearState above puts us on home with the
 # sign-in CTA — tap it directly (no conditional wrapper).
 - tapOn:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # Cart is empty after clearState — no need to clear.
 - runFlow:
@@ -38,190 +37,190 @@ tags:
     file: subflows/navigate-products.yaml
 
 - tapOn:
-    id: "add-to-cart-1"
+    id: 'add-to-cart-1'
 
 - tapOn:
-    id: "product-card-2"
+    id: 'product-card-2'
 - assertVisible:
-    id: "product-detail-screen"
+    id: 'product-detail-screen'
 - tapOn:
-    id: "add-to-cart-btn"
+    id: 'add-to-cart-btn'
 - tapOn:
-    text: "View Cart"
+    text: 'View Cart'
 
 # ============================================
 # TEST: Cart shows items before checkout
 # ============================================
 
 - assertVisible:
-    id: "cart-screen"
+    id: 'cart-screen'
 
 - assertVisible:
-    id: "cart-item-1"
+    id: 'cart-item-1'
 - assertVisible:
-    id: "cart-item-2"
+    id: 'cart-item-2'
 - assertVisible:
-    id: "cart-summary"
+    id: 'cart-summary'
 - assertVisible:
-    id: "checkout-btn"
+    id: 'checkout-btn'
 
 # ============================================
 # TEST: Start checkout
 # ============================================
 
 - tapOn:
-    id: "checkout-btn"
+    id: 'checkout-btn'
 
 - assertVisible:
-    id: "checkout-screen"
+    id: 'checkout-screen'
 
 # ============================================
 # STEP 1: Shipping Address
 # ============================================
 
 - assertVisible:
-    id: "shipping-form"
+    id: 'shipping-form'
 
 # Fill shipping details
 - tapOn:
-    id: "shipping-name"
-- inputText: "John Doe"
+    id: 'shipping-name'
+- inputText: 'John Doe'
 
 - tapOn:
-    id: "shipping-street"
-- inputText: "123 Main Street"
+    id: 'shipping-street'
+- inputText: '123 Main Street'
 
 - tapOn:
-    id: "shipping-city"
-- inputText: "San Francisco"
+    id: 'shipping-city'
+- inputText: 'San Francisco'
 
 - tapOn:
-    id: "shipping-state"
-- inputText: "CA"
+    id: 'shipping-state'
+- inputText: 'CA'
 
 - tapOn:
-    id: "shipping-zip"
-- inputText: "94105"
+    id: 'shipping-zip'
+- inputText: '94105'
 
 - tapOn:
-    id: "shipping-phone"
-- inputText: "415-555-0123"
+    id: 'shipping-phone'
+- inputText: '415-555-0123'
 
 # Go to next step
 - tapOn:
-    id: "next-btn"
+    id: 'next-btn'
 
 # ============================================
 # STEP 2: Payment Details
 # ============================================
 
 - assertVisible:
-    id: "payment-form"
+    id: 'payment-form'
 
 # Fill payment details
 - tapOn:
-    id: "payment-card-number"
-- inputText: "4111111111111111"
+    id: 'payment-card-number'
+- inputText: '4111111111111111'
 
 - tapOn:
-    id: "payment-cardholder"
-- inputText: "John Doe"
+    id: 'payment-cardholder'
+- inputText: 'John Doe'
 
 - tapOn:
-    id: "payment-expiry"
-- inputText: "12/25"
+    id: 'payment-expiry'
+- inputText: '12/25'
 
 - tapOn:
-    id: "payment-cvv"
-- inputText: "123"
+    id: 'payment-cvv'
+- inputText: '123'
 
 # Go to next step
 - tapOn:
-    id: "next-btn"
+    id: 'next-btn'
 
 # ============================================
 # STEP 3: Order Review
 # ============================================
 
 - assertVisible:
-    id: "order-review"
+    id: 'order-review'
 
 # Verify shipping address is shown
 - assertVisible:
-    text: "123 Main Street"
+    text: '123 Main Street'
 
 # Verify payment method shown (masked)
 - assertVisible:
-    text: "1111"
+    text: '1111'
 
 # Verify items are listed
 - assertVisible:
-    id: "cart-summary"
+    id: 'cart-summary'
 
 # ============================================
 # TEST: Go back to edit shipping
 # ============================================
 
 - tapOn:
-    id: "back-btn"
+    id: 'back-btn'
 
 - assertVisible:
-    id: "payment-form"
+    id: 'payment-form'
 
 - tapOn:
-    id: "back-btn"
+    id: 'back-btn'
 
 - assertVisible:
-    id: "shipping-form"
+    id: 'shipping-form'
 
 # Edit shipping address
 - tapOn:
-    id: "shipping-street"
+    id: 'shipping-street'
 - eraseText: 50
-- inputText: "456 Oak Avenue"
+- inputText: '456 Oak Avenue'
 
 # Go forward again
 - tapOn:
-    id: "next-btn"
+    id: 'next-btn'
 - assertVisible:
-    id: "payment-form"
+    id: 'payment-form'
 
 - tapOn:
-    id: "next-btn"
+    id: 'next-btn'
 - assertVisible:
-    id: "order-review"
+    id: 'order-review'
 
 # Verify updated address
 - assertVisible:
-    text: "456 Oak Avenue"
+    text: '456 Oak Avenue'
 
 # ============================================
 # TEST: Place order
 # ============================================
 
 - tapOn:
-    id: "place-order-btn"
+    id: 'place-order-btn'
 
 # Success alert
 - assertVisible:
-    text: "Order Placed"
+    text: 'Order Placed'
 
 - tapOn:
-    text: "View Orders"
+    text: 'View Orders'
 
 # ============================================
 # TEST: Order appears in orders list
 # ============================================
 
 - assertVisible:
-    id: "orders-screen"
+    id: 'orders-screen'
 
 - assertVisible:
-    id: "orders-list"
+    id: 'orders-list'
 
 # Most recent order should show "Processing" status
 - assertVisible:
-    text: "Processing"
+    text: 'Processing'
 
 # ============================================
 # TEST: Cart is now empty
@@ -231,4 +230,4 @@ tags:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-screen-empty"
+    id: 'cart-screen-empty'
