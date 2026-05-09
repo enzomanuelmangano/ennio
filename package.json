@@ -27,5 +27,8 @@
     "expo": "~53.0.27",
     "react": "19.0.0",
     "react-native": "0.79.6"
+  },
+  "patchedDependencies": {
+    "pressto@0.6.1": "patches/pressto@0.6.1.patch"
   }
 }
