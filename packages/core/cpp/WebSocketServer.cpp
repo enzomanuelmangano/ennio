@@ -145,11 +145,13 @@ bool WebSocketServer::start(int port) {
     int opt = 1;
     setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    // Bind
+    // Bind to loopback only — Ennio is a same-host dev tool. Refusing
+    // off-host connections eliminates the LAN attack surface even if a
+    // build with Ennio enabled accidentally ships.
     struct sockaddr_in addr;
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons(port);
 
     if (bind(serverSocket_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
