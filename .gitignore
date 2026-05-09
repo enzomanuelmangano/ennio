@@ -21,6 +21,12 @@ packages/nitro/nitrogen/generated/
 Pods/
 DerivedData/
 
+# Stale root-level prebuild output. The active Expo project lives at
+# example/, so /ios and /android at repo root are vestigial. Anchor
+# with a leading slash so example/ios stays tracked.
+/ios/
+/android/
+
 # Android
 *.apk
 *.aab
