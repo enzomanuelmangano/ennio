@@ -333,6 +333,7 @@ const createStyles = (theme: Theme) =>
       fontWeight: '700',
       color: theme.colors.text.primary,
       letterSpacing: -0.4,
+      marginBottom: 16,
     },
     seeAll: {
       color: theme.colors.text.primary,
