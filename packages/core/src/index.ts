@@ -97,9 +97,15 @@ export function isServerRunning(): boolean {
 
 // For backwards compatibility
 export const EnnioModule = {
-  get startServer() { return startServer; },
-  get stopServer() { return stopServer; },
-  get isServerRunning() { return isServerRunning; },
+  get startServer() {
+    return startServer;
+  },
+  get stopServer() {
+    return stopServer;
+  },
+  get isServerRunning() {
+    return isServerRunning;
+  },
 };
 
 // No JS-side bootstrap. `@ennio/core` autolinks via Pod, and the iOS

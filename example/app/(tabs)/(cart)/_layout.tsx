@@ -8,7 +8,8 @@ export default function CartLayout() {
         headerLargeTitle: true,
         headerLargeTitleShadowVisible: false,
         headerShadowVisible: false,
-      }}>
+      }}
+    >
       <Stack.Screen name="index" options={{ headerTitle: 'Cart' }} />
     </Stack>
   );

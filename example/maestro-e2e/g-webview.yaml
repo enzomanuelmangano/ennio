@@ -1,16 +1,16 @@
 appId: com.ennio.example
-name: "Gauntlet — WebView"
+name: 'Gauntlet — WebView'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-webview"
+      id: 'g-webview'
     direction: DOWN
 - tapOn:
-    id: "g-webview"
+    id: 'g-webview'
 - assertVisible:
-    id: "webview-screen"
+    id: 'webview-screen'
 - assertVisible:
-    id: "webview-loaded-marker"
+    id: 'webview-loaded-marker'

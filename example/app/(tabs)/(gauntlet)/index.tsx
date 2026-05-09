@@ -2,29 +2,29 @@
 // Each row navigates to a dedicated route under /gauntlet/<pattern>.
 
 import { router } from 'expo-router';
-import { ScrollView, Text, View, StyleSheet } from 'react-native';
+import { ScrollView, Text, StyleSheet } from 'react-native';
 import { PressableScale } from 'pressto';
 
 const PATTERNS: { id: string; label: string; route: string }[] = [
-  { id: 'g-flashlist',         label: 'FlashList virtualization',     route: '/gauntlet/flashlist' },
-  { id: 'g-bottomsheet',       label: 'BottomSheet (gorhom)',         route: '/gauntlet/bottomsheet' },
-  { id: 'g-webview',           label: 'WebView',                       route: '/gauntlet/webview' },
-  { id: 'g-slider',            label: 'Slider',                        route: '/gauntlet/slider' },
-  { id: 'g-picker',            label: 'Picker (system wheel)',         route: '/gauntlet/picker' },
-  { id: 'g-switch',            label: 'Switch + Stepper',              route: '/gauntlet/switch-stepper' },
-  { id: 'g-multiline',         label: 'Multi-line TextInput',          route: '/gauntlet/multiline' },
-  { id: 'g-keyboard',          label: 'KeyboardAvoidingView',          route: '/gauntlet/keyboard' },
-  { id: 'g-reanimated',        label: 'Reanimated worklet button',     route: '/gauntlet/reanimated' },
-  { id: 'g-scroll-paging',     label: 'ScrollView paging',             route: '/gauntlet/scroll-paging' },
-  { id: 'g-pan',               label: 'RNGH pan gesture',              route: '/gauntlet/pan' },
-  { id: 'g-pinch',             label: 'RNGH pinch gesture',            route: '/gauntlet/pinch' },
-  { id: 'g-touchables',        label: 'Touchable variants',            route: '/gauntlet/touchables' },
-  { id: 'g-action-sheet',      label: 'Action sheet (Alert)',          route: '/gauntlet/action-sheet' },
-  { id: 'g-alert',             label: 'Alert variants',                route: '/gauntlet/alert' },
-  { id: 'g-form',              label: 'Form validation',               route: '/gauntlet/form' },
-  { id: 'g-modal-stack',       label: 'Modal stacking',                route: '/gauntlet/modal-stack' },
-  { id: 'g-deep-link',         label: 'Deep link target',              route: '/gauntlet/deep-link' },
-  { id: 'g-playground',        label: 'Playground sandbox',            route: '/gauntlet/playground' },
+  { id: 'g-flashlist', label: 'FlashList virtualization', route: '/gauntlet/flashlist' },
+  { id: 'g-bottomsheet', label: 'BottomSheet (gorhom)', route: '/gauntlet/bottomsheet' },
+  { id: 'g-webview', label: 'WebView', route: '/gauntlet/webview' },
+  { id: 'g-slider', label: 'Slider', route: '/gauntlet/slider' },
+  { id: 'g-picker', label: 'Picker (system wheel)', route: '/gauntlet/picker' },
+  { id: 'g-switch', label: 'Switch + Stepper', route: '/gauntlet/switch-stepper' },
+  { id: 'g-multiline', label: 'Multi-line TextInput', route: '/gauntlet/multiline' },
+  { id: 'g-keyboard', label: 'KeyboardAvoidingView', route: '/gauntlet/keyboard' },
+  { id: 'g-reanimated', label: 'Reanimated worklet button', route: '/gauntlet/reanimated' },
+  { id: 'g-scroll-paging', label: 'ScrollView paging', route: '/gauntlet/scroll-paging' },
+  { id: 'g-pan', label: 'RNGH pan gesture', route: '/gauntlet/pan' },
+  { id: 'g-pinch', label: 'RNGH pinch gesture', route: '/gauntlet/pinch' },
+  { id: 'g-touchables', label: 'Touchable variants', route: '/gauntlet/touchables' },
+  { id: 'g-action-sheet', label: 'Action sheet (Alert)', route: '/gauntlet/action-sheet' },
+  { id: 'g-alert', label: 'Alert variants', route: '/gauntlet/alert' },
+  { id: 'g-form', label: 'Form validation', route: '/gauntlet/form' },
+  { id: 'g-modal-stack', label: 'Modal stacking', route: '/gauntlet/modal-stack' },
+  { id: 'g-deep-link', label: 'Deep link target', route: '/gauntlet/deep-link' },
+  { id: 'g-playground', label: 'Playground sandbox', route: '/gauntlet/playground' },
 ];
 
 export default function GauntletIndex() {

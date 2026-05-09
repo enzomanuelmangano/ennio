@@ -1,21 +1,21 @@
 appId: com.ennio.example
-name: "Gauntlet — KeyboardAvoidingView"
+name: 'Gauntlet — KeyboardAvoidingView'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-keyboard"
+      id: 'g-keyboard'
     direction: DOWN
 - tapOn:
-    id: "g-keyboard"
+    id: 'g-keyboard'
 - assertVisible:
-    id: "keyboard-screen"
+    id: 'keyboard-screen'
 - tapOn:
-    id: "keyboard-input"
-- inputText: "Hello"
+    id: 'keyboard-input'
+- inputText: 'Hello'
 - tapOn:
-    id: "keyboard-submit"
+    id: 'keyboard-submit'
 - assertVisible:
-    text: "Submitted: Hello"
+    text: 'Submitted: Hello'

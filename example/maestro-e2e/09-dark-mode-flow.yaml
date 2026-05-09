@@ -2,13 +2,12 @@
 # Tests dark mode toggle and persistence across screens
 
 appId: com.ennio.example
-name: "Dark Mode Flow"
+name: 'Dark Mode Flow'
 tags:
   - dark-mode
   - appearance
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -20,28 +19,28 @@ tags:
     file: subflows/navigate-home.yaml
 
 - tapOn:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 
 - assertVisible:
-    id: "settings-screen"
+    id: 'settings-screen'
 
 # Ensure dark mode is off first
 # (We'll toggle twice to ensure consistent state)
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 # ============================================
 # TEST: Enable dark mode
 # ============================================
 
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 # Settings screen should update
 - assertVisible:
-    id: "settings-screen"
+    id: 'settings-screen'
 
 # ============================================
 # TEST: Dark mode persists on home
@@ -51,11 +50,11 @@ tags:
     file: subflows/navigate-home.yaml
 
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # Home should be in dark mode
 - assertVisible:
-    id: "featured-product-1"
+    id: 'featured-product-1'
 
 # ============================================
 # TEST: Dark mode on products screen
@@ -65,27 +64,27 @@ tags:
     file: subflows/navigate-products.yaml
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 - assertVisible:
-    id: "search-input"
+    id: 'search-input'
 - assertVisible:
-    id: "products-list"
+    id: 'products-list'
 
 # ============================================
 # TEST: Dark mode on product detail
 # ============================================
 
 - tapOn:
-    id: "product-card-1"
+    id: 'product-card-1'
 
 - assertVisible:
-    id: "product-detail-screen"
+    id: 'product-detail-screen'
 
 - assertVisible:
-    id: "product-title"
+    id: 'product-title'
 - assertVisible:
-    id: "add-to-cart-btn"
+    id: 'add-to-cart-btn'
 
 - back
 
@@ -97,17 +96,17 @@ tags:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-root"
+    id: 'cart-root'
 
 # ============================================
 # TEST: Dark mode on profile (guest)
 # ============================================
 
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 
 - assertVisible:
-    id: "profile-root"
+    id: 'profile-root'
 
 # ============================================
 # TEST: Dark mode on login screen
@@ -115,13 +114,13 @@ tags:
 
 # Guest profile is visible after clearState (we never logged in this run).
 - tapOn:
-    id: "guest-signin-btn"
+    id: 'guest-signin-btn'
 - assertVisible:
-    id: "login-screen"
+    id: 'login-screen'
 - assertVisible:
-    id: "email-input"
+    id: 'email-input'
 - assertVisible:
-    id: "login-btn"
+    id: 'login-btn'
 - back
 
 # ============================================
@@ -132,13 +131,13 @@ tags:
     file: subflows/navigate-home.yaml
 
 - tapOn:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 
 - assertVisible:
-    id: "settings-screen"
+    id: 'settings-screen'
 
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 # ============================================
 # TEST: Light mode restored on all screens
@@ -148,19 +147,19 @@ tags:
     file: subflows/navigate-home.yaml
 
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 - runFlow:
     file: subflows/navigate-products.yaml
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 - runFlow:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-root"
+    id: 'cart-root'
 
 # ============================================
 # TEST: Dark mode with authenticated user
@@ -171,35 +170,35 @@ tags:
 
 # Login (we logged out earlier in this flow).
 - tapOn:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # Enable dark mode
 - tapOn:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 # Check profile in dark mode
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 
 - assertVisible:
-    id: "profile-screen"
+    id: 'profile-screen'
 
 - assertVisible:
-    id: "profile-header"
+    id: 'profile-header'
 
 # Check orders in dark mode
 - tapOn:
-    id: "menu-orders"
+    id: 'menu-orders'
 
 - assertVisible:
-    id: "orders-screen"
+    id: 'orders-screen'
 
 # ============================================
 # CLEANUP: Restore light mode
@@ -209,10 +208,10 @@ tags:
     file: subflows/navigate-home.yaml
 
 - tapOn:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 - assertVisible:
-    id: "settings-screen"
+    id: 'settings-screen'

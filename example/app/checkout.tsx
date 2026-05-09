@@ -19,13 +19,13 @@ type Step = 'shipping' | 'payment' | 'review';
 
 export default function CheckoutScreen() {
   const router = useRouter();
-  const items = useCartStore(state => state.items);
-  const getTotal = useCartStore(state => state.getTotal);
-  const getSubtotal = useCartStore(state => state.getSubtotal);
-  const getTax = useCartStore(state => state.getTax);
-  const checkout = useCartStore(state => state.checkout);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const items = useCartStore((state) => state.items);
+  const getTotal = useCartStore((state) => state.getTotal);
+  const getSubtotal = useCartStore((state) => state.getSubtotal);
+  const getTax = useCartStore((state) => state.getTax);
+  const checkout = useCartStore((state) => state.checkout);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
+  const darkMode = useSettingsStore((state) => state.preferences.darkMode);
 
   const [currentStep, setCurrentStep] = useState<Step>('shipping');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -108,9 +108,9 @@ export default function CheckoutScreen() {
       Alert.alert(
         'Order Placed!',
         'Your order has been placed successfully. You will receive a confirmation email shortly.',
-        [{ text: 'View Orders', onPress: () => router.replace('/orders') }]
+        [{ text: 'View Orders', onPress: () => router.replace('/orders') }],
       );
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Failed to place order. Please try again.');
     } finally {
       setIsProcessing(false);
@@ -138,18 +138,21 @@ export default function CheckoutScreen() {
             style={[
               styles.stepCircle,
               currentStep === step && styles.stepCircleActive,
-              (['shipping', 'payment', 'review'].indexOf(currentStep) > index) && styles.stepCircleCompleted,
+              ['shipping', 'payment', 'review'].indexOf(currentStep) > index &&
+                styles.stepCircleCompleted,
             ]}
           >
             <Text style={styles.stepNumber}>
-              {(['shipping', 'payment', 'review'].indexOf(currentStep) > index) ? '✓' : index + 1}
+              {['shipping', 'payment', 'review'].indexOf(currentStep) > index ? '✓' : index + 1}
             </Text>
           </View>
-          <Text style={[
-            styles.stepLabel,
-            darkMode && styles.subtitleDark,
-            currentStep === step && styles.stepLabelActive,
-          ]}>
+          <Text
+            style={[
+              styles.stepLabel,
+              darkMode && styles.subtitleDark,
+              currentStep === step && styles.stepLabelActive,
+            ]}
+          >
             {step.charAt(0).toUpperCase() + step.slice(1)}
           </Text>
           {index < 2 && <View style={[styles.stepLine, darkMode && styles.stepLineDark]} />}
@@ -167,7 +170,7 @@ export default function CheckoutScreen() {
         <TextInput
           style={[styles.input, darkMode && styles.inputDark, errors.fullName && styles.inputError]}
           defaultValue={shippingAddress.fullName}
-          onChangeText={text => setShippingAddress(prev => ({ ...prev, fullName: text }))}
+          onChangeText={(text) => setShippingAddress((prev) => ({ ...prev, fullName: text }))}
           placeholder="John Doe"
           placeholderTextColor={darkMode ? '#666' : '#999'}
           autoCorrect={false}
@@ -183,7 +186,7 @@ export default function CheckoutScreen() {
         <TextInput
           style={[styles.input, darkMode && styles.inputDark, errors.street && styles.inputError]}
           defaultValue={shippingAddress.street}
-          onChangeText={text => setShippingAddress(prev => ({ ...prev, street: text }))}
+          onChangeText={(text) => setShippingAddress((prev) => ({ ...prev, street: text }))}
           placeholder="123 Main St"
           placeholderTextColor={darkMode ? '#666' : '#999'}
           autoCorrect={false}
@@ -200,12 +203,12 @@ export default function CheckoutScreen() {
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.city && styles.inputError]}
             defaultValue={shippingAddress.city}
-            onChangeText={text => setShippingAddress(prev => ({ ...prev, city: text }))}
+            onChangeText={(text) => setShippingAddress((prev) => ({ ...prev, city: text }))}
             placeholder="New York"
             placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
+            autoCorrect={false}
+            autoCapitalize="none"
+            spellCheck={false}
             testID="shipping-city"
           />
           {errors.city && <Text style={styles.errorText}>{errors.city}</Text>}
@@ -215,12 +218,12 @@ export default function CheckoutScreen() {
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.state && styles.inputError]}
             defaultValue={shippingAddress.state}
-            onChangeText={text => setShippingAddress(prev => ({ ...prev, state: text }))}
+            onChangeText={(text) => setShippingAddress((prev) => ({ ...prev, state: text }))}
             placeholder="NY"
             placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
+            autoCorrect={false}
+            autoCapitalize="none"
+            spellCheck={false}
             testID="shipping-state"
           />
           {errors.state && <Text style={styles.errorText}>{errors.state}</Text>}
@@ -231,14 +234,18 @@ export default function CheckoutScreen() {
         <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
           <Text style={[styles.label, darkMode && styles.textLight]}>ZIP Code</Text>
           <TextInput
-            style={[styles.input, darkMode && styles.inputDark, errors.zipCode && styles.inputError]}
+            style={[
+              styles.input,
+              darkMode && styles.inputDark,
+              errors.zipCode && styles.inputError,
+            ]}
             defaultValue={shippingAddress.zipCode}
-            onChangeText={text => setShippingAddress(prev => ({ ...prev, zipCode: text }))}
+            onChangeText={(text) => setShippingAddress((prev) => ({ ...prev, zipCode: text }))}
             placeholder="10001"
             placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
+            autoCorrect={false}
+            autoCapitalize="none"
+            spellCheck={false}
             keyboardType="numeric"
             testID="shipping-zip"
           />
@@ -249,12 +256,12 @@ export default function CheckoutScreen() {
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.phone && styles.inputError]}
             defaultValue={shippingAddress.phone}
-            onChangeText={text => setShippingAddress(prev => ({ ...prev, phone: text }))}
+            onChangeText={(text) => setShippingAddress((prev) => ({ ...prev, phone: text }))}
             placeholder="(555) 123-4567"
             placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
+            autoCorrect={false}
+            autoCapitalize="none"
+            spellCheck={false}
             testID="shipping-phone"
           />
           {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
@@ -270,9 +277,15 @@ export default function CheckoutScreen() {
       <View style={styles.inputGroup}>
         <Text style={[styles.label, darkMode && styles.textLight]}>Card Number</Text>
         <TextInput
-          style={[styles.input, darkMode && styles.inputDark, errors.cardNumber && styles.inputError]}
+          style={[
+            styles.input,
+            darkMode && styles.inputDark,
+            errors.cardNumber && styles.inputError,
+          ]}
           defaultValue={paymentMethod.cardNumber}
-          onChangeText={text => setPaymentMethod(prev => ({ ...prev, cardNumber: formatCardNumber(text) }))}
+          onChangeText={(text) =>
+            setPaymentMethod((prev) => ({ ...prev, cardNumber: formatCardNumber(text) }))
+          }
           placeholder="1234 5678 9012 3456"
           placeholderTextColor={darkMode ? '#666' : '#999'}
           autoCorrect={false}
@@ -287,9 +300,13 @@ export default function CheckoutScreen() {
       <View style={styles.inputGroup}>
         <Text style={[styles.label, darkMode && styles.textLight]}>Cardholder Name</Text>
         <TextInput
-          style={[styles.input, darkMode && styles.inputDark, errors.cardholderName && styles.inputError]}
+          style={[
+            styles.input,
+            darkMode && styles.inputDark,
+            errors.cardholderName && styles.inputError,
+          ]}
           defaultValue={paymentMethod.cardholderName}
-          onChangeText={text => setPaymentMethod(prev => ({ ...prev, cardholderName: text }))}
+          onChangeText={(text) => setPaymentMethod((prev) => ({ ...prev, cardholderName: text }))}
           placeholder="JOHN DOE"
           placeholderTextColor={darkMode ? '#666' : '#999'}
           autoCorrect={false}
@@ -304,14 +321,20 @@ export default function CheckoutScreen() {
         <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
           <Text style={[styles.label, darkMode && styles.textLight]}>Expiry Date</Text>
           <TextInput
-            style={[styles.input, darkMode && styles.inputDark, errors.expiryDate && styles.inputError]}
+            style={[
+              styles.input,
+              darkMode && styles.inputDark,
+              errors.expiryDate && styles.inputError,
+            ]}
             defaultValue={paymentMethod.expiryDate}
-            onChangeText={text => setPaymentMethod(prev => ({ ...prev, expiryDate: formatExpiryDate(text) }))}
+            onChangeText={(text) =>
+              setPaymentMethod((prev) => ({ ...prev, expiryDate: formatExpiryDate(text) }))
+            }
             placeholder="MM/YY"
             placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
+            autoCorrect={false}
+            autoCapitalize="none"
+            spellCheck={false}
             keyboardType="numeric"
             testID="payment-expiry"
           />
@@ -322,12 +345,14 @@ export default function CheckoutScreen() {
           <TextInput
             style={[styles.input, darkMode && styles.inputDark, errors.cvv && styles.inputError]}
             defaultValue={paymentMethod.cvv}
-            onChangeText={text => setPaymentMethod(prev => ({ ...prev, cvv: text.replace(/\D/g, '').slice(0, 4) }))}
+            onChangeText={(text) =>
+              setPaymentMethod((prev) => ({ ...prev, cvv: text.replace(/\D/g, '').slice(0, 4) }))
+            }
             placeholder="123"
             placeholderTextColor={darkMode ? '#666' : '#999'}
-          autoCorrect={false}
-          autoCapitalize="none"
-          spellCheck={false}
+            autoCorrect={false}
+            autoCapitalize="none"
+            spellCheck={false}
             keyboardType="numeric"
             secureTextEntry
             testID="payment-cvv"
@@ -351,11 +376,16 @@ export default function CheckoutScreen() {
 
       <View style={[styles.reviewCard, darkMode && styles.cardDark]}>
         <Text style={[styles.reviewLabel, darkMode && styles.subtitleDark]}>Shipping To:</Text>
-        <Text style={[styles.reviewValue, darkMode && styles.textLight]}>{shippingAddress.fullName}</Text>
-        <Text style={[styles.reviewSubvalue, darkMode && styles.subtitleDark]}>
-          {shippingAddress.street}, {shippingAddress.city}, {shippingAddress.state} {shippingAddress.zipCode}
+        <Text style={[styles.reviewValue, darkMode && styles.textLight]}>
+          {shippingAddress.fullName}
         </Text>
-        <Text style={[styles.reviewSubvalue, darkMode && styles.subtitleDark]}>{shippingAddress.phone}</Text>
+        <Text style={[styles.reviewSubvalue, darkMode && styles.subtitleDark]}>
+          {shippingAddress.street}, {shippingAddress.city}, {shippingAddress.state}{' '}
+          {shippingAddress.zipCode}
+        </Text>
+        <Text style={[styles.reviewSubvalue, darkMode && styles.subtitleDark]}>
+          {shippingAddress.phone}
+        </Text>
       </View>
 
       <View style={[styles.reviewCard, darkMode && styles.cardDark]}>
@@ -369,13 +399,17 @@ export default function CheckoutScreen() {
       </View>
 
       <View style={[styles.reviewCard, darkMode && styles.cardDark]}>
-        <Text style={[styles.reviewLabel, darkMode && styles.subtitleDark]}>Items ({items.length}):</Text>
-        {items.map(item => (
+        <Text style={[styles.reviewLabel, darkMode && styles.subtitleDark]}>
+          Items ({items.length}):
+        </Text>
+        {items.map((item) => (
           <View key={item.product.id} style={styles.reviewItem}>
             <Text style={[styles.reviewItemName, darkMode && styles.textLight]}>
               {item.quantity}x {item.product.name}
             </Text>
-            <Text style={styles.reviewItemPrice}>${(item.product.price * item.quantity).toFixed(2)}</Text>
+            <Text style={styles.reviewItemPrice}>
+              ${(item.product.price * item.quantity).toFixed(2)}
+            </Text>
           </View>
         ))}
       </View>
@@ -383,11 +417,15 @@ export default function CheckoutScreen() {
       <View style={[styles.totalCard, darkMode && styles.cardDark]}>
         <View style={styles.totalRow}>
           <Text style={[styles.totalLabel, darkMode && styles.subtitleDark]}>Subtotal</Text>
-          <Text style={[styles.totalValue, darkMode && styles.textLight]}>${getSubtotal().toFixed(2)}</Text>
+          <Text style={[styles.totalValue, darkMode && styles.textLight]}>
+            ${getSubtotal().toFixed(2)}
+          </Text>
         </View>
         <View style={styles.totalRow}>
           <Text style={[styles.totalLabel, darkMode && styles.subtitleDark]}>Tax (10%)</Text>
-          <Text style={[styles.totalValue, darkMode && styles.textLight]}>${getTax().toFixed(2)}</Text>
+          <Text style={[styles.totalValue, darkMode && styles.textLight]}>
+            ${getTax().toFixed(2)}
+          </Text>
         </View>
         <View style={styles.totalRow}>
           <Text style={[styles.totalLabel, darkMode && styles.subtitleDark]}>Shipping</Text>
@@ -416,47 +454,47 @@ export default function CheckoutScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <View style={styles.flex1} testID="checkout-screen">
-        {renderStepIndicator()}
+          {renderStepIndicator()}
 
-        <ScrollView
-          style={styles.content}
-          contentContainerStyle={styles.contentContainer}
-          keyboardShouldPersistTaps="handled"
-        >
-          {currentStep === 'shipping' && renderShippingForm()}
-          {currentStep === 'payment' && renderPaymentForm()}
-          {currentStep === 'review' && renderReview()}
-        </ScrollView>
-
-        <View style={[styles.footer, darkMode && styles.footerDark]}>
-          {currentStep !== 'shipping' && (
-            <PressableScale
-              style={[styles.backButton, darkMode && styles.backButtonDark]}
-              onPress={handleBack}
-              testID="back-btn"
-            >
-              <Text style={[styles.backButtonText, darkMode && styles.textLight]}>Back</Text>
-            </PressableScale>
-          )}
-          <PressableScale
-            style={[
-              styles.nextButton,
-              currentStep === 'shipping' && styles.nextButtonFull,
-              isProcessing && styles.nextButtonDisabled,
-            ]}
-            onPress={currentStep === 'review' ? handlePlaceOrder : handleNext}
-            enabled={!isProcessing}
-            testID={currentStep === 'review' ? 'place-order-btn' : 'next-btn'}
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            keyboardShouldPersistTaps="handled"
           >
-            {isProcessing ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.nextButtonText}>
-                {currentStep === 'review' ? 'Place Order' : 'Continue'}
-              </Text>
+            {currentStep === 'shipping' && renderShippingForm()}
+            {currentStep === 'payment' && renderPaymentForm()}
+            {currentStep === 'review' && renderReview()}
+          </ScrollView>
+
+          <View style={[styles.footer, darkMode && styles.footerDark]}>
+            {currentStep !== 'shipping' && (
+              <PressableScale
+                style={[styles.backButton, darkMode && styles.backButtonDark]}
+                onPress={handleBack}
+                testID="back-btn"
+              >
+                <Text style={[styles.backButtonText, darkMode && styles.textLight]}>Back</Text>
+              </PressableScale>
             )}
-          </PressableScale>
-        </View>
+            <PressableScale
+              style={[
+                styles.nextButton,
+                currentStep === 'shipping' && styles.nextButtonFull,
+                isProcessing && styles.nextButtonDisabled,
+              ]}
+              onPress={currentStep === 'review' ? handlePlaceOrder : handleNext}
+              enabled={!isProcessing}
+              testID={currentStep === 'review' ? 'place-order-btn' : 'next-btn'}
+            >
+              {isProcessing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.nextButtonText}>
+                  {currentStep === 'review' ? 'Place Order' : 'Continue'}
+                </Text>
+              )}
+            </PressableScale>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </>

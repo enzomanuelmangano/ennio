@@ -8,17 +8,19 @@ import { useState } from 'react';
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const products = useProductsStore(state => state.products);
-  const addToCart = useCartStore(state => state.addToCart);
-  const cartItems = useCartStore(state => state.items);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const products = useProductsStore((state) => state.products);
+  const addToCart = useCartStore((state) => state.addToCart);
+  const cartItems = useCartStore((state) => state.items);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
+  const darkMode = useSettingsStore((state) => state.preferences.darkMode);
 
   const [quantity, setQuantity] = useState(1);
-  const [selectedTab, setSelectedTab] = useState<'description' | 'specs' | 'reviews'>('description');
+  const [selectedTab, setSelectedTab] = useState<'description' | 'specs' | 'reviews'>(
+    'description',
+  );
 
-  const product = products.find(p => p.id === id);
-  const inCart = cartItems.find(item => item.product.id === id);
+  const product = products.find((p) => p.id === id);
+  const inCart = cartItems.find((item) => item.product.id === id);
 
   if (!product) {
     return (
@@ -40,14 +42,16 @@ export default function ProductDetailScreen() {
     if (hapticEnabled) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    Alert.alert(
-      'Added to Cart',
-      `${quantity}x ${product.name} added to your cart.`,
-      [
-        { text: 'Continue Shopping', style: 'cancel' },
-        { text: 'View Cart', onPress: () => { router.dismissAll(); router.push('/(tabs)/(cart)'); } },
-      ]
-    );
+    Alert.alert('Added to Cart', `${quantity}x ${product.name} added to your cart.`, [
+      { text: 'Continue Shopping', style: 'cancel' },
+      {
+        text: 'View Cart',
+        onPress: () => {
+          router.dismissAll();
+          router.push('/(tabs)/(cart)');
+        },
+      },
+    ]);
   };
 
   const handleQuantityChange = (delta: number) => {
@@ -76,7 +80,9 @@ export default function ProductDetailScreen() {
 
         <View style={styles.content}>
           <View style={styles.header}>
-            <Text style={[styles.category, darkMode && styles.subtitleDark]}>{product.category}</Text>
+            <Text style={[styles.category, darkMode && styles.subtitleDark]}>
+              {product.category}
+            </Text>
             <View style={styles.ratingBadge}>
               <Text style={styles.ratingText}>⭐ {product.rating}</Text>
             </View>
@@ -87,7 +93,9 @@ export default function ProductDetailScreen() {
           </Text>
 
           <View style={styles.priceRow}>
-            <Text style={styles.price} testID="product-price">${product.price.toFixed(2)}</Text>
+            <Text style={styles.price} testID="product-price">
+              ${product.price.toFixed(2)}
+            </Text>
             <Text style={[styles.reviews, darkMode && styles.subtitleDark]}>
               {product.reviews} reviews
             </Text>
@@ -104,7 +112,10 @@ export default function ProductDetailScreen() {
               >
                 <Text style={styles.quantityBtnText}>−</Text>
               </Pressable>
-              <Text style={[styles.quantityValue, darkMode && styles.textLight]} testID="quantity-value">
+              <Text
+                style={[styles.quantityValue, darkMode && styles.textLight]}
+                testID="quantity-value"
+              >
                 {quantity}
               </Text>
               <Pressable
@@ -119,18 +130,20 @@ export default function ProductDetailScreen() {
 
           {/* Tab Navigation */}
           <View style={styles.tabContainer}>
-            {(['description', 'specs', 'reviews'] as const).map(tab => (
+            {(['description', 'specs', 'reviews'] as const).map((tab) => (
               <PressableScale
                 key={tab}
                 style={[styles.tab, selectedTab === tab && styles.tabActive]}
                 onPress={() => setSelectedTab(tab)}
                 testID={`tab-${tab}`}
               >
-                <Text style={[
-                  styles.tabText,
-                  darkMode && styles.subtitleDark,
-                  selectedTab === tab && styles.tabTextActive,
-                ]}>
+                <Text
+                  style={[
+                    styles.tabText,
+                    darkMode && styles.subtitleDark,
+                    selectedTab === tab && styles.tabTextActive,
+                  ]}
+                >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </Text>
               </PressableScale>
@@ -140,7 +153,10 @@ export default function ProductDetailScreen() {
           {/* Tab Content */}
           <View style={[styles.tabContent, darkMode && styles.cardDark]}>
             {selectedTab === 'description' && (
-              <Text style={[styles.description, darkMode && styles.subtitleDark]} testID="product-description">
+              <Text
+                style={[styles.description, darkMode && styles.subtitleDark]}
+                testID="product-description"
+              >
                 {product.description}
               </Text>
             )}
@@ -149,8 +165,16 @@ export default function ProductDetailScreen() {
                 <SpecRow label="Category" value={product.category} darkMode={darkMode} />
                 <SpecRow label="Rating" value={`${product.rating} / 5.0`} darkMode={darkMode} />
                 <SpecRow label="Reviews" value={`${product.reviews} reviews`} darkMode={darkMode} />
-                <SpecRow label="Availability" value={product.inStock ? 'In Stock' : 'Out of Stock'} darkMode={darkMode} />
-                <SpecRow label="SKU" value={`SKU-${product.id.toUpperCase()}`} darkMode={darkMode} />
+                <SpecRow
+                  label="Availability"
+                  value={product.inStock ? 'In Stock' : 'Out of Stock'}
+                  darkMode={darkMode}
+                />
+                <SpecRow
+                  label="SKU"
+                  value={`SKU-${product.id.toUpperCase()}`}
+                  darkMode={darkMode}
+                />
               </View>
             )}
             {selectedTab === 'reviews' && (
@@ -182,9 +206,7 @@ export default function ProductDetailScreen() {
 
           {inCart && (
             <View style={styles.inCartBadge}>
-              <Text style={styles.inCartText}>
-                ✓ {inCart.quantity} already in cart
-              </Text>
+              <Text style={styles.inCartText}>✓ {inCart.quantity} already in cart</Text>
             </View>
           )}
         </View>

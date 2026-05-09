@@ -17,10 +17,10 @@ import * as Haptics from 'expo-haptics';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const login = useAuthStore(state => state.login);
-  const isLoading = useAuthStore(state => state.isLoading);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const login = useAuthStore((state) => state.login);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
+  const darkMode = useSettingsStore((state) => state.preferences.darkMode);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -60,7 +60,7 @@ export default function LoginScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       router.replace('/');
-    } catch (error) {
+    } catch {
       Alert.alert('Login Failed', 'Invalid email or password. Please try again.');
     }
   };
@@ -74,7 +74,7 @@ export default function LoginScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       router.replace('/');
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Demo login failed');
     }
   };
@@ -117,9 +117,9 @@ export default function LoginScreen() {
                 placeholder="your@email.com"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
                 value={email}
-                onChangeText={text => {
+                onChangeText={(text) => {
                   setEmail(text);
-                  if (errors.email) setErrors(prev => ({ ...prev, email: undefined }));
+                  if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
                 }}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -127,7 +127,9 @@ export default function LoginScreen() {
                 testID="email-input"
               />
               {errors.email && (
-                <Text style={styles.errorText} testID="email-error">{errors.email}</Text>
+                <Text style={styles.errorText} testID="email-error">
+                  {errors.email}
+                </Text>
               )}
             </View>
 
@@ -144,9 +146,9 @@ export default function LoginScreen() {
                   placeholder="••••••••"
                   placeholderTextColor={darkMode ? '#666' : '#999'}
                   value={password}
-                  onChangeText={text => {
+                  onChangeText={(text) => {
                     setPassword(text);
-                    if (errors.password) setErrors(prev => ({ ...prev, password: undefined }));
+                    if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
                   }}
                   secureTextEntry={!showPassword}
                   testID="password-input"
@@ -160,7 +162,9 @@ export default function LoginScreen() {
                 </PressableScale>
               </View>
               {errors.password && (
-                <Text style={styles.errorText} testID="password-error">{errors.password}</Text>
+                <Text style={styles.errorText} testID="password-error">
+                  {errors.password}
+                </Text>
               )}
             </View>
 
@@ -217,7 +221,7 @@ export default function LoginScreen() {
 
           <View style={styles.footer}>
             <Text style={[styles.footerText, darkMode && styles.subtitleDark]}>
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
             </Text>
             <Link href="/auth/register" asChild>
               <PressableScale testID="go-to-register">

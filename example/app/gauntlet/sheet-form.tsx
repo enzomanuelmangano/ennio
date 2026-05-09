@@ -7,13 +7,12 @@ export default function SheetForm() {
       <Text testID="form-sheet-title" style={styles.title}>
         formSheet
       </Text>
-      <Text style={styles.body}>
-        This screen presents as a formSheet on iOS.
-      </Text>
+      <Text style={styles.body}>This screen presents as a formSheet on iOS.</Text>
       <TouchableOpacity
         testID="form-sheet-close-btn"
         onPress={() => router.back()}
-        style={styles.btn}>
+        style={styles.btn}
+      >
         <Text style={styles.btnText}>Close</Text>
       </TouchableOpacity>
     </View>

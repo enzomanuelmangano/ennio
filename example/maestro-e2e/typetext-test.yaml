@@ -1,12 +1,12 @@
 appId: com.ennio.example
-name: "TypeText Test"
+name: 'TypeText Test'
 ---
 - tapOn:
-    text: "Products"
+    text: 'Products'
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 - tapOn:
-    id: "search-input"
-- inputText: "Wireless"
+    id: 'search-input'
+- inputText: 'Wireless'
 - assertVisible:
-    text: "Wireless"
+    text: 'Wireless'

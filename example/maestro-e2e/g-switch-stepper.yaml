@@ -1,32 +1,32 @@
 appId: com.ennio.example
-name: "Gauntlet — Switch + Stepper"
+name: 'Gauntlet — Switch + Stepper'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-switch"
+      id: 'g-switch'
     direction: DOWN
 - tapOn:
-    id: "g-switch"
+    id: 'g-switch'
 - assertVisible:
-    id: "switch-stepper-screen"
+    id: 'switch-stepper-screen'
 - assertVisible:
-    text: "off"
+    text: 'off'
 - tapOn:
-    id: "switch-control"
+    id: 'switch-control'
 - assertVisible:
-    text: "on"
+    text: 'on'
 - tapOn:
-    id: "stepper-inc"
+    id: 'stepper-inc'
 - tapOn:
-    id: "stepper-inc"
+    id: 'stepper-inc'
 - tapOn:
-    id: "stepper-inc"
+    id: 'stepper-inc'
 - assertVisible:
-    text: "3"
+    text: '3'
 - tapOn:
-    id: "stepper-dec"
+    id: 'stepper-dec'
 - assertVisible:
-    text: "2"
+    text: '2'

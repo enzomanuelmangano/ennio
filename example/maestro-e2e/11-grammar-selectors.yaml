@@ -2,61 +2,60 @@ appId: com.ennio.example
 name: Grammar — selectors (id, text, label, index, relational, state)
 ---
 - launchApp
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-playground"
+      id: 'g-playground'
     direction: DOWN
 - tapOn:
-    id: "g-playground"
+    id: 'g-playground'
 - assertVisible:
-    id: "playground-scroll"
+    id: 'playground-scroll'
 
 # id selector
 - assertVisible:
-    id: "counter-display"
+    id: 'counter-display'
 - tapOn:
-    id: "counter-inc-btn"
+    id: 'counter-inc-btn'
 - tapOn:
-    id: "counter-inc-btn"
+    id: 'counter-inc-btn'
 - tapOn:
-    id: "counter-inc-btn"
+    id: 'counter-inc-btn'
 - assertVisible:
-    text: "3"
+    text: '3'
 - tapOn:
-    id: "counter-reset-btn"
+    id: 'counter-reset-btn'
 - assertVisible:
-    text: "0"
+    text: '0'
 
 # text selector — bare string shorthand
-- assertVisible: "Toggles"
+- assertVisible: 'Toggles'
 
 # index — multiple Toggles by index
 - assertVisible:
-    id: "toggle-1"
+    id: 'toggle-1'
 - assertVisible:
-    id: "toggle-3"
+    id: 'toggle-3'
 - assertVisible:
-    id: "toggle-5"
+    id: 'toggle-5'
 
 # Search input + filtered results
 - tapOn:
-    id: "search-input"
+    id: 'search-input'
 - eraseText
-- inputText: "cherry"
+- inputText: 'cherry'
 - hideKeyboard
 - assertVisible:
-    id: "fruit-cherry"
+    id: 'fruit-cherry'
 - assertNotVisible:
-    id: "fruit-banana"
+    id: 'fruit-banana'
 
 # eraseText then verify all return
 - tapOn:
-    id: "search-input"
+    id: 'search-input'
 - eraseText
 - assertVisible:
-    id: "fruit-banana"
-
+    id: 'fruit-banana'
 # Relational selectors — Ennio matcher gap (rightOf/leftOf not implemented)
 # - assertVisible:
 #     text: "Step 2"

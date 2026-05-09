@@ -1,20 +1,20 @@
 appId: com.ennio.example
-name: "Gauntlet — Pan gesture"
+name: 'Gauntlet — Pan gesture'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-pan"
+      id: 'g-pan'
     direction: DOWN
 - tapOn:
-    id: "g-pan"
+    id: 'g-pan'
 - assertVisible:
-    id: "pan-screen"
+    id: 'pan-screen'
 - assertVisible:
-    id: "pan-box"
+    id: 'pan-box'
 - tapOn:
-    id: "pan-reset"
+    id: 'pan-reset'
 - assertVisible:
-    text: "Resets: 1"
+    text: 'Resets: 1'

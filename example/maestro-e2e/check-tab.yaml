@@ -1,5 +1,5 @@
 appId: com.ennio.example
-name: "Check Tab"
+name: 'Check Tab'
 ---
 - assertVisible:
-    text: "Home"
+    text: 'Home'

@@ -23,7 +23,11 @@ import { execFileSync } from 'child_process';
  * a sync-fetch shim.
  */
 function createSyncHttp() {
-  function send(method: string, url: string, opts: { headers?: Record<string, string>; body?: string } = {}) {
+  function send(
+    method: string,
+    url: string,
+    opts: { headers?: Record<string, string>; body?: string } = {},
+  ) {
     // execFileSync, not execSync: input flows directly into argv, never
     // through a shell interpreter — no quote-escape contract to break,
     // no glob/IFS/command-substitution surface.
@@ -49,10 +53,14 @@ function createSyncHttp() {
   }
   return {
     get: (url: string, opts?: { headers?: Record<string, string> }) => send('GET', url, opts),
-    post: (url: string, opts?: { headers?: Record<string, string>; body?: string }) => send('POST', url, opts),
-    put: (url: string, opts?: { headers?: Record<string, string>; body?: string }) => send('PUT', url, opts),
-    delete: (url: string, opts?: { headers?: Record<string, string>; body?: string }) => send('DELETE', url, opts),
-    patch: (url: string, opts?: { headers?: Record<string, string>; body?: string }) => send('PATCH', url, opts),
+    post: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
+      send('POST', url, opts),
+    put: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
+      send('PUT', url, opts),
+    delete: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
+      send('DELETE', url, opts),
+    patch: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
+      send('PATCH', url, opts),
   };
 }
 
@@ -85,11 +93,13 @@ export interface MaestroGlobal {
 /**
  * Create a new JS evaluation context with Maestro globals
  */
-export function createContext(options: {
-  platform?: 'ios' | 'android';
-  appId?: string;
-  isSimulator?: boolean;
-} = {}): JsContext {
+export function createContext(
+  options: {
+    platform?: 'ios' | 'android';
+    appId?: string;
+    isSimulator?: boolean;
+  } = {},
+): JsContext {
   const platform = options.platform || 'ios';
 
   const context: JsContext = {
@@ -238,14 +248,14 @@ export function runScript(
   filePath: string,
   env: Record<string, string> = {},
   context: JsContext,
-  basePath: string
+  basePath: string,
 ): void {
   const absolutePath = resolve(dirname(basePath), filePath);
 
   let code: string;
   try {
     code = readFileSync(absolutePath, 'utf-8');
-  } catch (err) {
+  } catch {
     throw new Error(`runScript: Could not read file ${filePath}`);
   }
 
@@ -261,7 +271,9 @@ export function runScript(
       displayErrors: true,
     });
   } catch (err) {
-    throw new Error(`runScript error in ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `runScript error in ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

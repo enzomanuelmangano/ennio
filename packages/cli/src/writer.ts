@@ -15,7 +15,6 @@
  */
 
 import type { EnnioClient, Selector } from './client';
-import { selectorToJson } from './selector';
 // Last-resort fallback for label-based taps on RNGH NativeViewGestureHandler-
 // wrapped Pressables (pressto's PressableScale). Their RNDummyGestureRecognizer
 // lives on RNGestureHandlerManager, not in any individual view's
@@ -52,8 +51,16 @@ export interface Writer {
   clearText(testID: string): Promise<boolean>;
   eraseText(testID: string | null, count: number): Promise<boolean>;
   pressKey(testID: string | null, keyName: string): Promise<boolean>;
-  scroll(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean>;
-  swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean>;
+  scroll(
+    testID: string | null,
+    direction: 'up' | 'down' | 'left' | 'right',
+    distance: number,
+  ): Promise<boolean>;
+  swipe(
+    testID: string | null,
+    direction: 'up' | 'down' | 'left' | 'right',
+    distance: number,
+  ): Promise<boolean>;
   scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean>;
   back(): Promise<boolean>;
   hideKeyboard(): Promise<boolean>;
@@ -107,7 +114,13 @@ export class NitroWriter implements Writer {
    * to `setContentOffset` inside Nitro when the start point hits a
    * UIScrollView; otherwise drives a UITouchPhaseMoved loop.
    */
-  private async swipeAtPoints(x1: number, y1: number, x2: number, y2: number, durationMs: number): Promise<boolean> {
+  private async swipeAtPoints(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    durationMs: number,
+  ): Promise<boolean> {
     const r = await this.send('swipeAtPoints', { x1, y1, x2, y2, durationMs });
     return r?.success === true;
   }
@@ -121,7 +134,9 @@ export class NitroWriter implements Writer {
         this.surfaceOffset = { x: data.x, y: data.y };
         return this.surfaceOffset;
       }
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
     this.surfaceOffset = { x: 0, y: 0 };
     return this.surfaceOffset;
   }
@@ -140,12 +155,18 @@ export class NitroWriter implements Writer {
         this.screenSize = { width: data.width, height: data.height };
         return this.screenSize;
       }
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
     this.screenSize = { width: 402, height: 874 };
     return this.screenSize;
   }
 
-  private async scrollAuto(direction: 'up' | 'down' | 'left' | 'right', distance: number, testID = ''): Promise<void> {
+  private async scrollAuto(
+    direction: 'up' | 'down' | 'left' | 'right',
+    distance: number,
+    testID = '',
+  ): Promise<void> {
     // Vertical scrolls work well via Nitro (it walks up to find the
     // enclosing UIScrollView and adjusts contentOffset). Horizontal
     // scrolls inside a vertical-host page (featured carousel under a
@@ -156,13 +177,23 @@ export class NitroWriter implements Writer {
     if (direction === 'left' || direction === 'right') {
       const endX = direction === 'right' ? SAFE_CENTER_X + distance : SAFE_CENTER_X - distance;
       try {
-        await this.swipeAtPoints(SAFE_CENTER_X, SAFE_CENTER_Y, endX, SAFE_CENTER_Y, DEFAULT_SWIPE_DURATION_MS);
-      } catch { /* best effort */ }
+        await this.swipeAtPoints(
+          SAFE_CENTER_X,
+          SAFE_CENTER_Y,
+          endX,
+          SAFE_CENTER_Y,
+          DEFAULT_SWIPE_DURATION_MS,
+        );
+      } catch {
+        /* best effort */
+      }
       return;
     }
     try {
       await this.send('scroll', { testID, direction, distance });
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
   }
 
   async tap(testID: string): Promise<boolean> {
@@ -193,7 +224,9 @@ export class NitroWriter implements Writer {
     try {
       await this.send('hideKeyboard', {});
       await new Promise((r) => setTimeout(r, 120));
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
     const fresh = await this.layoutCenter({ id: testID });
     const target = fresh ?? center;
     return this.tapAtPoint(target.x, target.y);
@@ -232,7 +265,9 @@ export class NitroWriter implements Writer {
           const onScreen = cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height;
           if (onScreen) {
             if (process.env.ENNIO_DEBUG_IDB) {
-              console.error(`[layout] id=${selector.id} → window=(${data.x},${data.y},${data.width},${data.height})`);
+              console.error(
+                `[layout] id=${selector.id} → window=(${data.x},${data.y},${data.width},${data.height})`,
+              );
             }
             return { x: cx, y: cy };
           }
@@ -247,11 +282,18 @@ export class NitroWriter implements Writer {
     // Compound / text-only selectors: walk the Fabric shadow tree, then
     // add the React surface's window offset.
     const found = await this.client.findBySelector(selector);
-    const layout = (found as { layout?: { screenX: number; screenY: number; width: number; height: number } } | null | undefined)?.layout;
+    const layout = (
+      found as
+        | { layout?: { screenX: number; screenY: number; width: number; height: number } }
+        | null
+        | undefined
+    )?.layout;
     if (!layout || layout.width <= 0 || layout.height <= 0) return null;
     const offset = await this.getSurfaceOffset();
     if (process.env.ENNIO_DEBUG_IDB) {
-      console.error(`[layout] ${JSON.stringify(selector)} → frame=(${layout.screenX},${layout.screenY},${layout.width},${layout.height}) offset=(${offset.x},${offset.y})`);
+      console.error(
+        `[layout] ${JSON.stringify(selector)} → frame=(${layout.screenX},${layout.screenY},${layout.width},${layout.height}) offset=(${offset.x},${offset.y})`,
+      );
     }
     return {
       x: layout.screenX + layout.width / 2 + offset.x,
@@ -341,7 +383,11 @@ export class NitroWriter implements Writer {
     const r = await this.send('pressHardwareKey', { keyCode: code });
     return r?.success === true;
   }
-  async scroll(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
+  async scroll(
+    testID: string | null,
+    direction: 'up' | 'down' | 'left' | 'right',
+    distance: number,
+  ): Promise<boolean> {
     // Vertical scroll: route through the native `scroll` cmd, which
     // walks up to the enclosing UIScrollView and bumps contentOffset
     // directly. A swipe-at-centre gesture risks being captured by an
@@ -374,13 +420,25 @@ export class NitroWriter implements Writer {
     try {
       await idb.swipe(startX, midY, endX, midY, DEFAULT_SWIPE_DURATION_MS);
       return true;
-    } catch { /* fall back to synthesised UITouch path below */ }
+    } catch {
+      /* fall back to synthesised UITouch path below */
+    }
     let endXSynth = SAFE_CENTER_X;
     if (direction === 'right') endXSynth = SAFE_CENTER_X + distance;
     else if (direction === 'left') endXSynth = SAFE_CENTER_X - distance;
-    return this.swipeAtPoints(SAFE_CENTER_X, SAFE_CENTER_Y, endXSynth, SAFE_CENTER_Y, DEFAULT_SWIPE_DURATION_MS);
+    return this.swipeAtPoints(
+      SAFE_CENTER_X,
+      SAFE_CENTER_Y,
+      endXSynth,
+      SAFE_CENTER_Y,
+      DEFAULT_SWIPE_DURATION_MS,
+    );
   }
-  async swipe(testID: string | null, direction: 'up' | 'down' | 'left' | 'right', distance: number): Promise<boolean> {
+  async swipe(
+    testID: string | null,
+    direction: 'up' | 'down' | 'left' | 'right',
+    distance: number,
+  ): Promise<boolean> {
     return this.scroll(testID, direction, distance);
   }
   async scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean> {
@@ -443,7 +501,8 @@ export class NitroWriter implements Writer {
     // walks (UITabBarButton stays opaque). Drive the UITabBarController
     // directly before falling back to coordinate taps.
     const tab = await this.send('tapTabByName', { name: text });
-    if (process.env.ENNIO_DEBUG_IDB) console.error(`[tapByText] '${text}' tabSwitch=${tab?.success}`);
+    if (process.env.ENNIO_DEBUG_IDB)
+      console.error(`[tapByText] '${text}' tabSwitch=${tab?.success}`);
     if (tab?.success === true) return true;
     // Fiber-walker dispatch. Finds the React fiber whose RawText
     // matches `text`, walks .return to the surrounding Pressable, and
@@ -466,14 +525,22 @@ export class NitroWriter implements Writer {
       const cx = data.x + data.width / 2;
       const cy = data.y + data.height / 2;
       if (await this.tapAtPoint(cx, cy)) {
-        try { await idb.tap(cx, cy, 150); } catch { /* best effort */ }
+        try {
+          await idb.tap(cx, cy, 150);
+        } catch {
+          /* best effort */
+        }
         return true;
       }
     }
     const c = await this.layoutCenter({ text });
     if (c) {
       if (await this.tapAtPoint(c.x, c.y)) {
-        try { await idb.tap(c.x, c.y, 150); } catch { /* best effort */ }
+        try {
+          await idb.tap(c.x, c.y, 150);
+        } catch {
+          /* best effort */
+        }
         return true;
       }
     }
@@ -483,7 +550,9 @@ export class NitroWriter implements Writer {
     // out-of-process zeego UIMenu items.
     try {
       if (await idb.tapByLabelOOP(text)) return true;
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
     return false;
   }
   async tapAlertButton(buttonText: string): Promise<boolean> {
@@ -503,4 +572,3 @@ export class NitroWriter implements Writer {
     return r?.success === true;
   }
 }
-

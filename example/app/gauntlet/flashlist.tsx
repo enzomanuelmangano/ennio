@@ -1,7 +1,10 @@
 import { FlashList } from '@shopify/flash-list';
 import { Text, View, StyleSheet } from 'react-native';
 
-const ITEMS = Array.from({ length: 200 }, (_, i) => ({ id: `flash-${i}`, label: `Item #${i + 1}` }));
+const ITEMS = Array.from({ length: 200 }, (_, i) => ({
+  id: `flash-${i}`,
+  label: `Item #${i + 1}`,
+}));
 
 export default function FlashListScreen() {
   return (

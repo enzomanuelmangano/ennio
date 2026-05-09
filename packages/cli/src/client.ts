@@ -125,11 +125,14 @@ export interface Selector {
 
 export class EnnioClient {
   private ws: WebSocket | null = null;
-  private pending = new Map<string, {
-    resolve: (r: EnnioResponse) => void;
-    reject: (e: Error) => void;
-    timeoutHandle?: ReturnType<typeof setTimeout>;
-  }>();
+  private pending = new Map<
+    string,
+    {
+      resolve: (r: EnnioResponse) => void;
+      reject: (e: Error) => void;
+      timeoutHandle?: ReturnType<typeof setTimeout>;
+    }
+  >();
   private messageId = 0;
   private port: number;
 
@@ -143,7 +146,8 @@ export class EnnioClient {
       this.ws = new WebSocket(url);
 
       this.ws.onopen = () => resolve();
-      this.ws.onerror = () => reject(new Error(`Failed to connect to Ennio server on port ${this.port}`));
+      this.ws.onerror = () =>
+        reject(new Error(`Failed to connect to Ennio server on port ${this.port}`));
 
       this.ws.onmessage = (event) => {
         try {
@@ -286,11 +290,19 @@ export class EnnioClient {
    * relative; Stack-pushed screens have a non-window-origin surface and
    * the shadow comparison rejects elements that are clearly on screen.
    */
-  async getViewWindowFrame(testID: string): Promise<{ x: number; y: number; width: number; height: number } | null> {
+  async getViewWindowFrame(
+    testID: string,
+  ): Promise<{ x: number; y: number; width: number; height: number } | null> {
     const response = await this.send('getViewWindowFrame', { testID });
     if (!response.success || !response.data || typeof response.data !== 'object') return null;
     const r = response.data as { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
-    if (typeof r.x !== 'number' || typeof r.y !== 'number' || typeof r.width !== 'number' || typeof r.height !== 'number') return null;
+    if (
+      typeof r.x !== 'number' ||
+      typeof r.y !== 'number' ||
+      typeof r.width !== 'number' ||
+      typeof r.height !== 'number'
+    )
+      return null;
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   }
 

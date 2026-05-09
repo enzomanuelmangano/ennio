@@ -7,7 +7,9 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "test:e2e": "npx ennio e2e/"
+    "test:e2e": "npx ennio e2e/",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ennio/core": "*",

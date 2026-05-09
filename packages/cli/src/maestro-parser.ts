@@ -59,8 +59,19 @@ export type MaestroCommand =
   | { clearText: MaestroSelector | string }
   | { eraseText: number | { characters?: number } }
   | { scroll: { direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'; amount?: number } }
-  | { scrollUntilVisible: MaestroSelector | { element: MaestroSelector; direction?: string; timeout?: number } }
-  | { swipe: { direction?: string; start?: string | { x: number; y: number }; end?: string | { x: number; y: number }; duration?: number } }
+  | {
+      scrollUntilVisible:
+        | MaestroSelector
+        | { element: MaestroSelector; direction?: string; timeout?: number };
+    }
+  | {
+      swipe: {
+        direction?: string;
+        start?: string | { x: number; y: number };
+        end?: string | { x: number; y: number };
+        duration?: number;
+      };
+    }
   | { longPress: MaestroSelector | string }
   | { back: true }
   | { runFlow: RunFlowCommand }
@@ -84,12 +95,18 @@ export type MaestroCommand =
   | { setPermissions: Record<string, 'allow' | 'deny' | 'unset'> }
   | { setAirplaneMode: 'enabled' | 'disabled' | true | false }
   | { toggleAirplaneMode: true | Record<string, never> }
-  | { travel: { points: Array<{ latitude: number; longitude: number } | string>; speed?: number } }
+  | { travel: { points: ({ latitude: number; longitude: number } | string)[]; speed?: number } }
   | { startRecording: string | { path: string } }
   | { stopRecording: true }
   | { addMedia: string[] | { files: string[] } }
   | { waitForAnimationToEnd: true | { timeout?: number } }
-  | { extendedWaitUntil: { visible?: MaestroSelector; notVisible?: MaestroSelector; timeout?: number } }
+  | {
+      extendedWaitUntil: {
+        visible?: MaestroSelector;
+        notVisible?: MaestroSelector;
+        timeout?: number;
+      };
+    }
   | { inputRandomEmail: true | Record<string, never> }
   | { inputRandomNumber: true | { length?: number } }
   | { inputRandomText: true | { length?: number } }
@@ -254,7 +271,7 @@ export function resolveSubflowPath(currentFlowPath: string, subflowPath: string)
  */
 export function expandFlow(
   flow: MaestroFlow,
-  expandedPaths = new Set<string>()
+  expandedPaths = new Set<string>(),
 ): { commands: MaestroCommand[]; subflows: MaestroFlow[] } {
   // Prevent infinite recursion
   if (expandedPaths.has(flow.filePath)) {

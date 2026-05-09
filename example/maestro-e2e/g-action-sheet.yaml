@@ -1,19 +1,19 @@
 appId: com.ennio.example
-name: "Gauntlet — Action sheet"
+name: 'Gauntlet — Action sheet'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-action-sheet"
+      id: 'g-action-sheet'
     direction: DOWN
 - tapOn:
-    id: "g-action-sheet"
+    id: 'g-action-sheet'
 - assertVisible:
-    id: "action-sheet-screen"
+    id: 'action-sheet-screen'
 - tapOn:
-    id: "action-sheet-open"
-- tapOn: "Save"
+    id: 'action-sheet-open'
+- tapOn: 'Save'
 - assertVisible:
-    text: "Save"
+    text: 'Save'

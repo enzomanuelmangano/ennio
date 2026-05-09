@@ -8,7 +8,8 @@ export default function HomeLayout() {
         headerLargeTitle: true,
         headerLargeTitleShadowVisible: false,
         headerShadowVisible: false,
-      }}>
+      }}
+    >
       <Stack.Screen name="index" options={{ headerTitle: 'Home' }} />
     </Stack>
   );

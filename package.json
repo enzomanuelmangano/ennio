@@ -10,12 +10,20 @@
     "clean": "turbo run clean",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
+    "lint:fix": "turbo run lint -- --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "android": "expo run:android",
     "ios": "expo run:ios"
   },
   "devDependencies": {
+    "eslint": "^9.18.0",
+    "eslint-config-expo": "^9.2.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
     "turbo": "^2.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.20.0"
   },
   "packageManager": "bun@1.2.19",
   "engines": {

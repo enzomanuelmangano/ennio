@@ -1,26 +1,26 @@
 appId: com.ennio.example
-name: "Gauntlet — FlashList"
+name: 'Gauntlet — FlashList'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - assertVisible:
-    id: "gauntlet-screen"
+    id: 'gauntlet-screen'
 - scrollUntilVisible:
     element:
-      id: "g-flashlist"
+      id: 'g-flashlist'
     direction: DOWN
 - tapOn:
-    id: "g-flashlist"
+    id: 'g-flashlist'
 - assertVisible:
-    id: "flashlist-screen"
+    id: 'flashlist-screen'
 - assertVisible:
-    id: "flash-0"
+    id: 'flash-0'
 - assertVisible:
-    text: "Item #1"
+    text: 'Item #1'
 - scrollUntilVisible:
     element:
-      text: "Item #5"
+      text: 'Item #5'
     direction: DOWN
 - assertVisible:
-    text: "Item #5"
+    text: 'Item #5'

@@ -161,11 +161,7 @@ function FormScreen({ onBack }: FormScreenProps) {
           <Text style={styles.successMessage} testID="success-message">
             Welcome, {name}!
           </Text>
-          <TouchableOpacity
-            style={styles.button}
-            testID="reset-btn"
-            onPress={handleReset}
-          >
+          <TouchableOpacity style={styles.button} testID="reset-btn" onPress={handleReset}>
             <Text style={styles.buttonText}>Start Over</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.backButton} testID="back-btn" onPress={onBack}>
@@ -311,7 +307,7 @@ function ListScreen({ onBack }: ListScreenProps) {
           return { ...item, selected: newSelected };
         }
         return item;
-      })
+      }),
     );
   };
 

@@ -68,11 +68,9 @@ function SettingButton({
     >
       <Text style={styles.settingIcon}>{icon}</Text>
       <View style={styles.settingContent}>
-        <Text style={[
-          styles.settingLabel,
-          darkMode && styles.textLight,
-          danger && styles.dangerText,
-        ]}>
+        <Text
+          style={[styles.settingLabel, darkMode && styles.textLight, danger && styles.dangerText]}
+        >
           {label}
         </Text>
       </View>
@@ -83,23 +81,21 @@ function SettingButton({
 }
 
 function SectionHeader({ title, darkMode }: { title: string; darkMode: boolean }) {
-  return (
-    <Text style={[styles.sectionHeader, darkMode && styles.subtitleDark]}>{title}</Text>
-  );
+  return <Text style={[styles.sectionHeader, darkMode && styles.subtitleDark]}>{title}</Text>;
 }
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const preferences = useSettingsStore(state => state.preferences);
-  const notifications = useSettingsStore(state => state.notifications);
-  const privacy = useSettingsStore(state => state.privacy);
-  const updatePreference = useSettingsStore(state => state.updatePreference);
-  const updateNotification = useSettingsStore(state => state.updateNotification);
-  const updatePrivacy = useSettingsStore(state => state.updatePrivacy);
-  const resetSettings = useSettingsStore(state => state.resetSettings);
-  const isAuthenticated = useAuthStore(state => state.isAuthenticated);
-  const logout = useAuthStore(state => state.logout);
-  const clearCart = useCartStore(state => state.clearCart);
+  const preferences = useSettingsStore((state) => state.preferences);
+  const notifications = useSettingsStore((state) => state.notifications);
+  const privacy = useSettingsStore((state) => state.privacy);
+  const updatePreference = useSettingsStore((state) => state.updatePreference);
+  const updateNotification = useSettingsStore((state) => state.updateNotification);
+  const updatePrivacy = useSettingsStore((state) => state.updatePrivacy);
+  const resetSettings = useSettingsStore((state) => state.resetSettings);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const logout = useAuthStore((state) => state.logout);
+  const clearCart = useCartStore((state) => state.clearCart);
 
   const darkMode = preferences.darkMode;
 
@@ -132,7 +128,7 @@ export default function SettingsScreen() {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -153,26 +149,22 @@ export default function SettingsScreen() {
             Alert.alert('Done', 'All data has been cleared.');
           },
         },
-      ]
+      ],
     );
   };
 
   const handleLogout = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: () => {
-            logout();
-            router.back();
-          },
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: () => {
+          logout();
+          router.back();
         },
-      ]
-    );
+      },
+    ]);
   };
 
   return (
@@ -191,7 +183,7 @@ export default function SettingsScreen() {
             label="Dark Mode"
             description="Use dark theme throughout the app"
             value={preferences.darkMode}
-            onToggle={v => handleToggle('darkMode', v, 'pref')}
+            onToggle={(v) => handleToggle('darkMode', v, 'pref')}
             darkMode={darkMode}
             testID="toggle-dark-mode"
           />
@@ -200,7 +192,7 @@ export default function SettingsScreen() {
             label="Haptic Feedback"
             description="Vibrate on button presses"
             value={preferences.hapticFeedback}
-            onToggle={v => handleToggle('hapticFeedback', v, 'pref')}
+            onToggle={(v) => handleToggle('hapticFeedback', v, 'pref')}
             darkMode={darkMode}
             testID="toggle-haptic"
           />
@@ -208,7 +200,7 @@ export default function SettingsScreen() {
             icon="🔔"
             label="Show Notifications Badge"
             value={preferences.showBadges}
-            onToggle={v => handleToggle('showBadges', v, 'pref')}
+            onToggle={(v) => handleToggle('showBadges', v, 'pref')}
             darkMode={darkMode}
             testID="toggle-badges"
           />
@@ -222,7 +214,7 @@ export default function SettingsScreen() {
             label="Order Updates"
             description="Get notified about order status changes"
             value={notifications.orderUpdates}
-            onToggle={v => handleToggle('orderUpdates', v, 'notif')}
+            onToggle={(v) => handleToggle('orderUpdates', v, 'notif')}
             darkMode={darkMode}
             testID="toggle-order-updates"
           />
@@ -231,7 +223,7 @@ export default function SettingsScreen() {
             label="Promotions"
             description="Receive deals and promotional offers"
             value={notifications.promotions}
-            onToggle={v => handleToggle('promotions', v, 'notif')}
+            onToggle={(v) => handleToggle('promotions', v, 'notif')}
             darkMode={darkMode}
             testID="toggle-promotions"
           />
@@ -240,7 +232,7 @@ export default function SettingsScreen() {
             label="New Arrivals"
             description="Be notified when new products are added"
             value={notifications.newArrivals}
-            onToggle={v => handleToggle('newArrivals', v, 'notif')}
+            onToggle={(v) => handleToggle('newArrivals', v, 'notif')}
             darkMode={darkMode}
             testID="toggle-new-arrivals"
           />
@@ -249,7 +241,7 @@ export default function SettingsScreen() {
             label="Price Drops"
             description="Get alerts when saved items go on sale"
             value={notifications.priceDrops}
-            onToggle={v => handleToggle('priceDrops', v, 'notif')}
+            onToggle={(v) => handleToggle('priceDrops', v, 'notif')}
             darkMode={darkMode}
             testID="toggle-price-drops"
           />
@@ -263,7 +255,7 @@ export default function SettingsScreen() {
             label="Analytics"
             description="Help us improve by sharing anonymous usage data"
             value={privacy.analytics}
-            onToggle={v => handleToggle('analytics', v, 'privacy')}
+            onToggle={(v) => handleToggle('analytics', v, 'privacy')}
             darkMode={darkMode}
             testID="toggle-analytics"
           />
@@ -272,7 +264,7 @@ export default function SettingsScreen() {
             label="Personalized Ads"
             description="See ads based on your interests"
             value={privacy.personalizedAds}
-            onToggle={v => handleToggle('personalizedAds', v, 'privacy')}
+            onToggle={(v) => handleToggle('personalizedAds', v, 'privacy')}
             darkMode={darkMode}
             testID="toggle-personalized-ads"
           />
@@ -281,7 +273,7 @@ export default function SettingsScreen() {
             label="Location Services"
             description="Allow location access for local deals"
             value={privacy.locationServices}
-            onToggle={v => handleToggle('locationServices', v, 'privacy')}
+            onToggle={(v) => handleToggle('locationServices', v, 'privacy')}
             darkMode={darkMode}
             testID="toggle-location"
           />
@@ -295,14 +287,18 @@ export default function SettingsScreen() {
               <SettingButton
                 icon="👤"
                 label="Edit Profile"
-                onPress={() => Alert.alert('Coming Soon', 'Profile editing will be available soon!')}
+                onPress={() =>
+                  Alert.alert('Coming Soon', 'Profile editing will be available soon!')
+                }
                 darkMode={darkMode}
                 testID="edit-profile"
               />
               <SettingButton
                 icon="🔑"
                 label="Change Password"
-                onPress={() => Alert.alert('Coming Soon', 'Password change will be available soon!')}
+                onPress={() =>
+                  Alert.alert('Coming Soon', 'Password change will be available soon!')
+                }
                 darkMode={darkMode}
                 testID="change-password"
               />

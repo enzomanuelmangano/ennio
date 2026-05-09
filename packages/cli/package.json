@@ -5,6 +5,10 @@
   "bin": {
     "ennio": "./src/index.ts"
   },
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "esbuild": "^0.21.0",
     "glob": "^10.0.0",

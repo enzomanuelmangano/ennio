@@ -7,11 +7,6 @@
 
 import type { EnnioClient, Selector } from './client';
 
-// iPhone 17 Pro logical viewport. Generous-enough for any iPhone tested;
-// anything past this is unambiguously off-screen for visibility checks.
-const IPHONE_VIEWPORT_WIDTH = 440;
-const IPHONE_VIEWPORT_HEIGHT = 956;
-
 export interface Reader {
   /** Element with `testID` exists in the visible UI. */
   existsById(testID: string): Promise<boolean>;

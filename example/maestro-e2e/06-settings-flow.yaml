@@ -2,12 +2,11 @@
 # Tests all settings toggles and configurations
 
 appId: com.ennio.example
-name: "Settings Flow"
+name: 'Settings Flow'
 tags:
   - settings
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -21,23 +20,23 @@ tags:
 # Sign in so account-section settings (edit-profile, change-password,
 # sign-out) render — flow scrolls to and asserts those later.
 - tapOn:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 - assertNotVisible:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # ============================================
 # TEST: Navigate to settings via quick action
 # ============================================
 
 - tapOn:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 
 - assertVisible:
-    id: "settings-screen"
+    id: 'settings-screen'
 
 # ============================================
 # TEST: Appearance settings
@@ -45,31 +44,31 @@ tags:
 
 # Dark mode toggle
 - assertVisible:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 # UI should update to dark mode
 # Toggle back
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 # Haptic feedback toggle
 - assertVisible:
-    id: "toggle-haptic"
+    id: 'toggle-haptic'
 - tapOn:
-    id: "toggle-haptic"
+    id: 'toggle-haptic'
 - tapOn:
-    id: "toggle-haptic"
+    id: 'toggle-haptic'
 
 # Notification badges toggle
 - assertVisible:
-    id: "toggle-badges"
+    id: 'toggle-badges'
 - tapOn:
-    id: "toggle-badges"
+    id: 'toggle-badges'
 - tapOn:
-    id: "toggle-badges"
+    id: 'toggle-badges'
 
 # ============================================
 # TEST: Notification settings
@@ -77,38 +76,38 @@ tags:
 
 - scrollUntilVisible:
     element:
-      id: "toggle-order-updates"
+      id: 'toggle-order-updates'
     direction: DOWN
 
 # Order updates
 - assertVisible:
-    id: "toggle-order-updates"
+    id: 'toggle-order-updates'
 - tapOn:
-    id: "toggle-order-updates"
+    id: 'toggle-order-updates'
 - tapOn:
-    id: "toggle-order-updates"
+    id: 'toggle-order-updates'
 
 # Promotions
 - assertVisible:
-    id: "toggle-promotions"
+    id: 'toggle-promotions'
 - tapOn:
-    id: "toggle-promotions"
+    id: 'toggle-promotions'
 
 # New arrivals
 - assertVisible:
-    id: "toggle-new-arrivals"
+    id: 'toggle-new-arrivals'
 - tapOn:
-    id: "toggle-new-arrivals"
+    id: 'toggle-new-arrivals'
 - tapOn:
-    id: "toggle-new-arrivals"
+    id: 'toggle-new-arrivals'
 
 # Price drops
 - assertVisible:
-    id: "toggle-price-drops"
+    id: 'toggle-price-drops'
 - tapOn:
-    id: "toggle-price-drops"
+    id: 'toggle-price-drops'
 - tapOn:
-    id: "toggle-price-drops"
+    id: 'toggle-price-drops'
 
 # ============================================
 # TEST: Privacy settings
@@ -116,34 +115,34 @@ tags:
 
 - scrollUntilVisible:
     element:
-      id: "toggle-analytics"
+      id: 'toggle-analytics'
     direction: DOWN
 
 # Analytics
 - assertVisible:
-    id: "toggle-analytics"
+    id: 'toggle-analytics'
 - tapOn:
-    id: "toggle-analytics"
+    id: 'toggle-analytics'
 
 # Personalized ads
 - assertVisible:
-    id: "toggle-personalized-ads"
+    id: 'toggle-personalized-ads'
 - tapOn:
-    id: "toggle-personalized-ads"
+    id: 'toggle-personalized-ads'
 - tapOn:
-    id: "toggle-personalized-ads"
+    id: 'toggle-personalized-ads'
 
 # Location services — below the fold after the previous toggles
 - scrollUntilVisible:
     element:
-      id: "toggle-location"
+      id: 'toggle-location'
     direction: DOWN
 - assertVisible:
-    id: "toggle-location"
+    id: 'toggle-location'
 - tapOn:
-    id: "toggle-location"
+    id: 'toggle-location'
 - tapOn:
-    id: "toggle-location"
+    id: 'toggle-location'
 
 # ============================================
 # TEST: Account settings (when logged in)
@@ -154,29 +153,29 @@ tags:
     file: subflows/navigate-home.yaml
 
 - tapOn:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 
 - assertVisible:
-    id: "settings-screen"
+    id: 'settings-screen'
 
 - scrollUntilVisible:
     element:
-      id: "edit-profile"
+      id: 'edit-profile'
     direction: DOWN
 
 # Edit profile button
 - assertVisible:
-    id: "edit-profile"
+    id: 'edit-profile'
 
 # Change password button
 - assertVisible:
-    id: "change-password"
+    id: 'change-password'
 
 # Scroll until sign-out is on screen (settings scroll length varies
 # with toggle states / dynamic island padding).
 - scrollUntilVisible:
     element:
-      id: "sign-out"
+      id: 'sign-out'
     direction: DOWN
 
 # ============================================
@@ -188,17 +187,17 @@ tags:
 # scrollable, so they're already visible by the time we land.
 - scrollUntilVisible:
     element:
-      id: "help"
+      id: 'help'
     direction: DOWN
 
 - assertVisible:
-    id: "app-version"
+    id: 'app-version'
 - assertVisible:
-    id: "terms"
+    id: 'terms'
 - assertVisible:
-    id: "privacy-policy"
+    id: 'privacy-policy'
 - assertVisible:
-    id: "help"
+    id: 'help'
 
 # ============================================
 # TEST: Danger zone actions
@@ -208,31 +207,31 @@ tags:
 # the settings ScrollView).
 - scrollUntilVisible:
     element:
-      id: "reset-settings"
+      id: 'reset-settings'
     direction: DOWN
 
 # Clear cart & orders
 - assertVisible:
-    id: "clear-data"
+    id: 'clear-data'
 
 # Reset all settings
 - assertVisible:
-    id: "reset-settings"
+    id: 'reset-settings'
 
 # Test reset settings with confirmation
 - tapOn:
-    id: "reset-settings"
+    id: 'reset-settings'
 
 - assertVisible:
-    text: "Reset Settings"
+    text: 'Reset Settings'
 
 # Cancel the reset
 - tapOn:
-    text: "Cancel"
+    text: 'Cancel'
 
 # Settings should still be visible
 - assertVisible:
-    id: "settings-screen"
+    id: 'settings-screen'
 
 # ============================================
 # TEST: Navigate via profile menu
@@ -242,16 +241,16 @@ tags:
 - back
 
 - tapOn:
-    text: "Profile"
+    text: 'Profile'
 
 - assertVisible:
-    id: "profile-screen"
+    id: 'profile-screen'
 
 - tapOn:
-    id: "menu-settings"
+    id: 'menu-settings'
 
 - assertVisible:
-    id: "settings-screen"
+    id: 'settings-screen'
 
 # ============================================
 # TEST: Dark mode persists across screens
@@ -259,15 +258,15 @@ tags:
 
 - scrollUntilVisible:
     element:
-      id: "toggle-dark-mode"
+      id: 'toggle-dark-mode'
     direction: UP
 
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'
 
 # Defensive: dismiss any stray alert (optional — no-op when absent).
 - tapOn:
-    text: "OK"
+    text: 'OK'
     optional: true
 
 # Navigate to other screens and verify dark mode
@@ -276,7 +275,7 @@ tags:
 
 # Navigate back and toggle off
 - tapOn:
-    id: "quick-action-settings"
+    id: 'quick-action-settings'
 
 - tapOn:
-    id: "toggle-dark-mode"
+    id: 'toggle-dark-mode'

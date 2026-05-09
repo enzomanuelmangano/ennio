@@ -10,7 +10,7 @@
 #  - travel
 
 appId: com.ennio.example
-name: "Grammar Extras"
+name: 'Grammar Extras'
 tags:
   - grammar
   - parity
@@ -21,7 +21,6 @@ onFlowStart:
   - clearKeychain
 
 ---
-
 # Bare-string clearState — must work without `: true` payload.
 - clearState
 
@@ -30,11 +29,11 @@ onFlowStart:
 
 # Wait for the app to settle on Home.
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # Optional tap on a non-existent element — must not fail.
 - tapOn:
-    id: "this-element-does-not-exist"
+    id: 'this-element-does-not-exist'
     optional: true
 
 # dismissAlert / setAirplaneMode / travel are Ennio extensions that
@@ -43,24 +42,24 @@ onFlowStart:
 # inputRandom* family. We need a focused TextInput first — sign-in flow
 # has one.
 - tapOn:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 - assertVisible:
-    id: "login-screen"
+    id: 'login-screen'
 - tapOn:
-    id: "email-input"
+    id: 'email-input'
 - inputRandomEmail
 
 - tapOn:
-    id: "password-input"
+    id: 'password-input'
 - inputRandomText:
     length: 10
 
 # Erase and try inputRandomNumber on the same field.
 - tapOn:
-    id: "password-input"
+    id: 'password-input'
 - eraseText
 - tapOn:
-    id: "password-input"
+    id: 'password-input'
 - inputRandomNumber:
     length: 6
 
@@ -70,4 +69,4 @@ onFlowStart:
 - killApp
 - launchApp
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'

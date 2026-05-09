@@ -4,14 +4,7 @@
  * Complete journey from browse to order delivery
  */
 import { element, sleep, runTest } from '@ennio/test';
-import {
-  goHome,
-  goProducts,
-  goCart,
-  goProfile,
-  clearCart,
-  ensureLoggedOut,
-} from './shared';
+import { goHome, goProducts, goCart, goProfile, clearCart, ensureLoggedOut } from './shared';
 
 // ============================================
 // PHASE 1: Fresh Start

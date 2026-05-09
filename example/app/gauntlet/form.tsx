@@ -18,7 +18,11 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function FormScreen() {
-  const { control, handleSubmit, formState: { errors } } = useForm<FormValues>({
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<FormValues>({
     resolver: zodResolver(schema),
     mode: 'onSubmit',
   });
@@ -72,7 +76,7 @@ export default function FormScreen() {
       <PressableScale
         testID="form-submit"
         style={styles.button}
-        onPress={handleSubmit((v) => setSubmitted(v))}
+        onPress={() => handleSubmit((v) => setSubmitted(v))()}
       >
         <Text style={styles.buttonText}>Submit</Text>
       </PressableScale>
@@ -92,7 +96,13 @@ const styles = StyleSheet.create({
   label: { fontSize: 14, color: '#666', marginTop: 12, marginBottom: 4 },
   input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 12 },
   error: { color: '#FF3B30', marginTop: 4, fontSize: 12 },
-  button: { backgroundColor: '#007AFF', padding: 14, borderRadius: 10, alignItems: 'center', marginTop: 24 },
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 24,
+  },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   success: { marginTop: 16, color: '#34C759' },
 });

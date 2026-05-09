@@ -3,7 +3,7 @@ import { Stack } from 'expo-router';
 import { useCartStore } from '../../store';
 
 export default function TabLayout() {
-  const cartItemCount = useCartStore(state => state.getItemCount());
+  const cartItemCount = useCartStore((state) => state.getItemCount());
 
   return (
     <>
@@ -37,8 +37,10 @@ export default function TabLayout() {
               selected: 'cart.fill',
             }}
             md="shopping_cart"
-            badge={cartItemCount > 0 ? String(cartItemCount) : undefined}
           />
+          {cartItemCount > 0 && (
+            <NativeTabs.Trigger.Badge>{String(cartItemCount)}</NativeTabs.Trigger.Badge>
+          )}
         </NativeTabs.Trigger>
         <NativeTabs.Trigger name="(profile)" testID="tab-profile">
           <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>

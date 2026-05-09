@@ -7,7 +7,7 @@
 module.exports = {
   dependency: {
     platforms: {
-      ios: null,     // Disable iOS autolinking
+      ios: null, // Disable iOS autolinking
       android: null, // Disable Android autolinking
     },
   },

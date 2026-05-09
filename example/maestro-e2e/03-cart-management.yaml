@@ -2,13 +2,12 @@
 # Tests add/remove items, quantity updates, cart summary
 
 appId: com.ennio.example
-name: "Cart Management"
+name: 'Cart Management'
 tags:
   - cart
   - critical
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -26,30 +25,30 @@ tags:
 # ============================================
 
 - assertVisible:
-    id: "cart-screen-empty"
+    id: 'cart-screen-empty'
 
 - assertVisible:
-    text: "Your cart is empty"
+    text: 'Your cart is empty'
 
 - assertVisible:
-    id: "browse-products-btn"
+    id: 'browse-products-btn'
 
 # ============================================
 # TEST: Navigate to products from empty cart
 # ============================================
 
 - tapOn:
-    id: "browse-products-btn"
+    id: 'browse-products-btn'
 
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 
 # ============================================
 # TEST: Add product to cart from products list
 # ============================================
 
 - tapOn:
-    id: "add-to-cart-1"
+    id: 'add-to-cart-1'
 
 # Cart badge should update (if visible)
 # Navigate to cart to verify
@@ -57,10 +56,10 @@ tags:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-screen"
+    id: 'cart-screen'
 
 - assertVisible:
-    id: "cart-item-1"
+    id: 'cart-item-1'
 
 # ============================================
 # TEST: Add product from product detail
@@ -73,40 +72,40 @@ tags:
 # fold; scroll until it's in view before tapping.
 - scrollUntilVisible:
     element:
-      id: "product-card-2"
+      id: 'product-card-2'
     direction: DOWN
 - tapOn:
-    id: "product-card-2"
+    id: 'product-card-2'
 
 - assertVisible:
-    id: "product-detail-screen"
+    id: 'product-detail-screen'
 
 # Increase quantity before adding
 - tapOn:
-    id: "increase-quantity"
+    id: 'increase-quantity'
 - tapOn:
-    id: "increase-quantity"
+    id: 'increase-quantity'
 
 - tapOn:
-    id: "add-to-cart-btn"
+    id: 'add-to-cart-btn'
 
 # Handle alert
 - assertVisible:
-    text: "Added to Cart"
+    text: 'Added to Cart'
 - tapOn:
-    text: "View Cart"
+    text: 'View Cart'
 
 # ============================================
 # TEST: Cart has multiple items
 # ============================================
 
 - assertVisible:
-    id: "cart-screen"
+    id: 'cart-screen'
 
 - assertVisible:
-    id: "cart-item-1"
+    id: 'cart-item-1'
 - assertVisible:
-    id: "cart-item-2"
+    id: 'cart-item-2'
 
 # ============================================
 # TEST: Update quantity in cart
@@ -114,39 +113,39 @@ tags:
 
 # Increase quantity of first item
 - tapOn:
-    id: "increase-qty-1"
+    id: 'increase-qty-1'
 
 # Verify quantity updated
 - assertVisible:
-    id: "qty-1"
+    id: 'qty-1'
 
 # Decrease quantity
 - tapOn:
-    id: "decrease-qty-1"
+    id: 'decrease-qty-1'
 
 # ============================================
 # TEST: Cart summary updates
 # ============================================
 
 - assertVisible:
-    id: "cart-summary"
+    id: 'cart-summary'
 - assertVisible:
-    id: "cart-total"
+    id: 'cart-total'
 
 # ============================================
 # TEST: Remove single item
 # ============================================
 
 - tapOn:
-    id: "remove-item-2"
+    id: 'remove-item-2'
 
 # Item 2 should be gone
 - assertNotVisible:
-    id: "cart-item-2"
+    id: 'cart-item-2'
 
 # Item 1 should still be there
 - assertVisible:
-    id: "cart-item-1"
+    id: 'cart-item-1'
 
 # ============================================
 # TEST: Add more items from home featured
@@ -157,7 +156,7 @@ tags:
 
 - scrollUntilVisible:
     element:
-      id: "featured-product-1"
+      id: 'featured-product-1'
     direction: UP
 
 # Featured carousel is a horizontal ScrollView nested under the home
@@ -170,31 +169,31 @@ tags:
 - swipe:
     direction: LEFT
 - tapOn:
-    id: "add-to-cart-featured-3"
+    id: 'add-to-cart-featured-3'
 
 # Navigate back to cart
 - runFlow:
     file: subflows/navigate-cart.yaml
 
 - assertVisible:
-    id: "cart-item-3"
+    id: 'cart-item-3'
 
 # ============================================
 # TEST: Clear entire cart
 # ============================================
 
 - tapOn:
-    id: "clear-cart-btn"
+    id: 'clear-cart-btn'
 
 # Confirm clear
 - assertVisible:
-    text: "Clear Cart"
+    text: 'Clear Cart'
 - tapOn:
-    text: "Clear"
+    text: 'Clear'
 
 # Should show empty state
 - assertVisible:
-    id: "cart-screen-empty"
+    id: 'cart-screen-empty'
 
 # ============================================
 # TEST: Add from trending products
@@ -206,31 +205,31 @@ tags:
 # Scroll to trending section
 - scrollUntilVisible:
     element:
-      id: "trending-product-4"
+      id: 'trending-product-4'
     direction: DOWN
 
 - tapOn:
-    id: "trending-product-4"
+    id: 'trending-product-4'
 
 - assertVisible:
-    id: "product-detail-screen"
+    id: 'product-detail-screen'
 
 - tapOn:
-    id: "add-to-cart-btn"
+    id: 'add-to-cart-btn'
 
 - tapOn:
-    text: "View Cart"
+    text: 'View Cart'
 
 - scrollUntilVisible:
     element:
-      id: "cart-item-4"
+      id: 'cart-item-4'
 
 - assertVisible:
-    id: "cart-item-4"
+    id: 'cart-item-4'
 
 # ============================================
 # TEST: Checkout button visible
 # ============================================
 
 - assertVisible:
-    id: "checkout-btn"
+    id: 'checkout-btn'

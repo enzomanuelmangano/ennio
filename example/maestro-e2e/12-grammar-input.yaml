@@ -3,68 +3,68 @@ name: Grammar — input commands (text, random, erase, clear, paste, key)
 ---
 - launchApp
 - tapOn:
-    text: "Gauntlet"
+    text: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-playground"
+      id: 'g-playground'
     direction: DOWN
 - tapOn:
-    id: "g-playground"
-- assertVisible: "Search"
+    id: 'g-playground'
+- assertVisible: 'Search'
 
 # inputText — basic
 - tapOn:
-    id: "search-input"
-- inputText: "banana"
+    id: 'search-input'
+- inputText: 'banana'
 - assertVisible:
-    id: "fruit-banana"
+    id: 'fruit-banana'
 - assertNotVisible:
-    id: "fruit-apple"
+    id: 'fruit-apple'
 
 # eraseText — drop characters
 - eraseText: 6
 - assertVisible:
-    id: "fruit-apple"
+    id: 'fruit-apple'
 
 # eraseText then re-input via random
 - tapOn:
-    id: "search-input"
+    id: 'search-input'
 - eraseText
 
 # pressKey on focused field
 - tapOn:
-    id: "search-input"
-- inputText: "fig"
-- pressKey: "Backspace"
-- pressKey: "Backspace"
-- pressKey: "Backspace"
+    id: 'search-input'
+- inputText: 'fig'
+- pressKey: 'Backspace'
+- pressKey: 'Backspace'
+- pressKey: 'Backspace'
 - assertVisible:
-    id: "fruit-banana"
+    id: 'fruit-banana'
 
 # inputRandomText (length 4)
 - tapOn:
-    id: "search-input"
+    id: 'search-input'
 - inputRandomText:
     length: 4
 - tapOn:
-    id: "search-input"
+    id: 'search-input'
 - eraseText
 
 # inputRandomNumber (length 6)
 - inputRandomNumber:
     length: 6
 - tapOn:
-    id: "search-input"
+    id: 'search-input'
 - eraseText
 
 # Clipboard — copy + paste
-- inputText: "cherry"
+- inputText: 'cherry'
 - assertVisible:
-    id: "fruit-cherry"
-- setClipboard: "elderberry"
+    id: 'fruit-cherry'
+- setClipboard: 'elderberry'
 - tapOn:
-    id: "search-input"
+    id: 'search-input'
 - eraseText
 - pasteText
 - assertVisible:
-    id: "fruit-elderberry"
+    id: 'fruit-elderberry'

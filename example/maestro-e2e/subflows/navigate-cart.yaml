@@ -3,10 +3,9 @@
 appId: com.ennio.example
 
 ---
-
 - back
 
 - tapOn:
-    text: "Cart"
+    text: 'Cart'
 - assertVisible:
-    id: "cart-root"
+    id: 'cart-root'

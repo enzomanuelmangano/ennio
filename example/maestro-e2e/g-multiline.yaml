@@ -1,19 +1,19 @@
 appId: com.ennio.example
-name: "Gauntlet — Multi-line TextInput"
+name: 'Gauntlet — Multi-line TextInput'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-multiline"
+      id: 'g-multiline'
     direction: DOWN
 - tapOn:
-    id: "g-multiline"
+    id: 'g-multiline'
 - assertVisible:
-    id: "multiline-screen"
+    id: 'multiline-screen'
 - tapOn:
-    id: "multiline-input"
-- inputText: "First line"
+    id: 'multiline-input'
+- inputText: 'First line'
 - assertVisible:
-    text: "10 chars"
+    text: '10 chars'

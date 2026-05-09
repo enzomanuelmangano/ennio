@@ -1,20 +1,20 @@
 appId: com.ennio.example
-name: "Gauntlet — Pinch gesture"
+name: 'Gauntlet — Pinch gesture'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-pinch"
+      id: 'g-pinch'
     direction: DOWN
 - tapOn:
-    id: "g-pinch"
+    id: 'g-pinch'
 - assertVisible:
-    id: "pinch-screen"
+    id: 'pinch-screen'
 - assertVisible:
-    id: "pinch-box"
+    id: 'pinch-box'
 - tapOn:
-    id: "pinch-reset"
+    id: 'pinch-reset'
 - assertVisible:
-    text: "Resets: 1"
+    text: 'Resets: 1'

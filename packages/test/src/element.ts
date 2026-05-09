@@ -22,13 +22,15 @@ import {
 const getEnnio = () => {
   const ennio = getEnnioModule();
   if (!ennio) {
-    throw new Error('[Ennio] Native module not available. Make sure @ennio/core is properly installed.');
+    throw new Error(
+      '[Ennio] Native module not available. Make sure @ennio/core is properly installed.',
+    );
   }
   return ennio;
 };
 
 // Helper to wait
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Normalize text selector to TextMatcher format
@@ -90,8 +92,8 @@ function selectorToJson(selector: Selector): string {
     normalized.childOf = JSON.parse(selectorToJson(selector.childOf));
   }
   if (selector.containsDescendants) {
-    normalized.containsDescendants = selector.containsDescendants.map(
-      (s) => JSON.parse(selectorToJson(s))
+    normalized.containsDescendants = selector.containsDescendants.map((s) =>
+      JSON.parse(selectorToJson(s)),
     );
   }
 
@@ -285,7 +287,9 @@ export class Element {
     }
 
     if (!success) {
-      throw new Error(`[Ennio] Failed to type text into element with ${this.getSelectorDescription()}`);
+      throw new Error(
+        `[Ennio] Failed to type text into element with ${this.getSelectorDescription()}`,
+      );
     }
     await sleep(50);
   }
@@ -304,7 +308,9 @@ export class Element {
     }
 
     if (!success) {
-      throw new Error(`[Ennio] Failed to clear text from element with ${this.getSelectorDescription()}`);
+      throw new Error(
+        `[Ennio] Failed to clear text from element with ${this.getSelectorDescription()}`,
+      );
     }
     await sleep(50);
   }
@@ -332,13 +338,12 @@ export class Element {
     }
 
     if (!testID) {
-      throw new Error(`[Ennio] Cannot scroll element without testID: ${this.getSelectorDescription()}`);
+      throw new Error(
+        `[Ennio] Cannot scroll element without testID: ${this.getSelectorDescription()}`,
+      );
     }
 
-    const deltaX = direction === 'left' ? -amount : direction === 'right' ? amount : 0;
-    const deltaY = direction === 'up' ? -amount : direction === 'down' ? amount : 0;
-
-    const success = ennio.scroll(testID, deltaX, deltaY);
+    const success = ennio.scroll(testID, direction, amount);
     if (!success) {
       throw new Error(`[Ennio] Failed to scroll element with ${this.getSelectorDescription()}`);
     }
@@ -384,7 +389,9 @@ export class Element {
   async toBeVisible(): Promise<void> {
     const visible = await this.isVisible();
     if (!visible) {
-      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be visible`);
+      throw new Error(
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to be visible`,
+      );
     }
   }
 
@@ -405,7 +412,7 @@ export class Element {
     const text = await this.getText();
     if (text !== expected) {
       throw new Error(
-        `[Ennio] Expected element with ${this.getSelectorDescription()} to have text "${expected}", got "${text}"`
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to have text "${expected}", got "${text}"`,
       );
     }
   }
@@ -417,7 +424,7 @@ export class Element {
     const text = await this.getText();
     if (!text || !text.includes(substring)) {
       throw new Error(
-        `[Ennio] Expected element with ${this.getSelectorDescription()} to contain text "${substring}", got "${text}"`
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to contain text "${substring}", got "${text}"`,
       );
     }
   }
@@ -428,7 +435,9 @@ export class Element {
   async toBeEnabled(): Promise<void> {
     const info = await this.getInfo();
     if (!info?.enabled) {
-      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be enabled`);
+      throw new Error(
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to be enabled`,
+      );
     }
   }
 
@@ -438,7 +447,9 @@ export class Element {
   async toBeDisabled(): Promise<void> {
     const info = await this.getInfo();
     if (info?.enabled !== false) {
-      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be disabled`);
+      throw new Error(
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to be disabled`,
+      );
     }
   }
 
@@ -448,7 +459,9 @@ export class Element {
   async toBeChecked(): Promise<void> {
     const info = await this.getInfo();
     if (!info?.checked) {
-      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be checked`);
+      throw new Error(
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to be checked`,
+      );
     }
   }
 
@@ -458,7 +471,9 @@ export class Element {
   async toBeSelected(): Promise<void> {
     const info = await this.getInfo();
     if (!info?.selected) {
-      throw new Error(`[Ennio] Expected element with ${this.getSelectorDescription()} to be selected`);
+      throw new Error(
+        `[Ennio] Expected element with ${this.getSelectorDescription()} to be selected`,
+      );
     }
   }
 }

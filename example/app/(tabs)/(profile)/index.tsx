@@ -60,14 +60,11 @@ function ProfileHeader({
   styles: ReturnType<typeof createStyles>;
   theme: Theme;
 }) {
-  const user = useAuthStore(state => state.user);
+  const user = useAuthStore((state) => state.user);
 
   return (
     <View style={styles.profileHeader} testID="profile-header">
-      <Image
-        source={{ uri: user?.avatar || 'https://i.pravatar.cc/150' }}
-        style={styles.avatar}
-      />
+      <Image source={{ uri: user?.avatar || 'https://i.pravatar.cc/150' }} style={styles.avatar} />
       <View style={styles.profileInfo}>
         <Text style={styles.profileName}>{user?.name}</Text>
         <Text style={styles.profileEmail}>{user?.email}</Text>
@@ -81,15 +78,9 @@ function ProfileHeader({
   );
 }
 
-function StatsCard({
-  styles,
-  theme,
-}: {
-  styles: ReturnType<typeof createStyles>;
-  theme: Theme;
-}) {
-  const orders = useCartStore(state => state.orders);
-  const items = useCartStore(state => state.items);
+function StatsCard({ styles, theme }: { styles: ReturnType<typeof createStyles>; theme: Theme }) {
+  const orders = useCartStore((state) => state.orders);
+  const items = useCartStore((state) => state.items);
 
   const totalSpent = orders.reduce((sum, order) => sum + order.total, 0);
 
@@ -115,13 +106,7 @@ function StatsCard({
   );
 }
 
-function GuestView({
-  styles,
-  theme,
-}: {
-  styles: ReturnType<typeof createStyles>;
-  theme: Theme;
-}) {
+function GuestView({ styles, theme }: { styles: ReturnType<typeof createStyles>; theme: Theme }) {
   return (
     <View style={styles.guestContainer} testID="guest-view">
       <View style={styles.guestIconWrap}>
@@ -147,10 +132,10 @@ function GuestView({
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const isAuthenticated = useAuthStore(state => state.isAuthenticated);
-  const logout = useAuthStore(state => state.logout);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const logout = useAuthStore((state) => state.logout);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
+  const darkMode = useSettingsStore((state) => state.preferences.darkMode);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const insets = useSafeAreaInsets();
@@ -176,7 +161,8 @@ export default function ProfileScreen() {
     return (
       <View
         style={{ flex: 1, backgroundColor: theme.colors.background.primary }}
-        testID="profile-root">
+        testID="profile-root"
+      >
         <GuestView styles={styles} theme={theme} />
       </View>
     );
@@ -185,7 +171,8 @@ export default function ProfileScreen() {
   return (
     <View
       style={{ flex: 1, backgroundColor: theme.colors.background.primary }}
-      testID="profile-root">
+      testID="profile-root"
+    >
       <ScrollView
         style={styles.container}
         contentContainerStyle={{ paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 16 }}
@@ -219,7 +206,9 @@ export default function ProfileScreen() {
               icon="location-outline"
               label="Addresses"
               value="2 saved"
-              onPress={() => Alert.alert('Coming Soon', 'Address management will be available soon!')}
+              onPress={() =>
+                Alert.alert('Coming Soon', 'Address management will be available soon!')
+              }
               testID="menu-addresses"
               styles={styles}
               theme={theme}

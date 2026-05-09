@@ -32,13 +32,28 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const flags: Flags = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '-v') { flags.verbose = true; continue; }
-    if (a === '-h') { flags.help = true; continue; }
-    if (!a.startsWith('--')) { positional.push(a); continue; }
+    if (a === '-v') {
+      flags.verbose = true;
+      continue;
+    }
+    if (a === '-h') {
+      flags.help = true;
+      continue;
+    }
+    if (!a.startsWith('--')) {
+      positional.push(a);
+      continue;
+    }
     const eq = a.indexOf('=');
-    let name: string; let val: string | undefined;
-    if (eq >= 0) { name = a.slice(2, eq); val = a.slice(eq + 1); }
-    else { name = a.slice(2); val = undefined; }
+    let name: string;
+    let val: string | undefined;
+    if (eq >= 0) {
+      name = a.slice(2, eq);
+      val = a.slice(eq + 1);
+    } else {
+      name = a.slice(2);
+      val = undefined;
+    }
     if (BOOL_FLAGS.has(name)) {
       (flags as Record<string, unknown>)[name] = true;
     } else if (STRING_FLAGS.has(name)) {

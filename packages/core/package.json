@@ -19,6 +19,7 @@
     "build": "tsc",
     "clean": "rm -rf lib",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
     "prepublishOnly": "yarn build"
   },
   "peerDependencies": {

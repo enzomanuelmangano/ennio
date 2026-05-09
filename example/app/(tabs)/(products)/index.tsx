@@ -19,8 +19,8 @@ function ProductCard({
   theme: Theme;
 }) {
   const router = useRouter();
-  const addToCart = useCartStore(state => state.addToCart);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const addToCart = useCartStore((state) => state.addToCart);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
 
   const handleAddToCart = () => {
     if (product.inStock) {
@@ -72,8 +72,8 @@ function ProductCard({
 }
 
 function CategoryFilter({ styles }: { styles: ReturnType<typeof createStyles> }) {
-  const selectedCategory = useProductsStore(state => state.selectedCategory);
-  const setCategory = useProductsStore(state => state.setCategory);
+  const selectedCategory = useProductsStore((state) => state.selectedCategory);
+  const setCategory = useProductsStore((state) => state.setCategory);
 
   return (
     <View style={styles.categoryContainer}>
@@ -81,7 +81,7 @@ function CategoryFilter({ styles }: { styles: ReturnType<typeof createStyles> })
         horizontal
         showsHorizontalScrollIndicator={false}
         data={categories}
-        keyExtractor={item => item}
+        keyExtractor={(item) => item}
         contentContainerStyle={styles.categoryList}
         renderItem={({ item }) => (
           <PressableScale
@@ -93,7 +93,8 @@ function CategoryFilter({ styles }: { styles: ReturnType<typeof createStyles> })
               style={[
                 styles.categoryChipText,
                 selectedCategory === item && styles.categoryChipTextActive,
-              ]}>
+              ]}
+            >
               {item}
             </Text>
           </PressableScale>
@@ -114,7 +115,7 @@ function SortDropdown({
   styles: ReturnType<typeof createStyles>;
   theme: Theme;
 }) {
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
   const [open, setOpen] = useState(false);
 
   const options: { value: SortOption; label: string }[] = [
@@ -124,7 +125,7 @@ function SortDropdown({
     { value: 'name', label: 'Name: A to Z' },
   ];
 
-  const selectedLabel = options.find(o => o.value === value)?.label || 'Sort By';
+  const selectedLabel = options.find((o) => o.value === value)?.label || 'Sort By';
 
   const handleOpen = () => {
     if (hapticEnabled) Haptics.selectionAsync();
@@ -143,20 +144,24 @@ function SortDropdown({
         style={styles.sortButton}
         onPress={handleOpen}
         testID="sort-dropdown"
-        accessibilityIdentifier="sort-dropdown">
+        // @ts-expect-error pressto patch propagates accessibilityIdentifier at runtime; types omit it
+        accessibilityIdentifier="sort-dropdown"
+      >
         <Text style={styles.sortButtonText}>{selectedLabel}</Text>
         <Ionicons name="chevron-down" size={14} color={theme.colors.text.muted} />
       </PressableScale>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <PressableScale style={styles.sortBackdrop} onPress={() => setOpen(false)}>
           <View style={styles.sortMenu} testID="sort-options">
-            {options.map(o => (
+            {options.map((o) => (
               <PressableScale
                 key={o.value}
                 style={[styles.sortOption, value === o.value && styles.sortOptionActive]}
                 onPress={() => handleSelect(o.value)}
                 testID={`sort-option-${o.value}`}
-                accessibilityIdentifier={`sort-option-${o.value}`}>
+                // @ts-expect-error pressto patch propagates accessibilityIdentifier at runtime; types omit it
+                accessibilityIdentifier={`sort-option-${o.value}`}
+              >
                 <Text style={styles.sortOptionText}>{o.label}</Text>
                 {value === o.value && (
                   <Ionicons name="checkmark" size={18} color={theme.colors.accent.ink} />
@@ -171,26 +176,24 @@ function SortDropdown({
 }
 
 export default function ProductsScreen() {
-  const allProducts = useProductsStore(state => state.products);
-  const selectedCategory = useProductsStore(state => state.selectedCategory);
-  const searchQuery = useProductsStore(state => state.searchQuery);
-  const setSearchQuery = useProductsStore(state => state.setSearchQuery);
-  const sortBy = useProductsStore(state => state.sortBy);
-  const setSortBy = useProductsStore(state => state.setSortBy);
+  const allProducts = useProductsStore((state) => state.products);
+  const selectedCategory = useProductsStore((state) => state.selectedCategory);
+  const searchQuery = useProductsStore((state) => state.searchQuery);
+  const setSearchQuery = useProductsStore((state) => state.setSearchQuery);
+  const sortBy = useProductsStore((state) => state.sortBy);
+  const setSortBy = useProductsStore((state) => state.setSortBy);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const products = useMemo(() => {
     let filtered = allProducts;
     if (selectedCategory !== 'All') {
-      filtered = filtered.filter(p => p.category === selectedCategory);
+      filtered = filtered.filter((p) => p.category === selectedCategory);
     }
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
-        p =>
-          p.name.toLowerCase().includes(query) ||
-          p.description.toLowerCase().includes(query)
+        (p) => p.name.toLowerCase().includes(query) || p.description.toLowerCase().includes(query),
       );
     }
     return [...filtered].sort((a, b) => {
@@ -232,7 +235,8 @@ export default function ProductsScreen() {
           <PressableScale
             style={styles.clearSearch}
             onPress={() => setSearchQuery('')}
-            testID="clear-search">
+            testID="clear-search"
+          >
             <Ionicons name="close-circle" size={18} color={theme.colors.text.muted} />
           </PressableScale>
         )}
@@ -249,7 +253,8 @@ export default function ProductsScreen() {
             setSearchQuery('');
             useProductsStore.getState().setCategory('All');
           }}
-          testID="reset-all">
+          testID="reset-all"
+        >
           <Text style={styles.resetTopButtonText}>Reset Filters</Text>
         </PressableScale>
       )}
@@ -261,7 +266,7 @@ export default function ProductsScreen() {
       style={styles.container}
       data={products}
       numColumns={2}
-      keyExtractor={item => item.id}
+      keyExtractor={(item) => item.id}
       contentContainerStyle={styles.productsList}
       columnWrapperStyle={products.length > 0 ? styles.productsRow : undefined}
       renderItem={({ item }) => <ProductCard product={item} styles={styles} theme={theme} />}
@@ -282,7 +287,8 @@ export default function ProductsScreen() {
               setSearchQuery('');
               useProductsStore.getState().setCategory('All');
             }}
-            testID="reset-filters">
+            testID="reset-filters"
+          >
             <Text style={styles.resetButtonText}>Reset Filters</Text>
           </PressableScale>
         </View>

@@ -32,7 +32,7 @@ export default function Pressables() {
 
   const hit = (name: string) => {
     setLast(name);
-    setCount(c => c + 1);
+    setCount((c) => c + 1);
   };
 
   const tap = Gesture.Tap().onEnd(() => {
@@ -58,7 +58,8 @@ export default function Pressables() {
         <Pressable
           testID="press-pressable"
           onPress={() => hit('Pressable')}
-          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}>
+          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
+        >
           <Text style={styles.btnText}>Tap me</Text>
         </Pressable>
       </Row>
@@ -67,7 +68,8 @@ export default function Pressables() {
         <TouchableOpacity
           testID="press-touchable-opacity"
           onPress={() => hit('TouchableOpacity')}
-          style={styles.btn}>
+          style={styles.btn}
+        >
           <Text style={styles.btnText}>Tap me</Text>
         </TouchableOpacity>
       </Row>
@@ -77,7 +79,8 @@ export default function Pressables() {
           testID="press-touchable-highlight"
           onPress={() => hit('TouchableHighlight')}
           underlayColor="#0a5cd1"
-          style={styles.btn}>
+          style={styles.btn}
+        >
           <Text style={styles.btnText}>Tap me</Text>
         </TouchableHighlight>
       </Row>
@@ -85,7 +88,8 @@ export default function Pressables() {
       <Row label="TouchableWithoutFeedback">
         <TouchableWithoutFeedback
           testID="press-touchable-without-feedback"
-          onPress={() => hit('TouchableWithoutFeedback')}>
+          onPress={() => hit('TouchableWithoutFeedback')}
+        >
           <View style={styles.btn}>
             <Text style={styles.btnText}>Tap me</Text>
           </View>
@@ -96,7 +100,8 @@ export default function Pressables() {
         <PressableScale
           testID="press-pressable-scale"
           onPress={() => hit('PressableScale')}
-          style={styles.btn}>
+          style={styles.btn}
+        >
           <Text style={styles.btnText}>Tap me</Text>
         </PressableScale>
       </Row>
@@ -105,7 +110,8 @@ export default function Pressables() {
         <PressableOpacity
           testID="press-pressable-opacity-pressto"
           onPress={() => hit('PressableOpacity')}
-          style={styles.btn}>
+          style={styles.btn}
+        >
           <Text style={styles.btnText}>Tap me</Text>
         </PressableOpacity>
       </Row>
@@ -122,7 +128,7 @@ export default function Pressables() {
         <Switch
           testID="press-switch"
           value={switchOn}
-          onValueChange={v => {
+          onValueChange={(v) => {
             setSwitchOn(v);
             hit('Switch');
           }}
@@ -135,7 +141,8 @@ export default function Pressables() {
           testID="press-long"
           onLongPress={() => hit('LongPress')}
           delayLongPress={400}
-          style={styles.btn}>
+          style={styles.btn}
+        >
           <Text style={styles.btnText}>Long-press me</Text>
         </Pressable>
       </Row>
@@ -158,7 +165,8 @@ function DoubleTapBox({ onDoubleTap }: { onDoubleTap: () => void }) {
         if (now - last < 350) onDoubleTap();
         setLast(now);
       }}
-      style={styles.btn}>
+      style={styles.btn}
+    >
       <Text style={styles.btnText}>Double-tap me</Text>
     </Pressable>
   );

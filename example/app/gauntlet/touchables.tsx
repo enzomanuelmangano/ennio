@@ -3,7 +3,14 @@
 // can assert that the right one fired.
 
 import { useState } from 'react';
-import { View, Text, Pressable, TouchableOpacity, TouchableHighlight, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  TouchableOpacity,
+  TouchableHighlight,
+  StyleSheet,
+} from 'react-native';
 import { BaseButton } from 'react-native-gesture-handler';
 import { PressableScale } from 'pressto';
 
@@ -36,7 +43,11 @@ export default function TouchablesScreen() {
       <Row
         name="TouchableOpacity"
         render={() => (
-          <TouchableOpacity testID="touch-opacity" style={styles.btn} onPress={() => inc('TouchableOpacity')}>
+          <TouchableOpacity
+            testID="touch-opacity"
+            style={styles.btn}
+            onPress={() => inc('TouchableOpacity')}
+          >
             <Text style={styles.btnText}>Tap</Text>
           </TouchableOpacity>
         )}
@@ -44,7 +55,11 @@ export default function TouchablesScreen() {
       <Row
         name="TouchableHighlight"
         render={() => (
-          <TouchableHighlight testID="touch-highlight" style={styles.btn} onPress={() => inc('TouchableHighlight')}>
+          <TouchableHighlight
+            testID="touch-highlight"
+            style={styles.btn}
+            onPress={() => inc('TouchableHighlight')}
+          >
             <Text style={styles.btnText}>Tap</Text>
           </TouchableHighlight>
         )}
@@ -52,7 +67,11 @@ export default function TouchablesScreen() {
       <Row
         name="BaseButton"
         render={() => (
-          <BaseButton testID="touch-baseButton" style={styles.btn} onPress={() => inc('BaseButton')}>
+          <BaseButton
+            testID="touch-baseButton"
+            style={styles.btn}
+            onPress={() => inc('BaseButton')}
+          >
             <Text style={styles.btnText}>Tap</Text>
           </BaseButton>
         )}
@@ -60,7 +79,11 @@ export default function TouchablesScreen() {
       <Row
         name="PressableScale"
         render={() => (
-          <PressableScale testID="touch-pressableScale" style={styles.btn} onPress={() => inc('PressableScale')}>
+          <PressableScale
+            testID="touch-pressableScale"
+            style={styles.btn}
+            onPress={() => inc('PressableScale')}
+          >
             <Text style={styles.btnText}>Tap</Text>
           </PressableScale>
         )}

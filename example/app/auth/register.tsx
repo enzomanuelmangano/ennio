@@ -17,10 +17,10 @@ import * as Haptics from 'expo-haptics';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const register = useAuthStore(state => state.register);
-  const isLoading = useAuthStore(state => state.isLoading);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
-  const darkMode = useSettingsStore(state => state.preferences.darkMode);
+  const register = useAuthStore((state) => state.register);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
+  const darkMode = useSettingsStore((state) => state.preferences.darkMode);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -87,12 +87,10 @@ export default function RegisterScreen() {
       if (hapticEnabled) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-      Alert.alert(
-        'Welcome!',
-        'Your account has been created successfully.',
-        [{ text: 'Start Shopping', onPress: () => router.back() }]
-      );
-    } catch (error) {
+      Alert.alert('Welcome!', 'Your account has been created successfully.', [
+        { text: 'Start Shopping', onPress: () => router.back() },
+      ]);
+    } catch {
       Alert.alert('Registration Failed', 'An error occurred. Please try again.');
     }
   };
@@ -152,15 +150,17 @@ export default function RegisterScreen() {
                 placeholder="John Doe"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
                 defaultValue={name}
-                onChangeText={text => {
+                onChangeText={(text) => {
                   setName(text);
-                  if (errors.name) setErrors(prev => ({ ...prev, name: undefined }));
+                  if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
                 }}
                 autoCapitalize="words"
                 testID="name-input"
               />
               {errors.name && (
-                <Text style={styles.errorText} testID="name-error">{errors.name}</Text>
+                <Text style={styles.errorText} testID="name-error">
+                  {errors.name}
+                </Text>
               )}
             </View>
 
@@ -175,9 +175,9 @@ export default function RegisterScreen() {
                 placeholder="your@email.com"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
                 defaultValue={email}
-                onChangeText={text => {
+                onChangeText={(text) => {
                   setEmail(text);
-                  if (errors.email) setErrors(prev => ({ ...prev, email: undefined }));
+                  if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
                 }}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -185,7 +185,9 @@ export default function RegisterScreen() {
                 testID="email-input"
               />
               {errors.email && (
-                <Text style={styles.errorText} testID="email-error">{errors.email}</Text>
+                <Text style={styles.errorText} testID="email-error">
+                  {errors.email}
+                </Text>
               )}
             </View>
 
@@ -200,9 +202,9 @@ export default function RegisterScreen() {
                 placeholder="Min. 6 characters"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
                 defaultValue={password}
-                onChangeText={text => {
+                onChangeText={(text) => {
                   setPassword(text);
-                  if (errors.password) setErrors(prev => ({ ...prev, password: undefined }));
+                  if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
                 }}
                 secureTextEntry
                 testID="password-input"
@@ -210,16 +212,21 @@ export default function RegisterScreen() {
               {passwordStrength && (
                 <View style={styles.strengthContainer}>
                   <View style={styles.strengthBars}>
-                    {[1, 2, 3, 4].map(i => (
+                    {[1, 2, 3, 4].map((i) => (
                       <View
                         key={i}
                         style={[
                           styles.strengthBar,
                           {
                             backgroundColor:
-                              i <= (passwordStrength.label === 'Weak' ? 1 :
-                                   passwordStrength.label === 'Fair' ? 2 :
-                                   passwordStrength.label === 'Good' ? 3 : 4)
+                              i <=
+                              (passwordStrength.label === 'Weak'
+                                ? 1
+                                : passwordStrength.label === 'Fair'
+                                  ? 2
+                                  : passwordStrength.label === 'Good'
+                                    ? 3
+                                    : 4)
                                 ? passwordStrength.color
                                 : '#e0e0e0',
                           },
@@ -233,7 +240,9 @@ export default function RegisterScreen() {
                 </View>
               )}
               {errors.password && (
-                <Text style={styles.errorText} testID="password-error">{errors.password}</Text>
+                <Text style={styles.errorText} testID="password-error">
+                  {errors.password}
+                </Text>
               )}
             </View>
 
@@ -248,9 +257,10 @@ export default function RegisterScreen() {
                 placeholder="Re-enter your password"
                 placeholderTextColor={darkMode ? '#666' : '#999'}
                 defaultValue={confirmPassword}
-                onChangeText={text => {
+                onChangeText={(text) => {
                   setConfirmPassword(text);
-                  if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: undefined }));
+                  if (errors.confirmPassword)
+                    setErrors((prev) => ({ ...prev, confirmPassword: undefined }));
                 }}
                 secureTextEntry
                 testID="confirm-password-input"
@@ -271,9 +281,7 @@ export default function RegisterScreen() {
                 {acceptTerms && <Text style={styles.checkmark}>✓</Text>}
               </View>
               <Text style={[styles.termsText, darkMode && styles.subtitleDark]}>
-                I agree to the{' '}
-                <Text style={styles.termsLink}>Terms of Service</Text>
-                {' '}and{' '}
+                I agree to the <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
                 <Text style={styles.termsLink}>Privacy Policy</Text>
               </Text>
             </PressableScale>

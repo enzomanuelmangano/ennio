@@ -4,7 +4,7 @@ import { PressableScale } from 'pressto';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useCartStore, useAuthStore, useSettingsStore } from '../../../store';
+import { useCartStore, useSettingsStore } from '../../../store';
 import { useTheme, type Theme } from '../../../theme';
 import * as Haptics from 'expo-haptics';
 
@@ -17,9 +17,9 @@ function CartItem({
   styles: ReturnType<typeof createStyles>;
   theme: Theme;
 }) {
-  const updateQuantity = useCartStore(state => state.updateQuantity);
-  const removeFromCart = useCartStore(state => state.removeFromCart);
-  const hapticEnabled = useSettingsStore(state => state.preferences.hapticFeedback);
+  const updateQuantity = useCartStore((state) => state.updateQuantity);
+  const removeFromCart = useCartStore((state) => state.removeFromCart);
+  const hapticEnabled = useSettingsStore((state) => state.preferences.hapticFeedback);
   const router = useRouter();
 
   const handleQuantityChange = (delta: number) => {
@@ -85,14 +85,10 @@ function CartItem({
   );
 }
 
-function CartSummary({
-  styles,
-}: {
-  styles: ReturnType<typeof createStyles>;
-}) {
-  const subtotal = useCartStore(state => state.getSubtotal());
-  const tax = useCartStore(state => state.getTax());
-  const total = useCartStore(state => state.getTotal());
+function CartSummary({ styles }: { styles: ReturnType<typeof createStyles> }) {
+  const subtotal = useCartStore((state) => state.getSubtotal());
+  const tax = useCartStore((state) => state.getTax());
+  const total = useCartStore((state) => state.getTotal());
 
   return (
     <View style={styles.summary} testID="cart-summary">
@@ -120,8 +116,8 @@ function CartSummary({
 }
 
 export default function CartScreen() {
-  const items = useCartStore(state => state.items);
-  const clearCart = useCartStore(state => state.clearCart);
+  const items = useCartStore((state) => state.items);
+  const clearCart = useCartStore((state) => state.clearCart);
   const router = useRouter();
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -141,13 +137,14 @@ export default function CartScreen() {
 
   if (items.length === 0) {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.background.primary }} testID="cart-root">
+      <View
+        style={{ flex: 1, backgroundColor: theme.colors.background.primary }}
+        testID="cart-root"
+      >
         <View
-          style={[
-            styles.emptyContainer,
-            { paddingBottom: insets.bottom + TAB_BAR_HEIGHT },
-          ]}
-          testID="cart-screen-empty">
+          style={[styles.emptyContainer, { paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]}
+          testID="cart-screen-empty"
+        >
           <View style={styles.emptyIconWrap}>
             <Ionicons name="bag-outline" size={40} color={theme.colors.accent.champagneDeep} />
           </View>
@@ -156,7 +153,8 @@ export default function CartScreen() {
           <PressableScale
             style={styles.shopButton}
             onPress={() => router.push('/(tabs)/(products)')}
-            testID="browse-products-btn">
+            testID="browse-products-btn"
+          >
             <Text style={styles.shopButtonText}>Browse Products</Text>
           </PressableScale>
         </View>
@@ -167,14 +165,12 @@ export default function CartScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.background.primary }} testID="cart-root">
       <View
-        style={[
-          styles.container,
-          { paddingBottom: insets.bottom + TAB_BAR_HEIGHT },
-        ]}
-        testID="cart-screen">
+        style={[styles.container, { paddingBottom: insets.bottom + TAB_BAR_HEIGHT }]}
+        testID="cart-screen"
+      >
         <FlatList
           data={items}
-          keyExtractor={item => item.product.id}
+          keyExtractor={(item) => item.product.id}
           renderItem={({ item }) => <CartItem item={item} styles={styles} theme={theme} />}
           contentContainerStyle={styles.list}
           testID="cart-items-list"
@@ -196,7 +192,8 @@ export default function CartScreen() {
           <PressableScale
             style={styles.checkoutButton}
             onPress={handleCheckout}
-            testID="checkout-btn">
+            testID="checkout-btn"
+          >
             <Text style={styles.checkoutText}>Proceed to Checkout</Text>
             <Ionicons name="arrow-forward" size={18} color={theme.colors.text.onAccent} />
           </PressableScale>

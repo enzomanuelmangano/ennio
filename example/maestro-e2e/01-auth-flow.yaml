@@ -2,13 +2,12 @@
 # Tests demo login only
 
 appId: com.ennio.example
-name: "Authentication Flow"
+name: 'Authentication Flow'
 tags:
   - auth
   - critical
 
 ---
-
 - launchApp:
     clearState: true
 
@@ -17,10 +16,10 @@ tags:
 # ============================================
 
 - tapOn:
-    text: "Home"
+    text: 'Home'
 
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # ============================================
 # TEST: Demo login flow
@@ -28,16 +27,16 @@ tags:
 
 # Tap sign in button on home
 - tapOn:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 
 # Wait for login screen
 - assertVisible:
-    id: "login-screen"
+    id: 'login-screen'
 
 # Use demo login
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 
 # Should return to home with greeting
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'

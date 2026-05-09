@@ -1,27 +1,27 @@
 appId: com.ennio.example
-name: "Debug Minimal"
+name: 'Debug Minimal'
 ---
 # Login first
 - tapOn:
-    text: "Home"
+    text: 'Home'
 - assertVisible:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 - tapOn:
-    id: "home-signin-btn"
+    id: 'home-signin-btn'
 - assertVisible:
-    id: "login-screen"
+    id: 'login-screen'
 - tapOn:
-    id: "demo-login-btn"
+    id: 'demo-login-btn'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 
 # Now do the same typetext steps
 - tapOn:
-    text: "Products"
+    text: 'Products'
 - assertVisible:
-    id: "products-screen"
+    id: 'products-screen'
 - tapOn:
-    id: "search-input"
-- inputText: "Wireless"
+    id: 'search-input'
+- inputText: 'Wireless'
 - assertVisible:
-    text: "Wireless"
+    text: 'Wireless'

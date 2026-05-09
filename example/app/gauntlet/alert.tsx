@@ -15,7 +15,11 @@ export default function AlertScreen() {
       <PressableScale
         testID="alert-single"
         style={styles.button}
-        onPress={() => Alert.alert('Single', 'One button alert', [{ text: 'OK', onPress: () => setLast('single-ok') }])}
+        onPress={() =>
+          Alert.alert('Single', 'One button alert', [
+            { text: 'OK', onPress: () => setLast('single-ok') },
+          ])
+        }
       >
         <Text style={styles.buttonText}>Single-button alert</Text>
       </PressableScale>
@@ -23,10 +27,12 @@ export default function AlertScreen() {
       <PressableScale
         testID="alert-two"
         style={styles.button}
-        onPress={() => Alert.alert('Two', 'Two button alert', [
-          { text: 'Cancel', style: 'cancel', onPress: () => setLast('two-cancel') },
-          { text: 'OK', onPress: () => setLast('two-ok') },
-        ])}
+        onPress={() =>
+          Alert.alert('Two', 'Two button alert', [
+            { text: 'Cancel', style: 'cancel', onPress: () => setLast('two-cancel') },
+            { text: 'OK', onPress: () => setLast('two-ok') },
+          ])
+        }
       >
         <Text style={styles.buttonText}>Two-button alert</Text>
       </PressableScale>
@@ -34,11 +40,13 @@ export default function AlertScreen() {
       <PressableScale
         testID="alert-three"
         style={styles.button}
-        onPress={() => Alert.alert('Three', 'Three button alert', [
-          { text: 'Cancel', style: 'cancel', onPress: () => setLast('three-cancel') },
-          { text: 'Save', onPress: () => setLast('three-save') },
-          { text: 'Delete', style: 'destructive', onPress: () => setLast('three-delete') },
-        ])}
+        onPress={() =>
+          Alert.alert('Three', 'Three button alert', [
+            { text: 'Cancel', style: 'cancel', onPress: () => setLast('three-cancel') },
+            { text: 'Save', onPress: () => setLast('three-save') },
+            { text: 'Delete', style: 'destructive', onPress: () => setLast('three-delete') },
+          ])
+        }
       >
         <Text style={styles.buttonText}>Three-button alert</Text>
       </PressableScale>
@@ -55,7 +63,13 @@ export default function AlertScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20 },
   title: { fontSize: 22, fontWeight: '600', marginBottom: 24 },
-  button: { backgroundColor: '#007AFF', padding: 14, borderRadius: 10, alignItems: 'center', marginBottom: 12 },
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   last: { marginTop: 16, color: '#34C759', fontSize: 18 },
 });

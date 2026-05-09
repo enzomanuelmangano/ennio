@@ -11,6 +11,7 @@ import type { Reader } from './reader';
 import { basename } from 'path';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
+import { runInContext } from 'vm';
 import {
   MaestroCommand,
   MaestroSelector,
@@ -36,7 +37,10 @@ import {
 // Maestro convention: a bare number "50" is interpreted as 50% (not as
 // 50 pixels), so values > 1 are normalised to 0..1 fractions. A trailing
 // "%" is accepted but not required.
-function parseMaestroPoint(p: string | { x: number | string; y: number | string }): { x: number; y: number } {
+function parseMaestroPoint(p: string | { x: number | string; y: number | string }): {
+  x: number;
+  y: number;
+} {
   const parseFrac = (v: string | number): number => {
     if (typeof v === 'number') return v > 1 ? v / 100 : v;
     const m = String(v).trim().replace('%', '');
@@ -60,21 +64,21 @@ const DEFAULT_RECONNECT_TIMEOUT = 30000;
 // Per-command timing constants. All in ms unless noted. Pulled from the
 // magic numbers the audit flagged inside executeCommand — naming them
 // here makes intent explicit and the values tune-able from one place.
-const ALERT_TAP_SETTLE_MS = 150;        // Wait for alert-button tap to dismiss the alert.
-const ALERT_DISMISS_DELAY_MS = 120;     // Settle between dismissAlert and the next assertion.
-const RUNLOOP_TICK_MS = 30;             // UITouch begin→end gap; matches the native sendSynth tick.
-const TAP_NAV_SETTLE_MS = 200;          // Tab/Link nav settle before the next assertVisible.
-const TAP_BACK_RECOVER_DELAY_MS = 250;  // Pause between back-pop and retry tap.
+const ALERT_TAP_SETTLE_MS = 150; // Wait for alert-button tap to dismiss the alert.
+const ALERT_DISMISS_DELAY_MS = 120; // Settle between dismissAlert and the next assertion.
+const RUNLOOP_TICK_MS = 30; // UITouch begin→end gap; matches the native sendSynth tick.
+const TAP_NAV_SETTLE_MS = 200; // Tab/Link nav settle before the next assertVisible.
+const TAP_BACK_RECOVER_DELAY_MS = 250; // Pause between back-pop and retry tap.
 const KEYBOARD_DISMISS_SETTLE_MS = 120; // Settle after hideKeyboard before re-tapping the field.
-const POST_LAUNCH_SETTLE_MS = 800;      // Wait for sim teardown after clearState before relaunch.
-const POST_LAUNCH_IDLE_BUDGET_MS = 3000;// First waitForIdle after a launch.
-const POST_LAUNCH_SHADOW_COMMIT_MS = 400;// First shadow-tree commit settle after reconnect.
-const RETRY_POLL_MS = 100;              // Predicate retry tick for waitFor / extendedWaitUntil.
-const POINT_TAP_SETTLE_MS = 60;         // Quick settle after tapAt — no tab-nav animation.
-const RECORDING_SETTLE_MS = 500;        // Settle after start/stopRecording so the next step sees a stable IO state.
-const RETRY_BACKOFF_MS = 500;           // Pause between retry attempts inside `retry` block.
-const TRAVEL_WAYPOINT_GAP_MS = 200;     // Gap between successive simctl location fixes during `travel`.
-const OPENLINK_SETTLE_MS = 500;         // Wait for SpringBoard to switch contexts after openurl.
+const POST_LAUNCH_SETTLE_MS = 800; // Wait for sim teardown after clearState before relaunch.
+const POST_LAUNCH_IDLE_BUDGET_MS = 3000; // First waitForIdle after a launch.
+const POST_LAUNCH_SHADOW_COMMIT_MS = 400; // First shadow-tree commit settle after reconnect.
+const RETRY_POLL_MS = 100; // Predicate retry tick for waitFor / extendedWaitUntil.
+const POINT_TAP_SETTLE_MS = 60; // Quick settle after tapAt — no tab-nav animation.
+const RECORDING_SETTLE_MS = 500; // Settle after start/stopRecording so the next step sees a stable IO state.
+const RETRY_BACKOFF_MS = 500; // Pause between retry attempts inside `retry` block.
+const TRAVEL_WAYPOINT_GAP_MS = 200; // Gap between successive simctl location fixes during `travel`.
+const OPENLINK_SETTLE_MS = 500; // Wait for SpringBoard to switch contexts after openurl.
 const DEFAULT_WS_PORT = 9876;
 
 /**
@@ -110,7 +114,7 @@ export function getBootedSimulatorId(): string | null {
   try {
     const output = execSync('xcrun simctl list devices booted -j', { encoding: 'utf-8' });
     const data = JSON.parse(output);
-    for (const runtime of Object.values(data.devices) as Array<Array<{ udid: string; state: string }>>) {
+    for (const runtime of Object.values(data.devices) as { udid: string; state: string }[][]) {
       for (const device of runtime) {
         if (device.state === 'Booted') {
           return device.udid;
@@ -157,22 +161,37 @@ function clearAppState(deviceId: string, appId: string): void {
     execSync('sleep 0.4', { stdio: 'pipe' });
 
     // Get app data container path
-    const dataContainer = execSync(
-      `xcrun simctl get_app_container ${deviceId} ${appId} data`,
-      { encoding: 'utf-8', stdio: 'pipe' }
-    ).trim();
+    const dataContainer = execSync(`xcrun simctl get_app_container ${deviceId} ${appId} data`, {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    }).trim();
 
     if (dataContainer) {
       // Clear Library (AsyncStorage, UserDefaults, etc.)
-      execSync(`rm -rf "${dataContainer}/Library"/*`, { encoding: 'utf-8', stdio: 'pipe', shell: '/bin/bash' });
+      execSync(`rm -rf "${dataContainer}/Library"/*`, {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        shell: '/bin/bash',
+      });
       // Clear Documents
-      execSync(`rm -rf "${dataContainer}/Documents"/*`, { encoding: 'utf-8', stdio: 'pipe', shell: '/bin/bash' });
+      execSync(`rm -rf "${dataContainer}/Documents"/*`, {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        shell: '/bin/bash',
+      });
       // Clear tmp
-      execSync(`rm -rf "${dataContainer}/tmp"/*`, { encoding: 'utf-8', stdio: 'pipe', shell: '/bin/bash' });
+      execSync(`rm -rf "${dataContainer}/tmp"/*`, {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        shell: '/bin/bash',
+      });
     }
 
     // Also reset privacy permissions
-    execSync(`xcrun simctl privacy ${deviceId} reset all ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
+    execSync(`xcrun simctl privacy ${deviceId} reset all ${appId}`, {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
   } catch {
     // Continue even if some commands fail
   }
@@ -211,7 +230,7 @@ export async function runMaestroTests(
   writer: Writer,
   reader: Reader,
   testFilePath: string,
-  options: { verbose?: boolean; trace?: boolean; port?: number } = {}
+  options: { verbose?: boolean; trace?: boolean; port?: number } = {},
 ): Promise<MaestroTestsResult> {
   const results: MaestroTestsResult = { passed: 0, failed: 0, tests: [], client };
   const flow = parseMaestroFile(testFilePath);
@@ -261,7 +280,9 @@ export async function runMaestroTests(
           stdio: 'pipe',
         });
         console.log(`  (saved screenshot: ${shotPath})`);
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     }
     results.failed = 1;
     results.tests.push({
@@ -321,7 +342,7 @@ class MaestroExecutor {
       port?: number;
       reconnectClient?: () => Promise<EnnioClient>;
       env?: Record<string, string>;
-    } = {}
+    } = {},
   ) {
     this.client = client;
     this.writer = writer;
@@ -372,7 +393,7 @@ class MaestroExecutor {
   private async waitFor(
     condition: () => Promise<boolean>,
     timeout: number,
-    message: string
+    message: string,
   ): Promise<void> {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -486,7 +507,7 @@ class MaestroExecutor {
       await this.waitFor(
         () => this.selectorExists(selector),
         DEFAULT_VISIBLE_TIMEOUT,
-        `Element not found: ${JSON.stringify(selector)}`
+        `Element not found: ${JSON.stringify(selector)}`,
       );
     }
 
@@ -546,12 +567,11 @@ class MaestroExecutor {
    * re-fired automatically instead of failing the flow.
    */
 
-
   private async doubleTap(selector: MaestroSelector): Promise<void> {
     await this.waitFor(
       () => this.selectorExists(selector),
       DEFAULT_VISIBLE_TIMEOUT,
-      `Element not found: ${JSON.stringify(selector)}`
+      `Element not found: ${JSON.stringify(selector)}`,
     );
     let ok = false;
     if (selector.id && !selector.text) ok = await this.writer.doubleTap(selector.id);
@@ -566,10 +586,11 @@ class MaestroExecutor {
       await this.waitFor(
         () => this.selectorExists(targetSelector),
         DEFAULT_VISIBLE_TIMEOUT,
-        `Element not found: ${JSON.stringify(targetSelector)}`
+        `Element not found: ${JSON.stringify(targetSelector)}`,
       );
-      const sameAsLast = this.lastTappedSelector
-        && JSON.stringify(this.lastTappedSelector) === JSON.stringify(targetSelector);
+      const sameAsLast =
+        this.lastTappedSelector &&
+        JSON.stringify(this.lastTappedSelector) === JSON.stringify(targetSelector);
       if (!sameAsLast) {
         if (targetSelector.id && !targetSelector.text) {
           await this.writer.tap(targetSelector.id);
@@ -598,7 +619,7 @@ class MaestroExecutor {
     await this.waitFor(
       () => this.selectorExists(selector),
       DEFAULT_VISIBLE_TIMEOUT,
-      `Element not found: ${JSON.stringify(selector)}`
+      `Element not found: ${JSON.stringify(selector)}`,
     );
     if (selector.id) {
       const ok = await this.writer.clearText(selector.id);
@@ -614,7 +635,7 @@ class MaestroExecutor {
     await this.waitFor(
       () => this.selectorExists(selector),
       DEFAULT_VISIBLE_TIMEOUT,
-      `Element not found: ${JSON.stringify(selector)}`
+      `Element not found: ${JSON.stringify(selector)}`,
     );
     let ok = false;
     if (selector.id && !selector.text) ok = await this.writer.longPress(selector.id, duration);
@@ -722,7 +743,11 @@ class MaestroExecutor {
         // network spinners that the test isn't waiting on anyway. Cap
         // at 500ms so flows on apps that never fully idle (Reanimated at
         // 60Hz, looped springs, polling timers) don't pay 5s per step.
-        try { await this.client.waitForIdle(500); } catch { /* timeouts ignored */ }
+        try {
+          await this.client.waitForIdle(500);
+        } catch {
+          /* timeouts ignored */
+        }
         return;
       }
       const STRING_FORM_COMMANDS = new Set([
@@ -759,7 +784,8 @@ class MaestroExecutor {
     }
 
     if ('runScript' in processedCmd) {
-      const runCmd = (processedCmd as { runScript: { file: string; env?: Record<string, string> } }).runScript;
+      const runCmd = (processedCmd as { runScript: { file: string; env?: Record<string, string> } })
+        .runScript;
       this.log(`runScript: ${runCmd.file}`);
       // Merge flow-level env with per-command env (per-command wins).
       const mergedEnv = { ...this.flowEnv, ...(runCmd.env || {}) };
@@ -775,7 +801,7 @@ class MaestroExecutor {
       if (code.startsWith('${') && code.endsWith('}')) {
         code = code.slice(2, -1);
       }
-      const result = require('vm').runInContext(code, this.jsContext, { timeout: 1000 });
+      const result = runInContext(code, this.jsContext, { timeout: 1000 });
       if (!result) {
         throw new Error(`assertTrue failed: ${expr}`);
       }
@@ -806,7 +832,10 @@ class MaestroExecutor {
       // string into per-character keys.
       const raw = cmd.assertVisible as MaestroSelector | string;
       const normalized = normalizeSelector(raw);
-      const assertCmd = normalized as MaestroSelector & { timeout?: number; anyOf?: MaestroSelector[] };
+      const assertCmd = normalized as MaestroSelector & {
+        timeout?: number;
+        anyOf?: MaestroSelector[];
+      };
       const timeout = assertCmd.timeout ?? DEFAULT_VISIBLE_TIMEOUT;
       this.log(`assertVisible: ${JSON.stringify(assertCmd)}`);
 
@@ -822,7 +851,7 @@ class MaestroExecutor {
             return false;
           },
           timeout,
-          `None of the elements visible: ${JSON.stringify(assertCmd.anyOf)}`
+          `None of the elements visible: ${JSON.stringify(assertCmd.anyOf)}`,
         );
         return;
       }
@@ -832,7 +861,7 @@ class MaestroExecutor {
       await this.waitFor(
         () => this.selectorVisible(selector),
         timeout,
-        `Element not visible: ${JSON.stringify(selector)}`
+        `Element not visible: ${JSON.stringify(selector)}`,
       );
       return;
     }
@@ -842,12 +871,12 @@ class MaestroExecutor {
       // for `text: "Foo"` — normalize before destructuring `timeout` so we
       // don't spread the string into per-character keys.
       const raw = cmd.assertNotVisible as MaestroSelector | string;
-      const normalized = normalizeSelector(raw);
+      const normalized = normalizeSelector(raw) as MaestroSelector & { timeout?: number };
       const { timeout = DEFAULT_TIMEOUT, ...selector } = normalized;
       await this.waitFor(
         () => this.selectorVisible(selector).then((v) => !v),
         timeout,
-        `Element still visible: ${JSON.stringify(selector)}`
+        `Element still visible: ${JSON.stringify(selector)}`,
       );
       return;
     }
@@ -873,9 +902,11 @@ class MaestroExecutor {
     }
 
     if ('scrollUntilVisible' in cmd) {
-      await this.handleScrollUntilVisible(cmd.scrollUntilVisible as
-        | MaestroSelector
-        | { element: MaestroSelector; direction?: string; timeout?: number });
+      await this.handleScrollUntilVisible(
+        cmd.scrollUntilVisible as
+          | MaestroSelector
+          | { element: MaestroSelector; direction?: string; timeout?: number },
+      );
       return;
     }
 
@@ -886,7 +917,9 @@ class MaestroExecutor {
         await this.scroll(swipeCmd.direction.toLowerCase(), amount);
       } else if (swipeCmd.start && swipeCmd.end) {
         // Fast mode: best-effort vertical scroll inferred from y-delta.
-        const dy = (typeof swipeCmd.end === 'object' ? swipeCmd.end.y : 0) - (typeof swipeCmd.start === 'object' ? swipeCmd.start.y : 0);
+        const dy =
+          (typeof swipeCmd.end === 'object' ? swipeCmd.end.y : 0) -
+          (typeof swipeCmd.start === 'object' ? swipeCmd.start.y : 0);
         await this.writer.scroll(null, dy >= 0 ? 'down' : 'up', Math.abs(dy) || 200);
       }
       return;
@@ -913,7 +946,7 @@ class MaestroExecutor {
       await this.waitFor(
         () => this.selectorExists(selector),
         timeout,
-        `Element not found: ${JSON.stringify(selector)}`
+        `Element not found: ${JSON.stringify(selector)}`,
       );
       return;
     }
@@ -931,8 +964,11 @@ class MaestroExecutor {
 
     // stopApp / killApp (maestro alias — same behaviour, different name).
     if ('stopApp' in cmd || 'killApp' in cmd) {
-      const subCmd = ('stopApp' in cmd ? cmd.stopApp : (cmd as { killApp: typeof cmd extends { stopApp: infer S } ? S : unknown }).killApp) as
-        | true | { appId?: string } | undefined;
+      const subCmd = (
+        'stopApp' in cmd
+          ? cmd.stopApp
+          : (cmd as { killApp: typeof cmd extends { stopApp: infer S } ? S : unknown }).killApp
+      ) as true | { appId?: string } | undefined;
       this.handleStopApp(subCmd);
       return;
     }
@@ -949,7 +985,9 @@ class MaestroExecutor {
       this.log('dismissAlert');
       try {
         await this.writer.dismissAlert();
-      } catch { /* noop — no alert presented */ }
+      } catch {
+        /* noop — no alert presented */
+      }
       return;
     }
 
@@ -965,15 +1003,26 @@ class MaestroExecutor {
     }
 
     if ('travel' in cmd) {
-      const travelCmd = (cmd as { travel: { points: Array<{ latitude: number; longitude: number } | string>; speed?: number } }).travel;
+      const travelCmd = (
+        cmd as {
+          travel: {
+            points: ({ latitude: number; longitude: number } | string)[];
+            speed?: number;
+          };
+        }
+      ).travel;
       await this.handleTravel(travelCmd);
       return;
     }
 
     // inputRandomEmail / Number / Text / PersonName — generate a value
     // and route through typeText so the field receives a normal change.
-    if ('inputRandomEmail' in cmd || 'inputRandomNumber' in cmd
-        || 'inputRandomText' in cmd || 'inputRandomPersonName' in cmd) {
+    if (
+      'inputRandomEmail' in cmd ||
+      'inputRandomNumber' in cmd ||
+      'inputRandomText' in cmd ||
+      'inputRandomPersonName' in cmd
+    ) {
       await this.handleInputRandom(cmd as MaestroCommand);
       return;
     }
@@ -989,7 +1038,7 @@ class MaestroExecutor {
 
     if ('eraseText' in cmd) {
       const eraseCmd = cmd.eraseText;
-      const chars = typeof eraseCmd === 'number' ? eraseCmd : (eraseCmd.characters || 50);
+      const chars = typeof eraseCmd === 'number' ? eraseCmd : eraseCmd.characters || 50;
       this.log(`eraseText: ${chars} characters`);
       await this.writer.eraseText(this.lastTappedSelector?.id ?? null, chars);
       return;
@@ -1082,7 +1131,8 @@ class MaestroExecutor {
       // Bare-form `- waitForAnimationToEnd:` parses to `null`; typeof null
       // === 'object' so the prior check let null through and `null.timeout`
       // threw. Explicit null guard.
-      const timeout = (waitCmd && typeof waitCmd === 'object' && waitCmd.timeout) ? waitCmd.timeout : 500;
+      const timeout =
+        waitCmd && typeof waitCmd === 'object' && waitCmd.timeout ? waitCmd.timeout : 500;
       this.log(`waitForAnimationToEnd: timeout=${timeout}ms`);
       try {
         await this.client.waitForIdle(timeout);
@@ -1145,11 +1195,13 @@ class MaestroExecutor {
     }
   }
 
-  private async handleScrollUntilVisible(scrollCmd:
-    | MaestroSelector
-    | { element: MaestroSelector; direction?: string; timeout?: number }): Promise<void> {
+  private async handleScrollUntilVisible(
+    scrollCmd: MaestroSelector | { element: MaestroSelector; direction?: string; timeout?: number },
+  ): Promise<void> {
     const hasElement = typeof scrollCmd === 'object' && 'element' in scrollCmd;
-    const selector = normalizeSelector(hasElement ? scrollCmd.element : scrollCmd as MaestroSelector);
+    const selector = normalizeSelector(
+      hasElement ? scrollCmd.element : (scrollCmd as MaestroSelector),
+    );
     const direction = (hasElement ? scrollCmd.direction || 'DOWN' : 'DOWN').toLowerCase();
     const timeout = hasElement ? scrollCmd.timeout || 10000 : 10000;
     const scrollAmount = 300;
@@ -1178,7 +1230,10 @@ class MaestroExecutor {
     const deviceId = getBootedSimulatorId();
     if (!deviceId) throw new Error('takeScreenshot: No booted iOS simulator found');
     this.log(`takeScreenshot: ${path}`);
-    execSync(`xcrun simctl io ${deviceId} screenshot "${path}"`, { encoding: 'utf-8', stdio: 'pipe' });
+    execSync(`xcrun simctl io ${deviceId} screenshot "${path}"`, {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
   }
 
   private handleAddMedia(mediaCmd: string[] | { files: string[] }): void {
@@ -1193,8 +1248,22 @@ class MaestroExecutor {
 
   // Tiny fixed pool — deterministic enough for tests, varied enough not
   // to clash with hardcoded "Test User" assertions.
-  private static readonly RANDOM_FIRST_NAMES = ['Alex', 'Jordan', 'Sam', 'Casey', 'Robin', 'Taylor'];
-  private static readonly RANDOM_LAST_NAMES = ['Smith', 'Jones', 'Brown', 'Davis', 'Wilson', 'Miller'];
+  private static readonly RANDOM_FIRST_NAMES = [
+    'Alex',
+    'Jordan',
+    'Sam',
+    'Casey',
+    'Robin',
+    'Taylor',
+  ];
+  private static readonly RANDOM_LAST_NAMES = [
+    'Smith',
+    'Jones',
+    'Brown',
+    'Davis',
+    'Wilson',
+    'Miller',
+  ];
 
   private async handleInputRandom(cmd: MaestroCommand): Promise<void> {
     if ('inputRandomEmail' in cmd) {
@@ -1279,7 +1348,10 @@ class MaestroExecutor {
   // Walk maestro waypoints with a 200 ms gap so a CLLocationManagerDelegate
   // sees a sequence of fixes rather than a teleport. `speed` is informational;
   // simctl location takes one fix at a time, no velocity model.
-  private async handleTravel(travelCmd: { points: Array<{ latitude: number; longitude: number } | string>; speed?: number }): Promise<void> {
+  private async handleTravel(travelCmd: {
+    points: ({ latitude: number; longitude: number } | string)[];
+    speed?: number;
+  }): Promise<void> {
     const deviceId = getBootedSimulatorId();
     if (!deviceId) throw new Error('travel: No booted iOS simulator found');
     this.log(`travel: ${travelCmd.points.length} waypoints`);
@@ -1287,12 +1359,17 @@ class MaestroExecutor {
       let lat: number, lon: number;
       if (typeof p === 'string') {
         const [latStr, lonStr] = p.split(',').map((s) => s.trim());
-        lat = parseFloat(latStr); lon = parseFloat(lonStr);
+        lat = parseFloat(latStr);
+        lon = parseFloat(lonStr);
       } else {
-        lat = p.latitude; lon = p.longitude;
+        lat = p.latitude;
+        lon = p.longitude;
       }
       try {
-        execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, { encoding: 'utf-8', stdio: 'pipe' });
+        execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        });
       } catch (e) {
         if (process.env.ENNIO_VERBOSE) console.error(`travel: ${e}`);
       }
@@ -1300,7 +1377,10 @@ class MaestroExecutor {
     }
   }
 
-  private async handleRetry(retryCmd: { maxRetries?: number; commands: MaestroCommand[] }): Promise<void> {
+  private async handleRetry(retryCmd: {
+    maxRetries?: number;
+    commands: MaestroCommand[];
+  }): Promise<void> {
     const { maxRetries = 3, commands } = retryCmd;
     this.log(`retry: max ${maxRetries}`);
     let lastError: Error | null = null;
@@ -1323,14 +1403,19 @@ class MaestroExecutor {
     let lat: number, lon: number;
     if (typeof locCmd === 'string') {
       const [latStr, lonStr] = locCmd.split(',');
-      lat = parseFloat(latStr); lon = parseFloat(lonStr);
+      lat = parseFloat(latStr);
+      lon = parseFloat(lonStr);
     } else {
-      lat = locCmd.latitude; lon = locCmd.longitude;
+      lat = locCmd.latitude;
+      lon = locCmd.longitude;
     }
     const deviceId = getBootedSimulatorId();
     if (!deviceId) throw new Error('setLocation: No booted iOS simulator found');
     this.log(`setLocation: ${lat}, ${lon}`);
-    execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, { encoding: 'utf-8', stdio: 'pipe' });
+    execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
   }
 
   private async handleStartRecording(recCmd: string | { path: string }): Promise<void> {
@@ -1357,7 +1442,11 @@ class MaestroExecutor {
     await this.sleep(RECORDING_SETTLE_MS);
   }
 
-  private async handleExtendedWaitUntil(waitCmd: { visible?: MaestroSelector; notVisible?: MaestroSelector; timeout?: number }): Promise<void> {
+  private async handleExtendedWaitUntil(waitCmd: {
+    visible?: MaestroSelector;
+    notVisible?: MaestroSelector;
+    timeout?: number;
+  }): Promise<void> {
     const { visible, notVisible, timeout = 10000 } = waitCmd;
     this.log(`extendedWaitUntil: timeout=${timeout}ms`);
     if (visible) {
@@ -1400,11 +1489,17 @@ class MaestroExecutor {
       }
     }
     if (!connected) throw new Error('clearState: Failed to reconnect to app after restart');
-    try { await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS); } catch { /* tolerate */ }
+    try {
+      await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS);
+    } catch {
+      /* tolerate */
+    }
     this.log('clearState: App restarted with fresh state');
   }
 
-  private async handleLaunchApp(launchCmd: true | { clearState?: boolean; appId?: string }): Promise<void> {
+  private async handleLaunchApp(
+    launchCmd: true | { clearState?: boolean; appId?: string },
+  ): Promise<void> {
     const shouldClearState = typeof launchCmd === 'object' && launchCmd.clearState === true;
     const targetAppId = (typeof launchCmd === 'object' && launchCmd.appId) || this.appId;
     if (!targetAppId) throw new Error('launchApp: No appId specified in command or flow metadata');
@@ -1439,7 +1534,11 @@ class MaestroExecutor {
     // Wait for first shadow tree commit so the next assertVisible has
     // something to query.
     await this.sleep(POST_LAUNCH_SHADOW_COMMIT_MS);
-    try { await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS); } catch { /* tolerate */ }
+    try {
+      await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS);
+    } catch {
+      /* tolerate */
+    }
     this.log('launchApp: Reconnected');
   }
 

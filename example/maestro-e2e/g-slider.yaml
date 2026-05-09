@@ -1,20 +1,20 @@
 appId: com.ennio.example
-name: "Gauntlet — Slider"
+name: 'Gauntlet — Slider'
 ---
 - launchApp:
     clearState: true
-- tapOn: "Gauntlet"
+- tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
-      id: "g-slider"
+      id: 'g-slider'
     direction: DOWN
 - tapOn:
-    id: "g-slider"
+    id: 'g-slider'
 - assertVisible:
-    id: "slider-screen"
+    id: 'slider-screen'
 - assertVisible:
-    id: "slider-value"
+    id: 'slider-value'
 - tapOn:
-    id: "slider-set-half"
+    id: 'slider-set-half'
 - assertVisible:
-    text: "0.50"
+    text: '0.50'

@@ -5,14 +5,13 @@
 appId: com.ennio.example
 
 ---
-
 # Add a product to the cart from the home screen — featured cards add
 # silently (no Alert.alert), avoiding the modal-stuck-alert flake we
 # get when tapping product-detail's add-to-cart-btn from a long flow.
 - runFlow:
     file: navigate-home.yaml
 - tapOn:
-    id: "add-to-cart-featured-1"
+    id: 'add-to-cart-featured-1'
 
 # Navigate to cart
 - runFlow:
@@ -20,83 +19,83 @@ appId: com.ennio.example
 
 # Begin checkout
 - assertVisible:
-    id: "checkout-btn"
+    id: 'checkout-btn'
 - tapOn:
-    id: "checkout-btn"
+    id: 'checkout-btn'
 
 - assertVisible:
-    id: "checkout-screen"
+    id: 'checkout-screen'
 
 # Step 1: shipping
 - tapOn:
-    id: "shipping-name"
-- inputText: "Demo User"
+    id: 'shipping-name'
+- inputText: 'Demo User'
 - hideKeyboard
 
 - tapOn:
-    id: "shipping-street"
-- inputText: "123 Test St"
+    id: 'shipping-street'
+- inputText: '123 Test St'
 - hideKeyboard
 
 - tapOn:
-    id: "shipping-city"
-- inputText: "San Francisco"
+    id: 'shipping-city'
+- inputText: 'San Francisco'
 - hideKeyboard
 
 - tapOn:
-    id: "shipping-state"
-- inputText: "CA"
+    id: 'shipping-state'
+- inputText: 'CA'
 - hideKeyboard
 
 - tapOn:
-    id: "shipping-zip"
-- inputText: "94105"
+    id: 'shipping-zip'
+- inputText: '94105'
 - hideKeyboard
 
 - tapOn:
-    id: "shipping-phone"
-- inputText: "5555550100"
+    id: 'shipping-phone'
+- inputText: '5555550100'
 - hideKeyboard
 
 - tapOn:
-    id: "next-btn"
+    id: 'next-btn'
 
 # Step 2: payment
 - tapOn:
-    id: "payment-card-number"
-- inputText: "4111111111111111"
+    id: 'payment-card-number'
+- inputText: '4111111111111111'
 - hideKeyboard
 
 - tapOn:
-    id: "payment-cardholder"
-- inputText: "Demo User"
+    id: 'payment-cardholder'
+- inputText: 'Demo User'
 - hideKeyboard
 
 - tapOn:
-    id: "payment-expiry"
-- inputText: "1230"
+    id: 'payment-expiry'
+- inputText: '1230'
 - hideKeyboard
 
 - tapOn:
-    id: "payment-cvv"
-- inputText: "123"
+    id: 'payment-cvv'
+- inputText: '123'
 - hideKeyboard
 
 - tapOn:
-    id: "next-btn"
+    id: 'next-btn'
 
 # Step 3: review + place order
 - assertVisible:
-    id: "place-order-btn"
+    id: 'place-order-btn'
 - tapOn:
-    id: "place-order-btn"
+    id: 'place-order-btn'
 
 # Wait for the confirmation alert to appear, then tap through it.
 - assertVisible:
-    text: "Order Placed"
+    text: 'Order Placed'
 - tapOn:
-    text: "View Orders"
+    text: 'View Orders'
 
 # Ensure we end on the orders screen.
 - assertVisible:
-    id: "orders-screen"
+    id: 'orders-screen'

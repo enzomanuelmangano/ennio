@@ -2,11 +2,7 @@
 // JS callback. Validates that Ennio still triggers JS handlers on
 // reanimated-wrapped Pressables.
 
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-} from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { PressableScale } from 'pressto';
@@ -46,6 +42,11 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '600', marginBottom: 24 },
   count: { fontSize: 28, fontWeight: '700', marginBottom: 32 },
   box: { padding: 8 },
-  button: { backgroundColor: '#007AFF', paddingVertical: 18, paddingHorizontal: 32, borderRadius: 12 },
+  button: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 18,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+  },
   buttonText: { color: '#fff', fontSize: 17, fontWeight: '600' },
 });
