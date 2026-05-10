@@ -282,12 +282,12 @@ example/              Sample app + maestro-e2e/ flows (regression suite).
 
 ### Defense layers
 
-| Layer | Stage                 | Mechanism                                                                                                                                                                                         |
-| ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Plugin (build time)   | `ennio-expo-plugin` adds the iOS pod **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                                   |
-| 2     | Runtime (app launch)  | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`). |
+| Layer | Stage                 | Mechanism                                                                                                                                                                                                                                                                                                          |
+| ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | Plugin (build time)   | `ennio-expo-plugin` adds the iOS pod **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                                                                                                                                                    |
+| 2     | Runtime (app launch)  | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`).                                                                                                                  |
 | 3     | Network (server bind) | Server binds `INADDR_ANY` so usbmuxd's TCP forward can reach it on physical device. On the iOS Simulator the sandbox confines traffic to the host. **On physical device the port is reachable from the LAN — only run device builds on trusted networks.** Defense for production rests primarily on Layers 1 + 2. |
-| 4     | Visual                | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot.                                                                             |
+| 4     | Visual                | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot.                                                                                                                                                                                              |
 
 Layer 1 is the primary defense. Layers 2–4 are runtime backstops if a
 build with Ennio enabled accidentally escapes the gate. **Always set
