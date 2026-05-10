@@ -958,9 +958,29 @@ bool EnnioRuntimeHelper::isViewOnscreen(const std::string& testID) {
         CGRect viewRect = [view convertRect:view.bounds toView:view.window];
         if (viewRect.size.width <= 0 || viewRect.size.height <= 0) return;
         CGRect winRect = view.window.bounds;
-        // Require any overlap — partial visibility (e.g. button at the
-        // very bottom) still counts. CGRectIntersectsRect handles edges.
-        onscreen = CGRectIntersectsRect(viewRect, winRect);
+        if (!CGRectIntersectsRect(viewRect, winRect)) return;
+
+        // Walk ancestors: hidden / alpha~0 hides this view. Mirrors
+        // UIKit's hit-test pipeline.
+        for (UIView* v = view; v != nil; v = v.superview) {
+            if (v.hidden || v.alpha < 0.01) return;
+        }
+
+        // Z-order / occlusion. A modal/sheet/alert presented above the
+        // view's window blocks any finger from reaching it. Reject if a
+        // higher-level window covers the view's centre.
+        CGPoint centre = CGPointMake(CGRectGetMidX(viewRect), CGRectGetMidY(viewRect));
+        UIWindow* targetWindow = view.window;
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* w in ((UIWindowScene*)scene).windows) {
+                if (w.hidden || w == targetWindow) continue;
+                if (w.windowLevel <= targetWindow.windowLevel) continue;
+                CGPoint pt = [w convertPoint:centre fromWindow:targetWindow];
+                if ([w hitTest:pt withEvent:nil]) return;
+            }
+        }
+        onscreen = true;
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return onscreen;
