@@ -124,7 +124,14 @@ tags:
 - tapOn:
     id: 'toggle-analytics'
 
-# Personalized ads
+# Personalized ads — toggle sits at the bottom of the visible viewport
+# after analytics tap. assertVisible passes because the upper half is in
+# bounds, but tap point lands below the safe-tap zone. Push it up by
+# scrolling once more so its centre lands in the upper-middle.
+- scrollUntilVisible:
+    element:
+      id: 'toggle-location'
+    direction: DOWN
 - assertVisible:
     id: 'toggle-personalized-ads'
 - tapOn:

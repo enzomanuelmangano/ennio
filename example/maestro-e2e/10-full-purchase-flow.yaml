@@ -41,7 +41,7 @@ tags:
     id: 'category-electronics'
 
 - assertVisible:
-    id: 'products-screen'
+    id: 'products-list'
 
 # Search for specific product
 - tapOn:
@@ -87,7 +87,7 @@ tags:
 # Back to products
 - back
 - assertVisible:
-    id: 'products-screen'
+    id: 'products-list'
 
 # Clear search and find another product
 - tapOn:
@@ -143,8 +143,9 @@ tags:
 
 - waitForAnimationToEnd
 
+# `router.dismiss()` returns to Profile (the modal opener), not home.
 - assertVisible:
-    id: 'home-screen'
+    id: 'profile-screen'
 
 # ============================================
 # PHASE 7: Cart Still Has Items
@@ -300,18 +301,20 @@ tags:
     id: 'browse-products-btn'
 
 - assertVisible:
-    id: 'products-screen'
+    id: 'products-list'
 
 # ============================================
 # PHASE 13: Quick Reorder Flow
 # ============================================
 
-# Add another product quickly from home
+# Add another product quickly from home. featured-1 is the first card
+# in the horizontal carousel and always fully on-screen; featured-2's
+# add-to-cart button sits below the right edge.
 - runFlow:
     file: subflows/navigate-home.yaml
 
 - tapOn:
-    id: 'add-to-cart-featured-2'
+    id: 'add-to-cart-featured-1'
 
 # Verify cart updated
 - runFlow:

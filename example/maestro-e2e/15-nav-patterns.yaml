@@ -44,7 +44,13 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
 - assertNotVisible:
     id: 'page-sheet-title'
 
-# transparentModal — backdrop visible + dismiss
+# transparentModal — backdrop visible + dismiss. The button sits below
+# the page-sheet trigger; the page-sheet dismiss left the scroll
+# position unchanged, so scroll into view first.
+- scrollUntilVisible:
+    element:
+      id: 'open-transparent-modal-btn'
+    direction: DOWN
 - tapOn:
     id: 'open-transparent-modal-btn'
 - assertVisible:
