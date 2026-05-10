@@ -155,12 +155,11 @@ export default function ProductDetailScreen() {
           {/* Tab Content */}
           <View style={[styles.tabContent, darkMode && styles.cardDark]}>
             {selectedTab === 'description' && (
-              <Text
-                style={[styles.description, darkMode && styles.subtitleDark]}
-                testID="product-description"
-              >
-                {product.description}
-              </Text>
+              <View testID="product-description">
+                <Text style={[styles.description, darkMode && styles.subtitleDark]}>
+                  {product.description}
+                </Text>
+              </View>
             )}
             {selectedTab === 'specs' && (
               <View testID="product-specs">

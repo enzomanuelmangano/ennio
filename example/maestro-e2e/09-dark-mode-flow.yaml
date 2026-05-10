@@ -64,7 +64,7 @@ tags:
     file: subflows/navigate-products.yaml
 
 - assertVisible:
-    id: 'products-screen'
+    id: 'products-list'
 
 - assertVisible:
     id: 'search-input'
@@ -153,7 +153,7 @@ tags:
     file: subflows/navigate-products.yaml
 
 - assertVisible:
-    id: 'products-screen'
+    id: 'products-list'
 
 - runFlow:
     file: subflows/navigate-cart.yaml

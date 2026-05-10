@@ -43,13 +43,8 @@ tags:
     id: 'login-screen'
 - tapOn:
     id: 'demo-login-btn'
-- assertVisible:
-    id: 'home-screen'
-
-# Navigate back to profile
-- tapOn:
-    text: 'Profile'
-
+# `router.dismiss()` pops the login modal back to the screen that opened
+# it (Profile tab here), not home.
 - assertVisible:
     id: 'profile-screen'
 
@@ -107,10 +102,11 @@ tags:
 - assertVisible:
     id: 'menu-appearance'
 
-# Support section
+# Support section — scroll the deepest item into view so the upper
+# items (menu-help, menu-contact) are also fully on-screen.
 - scrollUntilVisible:
     element:
-      id: 'menu-help'
+      id: 'menu-terms'
     direction: DOWN
 
 - assertVisible:

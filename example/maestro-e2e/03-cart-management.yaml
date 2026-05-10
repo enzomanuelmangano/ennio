@@ -41,7 +41,7 @@ tags:
     id: 'browse-products-btn'
 
 - assertVisible:
-    id: 'products-screen'
+    id: 'products-list'
 
 # ============================================
 # TEST: Add product to cart from products list

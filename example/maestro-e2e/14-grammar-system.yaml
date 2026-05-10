@@ -27,10 +27,14 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 - takeScreenshot: /tmp/grammar-system-pre-alert.png
 
 # hideKeyboard (bare string + object form). search-input lives above the
-# alert button — scroll back up so it's in the viewport.
-- scrollUntilVisible:
-    element:
-      id: 'search-input'
+# alert button. Scroll the playground ScrollView up to expose it.
+- scroll:
+    direction: UP
+- scroll:
+    direction: UP
+- scroll:
+    direction: UP
+- scroll:
     direction: UP
 - tapOn:
     id: 'search-input'

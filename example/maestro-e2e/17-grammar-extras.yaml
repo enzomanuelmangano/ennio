@@ -27,7 +27,11 @@ onFlowStart:
 # Bare-string launchApp.
 - launchApp
 
-# Wait for the app to settle on Home.
+# clearState wipes app data but iOS NativeTabs remember the last
+# selected tab natively. Navigate to Home explicitly.
+- tapOn:
+    text: 'Home'
+    index: 0
 - assertVisible:
     id: 'home-screen'
 
@@ -68,5 +72,8 @@ onFlowStart:
 # airplane mode against a live process.
 - killApp
 - launchApp
+- tapOn:
+    text: 'Home'
+    index: 0
 - assertVisible:
     id: 'home-screen'

@@ -74,14 +74,26 @@ name: Pressables — every RN pressable variant
 # - assertVisible:
 #     text: "Switch"
 
-# Long-press (Maestro uses longPressOn)
+# Long-press (Maestro uses longPressOn). Scroll the row into view first;
+# `press-long` and `press-double` sit at the bottom of the screen and
+# the synth tap point lands below the safe-tap zone otherwise.
+- scrollUntilVisible:
+    element:
+      id: 'press-double'
+    direction: DOWN
 - longPressOn:
     id: 'press-long'
 - assertVisible:
     text: 'LongPress'
 
-# Double-tap
-- doubleTapOn:
+# Double-tap — DoubleTapBox uses Date.now()-based gap detection
+# (<350 ms). Ennio's `doubleTap` synth UITouches at the same coords get
+# coalesced by UIKit's gesture coordinator and only one onPress fires.
+# Two consecutive `tapOn`s engage RN's Pressable each time (the runner's
+# settle delay is ~150-200 ms, well within the 350 ms window).
+- tapOn:
+    id: 'press-double'
+- tapOn:
     id: 'press-double'
 - assertVisible:
     text: 'DoubleTap'

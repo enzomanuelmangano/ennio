@@ -59,7 +59,7 @@ export default function LoginScreen() {
       if (hapticEnabled) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-      router.replace('/');
+      router.dismiss();
     } catch {
       Alert.alert('Login Failed', 'Invalid email or password. Please try again.');
     }
@@ -73,7 +73,7 @@ export default function LoginScreen() {
       if (hapticEnabled) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-      router.replace('/');
+      router.dismiss();
     } catch {
       Alert.alert('Error', 'Demo login failed');
     }

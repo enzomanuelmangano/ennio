@@ -134,16 +134,16 @@ function SortDropdown({
 
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger>
-        <PressableScale
+      <DropdownMenu.Trigger asChild>
+        <View
           style={styles.sortButton}
           testID="sort-dropdown"
-          // @ts-expect-error pressto patch propagates accessibilityIdentifier at runtime; types omit it
           accessibilityIdentifier="sort-dropdown"
+          accessible
         >
           <Text style={styles.sortButtonText}>{selectedLabel}</Text>
           <Ionicons name="chevron-down" size={14} color={theme.colors.text.muted} />
-        </PressableScale>
+        </View>
       </DropdownMenu.Trigger>
       <DropdownMenu.Content>
         <DropdownMenu.Label>Sort by</DropdownMenu.Label>
