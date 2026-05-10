@@ -732,22 +732,92 @@ static BOOL viewIsTappable(UIView* view) {
     return YES;
 }
 
+// Walk up the UIView's responder chain to find the immediate owning
+// UIViewController. UIView -> nextResponder is the VC iff the view is
+// that VC's view directly; for normal subviews nextResponder is the
+// superview. So we walk view -> superview -> ... and check each step's
+// nextResponder, returning the first VC encountered.
+static UIViewController* owningViewController(UIView* view) {
+    for (UIView* v = view; v != nil; v = v.superview) {
+        UIResponder* r = v.nextResponder;
+        if ([r isKindOfClass:[UIViewController class]]) return (UIViewController*)r;
+    }
+    return nil;
+}
+
+// True iff every UIViewController in the view's owning chain is the
+// "active" child of its parent: for UITabBarController the selected
+// tab, for UINavigationController the visible top of stack. A modal
+// presentation flips the underlying chain to inactive (the presented
+// VC overlays it), so a presented-then-dismissed VC stops being active.
+//
+// react-native-screens with native-stack on iOS uses UINavigationController;
+// pushed-then-popped frames stay mounted but their VC is no longer
+// `visibleViewController`. expo-router bottom-tabs on iOS uses
+// UITabBarController; inactive tabs' VCs aren't `selectedViewController`.
+// This predicate is what catches the cases the a11y-elementsHidden flag
+// alone misses (RNS doesn't always flip a11y on inactive frames).
+static BOOL isViewInActiveVCChain(UIView* view) {
+    UIViewController* vc = owningViewController(view);
+    while (vc) {
+        UIViewController* parent = vc.parentViewController;
+        if (parent) {
+            if (parent.presentedViewController && parent.presentedViewController != vc) {
+                return NO;
+            }
+            if ([parent isKindOfClass:[UITabBarController class]]) {
+                UITabBarController* tab = (UITabBarController*)parent;
+                if (tab.selectedViewController != vc) return NO;
+            } else if ([parent isKindOfClass:[UINavigationController class]]) {
+                UINavigationController* nav = (UINavigationController*)parent;
+                if (nav.visibleViewController != vc) return NO;
+            }
+            vc = parent;
+        } else {
+            if (vc.presentedViewController) return NO;
+            return YES;
+        }
+    }
+    return YES;
+}
+
 // Recursively search the view tree for a UIView whose accessibilityIdentifier
-// matches the testID. Hidden / size-zero views skipped because they're not
-// interactable.
+// matches the testID, restricted to subtrees that iOS considers part of the
+// accessibility tree. accessibilityElementsHidden is the same flag UIKit honors
+// when XCUI / VoiceOver enumerate elements: react-native-screens flips it on
+// inactive stack frames, bottom-tabs flips it on inactive tabs, and UIKit
+// flips it on the underlying VC during modal presentation. Skipping those
+// subtrees here is what stops "found a stale UIView mounted under an inactive
+// tab" false positives.
 static UIView* findViewByTestID(UIView* root, NSString* testID) {
     if (!root || root.hidden) return nil;
-    // Don't filter on alpha here: a Modal mid-fade-in has parent
-    // UITransitionView at alpha=0..1, and rejecting alpha<0.01 hides every
-    // descendant during the animation. The "is this actually visible to a
-    // user / a real tap" decision lives in isViewOnscreen via convertRect
-    // + window-bounds intersection.
-    if ([root.accessibilityIdentifier isEqualToString:testID]) return root;
+    if (root.accessibilityElementsHidden) return nil;
+    if ([root.accessibilityIdentifier isEqualToString:testID]) {
+        // Reject matches inside inactive VC chains (pushed-under
+        // react-native-screens frames, deselected tabs, presented-modal
+        // underlay). Without this, taps fire on stale UIViews that no
+        // longer drive the live React state and assertions pass against
+        // ghost elements the user can't see.
+        if (!isViewInActiveVCChain(root)) return nil;
+        return root;
+    }
     for (UIView* sub in root.subviews) {
         UIView* hit = findViewByTestID(sub, testID);
         if (hit) return hit;
     }
     return nil;
+}
+
+// Is this view (and every ancestor up to the window) part of the iOS
+// accessibility tree? Combines accessibilityElementsHidden walk with the
+// active-VC-chain check.
+static BOOL viewIsInA11yTree(UIView* view) {
+    if (!view || !view.window) return NO;
+    for (UIView* v = view; v != nil; v = v.superview) {
+        if (v.accessibilityElementsHidden) return NO;
+    }
+    if (!isViewInActiveVCChain(view)) return NO;
+    return YES;
 }
 
 // Walk every connected scene window so views inside presented modals /
@@ -949,6 +1019,35 @@ std::pair<double, double> EnnioRuntimeHelper::getKeyWindowSize() {
     return {w, h};
 }
 
+bool EnnioRuntimeHelper::clearAppDataDirectories() {
+    NSFileManager* fm = [NSFileManager defaultManager];
+    NSString* home = NSHomeDirectory();
+    NSArray<NSString*>* targets = @[
+        [home stringByAppendingPathComponent:@"Library"],
+        [home stringByAppendingPathComponent:@"Documents"],
+        [home stringByAppendingPathComponent:@"tmp"],
+    ];
+    bool ok = true;
+    for (NSString* dir in targets) {
+        NSError* err = nil;
+        NSArray<NSString*>* entries = [fm contentsOfDirectoryAtPath:dir error:&err];
+        if (!entries) continue;
+        for (NSString* name in entries) {
+            // Library/Caches and Library/Preferences are recreated by
+            // iOS on next launch — wiping their contents drops AsyncStorage,
+            // RN HermesRuntime caches, NSUserDefaults, etc.
+            NSString* path = [dir stringByAppendingPathComponent:name];
+            NSError* rmErr = nil;
+            if (![fm removeItemAtPath:path error:&rmErr]) {
+                NSLog(@"[Ennio] clearAppDataDirectories: failed to remove %@: %@",
+                      path, rmErr.localizedDescription);
+                ok = false;
+            }
+        }
+    }
+    return ok;
+}
+
 bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
     NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
     __block bool isMenuTrigger = false;
@@ -970,6 +1069,17 @@ bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
     return isMenuTrigger;
 }
 
+bool EnnioRuntimeHelper::isInA11yTree(const std::string& testID) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        ok = viewIsInA11yTree(view) ? true : false;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
 bool EnnioRuntimeHelper::isViewOnscreen(const std::string& testID) {
     NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
     __block bool onscreen = false;
@@ -978,14 +1088,40 @@ bool EnnioRuntimeHelper::isViewOnscreen(const std::string& testID) {
         if (!view || !view.window) return;
         CGRect viewRect = [view convertRect:view.bounds toView:view.window];
         if (viewRect.size.width <= 0 || viewRect.size.height <= 0) return;
-        CGRect winRect = view.window.bounds;
-        if (!CGRectIntersectsRect(viewRect, winRect)) return;
+        // "Visible" requires the element's centre point to lie inside
+        // the safe content rect — window bounds minus the system safe-
+        // area insets (status bar / nav header on top, home-indicator +
+        // UITabBar on bottom). A FlashList cell rendered just below the
+        // scroll's visible bounds is technically in window space but
+        // its centre falls under the tab bar; tapping there is a no-op
+        // for the user. The centre-point predicate handles full-screen
+        // container views (centre is mid-screen → inside) and rejects
+        // virtualized cells parked offscreen (centre is below tab bar
+        // → outside). Matches Maestro's `visibilityPercentage 100`
+        // semantics for tap-targeting purposes.
+        UIWindow* w = view.window;
+        UIEdgeInsets insets = w.safeAreaInsets;
+        CGRect safeRect = UIEdgeInsetsInsetRect(w.bounds, insets);
+        CGPoint viewCentre = CGPointMake(CGRectGetMidX(viewRect), CGRectGetMidY(viewRect));
+        if (!CGRectContainsPoint(safeRect, viewCentre)) return;
+        // Also require some intersection with the safe rect — a centre-
+        // outside, edge-just-inside element would still slip through if
+        // we only checked the centre. (Belt-and-suspenders.)
+        if (!CGRectIntersectsRect(viewRect, safeRect)) return;
 
-        // Walk ancestors: hidden / alpha~0 hides this view. Mirrors
-        // UIKit's hit-test pipeline.
+        // Walk ancestors: hidden / alpha~0 / accessibilityElementsHidden
+        // all hide this view. The a11y check is what catches inactive
+        // tabs (bottom-tabs sets it on the inactive UITabBar children)
+        // and the underlying VC during modal presentation.
         for (UIView* v = view; v != nil; v = v.superview) {
             if (v.hidden || v.alpha < 0.01) return;
+            if (v.accessibilityElementsHidden) return;
         }
+        // Active-VC-chain: catches react-native-screens stack frames
+        // that stay mounted but inactive (push then dismissAll), where
+        // the a11y-elementsHidden flag isn't always flipped. Required
+        // for visibility correctness on multi-tab + native-stack apps.
+        if (!isViewInActiveVCChain(view)) return;
 
         // Z-order / occlusion. A modal/sheet/alert presented above the
         // view's window blocks any finger from reaching it. Reject if a
@@ -1270,9 +1406,14 @@ static BOOL viewIsHittableAtCenter(UIView* view) {
 
 // Smallest hittable view whose accessibility label matches `text`.
 // Caller iterates root windows; this recurses into one tree.
+// accessibilityElementsHidden filter: same a11y-tree predicate as
+// findViewByTestID — keeps text-based finders from latching onto labels
+// inside inactive stack frames / inactive tabs.
 static UIView* findLabelMatch(UIView* root, NSString* text, UIView* best) {
     if (!root || root.hidden || root.alpha < 0.01) return best;
-    if (labelMatchesText(root.accessibilityLabel, text) && viewIsHittableAtCenter(root)) {
+    if (root.accessibilityElementsHidden) return best;
+    if (labelMatchesText(root.accessibilityLabel, text) && viewIsHittableAtCenter(root) &&
+        isViewInActiveVCChain(root)) {
         CGFloat rootArea = root.bounds.size.width * root.bounds.size.height;
         CGFloat bestArea = best ? best.bounds.size.width * best.bounds.size.height : CGFLOAT_MAX;
         if (rootArea < bestArea) best = root;
@@ -1374,8 +1515,80 @@ bool EnnioRuntimeHelper::typeText(const std::string& testID, const std::string& 
                   tid, NSStringFromClass([view class]));
             return;
         }
-        if (![input isFirstResponder]) [input becomeFirstResponder];
-        [(id<UITextInput>)input insertText:str];
+        if (![input isFirstResponder]) {
+            [input becomeFirstResponder];
+            // Run the runloop briefly so the responder chain settles
+            // before we drive input. RN's RCTTextInputComponentView wires
+            // `_eventEmitter` during a runloop tick after the component
+            // view becomes first responder; firing insertText: on the
+            // exact same tick can win the race and lose the JS event.
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+        }
+        // Prefer the UITextField delegate's shouldChangeCharactersInRange:
+        // path when available — that's what UIKit calls during a real
+        // keystroke and is the entry point RN's adapter listens on. Falls
+        // back to insertText: + manual notify for UITextView and
+        // non-RN-managed fields.
+        BOOL handled = NO;
+        if ([input isKindOfClass:[UITextField class]]) {
+            UITextField* tf = (UITextField*)input;
+            id<UITextFieldDelegate> d = tf.delegate;
+            if ([d respondsToSelector:@selector(textField:shouldChangeCharactersInRange:replacementString:)]) {
+                NSRange range = NSMakeRange((tf.text ?: @"").length, 0);
+                BOOL ok = [d textField:tf shouldChangeCharactersInRange:range replacementString:str];
+                if (ok) {
+                    tf.text = [(tf.text ?: @"") stringByAppendingString:str];
+                    [tf sendActionsForControlEvents:UIControlEventEditingChanged];
+                }
+                handled = YES;
+            }
+        }
+        if (!handled) {
+            [(id<UITextInput>)input insertText:str];
+        }
+        // RN's RCTBaseTextInputView / RCTTextInputComponentView (the
+        // wrapper) propagates the change to JS via -textInputDidChange.
+        // insertText: on the inner RCTUITextField doesn't trigger that,
+        // so controlled inputs in RN keep stale state.
+        //
+        // We try three sources for the wrapper that responds to
+        // textInputDidChange: (1) the testID-bearing view itself
+        // (legacy wraps the UITextField), (2) the input view's
+        // textInputDelegate property (set during init), (3) the input
+        // view's superview chain.
+        SEL didChange = NSSelectorFromString(@"textInputDidChange");
+        // Race: RCTTextInputComponentView's `_eventEmitter` is wired
+        // during a runloop tick after the component view becomes the
+        // backed text input's host. A single textInputDidChange call on
+        // the same tick can hit a nil emitter and drop the JS event,
+        // leaving controlled inputs with stale state. Retry across 3
+        // runloop ticks (50ms each) so the wired emitter catches a
+        // later call. Walk every ancestor: Fabric uses
+        // RCTTextInputComponentView as the wrapper, legacy uses
+        // RCTBaseTextInputView; both respond to -textInputDidChange.
+        for (int retry = 0; retry < 3; retry++) {
+            for (UIView* anc = view; anc; anc = anc.superview) {
+                if ([anc respondsToSelector:didChange]) {
+                    #pragma clang diagnostic push
+                    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    [anc performSelector:didChange];
+                    #pragma clang diagnostic pop
+                }
+            }
+            if ([input isKindOfClass:[UIControl class]]) {
+                [(UIControl*)input sendActionsForControlEvents:UIControlEventEditingChanged];
+            }
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+        }
+        // UITextView path: deliver the change via the delegate. UITextView
+        // doesn't fire UIControlEventEditingChanged (not a UIControl), so
+        // the retry-loop sendActions above is a no-op for it.
+        if ([input isKindOfClass:[UITextView class]]) {
+            id<UITextViewDelegate> d = ((UITextView*)input).delegate;
+            if ([d respondsToSelector:@selector(textViewDidChange:)]) {
+                [d textViewDidChange:(UITextView*)input];
+            }
+        }
         ok = true;
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
@@ -1404,6 +1617,15 @@ bool EnnioRuntimeHelper::clearText(const std::string& testID) {
         if ([target respondsToSelector:@selector(deleteBackward)]) {
             [target performSelector:@selector(deleteBackward)];
         }
+        if ([target isKindOfClass:[UIControl class]]) {
+            [(UIControl*)target sendActionsForControlEvents:UIControlEventEditingChanged];
+        }
+        if ([target isKindOfClass:[UITextView class]]) {
+            id<UITextViewDelegate> d = ((UITextView*)target).delegate;
+            if ([d respondsToSelector:@selector(textViewDidChange:)]) {
+                [d textViewDidChange:(UITextView*)target];
+            }
+        }
         ok = true;
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
@@ -1427,6 +1649,15 @@ bool EnnioRuntimeHelper::eraseText(const std::string& testID, int count) {
         for (int i = 0; i < count; i++) {
             if ([target respondsToSelector:@selector(deleteBackward)]) {
                 [target performSelector:@selector(deleteBackward)];
+            }
+        }
+        if ([target isKindOfClass:[UIControl class]]) {
+            [(UIControl*)target sendActionsForControlEvents:UIControlEventEditingChanged];
+        }
+        if ([target isKindOfClass:[UITextView class]]) {
+            id<UITextViewDelegate> d = ((UITextView*)target).delegate;
+            if ([d respondsToSelector:@selector(textViewDidChange:)]) {
+                [d textViewDidChange:(UITextView*)target];
             }
         }
         ok = true;
@@ -1898,9 +2129,42 @@ bool EnnioRuntimeHelper::fireTapByTestID(const std::string& testID) {
 bool EnnioRuntimeHelper::backGesture() {
     __block bool ok = false;
     void (^block)(void) = ^{
-        // Walk every connected window. The poppable nav controller may
-        // live in a window other than the keyWindow (e.g. modal sheet
-        // hosted in its own UIWindow on newer iOS).
+        // Modal dismiss first: RNScreens native-stack with
+        // presentation: 'modal' presents the screen modally, but iOS
+        // also exposes that VC inside a poppable parent nav (RNScreens
+        // wraps the modal screen so it appears in the stack).
+        // popViewControllerAnimated on that nav does NOT dismiss the
+        // modal — RNScreens drives presentation via viewWillAppear
+        // hooks, not the nav stack. So check for presentedVC first.
+        // Find ANY presented modal across all scenes' windows. Skip
+        // system windows (rootVC of class UIViewController plain) — only
+        // the app window's rootVC has the actual containment hierarchy.
+        UIViewController* presented = nil;
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+                UIViewController* candidate = topMostViewController(win.rootViewController);
+                if (!candidate) continue;
+                UIViewController* walker = candidate;
+                while (walker && !walker.presentingViewController) {
+                    walker = walker.parentViewController;
+                }
+                if (walker && walker.presentingViewController) {
+                    presented = walker;
+                    break;
+                }
+            }
+            if (presented) break;
+        }
+        if (presented) {
+            [presented dismissViewControllerAnimated:NO completion:nil];
+            ok = true;
+            return;
+        }
+        // No modal — fall back to popping the topmost poppable nav
+        // controller. Walk every connected window: the poppable nav
+        // may live in a window other than the keyWindow (e.g. modal
+        // sheet hosted in its own UIWindow on newer iOS).
         UINavigationController* nav = nil;
         for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
@@ -1912,14 +2176,6 @@ bool EnnioRuntimeHelper::backGesture() {
         }
         if (nav) {
             [nav popViewControllerAnimated:NO];
-            ok = true;
-            return;
-        }
-        // No nav stack to pop — fall back to dismissing whatever is
-        // presented modally on top.
-        UIViewController* top = topMostViewControllerForKeyWindow();
-        if (top && top.presentingViewController) {
-            [top.presentingViewController dismissViewControllerAnimated:NO completion:nil];
             ok = true;
             return;
         }

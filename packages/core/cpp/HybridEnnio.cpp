@@ -11,6 +11,9 @@
 #include <type_traits>
 #include <unordered_map>
 #include <functional>
+#include <cstdio>
+#include <cstdlib>
+#include <cerrno>
 
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/UIManager.h>
@@ -211,8 +214,15 @@ void HybridEnnio::startServer(double port) {
     if (webSocketServer_->start(serverPort_)) {
         serverRunning_ = true;
         ENNIO_LOG_INFO(LOG_TAG, "WebSocket server started successfully");
+        // Diagnostic marker (mirror NSLog which gets filtered on device).
+        std::string mark = std::string(getenv("HOME") ? getenv("HOME") : "/tmp") + "/Library/_ennio_ws_started.txt";
+        FILE* fp = fopen(mark.c_str(), "w");
+        if (fp) { fprintf(fp, "port=%d", serverPort_); fclose(fp); }
     } else {
         ENNIO_LOG_ERROR(LOG_TAG, "Failed to start WebSocket server");
+        std::string mark = std::string(getenv("HOME") ? getenv("HOME") : "/tmp") + "/Library/_ennio_ws_failed.txt";
+        FILE* fp = fopen(mark.c_str(), "w");
+        if (fp) { fprintf(fp, "port=%d errno=%d", serverPort_, errno); fclose(fp); }
         webSocketServer_.reset();
     }
 }
@@ -384,6 +394,13 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             r.success = true;
             r.data = ::ennio::EnnioRuntimeHelper::getInstance().isMenuTriggerAncestor(
                 ::ennio::json::parseString(req.payload, "testID")) ? "true" : "false";
+        }},
+        { "clearAppData", [](HybridEnnio*, const auto&, auto& r) {
+            // In-process sandbox wipe (Library/, Documents/, tmp/). Works
+            // identically on Simulator and physical device — no host
+            // filesystem access required. Caller restarts the app
+            // afterwards to drop in-memory state.
+            r.success = ::ennio::EnnioRuntimeHelper::getInstance().clearAppDataDirectories();
         }},
         { "getText", [](HybridEnnio* self, const auto& req, auto& r) {
             auto result = self->getText(::ennio::json::parseString(req.payload, "testID"));
@@ -862,12 +879,36 @@ std::variant<nitro::NullType, ExtendedElementInfo> HybridEnnio::findBySelector(c
             return nitro::NullType();
         }
 
-        auto node = ::ennio::ElementMatcher::findFirst(root, criteria);
-        if (!node) {
+        // Walk all matches and prefer the first whose testID resolves to
+        // a UIView in the iOS a11y tree. Stops shadow-only matches under
+        // inactive tabs / pushed stack frames from being "found" and
+        // subsequently tapped against a stale UIView. Matches without
+        // testIDs fall through to first-match (text/trait-only selectors).
+        auto nodes = ::ennio::ElementMatcher::findAll(root, criteria);
+        if (nodes.empty()) {
             return nitro::NullType();
         }
 
-        auto infoOpt = ::ennio::ElementMatcher::getExtendedElementInfo(root, node);
+        auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
+        std::shared_ptr<const facebook::react::ShadowNode> chosen;
+        for (const auto& node : nodes) {
+            auto testID = ::ennio::ShadowTreeTraverser::getTestID(*node);
+            if (!testID) continue;
+            if (helper.isInA11yTree(*testID)) { chosen = node; break; }
+        }
+        if (!chosen) {
+            // No a11y-visible testID match. If any node lacks a testID,
+            // fall back to the first shadow-tree match (preserves current
+            // behavior for text-only / trait-only queries).
+            for (const auto& node : nodes) {
+                if (!::ennio::ShadowTreeTraverser::getTestID(*node)) { chosen = node; break; }
+            }
+        }
+        if (!chosen) {
+            return nitro::NullType();
+        }
+
+        auto infoOpt = ::ennio::ElementMatcher::getExtendedElementInfo(root, chosen);
         if (!infoOpt) {
             return nitro::NullType();
         }
@@ -890,7 +931,14 @@ std::vector<ExtendedElementInfo> HybridEnnio::findAllBySelector(const std::strin
         }
 
         auto nodes = ::ennio::ElementMatcher::findAll(root, criteria);
+        // a11y filter: drop testID-bearing matches whose UIView isn't in
+        // the iOS a11y tree (inactive tab / pushed frame / occluded
+        // modal host). Matches without testIDs are kept — caller handles
+        // visibility separately for those.
+        auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
         for (const auto& node : nodes) {
+            auto testID = ::ennio::ShadowTreeTraverser::getTestID(*node);
+            if (testID && !helper.isInA11yTree(*testID)) continue;
             auto infoOpt = ::ennio::ElementMatcher::getExtendedElementInfo(root, node);
             if (infoOpt) {
                 results.push_back(convertExtendedElementInfo(*infoOpt));
@@ -908,14 +956,25 @@ bool HybridEnnio::existsBySelector(const std::string& selectorJson) {
         auto criteria = ::ennio::SelectorParser::parse(selectorJson);
 
         auto root = getShadowTreeRoot();
-        if (root) {
-            auto node = ::ennio::ElementMatcher::findFirst(root, criteria);
-            if (node != nullptr) {
-                return true;
-            }
-        }
+        if (!root) return false;
 
-        return false;
+        // Walk all matches; if any with a testID is in the iOS a11y tree,
+        // it exists. Falls back to "any shadow match" when matches lack
+        // testIDs (text-only selectors) — the visibility gate is the
+        // proper place to enforce a11y for those.
+        auto nodes = ::ennio::ElementMatcher::findAll(root, criteria);
+        if (nodes.empty()) return false;
+
+        auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
+        bool hadTestID = false;
+        for (const auto& node : nodes) {
+            auto testID = ::ennio::ShadowTreeTraverser::getTestID(*node);
+            if (!testID) continue;
+            hadTestID = true;
+            if (helper.isInA11yTree(*testID)) return true;
+        }
+        // No testID-bearing match: fall back to shadow-tree presence.
+        return !hadTestID;
     } catch (const std::exception& e) {
         ENNIO_LOG_ERROR("existsBySelector", "Parse error: " << e.what());
         return false;
@@ -925,12 +984,36 @@ bool HybridEnnio::existsBySelector(const std::string& selectorJson) {
 std::variant<nitro::NullType, std::string> HybridEnnio::getTextBySelector(const std::string& selectorJson) {
     try {
         auto criteria = ::ennio::SelectorParser::parse(selectorJson);
-        auto node = findNodeBySelector(criteria);
-        if (!node) {
+        auto root = getShadowTreeRoot();
+        if (!root) {
             return nitro::NullType();
         }
 
-        auto text = ::ennio::ShadowTreeTraverser::getText(node);
+        // Same a11y filter as findBySelector: prefer the first match
+        // whose testID is in the iOS a11y tree; fall back to the first
+        // testID-less match.
+        auto nodes = ::ennio::ElementMatcher::findAll(root, criteria);
+        if (nodes.empty()) {
+            return nitro::NullType();
+        }
+
+        auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
+        std::shared_ptr<const facebook::react::ShadowNode> chosen;
+        for (const auto& node : nodes) {
+            auto testID = ::ennio::ShadowTreeTraverser::getTestID(*node);
+            if (!testID) continue;
+            if (helper.isInA11yTree(*testID)) { chosen = node; break; }
+        }
+        if (!chosen) {
+            for (const auto& node : nodes) {
+                if (!::ennio::ShadowTreeTraverser::getTestID(*node)) { chosen = node; break; }
+            }
+        }
+        if (!chosen) {
+            return nitro::NullType();
+        }
+
+        auto text = ::ennio::ShadowTreeTraverser::getText(chosen);
         if (!text) {
             return nitro::NullType();
         }
@@ -976,10 +1059,15 @@ bool HybridEnnio::isVisibleBySelector(const std::string& selectorJson) {
         const float width = screenWidth_ > 0 ? screenWidth_ : 430.0f;
         const float height = screenHeight_ > 0 ? screenHeight_ : 932.0f;
 
+        auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
         for (const auto& node : nodes) {
             auto testID = ::ennio::ShadowTreeTraverser::getTestID(*node);
             if (testID) {
-                if (::ennio::ShadowTreeTraverser::isVisible(root, *testID, width, height)) {
+                // Defer to the UIKit visibility path: it honors the iOS
+                // a11y tree (accessibilityElementsHidden), which catches
+                // matches under inactive tabs / pushed-under stack frames
+                // that the shadow-tree-only check would falsely accept.
+                if (helper.isViewOnscreen(*testID)) {
                     ENNIO_LOG_DEBUG_F(LOG_TAG, "isVisibleBySelector: visible via testID=%s", testID->c_str());
                     return true;
                 }

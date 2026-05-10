@@ -283,6 +283,16 @@ export class EnnioClient {
     return response.data === true;
   }
 
+  /**
+   * Wipe the app's sandbox (Library/, Documents/, tmp/) in-process. Works
+   * identically on Simulator and physical device — no host filesystem
+   * access. Caller restarts the app to drop in-memory state.
+   */
+  async clearAppData(): Promise<boolean> {
+    const response = await this.send('clearAppData', {});
+    return response?.success === true;
+  }
+
   async getText(testID: string): Promise<string | null> {
     const response = await this.send('getText', { testID });
     if (response.data == null) return null;

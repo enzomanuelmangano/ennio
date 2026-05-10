@@ -145,13 +145,18 @@ bool WebSocketServer::start(int port) {
     int opt = 1;
     setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    // Bind to loopback only — Ennio is a same-host dev tool. Refusing
-    // off-host connections eliminates the LAN attack surface even if a
-    // build with Ennio enabled accidentally ships.
+    // Bind to all interfaces. On Simulator, 127.0.0.1 is shared with the
+    // host — loopback would suffice. On physical device, usbmuxd's TCP
+    // tunnel reaches the kernel's bind address but app-sandboxed
+    // 127.0.0.1 sockets are NOT visible through it; binding INADDR_ANY
+    // exposes the listener on the in-app interface that usbmuxd can hit.
+    // The dev/QA tradeoff: an Ennio-enabled build is also reachable on
+    // LAN. Mitigated by the build-time `ENNIO_ENABLED` gate (see
+    // `EnnioAutoInit.mm`) — Ennio must never link into a release build.
     struct sockaddr_in addr;
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons(port);
 
     if (bind(serverSocket_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {

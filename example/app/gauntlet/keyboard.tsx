@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { View, Text, TextInput, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { useHeaderHeight } from '@react-navigation/elements';
 import { PressableScale } from 'pressto';
 
 export default function KeyboardAvoidingScreen() {
   const [value, setValue] = useState('');
   const [submitted, setSubmitted] = useState<string | null>(null);
+  const headerHeight = useHeaderHeight();
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={headerHeight}
       testID="keyboard-screen"
     >
       <View style={styles.spacer} />

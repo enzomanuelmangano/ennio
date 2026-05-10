@@ -135,15 +135,17 @@ function SortDropdown({
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <View
+        <Pressable
           style={styles.sortButton}
           testID="sort-dropdown"
           accessibilityIdentifier="sort-dropdown"
           accessible
         >
-          <Text style={styles.sortButtonText}>{selectedLabel}</Text>
-          <Ionicons name="chevron-down" size={14} color={theme.colors.text.muted} />
-        </View>
+          <View style={styles.sortButtonInner} pointerEvents="none">
+            <Text style={styles.sortButtonText}>{selectedLabel}</Text>
+            <Ionicons name="chevron-down" size={14} color={theme.colors.text.muted} />
+          </View>
+        </Pressable>
       </DropdownMenu.Trigger>
       <DropdownMenu.Content>
         <DropdownMenu.Label>Sort by</DropdownMenu.Label>
@@ -355,14 +357,17 @@ const createStyles = (theme: Theme) =>
       color: theme.colors.text.muted,
     },
     sortButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
       backgroundColor: theme.colors.background.tonal,
       paddingHorizontal: 14,
       paddingVertical: 8,
       borderRadius: theme.radii.pill,
       borderCurve: 'continuous',
+      alignSelf: 'flex-start',
+    },
+    sortButtonInner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
     },
     sortButtonText: {
       fontSize: 13,
