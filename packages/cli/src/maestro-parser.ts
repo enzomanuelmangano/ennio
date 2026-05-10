@@ -73,6 +73,7 @@ export type MaestroCommand =
       };
     }
   | { longPress: MaestroSelector | string }
+  | { longPressOn: MaestroSelector | string }
   | { back: true }
   | { runFlow: RunFlowCommand }
   | { waitFor: MaestroSelector & { timeout?: number } }

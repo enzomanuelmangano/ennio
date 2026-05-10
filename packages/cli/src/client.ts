@@ -272,6 +272,17 @@ export class EnnioClient {
     return response.data === true;
   }
 
+  /**
+   * True when the testID's UIView (or any ancestor) is a UIButton with
+   * `menu` set + `showsMenuAsPrimaryAction` (zeego DropdownMenu /
+   * react-native-ios-context-menu). The tap dispatcher routes these via
+   * idb HID — programmatic UIControl actions don't open UIMenu.
+   */
+  async isMenuTriggerAncestor(testID: string): Promise<boolean> {
+    const response = await this.send('isMenuTriggerAncestor', { testID });
+    return response.data === true;
+  }
+
   async getText(testID: string): Promise<string | null> {
     const response = await this.send('getText', { testID });
     if (response.data == null) return null;
