@@ -12,8 +12,8 @@ synchronously through a native JSI fiber-walk, with `idb` HID injection
 as fallback for keyboard input and swipes.
 
 ```
-ennio e2e/01-auth-flow.yaml      # one flow
-ennio e2e/                       # every *.yaml in the directory
+ennio test e2e/01-auth-flow.yaml      # one flow
+ennio test e2e/                       # every *.yaml in the directory
 ```
 
 ## Architecture
@@ -168,7 +168,7 @@ includes the pod and a `+load` swizzle bootstraps the WebSocket server
 Run a flow:
 
 ```bash
-ennio e2e/01-auth-flow.yaml
+ennio test e2e/01-auth-flow.yaml
 ```
 
 ## Build gating (`ennio-expo-plugin`)
@@ -206,11 +206,10 @@ nm -gU YourApp.app/YourApp 2>/dev/null | grep -E "EnnioCore|__ennio_invokeOnPres
 ## CLI
 
 ```bash
-ennio <flow.yaml>            # one flow
-ennio e2e/                   # every *.yaml under the directory, in order
-ennio --port=9876            # override WebSocket port
-ennio --verbose              # log every step + RPC
-ennio --trace                # per-step state snapshot
+ennio test <flow.yaml>            # one flow
+ennio test e2e/                   # every *.yaml under the directory, in order
+ennio test --verbose e2e/         # log every step + RPC
+ennio test --trace e2e/           # per-step state snapshot
 ```
 
 `ENNIO_UDID=<udid>` pins to a specific simulator when multiple are
@@ -227,7 +226,7 @@ independent: Ennio terminates the app, wipes its `Library/`,
 `Documents/`, and `tmp/` directories, resets privacy permissions, then
 re-launches. The native WebSocket server reconnects automatically.
 
-For `ennio e2e/`, flows run sequentially, each carrying its own
+For `ennio test e2e/`, flows run sequentially, each carrying its own
 `clearState`, so cross-flow leakage is impossible if the YAML opts in.
 If a flow omits `launchApp`, it inherits the previous flow's state by
 design (used for split flows that share auth setup).
@@ -236,10 +235,10 @@ To rule out flake from sim quirks rather than test-content issues:
 
 ```bash
 # Same flow back-to-back
-for i in 1 2 3; do ennio e2e/03-cart-management.yaml; done
+for i in 1 2 3; do ennio test e2e/03-cart-management.yaml; done
 
 # Verify a single flow in isolation
-ennio --verbose e2e/03-cart-management.yaml | tail -50
+ennio test --verbose e2e/03-cart-management.yaml | tail -50
 ```
 
 ## Maestro flow support
