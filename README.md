@@ -289,7 +289,7 @@ example/              Sample app + maestro-e2e/ flows (regression suite).
 
 | Layer | Stage                 | Mechanism                                                                                                                                                                                         |
 | ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Plugin (build time)   | `ennio-expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                       |
+| 1     | Plugin (build time)   | `ennio-expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                        |
 | 2     | Runtime (app launch)  | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`). |
 | 3     | Network (server bind) | Server binds to `127.0.0.1` only — off-host LAN traffic is refused at `bind()`.                                                                                                                   |
 | 4     | Visual                | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot.                                                                             |
