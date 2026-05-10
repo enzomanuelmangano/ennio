@@ -1,5 +1,11 @@
 # Ennio
 
+> [!WARNING]
+> **Experimental.** Ennio is at an early experimental stage. APIs, package
+> names, internals, and behavior may change without notice. iOS only.
+> Expect rough edges; do not rely on it for production-critical test
+> suites yet.
+
 Maestro-compatible E2E test runner for React Native iOS. Reads ride the
 Fabric shadow tree directly. Writes invoke the React `onPress` closure
 synchronously through a native JSI fiber-walk, with `idb` HID injection
@@ -88,17 +94,6 @@ Bypasses the iOS gesture pipeline entirely. Works for `Pressable`,
 expo-router `<Link asChild>`. Falls back to `idb` HID tap when the fiber
 has no `onPress` (TextInput) or no fiber match.
 
-### Performance
-
-| operation            | Maestro / XCUI     | Ennio               |
-| -------------------- | ------------------ | ------------------- |
-| `assertVisible: id`  | 200–400 ms         | 5–10 ms             |
-| `tapOn: id`          | 200–400 ms         | 5–15 ms             |
-| `tapOn: text` (tab)  | 200–400 ms         | 5–15 ms             |
-| `inputText` per char | ~50 ms             | ~30 ms (idb HID)    |
-| 30-step flow         | 60–90 s            | 5–15 s              |
-| suite cold start     | 10–15 s xcodebuild | 0 — already running |
-
 ## Requirements
 
 - React Native ≥ 0.81 with New Architecture (Fabric, bridgeless).
@@ -183,7 +178,7 @@ explicitly opt in. Default behavior:
 
 | `ENNIO_ENABLED` value                 | Plugin action                                                                                                                   |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `1` (iOS) / `true` (Android)          | Adds `pod 'EnnioCore'` / Gradle dep — full runtime included                                                                     |
+| `1`                                   | Adds `pod 'EnnioCore'` to the iOS Podfile — full runtime included                                                               |
 | `0`, `false`, unset, or anything else | Plugin no-ops — build contains **zero** Ennio code, symbols, or port listener (byte-equivalent to omitting the plugin entirely) |
 
 EAS:
@@ -289,9 +284,9 @@ example/              Sample app + maestro-e2e/ flows (regression suite).
 
 | Layer | Stage                 | Mechanism                                                                                                                                                                                         |
 | ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Plugin (build time)   | `ennio-expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                        |
+| 1     | Plugin (build time)   | `ennio-expo-plugin` adds the iOS pod **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                                   |
 | 2     | Runtime (app launch)  | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`). |
-| 3     | Network (server bind) | Server binds to `127.0.0.1` only — off-host LAN traffic is refused at `bind()`.                                                                                                                   |
+| 3     | Network (server bind) | Server binds `INADDR_ANY` so usbmuxd's TCP forward can reach it on physical device. On the iOS Simulator the sandbox confines traffic to the host. **On physical device the port is reachable from the LAN — only run device builds on trusted networks.** Defense for production rests primarily on Layers 1 + 2. |
 | 4     | Visual                | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot.                                                                             |
 
 Layer 1 is the primary defense. Layers 2–4 are runtime backstops if a
@@ -325,13 +320,11 @@ nm -gU build/Build/Products/Release-iphoneos/YourApp.app/YourApp \
 
 ## Limitations
 
-- iOS-simulator focus. Real-device works but requires `idb_companion`
-  on the device and codesign-friendly build settings.
-- TextInput focus uses idb HID tap (forwardRef breaks fiber.stateNode
-  focus paths). Each typeText preamble dismisses the keyboard before
-  re-tapping the field to avoid keyboard-occlusion focus drops.
-- Custom touchables must surface an `onPress` prop on the testID-bearing
-  fiber to use the fast path. Anything else falls to idb HID.
+- **Android not yet supported.** Some scaffolding is present in the source
+  tree (CMake, Gradle, nitrogen Android codegen) but no runtime: no
+  `+load`-equivalent bootstrap, no JNI hook, no JS-thread executor.
+  Setting `ENNIO_ENABLED=true` for Android builds currently has no effect
+  — do not rely on it.
 
 ## License
 

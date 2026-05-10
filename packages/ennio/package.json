@@ -1,7 +1,7 @@
 {
   "name": "ennio",
   "version": "0.0.1",
-  "description": "Fast React Native E2E testing via direct Fabric shadow tree access. Maestro-compatible YAML runner with sub-15ms tap latency.",
+  "description": "Maestro-compatible E2E test runner for React Native iOS. Direct JSI fiber-walk invokes onPress synchronously.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
