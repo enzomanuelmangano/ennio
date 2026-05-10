@@ -1,9 +1,8 @@
-#!/usr/bin/env bun
 /**
  * Ennio CLI entry — subcommand dispatcher.
  *
  * Architecture:
- *   - one channel: WebSocket to the in-app @ennio/core module on :9876.
+ *   - one channel: WebSocket to the in-app ennio module on :9876.
  *     Reads (assertVisible, layout, alerts) traverse the Fabric shadow
  *     tree. Writes (tap, typeText, scroll, alert button tap) run inside
  *     the user app via UIKit / accessibilityActivate / sendActions —

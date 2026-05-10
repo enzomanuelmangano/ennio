@@ -1,0 +1,31 @@
+{
+  "name": "ennio-expo-plugin",
+  "version": "0.0.1",
+  "description": "Expo config plugin for Ennio E2E testing — gates the native runtime behind ENNIO_ENABLED.",
+  "main": "src/index.js",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "lint": "eslint . --max-warnings=0"
+  },
+  "dependencies": {
+    "@expo/config-plugins": "^9.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/enzomanuelmangano/ennio.git",
+    "directory": "packages/ennio-expo-plugin"
+  },
+  "license": "MIT",
+  "keywords": [
+    "expo",
+    "expo-plugin",
+    "react-native",
+    "ennio",
+    "e2e"
+  ]
+}

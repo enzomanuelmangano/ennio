@@ -22,7 +22,7 @@ export default [
       '**/android/build/**',
       '**/android/app/build/**',
       '**/ios/Pods/**',
-      'packages/core/nitrogen/generated/**',
+      'packages/ennio/nitrogen/generated/**',
       'patches/**',
       '**/*.xcassets/**',
       'bun.lock',

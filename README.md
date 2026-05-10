@@ -1,13 +1,19 @@
 # Ennio
 
+> [!WARNING]
+> **Experimental.** Ennio is at an early experimental stage. APIs, package
+> names, internals, and behavior may change without notice. iOS only.
+> Expect rough edges; do not rely on it for production-critical test
+> suites yet.
+
 Maestro-compatible E2E test runner for React Native iOS. Reads ride the
 Fabric shadow tree directly. Writes invoke the React `onPress` closure
 synchronously through a native JSI fiber-walk, with `idb` HID injection
 as fallback for keyboard input and swipes.
 
 ```
-ennio e2e/01-auth-flow.yaml      # one flow
-ennio e2e/                       # every *.yaml in the directory
+ennio test e2e/01-auth-flow.yaml      # one flow
+ennio test e2e/                       # every *.yaml in the directory
 ```
 
 ## Architecture
@@ -46,7 +52,7 @@ ennio e2e/                       # every *.yaml in the directory
 
 ### Bootstrap (zero-import)
 
-`@ennio/core` boots itself entirely from native. The user's app does
+`ennio` boots itself entirely from native. The user's app does
 **not** import the package anywhere. Sequence at launch:
 
 1. `+load` constructor in `EnnioAutoInit.mm` swizzles `RCTHost.start`.
@@ -61,7 +67,7 @@ ennio e2e/                       # every *.yaml in the directory
    the WebSocket server.
 
 The user installs the package via `npm install`; autolinking adds the
-pod, and the swizzle does the rest. **No `import '@ennio/core'`.**
+pod, and the swizzle does the rest. **No `import 'ennio'`.**
 
 ### Direct onPress dispatch
 
@@ -88,17 +94,6 @@ Bypasses the iOS gesture pipeline entirely. Works for `Pressable`,
 expo-router `<Link asChild>`. Falls back to `idb` HID tap when the fiber
 has no `onPress` (TextInput) or no fiber match.
 
-### Performance
-
-| operation            | Maestro / XCUI     | Ennio               |
-| -------------------- | ------------------ | ------------------- |
-| `assertVisible: id`  | 200–400 ms         | 5–10 ms             |
-| `tapOn: id`          | 200–400 ms         | 5–15 ms             |
-| `tapOn: text` (tab)  | 200–400 ms         | 5–15 ms             |
-| `inputText` per char | ~50 ms             | ~30 ms (idb HID)    |
-| 30-step flow         | 60–90 s            | 5–15 s              |
-| suite cold start     | 10–15 s xcodebuild | 0 — already running |
-
 ## Requirements
 
 - React Native ≥ 0.81 with New Architecture (Fabric, bridgeless).
@@ -114,22 +109,20 @@ iOS only.
 ## Setup
 
 ```bash
-# Runtime + plugin
-npm install @ennio/core @ennio/expo-plugin react-native-nitro-modules
-
-# CLI
-npm install -D @ennio/cli
+npm install ennio ennio-expo-plugin react-native-nitro-modules
 ```
+
+`ennio` ships the native runtime and the CLI binary together — `npx ennio` is available immediately.
 
 `app.json`:
 
 ```json
 {
-  "plugins": ["expo-router", "@ennio/expo-plugin"]
+  "plugins": ["expo-router", "ennio-expo-plugin"]
 }
 ```
 
-> **Default = OFF.** Having `@ennio/core` and `@ennio/expo-plugin` in
+> **Default = OFF.** Having `ennio` and `ennio-expo-plugin` in
 > your dependencies is **safe to ship to production**. The native
 > runtime only links in when `ENNIO_ENABLED=1` is set at prebuild
 > time. Without it the plugin no-ops and the resulting build is
@@ -164,10 +157,10 @@ bunx expo run:ios --configuration Release
 ```
 
 When excluded, the build is byte-identical to one with
-`@ennio/expo-plugin` removed from `app.json` — zero symbols, zero
+`ennio-expo-plugin` removed from `app.json` — zero symbols, zero
 linked code, zero port listener.
 
-You never import `@ennio/core` anywhere. When enabled, autolinking
+You never import `ennio` anywhere. When enabled, autolinking
 includes the pod and a `+load` swizzle bootstraps the WebSocket server
 
 - JSI fiber walker before your app's first frame.
@@ -175,17 +168,17 @@ includes the pod and a `+load` swizzle bootstraps the WebSocket server
 Run a flow:
 
 ```bash
-ennio e2e/01-auth-flow.yaml
+ennio test e2e/01-auth-flow.yaml
 ```
 
-## Build gating (`@ennio/expo-plugin`)
+## Build gating (`ennio-expo-plugin`)
 
 The plugin's only job: keep Ennio out of any build that doesn't
 explicitly opt in. Default behavior:
 
 | `ENNIO_ENABLED` value                 | Plugin action                                                                                                                   |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `1` (iOS) / `true` (Android)          | Adds `pod 'EnnioCore'` / Gradle dep — full runtime included                                                                     |
+| `1`                                   | Adds `pod 'EnnioCore'` to the iOS Podfile — full runtime included                                                               |
 | `0`, `false`, unset, or anything else | Plugin no-ops — build contains **zero** Ennio code, symbols, or port listener (byte-equivalent to omitting the plugin entirely) |
 
 EAS:
@@ -213,11 +206,10 @@ nm -gU YourApp.app/YourApp 2>/dev/null | grep -E "EnnioCore|__ennio_invokeOnPres
 ## CLI
 
 ```bash
-ennio <flow.yaml>            # one flow
-ennio e2e/                   # every *.yaml under the directory, in order
-ennio --port=9876            # override WebSocket port
-ennio --verbose              # log every step + RPC
-ennio --trace                # per-step state snapshot
+ennio test <flow.yaml>            # one flow
+ennio test e2e/                   # every *.yaml under the directory, in order
+ennio test --verbose e2e/         # log every step + RPC
+ennio test --trace e2e/           # per-step state snapshot
 ```
 
 `ENNIO_UDID=<udid>` pins to a specific simulator when multiple are
@@ -234,7 +226,7 @@ independent: Ennio terminates the app, wipes its `Library/`,
 `Documents/`, and `tmp/` directories, resets privacy permissions, then
 re-launches. The native WebSocket server reconnects automatically.
 
-For `ennio e2e/`, flows run sequentially, each carrying its own
+For `ennio test e2e/`, flows run sequentially, each carrying its own
 `clearState`, so cross-flow leakage is impossible if the YAML opts in.
 If a flow omits `launchApp`, it inherits the previous flow's state by
 design (used for split flows that share auth setup).
@@ -243,10 +235,10 @@ To rule out flake from sim quirks rather than test-content issues:
 
 ```bash
 # Same flow back-to-back
-for i in 1 2 3; do ennio e2e/03-cart-management.yaml; done
+for i in 1 2 3; do ennio test e2e/03-cart-management.yaml; done
 
 # Verify a single flow in isolation
-ennio --verbose e2e/03-cart-management.yaml | tail -50
+ennio test --verbose e2e/03-cart-management.yaml | tail -50
 ```
 
 ## Maestro flow support
@@ -271,18 +263,17 @@ The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
 
 ```
 packages/
-  core/         @ennio/core       — in-app native module
-                                    (C++/ObjC++ + Nitro spec)
-  cli/          @ennio/cli        — `ennio` binary, YAML runner
-  expo-plugin/  @ennio/expo-plugin — Podfile gate (ENNIO_ENABLED)
-example/        Sample app + e2e/ flows (10 example flows, the
-                runner's regression suite).
+  ennio/              ennio              — in-app native runtime (C++/ObjC++
+                                           + Nitro spec) AND `ennio` CLI binary
+                                           (esbuild-bundled, ships in same pkg)
+  ennio-expo-plugin/  ennio-expo-plugin  — Podfile gate (ENNIO_ENABLED)
+example/              Sample app + maestro-e2e/ flows (regression suite).
 ```
 
 ## Security
 
-> **TL;DR — installed ≠ enabled.** Keeping `@ennio/core` and
-> `@ennio/expo-plugin` in your dependencies and plugins list is **safe
+> **TL;DR — installed ≠ enabled.** Keeping `ennio` and
+> `ennio-expo-plugin` in your dependencies and plugins list is **safe
 > for App Store / production builds**. They are inert by default. The
 > remote-control surface only ships when you explicitly set
 > `ENNIO_ENABLED=1` at prebuild time. Production builds without that
@@ -290,12 +281,12 @@ example/        Sample app + e2e/ flows (10 example flows, the
 
 ### Defense layers
 
-| Layer | Stage                 | Mechanism                                                                                                                                                                                         |
-| ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Plugin (build time)   | `@ennio/expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                       |
-| 2     | Runtime (app launch)  | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`). |
-| 3     | Network (server bind) | Server binds to `127.0.0.1` only — off-host LAN traffic is refused at `bind()`.                                                                                                                   |
-| 4     | Visual                | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot.                                                                             |
+| Layer | Stage                 | Mechanism                                                                                                                                                                                                                                                                                                          |
+| ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | Plugin (build time)   | `ennio-expo-plugin` adds the iOS pod **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                                                                                                                                                    |
+| 2     | Runtime (app launch)  | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`).                                                                                                                  |
+| 3     | Network (server bind) | Server binds `INADDR_ANY` so usbmuxd's TCP forward can reach it on physical device. On the iOS Simulator the sandbox confines traffic to the host. **On physical device the port is reachable from the LAN — only run device builds on trusted networks.** Defense for production rests primarily on Layers 1 + 2. |
+| 4     | Visual                | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot.                                                                                                                                                                                              |
 
 Layer 1 is the primary defense. Layers 2–4 are runtime backstops if a
 build with Ennio enabled accidentally escapes the gate. **Always set
@@ -328,13 +319,11 @@ nm -gU build/Build/Products/Release-iphoneos/YourApp.app/YourApp \
 
 ## Limitations
 
-- iOS-simulator focus. Real-device works but requires `idb_companion`
-  on the device and codesign-friendly build settings.
-- TextInput focus uses idb HID tap (forwardRef breaks fiber.stateNode
-  focus paths). Each typeText preamble dismisses the keyboard before
-  re-tapping the field to avoid keyboard-occlusion focus drops.
-- Custom touchables must surface an `onPress` prop on the testID-bearing
-  fiber to use the fast path. Anything else falls to idb HID.
+- **Android not yet supported.** Some scaffolding is present in the source
+  tree (CMake, Gradle, nitrogen Android codegen) but no runtime: no
+  `+load`-equivalent bootstrap, no JNI hook, no JS-thread executor.
+  Setting `ENNIO_ENABLED=true` for Android builds currently has no effect
+  — do not rely on it.
 
 ## License
 

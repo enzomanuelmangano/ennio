@@ -5,6 +5,6 @@
     "rootDir": "./src",
     "jsx": "react-native"
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "lib"]
+  "include": ["src/Ennio.nitro.ts", "src/index.ts"],
+  "exclude": ["node_modules", "lib", "dist", "src/cli", "tests"]
 }

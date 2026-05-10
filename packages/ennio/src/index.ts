@@ -108,8 +108,8 @@ export const EnnioModule = {
   },
 };
 
-// No JS-side bootstrap. `@ennio/core` autolinks via Pod, and the iOS
+// No JS-side bootstrap. `ennio` autolinks via Pod, and the iOS
 // `EnnioAutoInit` swizzle drives the WS-server start + Fiber walker
 // install + HybridEnnio construction natively, on the JS thread, the
 // moment RCTHost finishes booting. The user's app never imports this
-// package; it lands purely through `npm install @ennio/core`.
+// package; it lands purely through `npm install ennio`.

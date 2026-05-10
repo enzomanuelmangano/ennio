@@ -1,7 +1,7 @@
 /**
  * Writer abstraction
  *
- * Single backend: NitroWriter. Reads route through @ennio/core's Fabric
+ * Single backend: NitroWriter. Reads route through ennio's Fabric
  * shadow tree over WebSocket. Writes do too — every tap, type, swipe,
  * scroll, key-press lands in the user app's process via the Nitro
  * helper (UIControl.sendActions / synthesised UITouch /

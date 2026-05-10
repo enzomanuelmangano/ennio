@@ -47,9 +47,9 @@ function withEnnioIOS(config) {
     # Try standard layout, monorepo (1 level up), and bun workspace
     # (2 levels up — apps/<app>/node_modules empty, root has hoisted dep).
     candidate_paths = [
-      File.join(__dir__, '..', 'node_modules', '@ennio', 'core'),
-      File.join(__dir__, '..', '..', 'node_modules', '@ennio', 'core'),
-      File.join(__dir__, '..', '..', '..', 'node_modules', '@ennio', 'core'),
+      File.join(__dir__, '..', 'node_modules', 'ennio'),
+      File.join(__dir__, '..', '..', 'node_modules', 'ennio'),
+      File.join(__dir__, '..', '..', '..', 'node_modules', 'ennio'),
     ]
     ennio_path = candidate_paths.find { |p| File.exist?(p) }
     pod 'EnnioCore', :path => ennio_path if ennio_path
