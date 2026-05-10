@@ -359,6 +359,20 @@ void HybridEnnio::synchronize() {
     );
 }
 
+bool HybridEnnio::waitForNextCommit(double maxMs) {
+    // Snapshot the current counter; wake when JS bumps it (via the
+    // __ennio_native_onCommit HostFunction installed in
+    // nativeBootstrap). Cap at maxMs so the worst case is identical
+    // to a blind sleep of the same duration — no flake risk.
+    uint64_t startId = g_commitCounter.load(std::memory_order_acquire);
+    auto deadline = std::chrono::steady_clock::now()
+                  + std::chrono::milliseconds(static_cast<long>(maxMs));
+    std::unique_lock<std::mutex> lock(g_commitMutex);
+    return g_commitCv.wait_until(lock, deadline, [&] {
+        return g_commitCounter.load(std::memory_order_acquire) > startId;
+    });
+}
+
 // ============================================
 // WebSocket Command Handler
 // ============================================
@@ -431,6 +445,19 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
         { "synchronize", [](HybridEnnio* self, const auto&, auto& r) {
             self->synchronize();
             r.success = true;
+        }},
+        { "waitForCommit", [](HybridEnnio* self, const auto& req, auto& r) {
+            double maxMs = ::ennio::json::parseDouble(req.payload, "maxMs");
+            auto start = std::chrono::steady_clock::now();
+            bool gotCommit = self->waitForNextCommit(maxMs);
+            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            r.success = true;
+            // JSON: { "commit": true|false, "elapsedMs": N }
+            std::ostringstream oss;
+            oss << "{\"commit\":" << (gotCommit ? "true" : "false")
+                << ",\"elapsedMs\":" << elapsedMs << "}";
+            r.data = oss.str();
         }},
 
         // ---- Alerts ----
@@ -1438,6 +1465,21 @@ namespace {
       return invokeFromFiber(fiber);
     });
   };
+  // Commit signal — monkey-patch onCommitFiberRoot so the native
+  // side learns the moment React finishes a commit. Same pattern
+  // React DevTools uses; stable across React versions. The native
+  // callback is installed by HybridEnnio::nativeBootstrap right
+  // after this walker source is evaluated.
+  var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  if (hook && typeof hook.onCommitFiberRoot === 'function') {
+    var originalOnCommit = hook.onCommitFiberRoot.bind(hook);
+    hook.onCommitFiberRoot = function (rendererID, root, priorityLevel, didError) {
+      try { originalOnCommit(rendererID, root, priorityLevel, didError); } catch (e) {}
+      if (typeof globalThis.__ennio_native_onCommit === 'function') {
+        try { globalThis.__ennio_native_onCommit(); } catch (e) {}
+      }
+    };
+  }
 })();
 )JS";
 
@@ -1447,6 +1489,14 @@ namespace {
 
     std::mutex g_instanceMutex;
     std::shared_ptr<HybridEnnio> g_instance;
+
+    // Commit signal — incremented from the JS thread via
+    // __ennio_native_onCommit (a JSI HostFunction installed in
+    // nativeBootstrap). waitForNextCommit blocks on this counter +
+    // condition variable until the value advances or maxMs elapses.
+    std::mutex g_commitMutex;
+    std::condition_variable g_commitCv;
+    std::atomic<uint64_t> g_commitCounter{0};
 }
 
 void HybridEnnio::setJSThreadExecutor(HybridEnnio::JSThreadExecutor exec) {
@@ -1469,6 +1519,27 @@ void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
     } catch (const std::exception& e) {
         ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: walker eval failed: " << e.what()));
         return;
+    }
+
+    // Install __ennio_native_onCommit as a JSI HostFunction. The
+    // monkey-patched onCommitFiberRoot in the walker calls this on
+    // every React commit; we bump the counter and wake any thread
+    // waiting in waitForNextCommit. Idempotent — overwrites on each
+    // bootstrap.
+    try {
+        auto onCommitFn = facebook::jsi::Function::createFromHostFunction(
+            runtime,
+            facebook::jsi::PropNameID::forAscii(runtime, "__ennio_native_onCommit"),
+            0,
+            [](facebook::jsi::Runtime&, const facebook::jsi::Value&,
+               const facebook::jsi::Value*, size_t) -> facebook::jsi::Value {
+                g_commitCounter.fetch_add(1, std::memory_order_release);
+                g_commitCv.notify_all();
+                return facebook::jsi::Value::undefined();
+            });
+        runtime.global().setProperty(runtime, "__ennio_native_onCommit", onCommitFn);
+    } catch (const std::exception& e) {
+        ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: onCommit install failed: " << e.what()));
     }
 
     std::shared_ptr<HybridEnnio> instance;

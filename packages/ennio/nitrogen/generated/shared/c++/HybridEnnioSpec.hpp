@@ -72,6 +72,7 @@ namespace margelo::nitro::ennio {
       virtual std::variant<nitro::NullType, std::string> getText(const std::string& testID) = 0;
       virtual bool waitForIdle(double timeoutMs) = 0;
       virtual void synchronize() = 0;
+      virtual bool waitForNextCommit(double maxMs) = 0;
       virtual std::variant<nitro::NullType, ExtendedElementInfo> findBySelector(const std::string& selectorJson) = 0;
       virtual std::vector<ExtendedElementInfo> findAllBySelector(const std::string& selectorJson) = 0;
       virtual bool existsBySelector(const std::string& selectorJson) = 0;
