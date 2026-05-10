@@ -12,8 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ennio/core": "*",
-    "@ennio/expo-plugin": "*",
+    "ennio": "*",
+    "ennio-expo-plugin": "*",
     "@expo/metro-runtime": "~55.0.10",
     "@gorhom/bottom-sheet": "^5.2.13",
     "@hookform/resolvers": "^5.2.2",
@@ -48,7 +48,6 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
-    "@ennio/cli": "*",
     "@types/react": "~19.2.10",
     "expo-color-space-plugin": "^0.1.0",
     "typescript": "~5.9.2"

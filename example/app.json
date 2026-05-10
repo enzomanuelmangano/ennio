@@ -25,7 +25,7 @@
     },
     "plugins": [
       "expo-router",
-      "@ennio/expo-plugin",
+      "ennio-expo-plugin",
       [
         "expo-color-space-plugin",
         {
