@@ -949,6 +949,27 @@ std::pair<double, double> EnnioRuntimeHelper::getKeyWindowSize() {
     return {w, h};
 }
 
+bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool isMenuTrigger = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view) return;
+        if (@available(iOS 14.0, *)) {
+            for (UIView* cursor = view; cursor; cursor = cursor.superview) {
+                if (![cursor isKindOfClass:[UIButton class]]) continue;
+                UIButton* b = (UIButton*)cursor;
+                if (b.menu && b.showsMenuAsPrimaryAction) {
+                    isMenuTrigger = true;
+                    return;
+                }
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return isMenuTrigger;
+}
+
 bool EnnioRuntimeHelper::isViewOnscreen(const std::string& testID) {
     NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
     __block bool onscreen = false;
