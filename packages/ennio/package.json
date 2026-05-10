@@ -1,12 +1,23 @@
 {
-  "name": "@ennio/core",
-  "version": "0.1.8",
-  "description": "Fast React Native E2E testing via direct Fabric shadow tree access",
+  "name": "ennio",
+  "version": "0.1.0",
+  "description": "Fast React Native E2E testing via direct Fabric shadow tree access. Maestro-compatible YAML runner with sub-15ms tap latency.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "bin": {
+    "ennio": "./dist/cli.js"
+  },
   "files": [
     "lib/",
-    "src/",
+    "dist/",
+    "src/Ennio.nitro.ts",
+    "src/index.ts",
     "cpp/",
     "android/",
     "ios/",
@@ -16,11 +27,13 @@
     "react-native.config.js"
   ],
   "scripts": {
-    "build": "tsc",
-    "clean": "rm -rf lib",
-    "typecheck": "tsc --noEmit",
+    "build:lib": "tsc",
+    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --external:fsevents",
+    "build": "npm run build:lib && npm run build:cli && chmod +x dist/cli.js",
+    "clean": "rm -rf lib dist",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
     "lint": "eslint . --max-warnings=0",
-    "prepublishOnly": "yarn build"
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "peerDependencies": {
     "react": "*",
@@ -28,15 +41,23 @@
     "react-native-nitro-modules": ">=0.18.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
+    "esbuild": "^0.21.0",
+    "glob": "^10.0.0",
+    "js-yaml": "^4.1.0",
     "nitrogen": "^0.35.5",
     "react-native-nitro-modules": "^0.35.5",
     "typescript": "^5.4.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/user/ennio.git",
-    "directory": "packages/core"
+    "url": "https://github.com/enzomanuelmangano/ennio.git",
+    "directory": "packages/ennio"
   },
   "license": "MIT",
   "keywords": [
@@ -44,7 +65,8 @@
     "e2e",
     "testing",
     "fabric",
-    "nitro"
-  ],
-  "dependencies": {}
+    "nitro",
+    "maestro",
+    "ios"
+  ]
 }

@@ -4,12 +4,13 @@
 
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 
 export function runVersionCommand(): number {
   try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const pkg = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf-8'));
+    // After esbuild bundles to CJS, __filename is the absolute path to
+    // dist/cli.js. The pkg's package.json is one directory up.
+    const here = dirname(__filename);
+    const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf-8'));
     console.log(`ennio ${pkg.version}`);
   } catch {
     console.log('ennio (version unknown)');
