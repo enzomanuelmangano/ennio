@@ -854,7 +854,7 @@ class MaestroExecutor {
     if ('tapOn' in cmd) {
       const selector = normalizeSelector(cmd.tapOn as MaestroSelector | string);
       this.log(`tapOn: ${JSON.stringify(selector)}`);
-      await this.tap(selector, { optional: selector.optional === true });
+      await this.tap(selector, { optional: isOptional(cmd) });
       return;
     }
 
