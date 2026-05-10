@@ -213,7 +213,7 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
     // ready. Inside that block we have a `jsi::Runtime&` — capture it,
     // install the fiber walker, construct HybridEnnio, start the WS
     // server. After this, the user's app never has to import
-    // `@ennio/core`; the package autolinks via Pod and bootstraps
+    // `ennio`; the package autolinks via Pod and bootstraps
     // entirely from native.
     Ivar instanceIvar = class_getInstanceVariable([self class], "_instance");
     if (instanceIvar) {

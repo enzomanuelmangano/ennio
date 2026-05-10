@@ -55,7 +55,7 @@ export async function runDoctorCommand(_positional: string[], flags: Flags): Pro
     ok: !!client,
     detail: client
       ? 'connected'
-      : 'no listener — launch the app, confirm @ennio/core wired + ENNIO_ENABLED=1 at pod install',
+      : 'no listener — launch the app, confirm ennio wired + ENNIO_ENABLED=1 at pod install',
   });
   if (client) client.disconnect();
 

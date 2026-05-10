@@ -2,7 +2,7 @@
  * Reader abstraction
  *
  * Single backend: NitroReader — every read traverses the in-app Fabric
- * shadow tree via the @ennio/core WebSocket.
+ * shadow tree via the ennio WebSocket.
  */
 
 import type { EnnioClient, Selector } from './client';

@@ -1,5 +1,5 @@
 /**
- * WS bootstrap: connect to in-app @ennio/core. If the app isn't running,
+ * WS bootstrap: connect to in-app ennio. If the app isn't running,
  * auto-launch it on the booted simulator (mirrors maestro's `launchApp`
  * UX — user shouldn't have to launch the app by hand before invoking).
  */
@@ -86,6 +86,6 @@ export async function connectOrLaunch(opts: BootstrapOptions): Promise<Bootstrap
     reason:
       `Could not connect to the in-app Ennio server on port ${port}.\n` +
       `Tried auto-launching ${appId}; WebSocket never bound.\n` +
-      `Confirm the app has @ennio/core wired and ENNIO_ENABLED=1 in pod install.`,
+      `Confirm the app has ennio wired and ENNIO_ENABLED=1 in pod install.`,
   };
 }

@@ -46,7 +46,7 @@ ennio e2e/                       # every *.yaml in the directory
 
 ### Bootstrap (zero-import)
 
-`@ennio/core` boots itself entirely from native. The user's app does
+`ennio` boots itself entirely from native. The user's app does
 **not** import the package anywhere. Sequence at launch:
 
 1. `+load` constructor in `EnnioAutoInit.mm` swizzles `RCTHost.start`.
@@ -61,7 +61,7 @@ ennio e2e/                       # every *.yaml in the directory
    the WebSocket server.
 
 The user installs the package via `npm install`; autolinking adds the
-pod, and the swizzle does the rest. **No `import '@ennio/core'`.**
+pod, and the swizzle does the rest. **No `import 'ennio'`.**
 
 ### Direct onPress dispatch
 
@@ -114,22 +114,20 @@ iOS only.
 ## Setup
 
 ```bash
-# Runtime + plugin
-npm install @ennio/core @ennio/expo-plugin react-native-nitro-modules
-
-# CLI
-npm install -D @ennio/cli
+npm install ennio ennio-expo-plugin react-native-nitro-modules
 ```
+
+`ennio` ships the native runtime and the CLI binary together — `npx ennio` is available immediately.
 
 `app.json`:
 
 ```json
 {
-  "plugins": ["expo-router", "@ennio/expo-plugin"]
+  "plugins": ["expo-router", "ennio-expo-plugin"]
 }
 ```
 
-> **Default = OFF.** Having `@ennio/core` and `@ennio/expo-plugin` in
+> **Default = OFF.** Having `ennio` and `ennio-expo-plugin` in
 > your dependencies is **safe to ship to production**. The native
 > runtime only links in when `ENNIO_ENABLED=1` is set at prebuild
 > time. Without it the plugin no-ops and the resulting build is
@@ -164,10 +162,10 @@ bunx expo run:ios --configuration Release
 ```
 
 When excluded, the build is byte-identical to one with
-`@ennio/expo-plugin` removed from `app.json` — zero symbols, zero
+`ennio-expo-plugin` removed from `app.json` — zero symbols, zero
 linked code, zero port listener.
 
-You never import `@ennio/core` anywhere. When enabled, autolinking
+You never import `ennio` anywhere. When enabled, autolinking
 includes the pod and a `+load` swizzle bootstraps the WebSocket server
 
 - JSI fiber walker before your app's first frame.
@@ -178,7 +176,7 @@ Run a flow:
 ennio e2e/01-auth-flow.yaml
 ```
 
-## Build gating (`@ennio/expo-plugin`)
+## Build gating (`ennio-expo-plugin`)
 
 The plugin's only job: keep Ennio out of any build that doesn't
 explicitly opt in. Default behavior:
@@ -271,18 +269,17 @@ The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
 
 ```
 packages/
-  core/         @ennio/core       — in-app native module
-                                    (C++/ObjC++ + Nitro spec)
-  cli/          @ennio/cli        — `ennio` binary, YAML runner
-  expo-plugin/  @ennio/expo-plugin — Podfile gate (ENNIO_ENABLED)
-example/        Sample app + e2e/ flows (10 example flows, the
-                runner's regression suite).
+  ennio/              ennio              — in-app native runtime (C++/ObjC++
+                                           + Nitro spec) AND `ennio` CLI binary
+                                           (esbuild-bundled, ships in same pkg)
+  ennio-expo-plugin/  ennio-expo-plugin  — Podfile gate (ENNIO_ENABLED)
+example/              Sample app + maestro-e2e/ flows (regression suite).
 ```
 
 ## Security
 
-> **TL;DR — installed ≠ enabled.** Keeping `@ennio/core` and
-> `@ennio/expo-plugin` in your dependencies and plugins list is **safe
+> **TL;DR — installed ≠ enabled.** Keeping `ennio` and
+> `ennio-expo-plugin` in your dependencies and plugins list is **safe
 > for App Store / production builds**. They are inert by default. The
 > remote-control surface only ships when you explicitly set
 > `ENNIO_ENABLED=1` at prebuild time. Production builds without that
@@ -292,7 +289,7 @@ example/        Sample app + e2e/ flows (10 example flows, the
 
 | Layer | Stage                 | Mechanism                                                                                                                                                                                         |
 | ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Plugin (build time)   | `@ennio/expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                       |
+| 1     | Plugin (build time)   | `ennio-expo-plugin` writes the pod / Gradle dep **only** if `ENNIO_ENABLED=1`. Without the env var the binary contains zero Ennio symbols.                                                       |
 | 2     | Runtime (app launch)  | If Ennio is somehow linked into an App Store / Enterprise build, `EnnioAutoInit` refuses to start the server, fiber walker, or ribbon (parses `appStoreReceiptURL` + `embedded.mobileprovision`). |
 | 3     | Network (server bind) | Server binds to `127.0.0.1` only — off-host LAN traffic is refused at `bind()`.                                                                                                                   |
 | 4     | Visual                | When Ennio is active, the red diagonal **E2E** ribbon paints top-right of every screen — visible on every screenshot.                                                                             |
