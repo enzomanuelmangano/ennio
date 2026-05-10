@@ -197,6 +197,28 @@ export class NitroWriter implements Writer {
   }
 
   async tap(testID: string): Promise<boolean> {
+    // UIMenu trigger detection: zeego DropdownMenu / UIButton.menu opens
+    // its menu via a private UIContextMenuInteraction recogniser that
+    // only fires off real HID input. UIControl.sendActions and Fiber
+    // walker invokeOnPress both report YES without ever opening the
+    // menu (false positive). Route through idb HID.
+    if (await this.client.isMenuTriggerAncestor(testID)) {
+      const center = await this.layoutCenter({ id: testID });
+      if (!center) return false;
+      try {
+        await idb.ensureCompanion();
+        // 100 ms duration mirrors a normal finger tap; instant taps
+        // (default 0 ms) sometimes get swallowed by the menu button's
+        // begin/end gesture coalescing.
+        await idb.tap(center.x, center.y, 100);
+        // UIMenu present-animation runs ~250 ms; let it land before the
+        // caller queries for menu items by label.
+        await new Promise((r) => setTimeout(r, 400));
+        return true;
+      } catch {
+        return false;
+      }
+    }
     // Direct onPress invocation. The native helper walks the React
     // Fiber tree, finds the testID, and calls its onPress prop. Skips
     // iOS HID, gesture coordinator, UIPresentationController gating.

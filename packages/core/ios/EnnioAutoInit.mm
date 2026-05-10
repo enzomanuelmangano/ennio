@@ -40,6 +40,14 @@ typedef NS_ENUM(NSInteger, EnnioDistribution) {
 };
 
 static EnnioDistribution ennioDetectDistribution(void) {
+#if TARGET_OS_SIMULATOR
+    // Simulator builds ship a placeholder StoreKit receipt named
+    // "receipt" (same name App Store production builds use), which the
+    // logic below would mis-classify as App Store and refuse to start.
+    // The Simulator runs no production binary by definition, so short-
+    // circuit to Dev before anything else.
+    return EnnioDistDev;
+#else
     NSURL* receiptURL = [NSBundle mainBundle].appStoreReceiptURL;
     NSString* receiptName = receiptURL.lastPathComponent;
 
@@ -75,9 +83,10 @@ static EnnioDistribution ennioDetectDistribution(void) {
     // Store, so no receipt was fetched.
     if (hasProfile && !hasProvisionedDevices && !provisionsAllDevices) return EnnioDistAppStore;
 
-    // Simulator and Xcode-attached debug builds have no embedded
+    // Xcode-attached debug builds on real hardware with no embedded
     // profile at all. Treat as Dev.
     return EnnioDistDev;
+#endif
 }
 
 static NSString* ennioDistributionName(EnnioDistribution d) {

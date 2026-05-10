@@ -925,8 +925,11 @@ class MaestroExecutor {
       return;
     }
 
-    if ('longPress' in cmd) {
-      const selector = normalizeSelector(cmd.longPress as MaestroSelector | string);
+    if ('longPress' in cmd || 'longPressOn' in cmd) {
+      const raw = ('longPressOn' in cmd ? cmd.longPressOn : cmd.longPress) as
+        | MaestroSelector
+        | string;
+      const selector = normalizeSelector(raw);
       await this.longPress(selector);
       return;
     }

@@ -949,6 +949,27 @@ std::pair<double, double> EnnioRuntimeHelper::getKeyWindowSize() {
     return {w, h};
 }
 
+bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
+    NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
+    __block bool isMenuTrigger = false;
+    void (^block)(void) = ^{
+        UIView* view = findViewByTestIDInAllWindows(tid);
+        if (!view) return;
+        if (@available(iOS 14.0, *)) {
+            for (UIView* cursor = view; cursor; cursor = cursor.superview) {
+                if (![cursor isKindOfClass:[UIButton class]]) continue;
+                UIButton* b = (UIButton*)cursor;
+                if (b.menu && b.showsMenuAsPrimaryAction) {
+                    isMenuTrigger = true;
+                    return;
+                }
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return isMenuTrigger;
+}
+
 bool EnnioRuntimeHelper::isViewOnscreen(const std::string& testID) {
     NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
     __block bool onscreen = false;
@@ -958,9 +979,29 @@ bool EnnioRuntimeHelper::isViewOnscreen(const std::string& testID) {
         CGRect viewRect = [view convertRect:view.bounds toView:view.window];
         if (viewRect.size.width <= 0 || viewRect.size.height <= 0) return;
         CGRect winRect = view.window.bounds;
-        // Require any overlap — partial visibility (e.g. button at the
-        // very bottom) still counts. CGRectIntersectsRect handles edges.
-        onscreen = CGRectIntersectsRect(viewRect, winRect);
+        if (!CGRectIntersectsRect(viewRect, winRect)) return;
+
+        // Walk ancestors: hidden / alpha~0 hides this view. Mirrors
+        // UIKit's hit-test pipeline.
+        for (UIView* v = view; v != nil; v = v.superview) {
+            if (v.hidden || v.alpha < 0.01) return;
+        }
+
+        // Z-order / occlusion. A modal/sheet/alert presented above the
+        // view's window blocks any finger from reaching it. Reject if a
+        // higher-level window covers the view's centre.
+        CGPoint centre = CGPointMake(CGRectGetMidX(viewRect), CGRectGetMidY(viewRect));
+        UIWindow* targetWindow = view.window;
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* w in ((UIWindowScene*)scene).windows) {
+                if (w.hidden || w == targetWindow) continue;
+                if (w.windowLevel <= targetWindow.windowLevel) continue;
+                CGPoint pt = [w convertPoint:centre fromWindow:targetWindow];
+                if ([w hitTest:pt withEvent:nil]) return;
+            }
+        }
+        onscreen = true;
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return onscreen;

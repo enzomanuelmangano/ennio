@@ -145,6 +145,14 @@ public:
      * sheets, RNScreens stack headers.
      */
     std::tuple<double, double, double, double> getViewWindowFrameByLabel(const std::string& text);
+    /**
+     * True if the testID's UIView (or any ancestor) is a UIButton with
+     * `menu` set + `showsMenuAsPrimaryAction` (zeego DropdownMenu,
+     * react-native-ios-context-menu). Such triggers cannot be opened by
+     * UIControl.sendActions or programmatic _presentMenuAtLocation: in
+     * the host app — only by real HID input. Caller routes through idb.
+     */
+    bool isMenuTriggerAncestor(const std::string& testID);
     bool doubleTap(const std::string& testID);
     bool longPress(const std::string& testID, int durationMs);
     bool typeText(const std::string& testID, const std::string& text);

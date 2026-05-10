@@ -12,9 +12,11 @@ export const DEFAULT_WS_PORT = 9876;
 // fast on a local socket. We retry-poll separately after auto-launch.
 const CONNECT_PROBE_TIMEOUT_MS = 2_000;
 // Auto-launch poll cadence + total. RN bridge + Nitro WS bind takes
-// ~3-6 s on a fresh launch; longer on the first launch after install.
+// ~3-6 s on a fresh launch; longer on iOS 26 Sims (Metro bundle
+// download + JS init can stretch to 10-15 s on the first launch
+// after install).
 const LAUNCH_POLL_INTERVAL_MS = 500;
-const LAUNCH_TIMEOUT_DEFAULT_SEC = 10;
+const LAUNCH_TIMEOUT_DEFAULT_SEC = 30;
 
 export async function tryWebSocketConnection(port: number): Promise<EnnioClient | null> {
   const client = new EnnioClient(port);

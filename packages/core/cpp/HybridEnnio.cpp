@@ -380,6 +380,11 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             r.success = true;
             r.data = self->isVisible(::ennio::json::parseString(req.payload, "testID")) ? "true" : "false";
         }},
+        { "isMenuTriggerAncestor", [](HybridEnnio*, const auto& req, auto& r) {
+            r.success = true;
+            r.data = ::ennio::EnnioRuntimeHelper::getInstance().isMenuTriggerAncestor(
+                ::ennio::json::parseString(req.payload, "testID")) ? "true" : "false";
+        }},
         { "getText", [](HybridEnnio* self, const auto& req, auto& r) {
             auto result = self->getText(::ennio::json::parseString(req.payload, "testID"));
             r.success = true;
@@ -1069,7 +1074,25 @@ bool HybridEnnio::tapByLabel(const std::string& text) {
     return ::ennio::EnnioRuntimeHelper::getInstance().tapByLabel(text);
 }
 bool HybridEnnio::doubleTap(const std::string& testID) {
-    return ::ennio::EnnioRuntimeHelper::getInstance().doubleTap(testID);
+    // Same shadow-tree-coords path as `tap()`. The legacy
+    // EnnioRuntimeHelper::doubleTap calls EnnioRuntimeHelper::tap which
+    // searches by accessibilityIdentifier — RN Pressable's testID
+    // doesn't always reach the host UIView. Two synthesised UITouches
+    // 120 ms apart through hit-testing reliably engage RN's tap-count
+    // machinery (DoubleTapBox: <350 ms gap → onDoubleTap).
+    auto root = getShadowTreeRoot();
+    if (!root) return false;
+    auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
+    if (!metrics || metrics->width <= 0 || metrics->height <= 0) return false;
+    double cx = metrics->screenX + metrics->width / 2.0;
+    double cy = metrics->screenY + metrics->height / 2.0;
+    auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
+    if (!helper.tapAtScreenPoint(cx, cy)) return false;
+    // RN's tap-count Pressable detects double-tap at <350 ms gap. Use
+    // 200 ms — long enough for the gesture coordinator to mark the
+    // first tap as Ended before the second Began arrives.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    return helper.tapAtScreenPoint(cx, cy);
 }
 bool HybridEnnio::longPress(const std::string& testID, double durationMs) {
     return ::ennio::EnnioRuntimeHelper::getInstance().longPress(testID, static_cast<int>(durationMs));
