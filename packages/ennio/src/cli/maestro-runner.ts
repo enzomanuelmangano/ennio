@@ -418,6 +418,21 @@ class MaestroExecutor {
   }
 
   /**
+   * Wake the moment React fires onCommitFiberRoot, capped at maxMs.
+   * Replaces blind sleep settles after React-driven mutations (taps,
+   * navigations, keyboard dismissals). The cap is the safety floor —
+   * worst case is identical to a sleep of the same duration.
+   */
+  private async waitCommit(maxMs: number): Promise<void> {
+    const result = await this.client.waitForCommit(maxMs);
+    this.log(
+      `waitForCommit(${maxMs}): ${
+        result.commit ? `commit at ${result.elapsedMs}ms` : 'timeout (no commit)'
+      }`,
+    );
+  }
+
+  /**
    * Wait for a condition to be true
    */
   private async waitFor(
@@ -486,7 +501,7 @@ class MaestroExecutor {
         if (buttons.includes(buttonText)) {
           this.log(`(tapping alert button: "${buttonText}")`);
           await this.writer.tapAlertButton(buttonText);
-          await this.sleep(ALERT_TAP_SETTLE_MS);
+          await this.waitCommit(ALERT_TAP_SETTLE_MS);
           // Drain any queued / re-presented alerts. A synthesized
           // touch can occasionally double-fire the trigger handler,
           // queueing a second alert behind the first one. Dismiss in
@@ -494,7 +509,7 @@ class MaestroExecutor {
           for (let i = 0; i < 8; i++) {
             if (!(await this.client.isAlertPresent())) return true;
             await this.writer.dismissAlert();
-            await this.sleep(ALERT_DISMISS_DELAY_MS);
+            await this.waitCommit(ALERT_DISMISS_DELAY_MS);
           }
           return true;
         }
@@ -512,7 +527,7 @@ class MaestroExecutor {
       this.log(`tap: point ${(x * 100).toFixed(1)}%,${(y * 100).toFixed(1)}%`);
       await this.writer.tapAt(x, y);
       this.lastTappedSelector = selector;
-      await this.sleep(POINT_TAP_SETTLE_MS);
+      await this.waitCommit(POINT_TAP_SETTLE_MS);
       return;
     }
     // Text-only selectors: try alert button tap first. Polls long enough
@@ -535,7 +550,7 @@ class MaestroExecutor {
       if (await this.reader.isAlertPresent()) {
         this.log('(auto-dismissing stale alert before id-tap)');
         await this.writer.dismissAlert();
-        await this.sleep(TAP_NAV_SETTLE_MS);
+        await this.waitCommit(TAP_NAV_SETTLE_MS);
       }
       await this.waitFor(
         () => this.selectorExists(selector),
@@ -570,7 +585,7 @@ class MaestroExecutor {
         backAttempts++;
         this.log(`tap retry: popping stack (attempt ${backAttempts})`);
         await this.writer.back();
-        await this.sleep(TAP_BACK_RECOVER_DELAY_MS);
+        await this.waitCommit(TAP_BACK_RECOVER_DELAY_MS);
         continue;
       }
       // If an alert IS up and we still can't tap it, retry the alert
@@ -588,8 +603,10 @@ class MaestroExecutor {
     // Direct onPress dispatch (writer's primary path) is synchronous, but
     // the resulting React work — setState, transition commit, native tab
     // switch animation — is not. Tab-switching taps and Link navigation
-    // need ~150-250 ms before the destination surface is queryable.
-    await this.sleep(TAP_NAV_SETTLE_MS);
+    // need ~150-250 ms before the destination surface is queryable. The
+    // commit-signal wake fires the moment React finishes the commit
+    // triggered by onPress, capped by TAP_NAV_SETTLE_MS for safety.
+    await this.waitCommit(TAP_NAV_SETTLE_MS);
   }
 
   /**
@@ -633,7 +650,7 @@ class MaestroExecutor {
           await this.writer.tapBySelector(toEnnioSelector(targetSelector));
         }
         this.lastTappedSelector = targetSelector;
-        await this.sleep(KEYBOARD_DISMISS_SETTLE_MS);
+        await this.waitCommit(KEYBOARD_DISMISS_SETTLE_MS);
       }
       // typeText into the resolved field's testID. Falls back to the
       // currently-focused responder (id=null) if no testID was found.
@@ -652,7 +669,7 @@ class MaestroExecutor {
     } catch {
       /* tolerate */
     }
-    await this.sleep(TAP_BACK_RECOVER_DELAY_MS);
+    await this.waitCommit(TAP_BACK_RECOVER_DELAY_MS);
   }
 
   private async clearText(selector: MaestroSelector): Promise<void> {
@@ -691,7 +708,7 @@ class MaestroExecutor {
       return;
     }
     await this.writer.scroll(null, dir, amount);
-    await this.sleep(KEYBOARD_DISMISS_SETTLE_MS);
+    await this.waitCommit(KEYBOARD_DISMISS_SETTLE_MS);
   }
 
   /**
@@ -771,10 +788,10 @@ class MaestroExecutor {
         // become a no-op, leaving a stale alert blocking subsequent taps.
         if (await this.reader.isAlertPresent()) {
           await this.writer.dismissAlert();
-          await this.sleep(ALERT_TAP_SETTLE_MS);
+          await this.waitCommit(ALERT_TAP_SETTLE_MS);
         }
         await this.writer.back();
-        await this.sleep(KEYBOARD_DISMISS_SETTLE_MS);
+        await this.waitCommit(KEYBOARD_DISMISS_SETTLE_MS);
         return;
       }
       if (processedCmd === 'waitForAnimationToEnd') {
@@ -1255,7 +1272,7 @@ class MaestroExecutor {
     while (Date.now() - startTime < timeout) {
       if (await this.selectorVisible(selector)) return;
       await this.scroll(direction, scrollAmount);
-      await this.sleep(TAP_NAV_SETTLE_MS);
+      await this.waitCommit(TAP_NAV_SETTLE_MS);
     }
     throw new Error(`scrollUntilVisible timeout: ${JSON.stringify(selector)}`);
   }

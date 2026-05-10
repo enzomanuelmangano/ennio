@@ -276,6 +276,15 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
    */
   synchronize(): void;
 
+  /**
+   * Block until React fires the next onCommitFiberRoot, or until maxMs
+   * elapses. Used by the CLI to wake early from blind settle sleeps —
+   * cap is the safety floor, commit signal is the early-wake.
+   * @param maxMs - Maximum time to wait in milliseconds
+   * @returns true if a commit fired within maxMs, false on timeout
+   */
+  waitForNextCommit(maxMs: number): boolean;
+
   // ============================================
   // Selector-based Queries (Full Maestro Parity)
   // ============================================

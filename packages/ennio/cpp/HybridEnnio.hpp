@@ -64,6 +64,11 @@ public:
     bool waitForIdle(double timeoutMs) override;
     void synchronize() override;
 
+    // Wake the moment React fires onCommitFiberRoot, capped at maxMs.
+    // Replaces blind sleep settles in the CLI with an early-wake; cap
+    // is the safety floor so the worst case is identical to a sleep.
+    bool waitForNextCommit(double maxMs) override;
+
     // ============================================
     // Selector-based Queries (Full Maestro Parity)
     // ============================================

@@ -24,6 +24,7 @@ namespace margelo::nitro::ennio {
       prototype.registerHybridMethod("getText", &HybridEnnioSpec::getText);
       prototype.registerHybridMethod("waitForIdle", &HybridEnnioSpec::waitForIdle);
       prototype.registerHybridMethod("synchronize", &HybridEnnioSpec::synchronize);
+      prototype.registerHybridMethod("waitForNextCommit", &HybridEnnioSpec::waitForNextCommit);
       prototype.registerHybridMethod("findBySelector", &HybridEnnioSpec::findBySelector);
       prototype.registerHybridMethod("findAllBySelector", &HybridEnnioSpec::findAllBySelector);
       prototype.registerHybridMethod("existsBySelector", &HybridEnnioSpec::existsBySelector);

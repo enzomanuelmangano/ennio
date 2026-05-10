@@ -337,6 +337,24 @@ export class EnnioClient {
     await this.send('synchronize', {});
   }
 
+  /**
+   * Block until React fires the next onCommitFiberRoot, capped at
+   * maxMs. Returns { commit: true, elapsedMs } on early-wake or
+   * { commit: false, elapsedMs: ~maxMs } on timeout. Used to replace
+   * blind sleep settles in the runner — cap is the safety floor.
+   */
+  async waitForCommit(maxMs: number = 200): Promise<{ commit: boolean; elapsedMs: number }> {
+    const response = await this.send('waitForCommit', { maxMs });
+    if (typeof response.data === 'object' && response.data !== null) {
+      const d = response.data as { commit?: unknown; elapsedMs?: unknown };
+      return {
+        commit: d.commit === true,
+        elapsedMs: typeof d.elapsedMs === 'number' ? d.elapsedMs : maxMs,
+      };
+    }
+    return { commit: false, elapsedMs: maxMs };
+  }
+
   // Alert handling (read-only)
   async isAlertPresent(): Promise<boolean> {
     const response = await this.send('isAlertPresent', {});
