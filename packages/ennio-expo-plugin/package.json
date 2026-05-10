@@ -1,6 +1,6 @@
 {
   "name": "ennio-expo-plugin",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Expo config plugin for Ennio E2E testing — gates the native runtime behind ENNIO_ENABLED.",
   "main": "src/index.js",
   "files": [
