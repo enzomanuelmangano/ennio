@@ -341,6 +341,16 @@ static constexpr int IDLE_STABILITY_MS = 100;
 static constexpr int SYNCHRONIZE_TIMEOUT_MS = 500;
 static constexpr int SYNCHRONIZE_STABILITY_MS = 50;
 
+// Commit signal — incremented from the JS thread via
+// __ennio_native_onCommit (a JSI HostFunction installed in
+// nativeBootstrap). waitForNextCommit blocks on this counter +
+// condition variable until the value advances or maxMs elapses.
+namespace {
+    std::mutex g_commitMutex;
+    std::condition_variable g_commitCv;
+    std::atomic<uint64_t> g_commitCounter{0};
+}
+
 bool HybridEnnio::waitForIdle(double timeoutMs) {
     return ::ennio::IdleMonitor::getInstance().waitForIdle(
         static_cast<int>(timeoutMs),
@@ -1489,14 +1499,6 @@ namespace {
 
     std::mutex g_instanceMutex;
     std::shared_ptr<HybridEnnio> g_instance;
-
-    // Commit signal — incremented from the JS thread via
-    // __ennio_native_onCommit (a JSI HostFunction installed in
-    // nativeBootstrap). waitForNextCommit blocks on this counter +
-    // condition variable until the value advances or maxMs elapses.
-    std::mutex g_commitMutex;
-    std::condition_variable g_commitCv;
-    std::atomic<uint64_t> g_commitCounter{0};
 }
 
 void HybridEnnio::setJSThreadExecutor(HybridEnnio::JSThreadExecutor exec) {
