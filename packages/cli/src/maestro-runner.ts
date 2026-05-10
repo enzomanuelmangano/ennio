@@ -72,7 +72,7 @@ const TAP_BACK_RECOVER_DELAY_MS = 250; // Pause between back-pop and retry tap.
 const KEYBOARD_DISMISS_SETTLE_MS = 120; // Settle after hideKeyboard before re-tapping the field.
 const POST_LAUNCH_SETTLE_MS = 800; // Wait for sim teardown after clearState before relaunch.
 const POST_LAUNCH_IDLE_BUDGET_MS = 3000; // First waitForIdle after a launch.
-const TYPE_TEXT_IDLE_BUDGET_MS = 800; // Drain RN bridge after typeText so onChangeText commits before the next tap reads `value`.
+const TYPE_TEXT_IDLE_BUDGET_MS = 1500; // Drain RN bridge after typeText so onChangeText commits before the next tap reads `value`. Bumped from 800 → 1500 to absorb the legacy-bridge RCTDirectEventBlock async hop on slow simulator runs.
 const POST_LAUNCH_SHADOW_COMMIT_MS = 400; // First shadow-tree commit settle after reconnect.
 const RETRY_POLL_MS = 100; // Predicate retry tick for waitFor / extendedWaitUntil.
 const POINT_TAP_SETTLE_MS = 60; // Quick settle after tapAt — no tab-nav animation.
@@ -504,7 +504,7 @@ class MaestroExecutor {
     return false;
   }
 
-  private async tap(selector: MaestroSelector): Promise<void> {
+  private async tap(selector: MaestroSelector, opts: { optional?: boolean } = {}): Promise<void> {
     // Point selector — Maestro `tapOn: { point: "X%,Y%" }`. Resolve to a
     // normalised window coordinate and dispatch directly via the writer.
     if (selector.point) {
@@ -518,8 +518,11 @@ class MaestroExecutor {
     // Text-only selectors: try alert button tap first. Polls long enough
     // (2s) for Alert.alert's presentation animation to finish — the
     // dialog typically appears 300-1500ms after the triggering tap.
+    // Optional taps cap at 200ms — we don't want to wait for an alert
+    // that the test never expected to be present.
     if (selector.text && !selector.id) {
-      const ok = await this.tryTapAlertButton(selector.text, 2000);
+      const alertPoll = opts.optional ? 200 : 2000;
+      const ok = await this.tryTapAlertButton(selector.text, alertPoll);
       if (ok) return;
     }
 
@@ -536,7 +539,7 @@ class MaestroExecutor {
       }
       await this.waitFor(
         () => this.selectorExists(selector),
-        DEFAULT_VISIBLE_TIMEOUT,
+        opts.optional ? 500 : DEFAULT_VISIBLE_TIMEOUT,
         `Element not found: ${JSON.stringify(selector)}`,
       );
     }
@@ -552,18 +555,18 @@ class MaestroExecutor {
     };
 
     const start = Date.now();
+    // Optional taps shouldn't burn the full visible-element timeout when
+    // the element is missing — that's the expected outcome. Cap at 500ms
+    // and disable the stack-pop recovery loop entirely.
+    const tapTimeout = opts.optional ? 500 : DEFAULT_VISIBLE_TIMEOUT;
+    const allowStackPop = !opts.optional;
     let ok = false;
     let backAttempts = 0;
-    while (Date.now() - start < DEFAULT_VISIBLE_TIMEOUT) {
+    while (Date.now() - start < tapTimeout) {
       ok = await tryOnce();
       if (ok) break;
-      // Stack-pushed-over-tab-bar recovery: if a text-only selector keeps
-      // missing AND no alert is sitting on top, pop the nav stack and
-      // retry. The alert check is critical — without it we'd dismiss an
-      // alert whose button we were trying to tap but couldn't see in the
-      // 2s window above (e.g. slow simulator).
       const alertUp = !!selector.text && !selector.id && (await this.reader.isAlertPresent());
-      if (!ok && selector.text && !selector.id && !alertUp && backAttempts < 3) {
+      if (allowStackPop && !ok && selector.text && !selector.id && !alertUp && backAttempts < 3) {
         backAttempts++;
         this.log(`tap retry: popping stack (attempt ${backAttempts})`);
         await this.writer.back();
@@ -851,7 +854,7 @@ class MaestroExecutor {
     if ('tapOn' in cmd) {
       const selector = normalizeSelector(cmd.tapOn as MaestroSelector | string);
       this.log(`tapOn: ${JSON.stringify(selector)}`);
-      await this.tap(selector);
+      await this.tap(selector, { optional: selector.optional === true });
       return;
     }
 

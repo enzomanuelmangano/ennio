@@ -153,9 +153,9 @@ tags:
 - assertVisible:
     text: '1111'
 
-# Verify items are listed
+# Verify items are listed (review screen has its own totalCard, not cart-summary)
 - assertVisible:
-    id: 'cart-summary'
+    text: 'Total'
 
 # ============================================
 # TEST: Go back to edit shipping

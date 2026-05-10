@@ -131,6 +131,15 @@ public:
      */
     bool isViewOnscreen(const std::string& testID);
     /**
+     * True iff the testID's UIView is in the iOS accessibility tree.
+     * The predicate: view is attached to a window AND no ancestor has
+     * accessibilityElementsHidden=YES. This is what XCUI uses to decide
+     * whether an element is enumerable. Used to filter shadow-tree
+     * selector matches that resolved to a stale UIView under an inactive
+     * tab / pushed stack frame / occluded modal host.
+     */
+    bool isInA11yTree(const std::string& testID);
+    /**
      * Window-relative frame of the UIView with the given testID. Returns
      * (x, y, w, h) all in logical points. Width/height = 0 when not
      * found. This bypasses Fabric's surface-relative layout entirely:
