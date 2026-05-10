@@ -11,6 +11,9 @@
 #include <type_traits>
 #include <unordered_map>
 #include <functional>
+#include <cstdio>
+#include <cstdlib>
+#include <cerrno>
 
 #include <react/renderer/uimanager/UIManagerBinding.h>
 #include <react/renderer/uimanager/UIManager.h>
@@ -211,8 +214,15 @@ void HybridEnnio::startServer(double port) {
     if (webSocketServer_->start(serverPort_)) {
         serverRunning_ = true;
         ENNIO_LOG_INFO(LOG_TAG, "WebSocket server started successfully");
+        // Diagnostic marker (mirror NSLog which gets filtered on device).
+        std::string mark = std::string(getenv("HOME") ? getenv("HOME") : "/tmp") + "/Library/_ennio_ws_started.txt";
+        FILE* fp = fopen(mark.c_str(), "w");
+        if (fp) { fprintf(fp, "port=%d", serverPort_); fclose(fp); }
     } else {
         ENNIO_LOG_ERROR(LOG_TAG, "Failed to start WebSocket server");
+        std::string mark = std::string(getenv("HOME") ? getenv("HOME") : "/tmp") + "/Library/_ennio_ws_failed.txt";
+        FILE* fp = fopen(mark.c_str(), "w");
+        if (fp) { fprintf(fp, "port=%d errno=%d", serverPort_, errno); fclose(fp); }
         webSocketServer_.reset();
     }
 }
@@ -384,6 +394,13 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             r.success = true;
             r.data = ::ennio::EnnioRuntimeHelper::getInstance().isMenuTriggerAncestor(
                 ::ennio::json::parseString(req.payload, "testID")) ? "true" : "false";
+        }},
+        { "clearAppData", [](HybridEnnio*, const auto&, auto& r) {
+            // In-process sandbox wipe (Library/, Documents/, tmp/). Works
+            // identically on Simulator and physical device — no host
+            // filesystem access required. Caller restarts the app
+            // afterwards to drop in-memory state.
+            r.success = ::ennio::EnnioRuntimeHelper::getInstance().clearAppDataDirectories();
         }},
         { "getText", [](HybridEnnio* self, const auto& req, auto& r) {
             auto result = self->getText(::ennio::json::parseString(req.payload, "testID"));

@@ -72,6 +72,7 @@ const TAP_BACK_RECOVER_DELAY_MS = 250; // Pause between back-pop and retry tap.
 const KEYBOARD_DISMISS_SETTLE_MS = 120; // Settle after hideKeyboard before re-tapping the field.
 const POST_LAUNCH_SETTLE_MS = 800; // Wait for sim teardown after clearState before relaunch.
 const POST_LAUNCH_IDLE_BUDGET_MS = 3000; // First waitForIdle after a launch.
+const TYPE_TEXT_IDLE_BUDGET_MS = 800; // Drain RN bridge after typeText so onChangeText commits before the next tap reads `value`.
 const POST_LAUNCH_SHADOW_COMMIT_MS = 400; // First shadow-tree commit settle after reconnect.
 const RETRY_POLL_MS = 100; // Predicate retry tick for waitFor / extendedWaitUntil.
 const POINT_TAP_SETTLE_MS = 60; // Quick settle after tapAt — no tab-nav animation.
@@ -100,11 +101,37 @@ function isOptional(cmd: unknown): boolean {
 }
 
 // ============================================
-// Simulator Helpers
+// Target Helpers (Simulator + Physical Device)
 // ============================================
 
+type TargetType = 'simulator' | 'device';
+
 /**
- * Get the booted iOS simulator device ID
+ * Detect whether the chosen UDID is a Simulator or a physical device.
+ * Returns 'simulator' if the UDID appears in `xcrun simctl list devices`,
+ * 'device' otherwise (anything reachable via idb / devicectl).
+ */
+export function getTargetType(udid: string): TargetType {
+  try {
+    const out = execSync(`xcrun simctl list devices ${udid} -j`, {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+    const data = JSON.parse(out);
+    for (const runtime of Object.values(data.devices) as { udid: string }[][]) {
+      for (const d of runtime) {
+        if (d.udid === udid) return 'simulator';
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return 'device';
+}
+
+/**
+ * Resolve the active iOS target UDID. Honours ENNIO_UDID, then falls
+ * back to the first booted Simulator.
  */
 export function getBootedSimulatorId(): string | null {
   // Honor ENNIO_UDID env override so tests pin to a specific simulator
@@ -128,72 +155,76 @@ export function getBootedSimulatorId(): string | null {
 }
 
 /**
- * Terminate an app on simulator
+ * Terminate an app on the active target. Sim → simctl; device → devicectl.
+ * idb is avoided on iOS 26+ — its bundled DeveloperDiskImage tops out
+ * at 16.4 and rejects launches with "not suitable for 26.x".
  */
 function terminateApp(deviceId: string, appId: string): void {
   try {
-    execSync(`xcrun simctl terminate ${deviceId} ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
+    if (getTargetType(deviceId) === 'simulator') {
+      execSync(`xcrun simctl terminate ${deviceId} ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
+    } else {
+      // devicectl wants the bundle's PID — resolve via list, then signal.
+      // Falls back silently if process isn't running.
+      execSync(
+        `xcrun devicectl device process terminate --device ${deviceId} --bundle-identifier ${appId}`,
+        { encoding: 'utf-8', stdio: 'pipe' },
+      );
+    }
   } catch {
-    // App may not be running - that's OK
+    // App may not be running — that's OK
   }
 }
 
 /**
- * Launch an app on simulator
+ * Launch an app on the active target. Sim → simctl; device → devicectl.
+ * Same iOS 26 reasoning as terminateApp above.
  */
 export function launchAppOnSimulator(deviceId: string, appId: string): void {
-  execSync(`xcrun simctl launch ${deviceId} ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
-}
-
-/**
- * Clear app state on simulator
- * This terminates the app and clears its data container (Library, Documents, tmp)
- */
-function clearAppState(deviceId: string, appId: string): void {
-  try {
-    // Terminate first
-    terminateApp(deviceId, appId);
-    // simctl terminate returns before the process is fully reaped — the
-    // app can still hold open handles on its sandbox for ~150ms. Wait
-    // long enough that AsyncStorage's last flush completes before we
-    // wipe its files; otherwise the next launch reads stale demo-user
-    // state from a half-truncated manifest.
-    execSync('sleep 0.4', { stdio: 'pipe' });
-
-    // Get app data container path
-    const dataContainer = execSync(`xcrun simctl get_app_container ${deviceId} ${appId} data`, {
-      encoding: 'utf-8',
-      stdio: 'pipe',
-    }).trim();
-
-    if (dataContainer) {
-      // Clear Library (AsyncStorage, UserDefaults, etc.)
-      execSync(`rm -rf "${dataContainer}/Library"/*`, {
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        shell: '/bin/bash',
-      });
-      // Clear Documents
-      execSync(`rm -rf "${dataContainer}/Documents"/*`, {
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        shell: '/bin/bash',
-      });
-      // Clear tmp
-      execSync(`rm -rf "${dataContainer}/tmp"/*`, {
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        shell: '/bin/bash',
-      });
-    }
-
-    // Also reset privacy permissions
-    execSync(`xcrun simctl privacy ${deviceId} reset all ${appId}`, {
+  if (getTargetType(deviceId) === 'simulator') {
+    execSync(`xcrun simctl launch ${deviceId} ${appId}`, { encoding: 'utf-8', stdio: 'pipe' });
+  } else {
+    execSync(`xcrun devicectl device process launch --device ${deviceId} ${appId}`, {
       encoding: 'utf-8',
       stdio: 'pipe',
     });
+  }
+}
+
+/**
+ * Throw a consistent error when a command is sim-only and the active
+ * target is a physical device. iOS doesn't expose simctl-equivalents for
+ * status_bar / location / privacy / keychain on real hardware — instead
+ * of failing with a cryptic shell error, we surface the gap loudly so a
+ * device-mode run can either skip the flow or fall back manually.
+ */
+function requireSimulator(deviceId: string, label: string): void {
+  if (getTargetType(deviceId) !== 'simulator') {
+    throw new Error(`${label}: not supported on physical device (simulator-only API)`);
+  }
+}
+
+/**
+ * Capture a screenshot from the active target. Sim → simctl io; device → idb screenshot.
+ * Returns true on success, false on any failure (caller treats as best-effort).
+ */
+export function captureScreenshot(deviceId: string, path: string): boolean {
+  try {
+    if (getTargetType(deviceId) === 'simulator') {
+      execSync(`xcrun simctl io ${deviceId} screenshot "${path}"`, {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+    } else {
+      // No supported on-device screenshot path under iOS 26: devicectl
+      // exposes none, idb's `screenshotr` service errors with 0xe8000022,
+      // and pymobiledevice3 isn't a hard dependency. Treat as a no-op so
+      // failure-diagnostics screenshots don't kill the run.
+      return false;
+    }
+    return true;
   } catch {
-    // Continue even if some commands fail
+    return false;
   }
 }
 
@@ -275,13 +306,12 @@ export async function runMaestroTests(
     if (udid) {
       const shotPath = `/tmp/ennio-shots/${basename(testFilePath, '.yaml')}-fail.png`;
       try {
-        execSync(`mkdir -p /tmp/ennio-shots && xcrun simctl io ${udid} screenshot "${shotPath}"`, {
-          encoding: 'utf-8',
-          stdio: 'pipe',
-        });
-        console.log(`  (saved screenshot: ${shotPath})`);
+        execSync('mkdir -p /tmp/ennio-shots', { encoding: 'utf-8', stdio: 'pipe' });
       } catch {
         /* noop */
+      }
+      if (captureScreenshot(udid, shotPath)) {
+        console.log(`  (saved screenshot: ${shotPath})`);
       }
     }
     results.failed = 1;
@@ -611,7 +641,14 @@ class MaestroExecutor {
     }
     // Allow the iOS bridge to flush onChangeText for the last few keys —
     // RN commits text input asynchronously and a tight subsequent button
-    // tap (e.g. submit) reads stale state otherwise.
+    // tap (e.g. submit) reads stale state otherwise. waitForIdle drains
+    // the JS thread + Fabric commits; the sleep is a hedge against the
+    // last onChangeText being scheduled just after waitForIdle returned.
+    try {
+      await this.client.waitForIdle(TYPE_TEXT_IDLE_BUDGET_MS);
+    } catch {
+      /* tolerate */
+    }
     await this.sleep(TAP_BACK_RECOVER_DELAY_MS);
   }
 
@@ -1178,7 +1215,8 @@ class MaestroExecutor {
 
   private handleSetPermissions(permissions: Record<string, 'allow' | 'deny' | 'unset'>): void {
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('setPermissions: No booted iOS simulator found');
+    if (!deviceId) throw new Error('setPermissions: No booted iOS target found');
+    requireSimulator(deviceId, 'setPermissions');
     const targetAppId = this.appId;
     if (!targetAppId) throw new Error('setPermissions: No appId specified');
 
@@ -1222,30 +1260,47 @@ class MaestroExecutor {
   private async handleOpenLink(linkCmd: string | { link: string }): Promise<void> {
     const url = typeof linkCmd === 'string' ? linkCmd : linkCmd.link;
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('openLink: No booted iOS simulator found');
+    if (!deviceId) throw new Error('openLink: No booted iOS target found');
     this.log(`openLink: ${url}`);
-    execSync(`xcrun simctl openurl ${deviceId} "${url}"`, { encoding: 'utf-8', stdio: 'pipe' });
+    if (getTargetType(deviceId) === 'simulator') {
+      execSync(`xcrun simctl openurl ${deviceId} "${url}"`, { encoding: 'utf-8', stdio: 'pipe' });
+    } else {
+      execSync(`idb url-scheme open --udid ${deviceId} "${url}"`, {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+    }
     await this.sleep(OPENLINK_SETTLE_MS);
   }
 
   private handleTakeScreenshot(screenshotCmd: string | { path: string }): void {
     const path = typeof screenshotCmd === 'string' ? screenshotCmd : screenshotCmd.path;
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('takeScreenshot: No booted iOS simulator found');
+    if (!deviceId) throw new Error('takeScreenshot: No booted iOS target found');
     this.log(`takeScreenshot: ${path}`);
-    execSync(`xcrun simctl io ${deviceId} screenshot "${path}"`, {
-      encoding: 'utf-8',
-      stdio: 'pipe',
-    });
+    if (!captureScreenshot(deviceId, path)) {
+      throw new Error(`takeScreenshot: capture failed for ${path}`);
+    }
   }
 
   private handleAddMedia(mediaCmd: string[] | { files: string[] }): void {
     const files = Array.isArray(mediaCmd) ? mediaCmd : mediaCmd.files;
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('addMedia: No booted iOS simulator found');
+    if (!deviceId) throw new Error('addMedia: No booted iOS target found');
     this.log(`addMedia: ${files.join(', ')}`);
+    const isSim = getTargetType(deviceId) === 'simulator';
     for (const file of files) {
-      execSync(`xcrun simctl addmedia ${deviceId} "${file}"`, { encoding: 'utf-8', stdio: 'pipe' });
+      if (isSim) {
+        execSync(`xcrun simctl addmedia ${deviceId} "${file}"`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        });
+      } else {
+        execSync(`idb add-media --udid ${deviceId} "${file}"`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        });
+      }
     }
   }
 
@@ -1318,7 +1373,8 @@ class MaestroExecutor {
   // fresh keychain anyway via the rm-rf+launch path in clearState.
   private handleClearKeychain(): void {
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('clearKeychain: No booted iOS simulator found');
+    if (!deviceId) throw new Error('clearKeychain: No booted iOS target found');
+    requireSimulator(deviceId, 'clearKeychain');
     this.log('clearKeychain');
     try {
       execSync(`xcrun simctl keychain ${deviceId} reset`, { encoding: 'utf-8', stdio: 'pipe' });
@@ -1332,7 +1388,8 @@ class MaestroExecutor {
   // `airplaneOn` and flips it. setAirplaneMode passes the explicit value.
   private applyAirplaneMode(enabled: boolean, label: string): void {
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error(`${label}: No booted iOS simulator found`);
+    if (!deviceId) throw new Error(`${label}: No booted iOS target found`);
+    requireSimulator(deviceId, label);
     this.log(`${label}: ${enabled ? 'on' : 'off'}`);
     try {
       if (enabled) {
@@ -1356,7 +1413,8 @@ class MaestroExecutor {
     speed?: number;
   }): Promise<void> {
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('travel: No booted iOS simulator found');
+    if (!deviceId) throw new Error('travel: No booted iOS target found');
+    requireSimulator(deviceId, 'travel');
     this.log(`travel: ${travelCmd.points.length} waypoints`);
     for (const p of travelCmd.points) {
       let lat: number, lon: number;
@@ -1413,7 +1471,8 @@ class MaestroExecutor {
       lon = locCmd.longitude;
     }
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('setLocation: No booted iOS simulator found');
+    if (!deviceId) throw new Error('setLocation: No booted iOS target found');
+    requireSimulator(deviceId, 'setLocation');
     this.log(`setLocation: ${lat}, ${lon}`);
     execSync(`xcrun simctl location ${deviceId} set ${lat},${lon}`, {
       encoding: 'utf-8',
@@ -1424,7 +1483,8 @@ class MaestroExecutor {
   private async handleStartRecording(recCmd: string | { path: string }): Promise<void> {
     const path = typeof recCmd === 'string' ? recCmd : recCmd.path;
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('startRecording: No booted iOS simulator found');
+    if (!deviceId) throw new Error('startRecording: No booted iOS target found');
+    requireSimulator(deviceId, 'startRecording');
     this.log(`startRecording: ${path}`);
     // Background recording — `simctl io recordVideo` blocks until killed.
     // unref() so the child doesn't keep the test runner alive after exit.
@@ -1474,11 +1534,19 @@ class MaestroExecutor {
     const targetAppId = (typeof clearCmd === 'object' && clearCmd.appId) || this.appId;
     if (!targetAppId) throw new Error('clearState: No appId specified in command or flow metadata');
     const deviceId = getBootedSimulatorId();
-    if (!deviceId) throw new Error('clearState: No booted iOS simulator found');
+    if (!deviceId) throw new Error('clearState: No booted iOS target found');
 
     this.log(`clearState: ${targetAppId}`);
+    // In-process sandbox wipe via WS while the app is still running.
+    // Works identically on Sim + device (no host filesystem access).
+    try {
+      await this.client.clearAppData();
+    } catch {
+      /* best effort */
+    }
     this.client.disconnect();
-    clearAppState(deviceId, targetAppId);
+    terminateApp(deviceId, targetAppId);
+    await this.sleep(POST_LAUNCH_SETTLE_MS);
     launchAppOnSimulator(deviceId, targetAppId);
 
     let connected = false;
@@ -1510,9 +1578,17 @@ class MaestroExecutor {
     if (!deviceId) throw new Error('launchApp: No booted iOS simulator found');
 
     this.log(`launchApp: ${targetAppId}${shouldClearState ? ' (clearState)' : ''}`);
+    if (shouldClearState) {
+      // In-process sandbox wipe via WS before disconnect — works on
+      // Sim + device with no host filesystem access.
+      try {
+        await this.client.clearAppData();
+      } catch {
+        /* best effort */
+      }
+    }
     this.client.disconnect();
-    if (shouldClearState) clearAppState(deviceId, targetAppId);
-    else terminateApp(deviceId, targetAppId);
+    terminateApp(deviceId, targetAppId);
 
     // Brief settle so the simulator finishes wiping data containers
     // before relaunch. Skipping this on iOS 26 sim can produce a Hermes

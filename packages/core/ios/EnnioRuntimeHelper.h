@@ -153,6 +153,15 @@ public:
      * the host app — only by real HID input. Caller routes through idb.
      */
     bool isMenuTriggerAncestor(const std::string& testID);
+    /**
+     * Wipe the app's sandbox: Library/, Documents/, tmp/. Runs in-process
+     * via NSFileManager so it works identically on Simulator and on a
+     * real device — no host filesystem access required, no shell-out.
+     * Caller should restart the app afterwards to drop in-memory state
+     * (Zustand stores, RN HermesRuntime caches, etc.).
+     * Keychain is a separate iOS subsystem — see clearKeychain().
+     */
+    bool clearAppDataDirectories();
     bool doubleTap(const std::string& testID);
     bool longPress(const std::string& testID, int durationMs);
     bool typeText(const std::string& testID, const std::string& text);

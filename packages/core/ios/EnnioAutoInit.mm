@@ -109,6 +109,10 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
 
 + (void)load {
     NSLog(@"[Ennio] EnnioAutoInit +load called");
+    // Diagnostic marker: when stdout/NSLog gets swallowed (idevicesyslog
+    // sometimes drops app debug lines on device), the file proves +load ran.
+    NSString* mark = [NSString stringWithFormat:@"%@/Library/_ennio_load_fired.txt", NSHomeDirectory()];
+    [@"loaded" writeToFile:mark atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
     // Try to swizzle RCTHost's start method
     Class hostClass = NSClassFromString(@"RCTHost");
@@ -231,10 +235,18 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
             // method delivers our C++ lambda onto the JS thread.
             std::function<void(facebook::jsi::Runtime&)> boot =
                 [](facebook::jsi::Runtime& rt) {
+                    NSString* m = [NSString stringWithFormat:@"%@/Library/_ennio_jsthread_fired.txt", NSHomeDirectory()];
+                    [@"jsthread" writeToFile:m atomically:YES encoding:NSUTF8StringEncoding error:nil];
                     margelo::nitro::ennio::HybridEnnio::nativeBootstrap(rt, kEnnioDefaultPort);
+                    NSString* m2 = [NSString stringWithFormat:@"%@/Library/_ennio_bootstrap_returned.txt", NSHomeDirectory()];
+                    [@"returned" writeToFile:m2 atomically:YES encoding:NSUTF8StringEncoding error:nil];
                 };
             [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(boot)];
             NSLog(@"[Ennio] Scheduled nativeBootstrap on JS thread");
+            // Diagnostic marker: confirms ennio_start ran AND nativeBootstrap was scheduled.
+            NSString* mark2 = [NSString stringWithFormat:@"%@/Library/_ennio_bootstrap_scheduled.txt", NSHomeDirectory()];
+            [[NSString stringWithFormat:@"port=%d dist=%@", kEnnioDefaultPort, ennioDistributionName(dist)]
+                writeToFile:mark2 atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
             // Loud, greppable announce. If this line ever shows up in
             // Console.app on a non-dev device, the build pipeline has

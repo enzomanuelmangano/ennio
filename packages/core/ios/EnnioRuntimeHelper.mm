@@ -949,6 +949,35 @@ std::pair<double, double> EnnioRuntimeHelper::getKeyWindowSize() {
     return {w, h};
 }
 
+bool EnnioRuntimeHelper::clearAppDataDirectories() {
+    NSFileManager* fm = [NSFileManager defaultManager];
+    NSString* home = NSHomeDirectory();
+    NSArray<NSString*>* targets = @[
+        [home stringByAppendingPathComponent:@"Library"],
+        [home stringByAppendingPathComponent:@"Documents"],
+        [home stringByAppendingPathComponent:@"tmp"],
+    ];
+    bool ok = true;
+    for (NSString* dir in targets) {
+        NSError* err = nil;
+        NSArray<NSString*>* entries = [fm contentsOfDirectoryAtPath:dir error:&err];
+        if (!entries) continue;
+        for (NSString* name in entries) {
+            // Library/Caches and Library/Preferences are recreated by
+            // iOS on next launch — wiping their contents drops AsyncStorage,
+            // RN HermesRuntime caches, NSUserDefaults, etc.
+            NSString* path = [dir stringByAppendingPathComponent:name];
+            NSError* rmErr = nil;
+            if (![fm removeItemAtPath:path error:&rmErr]) {
+                NSLog(@"[Ennio] clearAppDataDirectories: failed to remove %@: %@",
+                      path, rmErr.localizedDescription);
+                ok = false;
+            }
+        }
+    }
+    return ok;
+}
+
 bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
     NSString* tid = [NSString stringWithUTF8String:testID.c_str()];
     __block bool isMenuTrigger = false;
