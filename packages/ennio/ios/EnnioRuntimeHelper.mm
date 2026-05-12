@@ -451,6 +451,14 @@ static BOOL tryUIControlChain(UIView* hit) {
 // does on real HID — walk up invoking any tap-class GR's target directly.
 static BOOL tryAncestorTapGestures(UIView* hit) {
     for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
+        if (cursor.gestureRecognizers.count > 0) {
+            NSMutableString* dump = [NSMutableString string];
+            for (UIGestureRecognizer* gr in cursor.gestureRecognizers) {
+                [dump appendFormat:@"%@(%ld) ", NSStringFromClass([gr class]), (long)gr.state];
+            }
+            NSLog(@"[Ennio] tryAncestorTapGestures view=%@ recognizers=[%@]",
+                  NSStringFromClass([cursor class]), dump);
+        }
         if (invokeTapGestureRecognizers(cursor)) return YES;
     }
     return NO;
@@ -499,7 +507,13 @@ static BOOL tryRNGestureHandlerDirect(UIView* hit, UIWindow* window, UIEvent* ev
         for (UIGestureRecognizer* gr in cursor.gestureRecognizers) {
             if (!gr.enabled) continue;
             NSString* clsName = NSStringFromClass([gr class]);
-            if (![clsName hasPrefix:@"RNDummy"] && ![clsName hasPrefix:@"RNNative"]) continue;
+            // RNGH 2.x recognizer prefixes:
+            //   RNDummyGestureRecognizer / RNNativeViewGestureRecognizer — wraps a base RN view.
+            //   RN<Type>GestureHandler — direct Gesture.Tap() / Gesture.Pan() etc.
+            //   RNGestureHandlerButton — RNGH's Button wrapper.
+            // Widened from {RNDummy, RNNative} so Gesture.Tap() on a bare
+            // View (no Pressable wrapper) routes through this path.
+            if (![clsName hasPrefix:@"RN"]) continue;
             @try {
                 if ([gr respondsToSelector:@selector(touchesBegan:withEvent:)]) {
                     [gr touchesBegan:touchSet withEvent:event];
@@ -644,6 +658,28 @@ static BOOL invokeTapGestureRecognizers(UIView* view) {
                 continue;
             } @catch (NSException* e) {
                 NSLog(@"[Ennio] state-drive %@: %@", NSStringFromClass([gr class]), e.reason);
+            }
+        }
+        // RNGH 2.x exposes a public `triggerAction` on every RN* tap
+        // recogniser that bypasses the UIKit state machine and fires
+        // `handleGesture:fromReset:` on the wrapping RNGestureHandler.
+        // That's the only path that delivers a tap event into the JS
+        // event chain for Gesture.Tap() on a bare View (no Pressable
+        // wrapper, no UIControl). State-drive alone leaves the gesture
+        // handler in Possible because RN's pointer tracker never saw
+        // a touchesBegan, so JS `onEnd` is never resolved.
+        NSString* grClassName = NSStringFromClass([gr class]);
+        if ([grClassName hasPrefix:@"RN"] &&
+            [gr respondsToSelector:NSSelectorFromString(@"triggerAction")]) {
+            @try {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [gr performSelector:NSSelectorFromString(@"triggerAction")];
+                #pragma clang diagnostic pop
+                fired = YES;
+                continue;
+            } @catch (NSException* e) {
+                NSLog(@"[Ennio] triggerAction %@: %@", grClassName, e.reason);
             }
         }
         // Fallback for unrecognised tap-class GRs: walk `_targets` and
@@ -1055,6 +1091,8 @@ bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
         UIView* view = findViewByTestIDInAllWindows(tid);
         if (!view) return;
         if (@available(iOS 14.0, *)) {
+            // Walk up: testID may sit on the asChild child of zeego's
+            // DropdownMenu.Trigger; the UIButton.menu host is its superview.
             for (UIView* cursor = view; cursor; cursor = cursor.superview) {
                 if (![cursor isKindOfClass:[UIButton class]]) continue;
                 UIButton* b = (UIButton*)cursor;
@@ -1062,6 +1100,22 @@ bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
                     isMenuTrigger = true;
                     return;
                 }
+            }
+            // Walk down: testID may sit on an outer wrapper View hoisted
+            // above DropdownMenu.Root so Maestro can see it in the iOS
+            // accessibility tree. Find the UIButton.menu in the subtree.
+            NSMutableArray<UIView*>* stack = [NSMutableArray arrayWithObject:view];
+            while (stack.count > 0) {
+                UIView* cur = stack.lastObject;
+                [stack removeLastObject];
+                if ([cur isKindOfClass:[UIButton class]]) {
+                    UIButton* b = (UIButton*)cur;
+                    if (b.menu && b.showsMenuAsPrimaryAction) {
+                        isMenuTrigger = true;
+                        return;
+                    }
+                }
+                for (UIView* sub in cur.subviews) [stack addObject:sub];
             }
         }
     };

@@ -16,11 +16,67 @@ ennio test e2e/01-auth-flow.yaml      # one flow
 ennio test e2e/                       # every *.yaml in the directory
 ```
 
+## Getting started
+
+Requires an Expo app on RN ≥ 0.81 (New Architecture, Fabric), iOS 17+
+simulator, Xcode 16+, Node 18+, and `idb_companion`
+(`brew install facebook/fb/idb-companion`).
+
+**1. Install**
+
+```bash
+npm install ennio ennio-expo-plugin react-native-nitro-modules
+```
+
+**2. Register the plugin** — add `"ennio-expo-plugin"` to `app.json`:
+
+```json
+{
+  "plugins": ["expo-router", "ennio-expo-plugin"]
+}
+```
+
+**3. Prebuild + run with Ennio enabled**
+
+```bash
+ENNIO_ENABLED=1 npx expo prebuild --clean
+ENNIO_ENABLED=1 npx expo run:ios
+```
+
+The app autolinks `ennio`, the WebSocket server binds on port `9876`,
+and the red **E2E** ribbon appears on every screen. No imports needed
+anywhere in your app code.
+
+**4. Write a Maestro YAML flow** (`e2e/login.yaml`):
+
+```yaml
+appId: com.your.app
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: "email-input"
+- inputText: "user@example.com"
+- tapOn: "Continue"
+- assertVisible:
+    id: "home-screen"
+```
+
+**5. Run it**
+
+```bash
+npx ennio test e2e/login.yaml
+```
+
+That's it. For production / disabling the runtime, EAS profiles,
+build-symbol auditing, and security details, see the [Setup](#setup)
+and [Security](#security) sections below.
+
 ## Architecture
 
 ```
 ┌─ host machine ────────────────────────────────────┐
-│  ennio CLI (Bun)                                  │
+│  ennio CLI (Node)                                 │
 │    EnnioClient ──ws 127.0.0.1:9876──► same host   │
 │    idb subprocess (HID input)                     │
 └────────────────────────────┬──────────────────────┘
@@ -99,7 +155,7 @@ has no `onPress` (TextInput) or no fiber match.
 - React Native ≥ 0.81 with New Architecture (Fabric, bridgeless).
 - iOS 17+ simulator (tested on iPhone 17 Pro / iOS 26).
 - Xcode 16+.
-- Bun or Node 18+.
+- Node 18+.
 - `idb_companion`: `brew install facebook/fb/idb-companion` (used for
   typeText, swipes, and non-tab text taps).
 - Expo (bare RN works with manual Podfile linking).
@@ -138,9 +194,9 @@ npm install ennio ennio-expo-plugin react-native-nitro-modules
 Enable for E2E:
 
 ```bash
-ENNIO_ENABLED=1 bunx expo prebuild --clean
+ENNIO_ENABLED=1 npx expo prebuild --clean
 ENNIO_ENABLED=1 cd ios && pod install && cd ..
-ENNIO_ENABLED=1 bunx expo run:ios
+ENNIO_ENABLED=1 npx expo run:ios
 ```
 
 Disable for production / App Store. Either unset the env var entirely
@@ -148,12 +204,12 @@ or set it explicitly to `0` — both excluded equally:
 
 ```bash
 # Recommended: be explicit
-ENNIO_ENABLED=0 bunx expo prebuild --clean
-ENNIO_ENABLED=0 bunx expo run:ios --configuration Release
+ENNIO_ENABLED=0 npx expo prebuild --clean
+ENNIO_ENABLED=0 npx expo run:ios --configuration Release
 
 # Equivalent: leave it unset
-bunx expo prebuild --clean
-bunx expo run:ios --configuration Release
+npx expo prebuild --clean
+npx expo run:ios --configuration Release
 ```
 
 When excluded, the build is byte-identical to one with

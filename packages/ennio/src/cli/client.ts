@@ -8,6 +8,7 @@
  * which forwards command names to the in-app dispatch table over WS.
  */
 
+import WebSocket from 'ws';
 import { selectorToJson } from './selector';
 
 const DEFAULT_PORT = 9876;

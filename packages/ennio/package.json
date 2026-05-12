@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "build:lib": "tsc",
-    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --external:fsevents",
+    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --external:fsevents --external:bufferutil --external:utf-8-validate",
     "build": "npm run build:lib && npm run build:cli && chmod +x dist/cli.js",
     "clean": "rm -rf lib dist",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
@@ -44,12 +44,14 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
+    "@types/ws": "^8.5.0",
     "esbuild": "^0.21.0",
     "glob": "^10.0.0",
     "js-yaml": "^4.1.0",
     "nitrogen": "^0.35.5",
     "react-native-nitro-modules": "^0.35.5",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "ws": "^8.18.0"
   },
   "publishConfig": {
     "access": "public"

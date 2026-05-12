@@ -31,6 +31,7 @@ export default function GauntletIndex() {
   return (
     <ScrollView
       style={styles.container}
+      contentContainerStyle={styles.scrollContent}
       contentInsetAdjustmentBehavior="automatic"
       testID="gauntlet-screen"
     >
@@ -52,6 +53,7 @@ export default function GauntletIndex() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f2f2f7' },
+  scrollContent: { paddingBottom: 120 },
   heading: { fontSize: 28, fontWeight: '700', padding: 16, paddingBottom: 4 },
   subheading: { fontSize: 14, color: '#666', paddingHorizontal: 16, paddingBottom: 12 },
   row: {

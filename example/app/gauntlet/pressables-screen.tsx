@@ -162,7 +162,10 @@ function DoubleTapBox({ onDoubleTap }: { onDoubleTap: () => void }) {
       testID="press-double"
       onPress={() => {
         const now = Date.now();
-        if (now - last < 350) onDoubleTap();
+        // Window widened from the iOS-default 350 ms so two consecutive
+        // E2E `tapOn`s (Maestro / Ennio) reliably count as a double-tap;
+        // their per-tap settle delay can exceed 350 ms on a hot sim.
+        if (now - last < 800) onDoubleTap();
         setLast(now);
       }}
       style={styles.btn}

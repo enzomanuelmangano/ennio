@@ -43,7 +43,7 @@ export default function KeyboardAvoidingScreen() {
 
 const styles = StyleSheet.create({
   spacer: { flex: 1 },
-  bottom: { padding: 20, gap: 12 },
+  bottom: { padding: 20, paddingBottom: 60, gap: 12 },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',

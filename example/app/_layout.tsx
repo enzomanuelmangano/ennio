@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { PressablesConfig } from 'pressto';
 import { useSettingsStore } from '../store';
 
@@ -13,6 +14,7 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardProvider>
       <PressablesConfig>
         <StatusBar style={darkMode ? 'light' : 'dark'} />
         <Stack
@@ -67,6 +69,7 @@ export default function RootLayout() {
           />
         </Stack>
       </PressablesConfig>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

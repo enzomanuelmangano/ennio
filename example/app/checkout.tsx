@@ -3,13 +3,15 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TextInput,
   Alert,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import {
+  KeyboardAwareScrollView,
+  KeyboardAvoidingView,
+} from 'react-native-keyboard-controller';
 import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useCartStore, useSettingsStore } from '../store';
@@ -456,15 +458,19 @@ export default function CheckoutScreen() {
         <View style={styles.flex1} testID="checkout-screen">
           {renderStepIndicator()}
 
-          <ScrollView
+          <KeyboardAwareScrollView
             style={styles.content}
             contentContainerStyle={styles.contentContainer}
             keyboardShouldPersistTaps="handled"
+            // Keep the focused field plus the next 1-2 rows above the
+            // keyboard so an E2E `tapOn` for the following field lands
+            // on a visible target instead of the keyboard window.
+            bottomOffset={180}
           >
             {currentStep === 'shipping' && renderShippingForm()}
             {currentStep === 'payment' && renderPaymentForm()}
             {currentStep === 'review' && renderReview()}
-          </ScrollView>
+          </KeyboardAwareScrollView>
 
           <View style={[styles.footer, darkMode && styles.footerDark]}>
             {currentStep !== 'shipping' && (

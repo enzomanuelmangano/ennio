@@ -175,10 +175,16 @@ export class NitroWriter implements Writer {
     // recogniser claims it. Maestro convention: `LEFT` is finger
     // right→left (advance to next page); `RIGHT` is left→right.
     if (direction === 'left' || direction === 'right') {
-      const endX = direction === 'right' ? SAFE_CENTER_X + distance : SAFE_CENTER_X - distance;
+      // Use opposite-edge start + opposite-edge end to maximise travel
+      // and stay inside the window. A swipe with negative endpoints
+      // (e.g. start 200, end -200 on a 420-wide window) is silently
+      // dropped by UIKit because the second touch lands off-screen,
+      // never reaches the responder, and the pan recogniser bails.
+      const startX = direction === 'left' ? Math.round(SAFE_CENTER_X * 1.75) : Math.round(SAFE_CENTER_X * 0.25);
+      const endX = direction === 'left' ? Math.round(SAFE_CENTER_X * 0.25) : Math.round(SAFE_CENTER_X * 1.75);
       try {
         await this.swipeAtPoints(
-          SAFE_CENTER_X,
+          startX,
           SAFE_CENTER_Y,
           endX,
           SAFE_CENTER_Y,
