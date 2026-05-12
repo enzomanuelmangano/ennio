@@ -55,11 +55,11 @@ appId: com.your.app
 - launchApp:
     clearState: true
 - tapOn:
-    id: "email-input"
-- inputText: "user@example.com"
-- tapOn: "Continue"
+    id: 'email-input'
+- inputText: 'user@example.com'
+- tapOn: 'Continue'
 - assertVisible:
-    id: "home-screen"
+    id: 'home-screen'
 ```
 
 **5. Run it**

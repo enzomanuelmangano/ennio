@@ -15,60 +15,60 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
-      <PressablesConfig>
-        <StatusBar style={darkMode ? 'light' : 'dark'} />
-        <Stack
-          screenOptions={{
-            headerLargeTitleShadowVisible: false,
-            headerShadowVisible: false,
-            contentStyle: {
-              backgroundColor: darkMode ? '#16213e' : '#f5f5f5',
-            },
-          }}
-        >
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="auth/login"
-            options={{
-              title: 'Sign In',
-              presentation: 'modal',
+        <PressablesConfig>
+          <StatusBar style={darkMode ? 'light' : 'dark'} />
+          <Stack
+            screenOptions={{
+              headerLargeTitleShadowVisible: false,
+              headerShadowVisible: false,
+              contentStyle: {
+                backgroundColor: darkMode ? '#16213e' : '#f5f5f5',
+              },
             }}
-          />
-          <Stack.Screen
-            name="auth/register"
-            options={{
-              title: 'Create Account',
-              presentation: 'modal',
-            }}
-          />
-          <Stack.Screen name="product" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="checkout"
-            options={{
-              title: 'Checkout',
-              presentation: 'modal',
-            }}
-          />
-          <Stack.Screen name="orders" options={{ headerShown: false }} />
-          <Stack.Screen name="settings" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="gauntlet/sheet-form"
-            options={{ presentation: 'formSheet', title: 'formSheet' }}
-          />
-          <Stack.Screen
-            name="gauntlet/sheet-page"
-            options={{ presentation: 'pageSheet', title: 'pageSheet' }}
-          />
-          <Stack.Screen
-            name="gauntlet/sheet-stacked"
-            options={{ presentation: 'modal', title: 'Stacked modal' }}
-          />
-          <Stack.Screen
-            name="gauntlet/sheet-transparent"
-            options={{ presentation: 'transparentModal', headerShown: false, animation: 'fade' }}
-          />
-        </Stack>
-      </PressablesConfig>
+          >
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="auth/login"
+              options={{
+                title: 'Sign In',
+                presentation: 'modal',
+              }}
+            />
+            <Stack.Screen
+              name="auth/register"
+              options={{
+                title: 'Create Account',
+                presentation: 'modal',
+              }}
+            />
+            <Stack.Screen name="product" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="checkout"
+              options={{
+                title: 'Checkout',
+                presentation: 'modal',
+              }}
+            />
+            <Stack.Screen name="orders" options={{ headerShown: false }} />
+            <Stack.Screen name="settings" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="gauntlet/sheet-form"
+              options={{ presentation: 'formSheet', title: 'formSheet' }}
+            />
+            <Stack.Screen
+              name="gauntlet/sheet-page"
+              options={{ presentation: 'pageSheet', title: 'pageSheet' }}
+            />
+            <Stack.Screen
+              name="gauntlet/sheet-stacked"
+              options={{ presentation: 'modal', title: 'Stacked modal' }}
+            />
+            <Stack.Screen
+              name="gauntlet/sheet-transparent"
+              options={{ presentation: 'transparentModal', headerShown: false, animation: 'fade' }}
+            />
+          </Stack>
+        </PressablesConfig>
       </KeyboardProvider>
     </GestureHandlerRootView>
   );

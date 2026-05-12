@@ -180,8 +180,10 @@ export class NitroWriter implements Writer {
       // (e.g. start 200, end -200 on a 420-wide window) is silently
       // dropped by UIKit because the second touch lands off-screen,
       // never reaches the responder, and the pan recogniser bails.
-      const startX = direction === 'left' ? Math.round(SAFE_CENTER_X * 1.75) : Math.round(SAFE_CENTER_X * 0.25);
-      const endX = direction === 'left' ? Math.round(SAFE_CENTER_X * 0.25) : Math.round(SAFE_CENTER_X * 1.75);
+      const startX =
+        direction === 'left' ? Math.round(SAFE_CENTER_X * 1.75) : Math.round(SAFE_CENTER_X * 0.25);
+      const endX =
+        direction === 'left' ? Math.round(SAFE_CENTER_X * 0.25) : Math.round(SAFE_CENTER_X * 1.75);
       try {
         await this.swipeAtPoints(
           startX,

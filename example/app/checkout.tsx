@@ -8,10 +8,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import {
-  KeyboardAwareScrollView,
-  KeyboardAvoidingView,
-} from 'react-native-keyboard-controller';
+import { KeyboardAwareScrollView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useCartStore, useSettingsStore } from '../store';
