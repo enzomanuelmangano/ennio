@@ -205,61 +205,31 @@ export class NitroWriter implements Writer {
   }
 
   async tap(testID: string): Promise<boolean> {
-    // UIMenu trigger detection: zeego DropdownMenu / UIButton.menu opens
-    // its menu via a private UIContextMenuInteraction recogniser that
-    // only fires off real HID input. UIControl.sendActions and Fiber
-    // walker invokeOnPress both report YES without ever opening the
-    // menu (false positive). Route through idb HID.
-    if (await this.client.isMenuTriggerAncestor(testID)) {
-      const center = await this.layoutCenter({ id: testID });
-      if (!center) return false;
-      try {
-        await idb.ensureCompanion();
-        // 100 ms duration mirrors a normal finger tap; instant taps
-        // (default 0 ms) sometimes get swallowed by the menu button's
-        // begin/end gesture coalescing.
-        await idb.tap(center.x, center.y, 100);
-        // UIMenu present-animation runs ~250 ms; let it land before the
-        // caller queries for menu items by label.
-        await new Promise((r) => setTimeout(r, 400));
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    // Direct onPress invocation. The native helper walks the React
-    // Fiber tree, finds the testID, and calls its onPress prop. Skips
-    // iOS HID, gesture coordinator, UIPresentationController gating.
-    // Library-agnostic — works for Pressable, TouchableOpacity, RNGH
-    // BaseButton, pressto. Falls back to a coord-based synthesised
-    // UITouch when no onPress is found in the fiber tree (typically a
-    // TextInput that needs becomeFirstResponder).
-    const direct = await this.send('invokeOnPress', { testID });
-    if (direct?.success === true) return true;
-    // Native side rejected because the view is offscreen / not laid
-    // out. Don't fall back to a coord tap — synthesising a touch at an
-    // offscreen point is meaningless. Surface a clear failure so the
-    // caller can scroll first.
-    if (typeof direct?.error === 'string' && direct.error.startsWith('Element not in viewport')) {
-      return false;
-    }
+    // Maestro-parity tap: locate via JSI + Fabric measure (fast), then
+    // dispatch a real iOS HID event via idb at the centre coord. No
+    // invokeOnPress shortcut — real touches go through UIKit hit-test,
+    // gesture recognizers, the responder chain. Same path Maestro/
+    // XCUITest uses. Catches keyboard occlusion, modal overlays,
+    // RNGH gestures, UIMenu triggers, Switch onValueChange.
     const center = await this.layoutCenter({ id: testID });
     if (!center) return false;
-    // The fiber walk found the testID but no onPress — typically a
-    // TextInput. If a keyboard is up from a previously-focused field,
-    // the next tap could land on the keyboard window (which sits over
-    // the field), focus stays on the prior input, and a subsequent
-    // typeText injects characters into the wrong place. Drop the
-    // keyboard first so the target field is hit-testable.
-    try {
-      await this.send('hideKeyboard', {});
-      await new Promise((r) => setTimeout(r, 120));
-    } catch {
-      /* best effort */
+    if (process.env.ENNIO_DEBUG_TAP) {
+      console.error(`[ennio tap] id=${testID} → (${center.x.toFixed(1)}, ${center.y.toFixed(1)})`);
     }
-    const fresh = await this.layoutCenter({ id: testID });
-    const target = fresh ?? center;
-    return this.tapAtPoint(target.x, target.y);
+    try {
+      await idb.ensureCompanion();
+      const isMenu = await this.client.isMenuTriggerAncestor(testID);
+      const dur = isMenu ? 100 : 80;
+      await idb.tap(center.x, center.y, dur);
+      // Deterministic settle: wait for React's next fiber commit (signals
+      // the press handler ran + state updated). UIMenu present-animation
+      // takes ~250 ms regardless of React; cap higher for that case.
+      const cap = isMenu ? 600 : 300;
+      await this.client.waitForCommit(cap);
+      return true;
+    } catch {
+      return false;
+    }
   }
   async tapAt(x: number, y: number): Promise<boolean> {
     return this.tapAtPoint(x, y);
@@ -286,28 +256,39 @@ export class NitroWriter implements Writer {
       // here masked legitimate flow bugs (off-screen taps that a real
       // finger could never deliver) and let Ennio pass flows that
       // Maestro correctly failed.
-      for (let i = 0; i < 4; i++) {
+      // Wait for the UIView's window-frame to be STABLE across two
+      // consecutive reads (~50 ms apart). UIScrollView paging snap +
+      // any UIView-level animation that React doesn't know about move
+      // the frame mid-flight; reading once gives an in-progress coord
+      // and the tap lands at the wrong x. Stable means snap is done.
+      let lastCoord: { x: number; y: number } | null = null;
+      for (let i = 0; i < 30; i++) {
         const r = await this.send('getViewWindowFrame', { testID: selector.id });
         const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
         if (data && data.width > 0 && data.height > 0) {
           const cx = data.x + data.width / 2;
           const cy = data.y + data.height / 2;
           const onScreen = cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height;
-          if (onScreen) {
+          if (!onScreen) {
+            // UIView found but its centre lies outside the visible viewport.
+            // Refuse — the caller is expected to scroll first.
+            return null;
+          }
+          if (lastCoord && Math.abs(lastCoord.x - cx) < 0.5 && Math.abs(lastCoord.y - cy) < 0.5) {
             if (process.env.ENNIO_DEBUG_IDB) {
               console.error(
-                `[layout] id=${selector.id} → window=(${data.x},${data.y},${data.width},${data.height})`,
+                `[layout] id=${selector.id} stable → window=(${data.x},${data.y},${data.width},${data.height}) iter=${i}`,
               );
             }
             return { x: cx, y: cy };
           }
-          // UIView found but its centre lies outside the visible viewport.
-          // Refuse — the caller is expected to scroll first.
-          return null;
+          lastCoord = { x: cx, y: cy };
         }
-        await new Promise((res) => setTimeout(res, 100));
+        await new Promise((res) => setTimeout(res, 50));
       }
-      return null;
+      // Fell through stability check — return last known coord (best
+      // effort; view may still be animating).
+      return lastCoord;
     }
     // Compound / text-only selectors: walk the Fabric shadow tree, then
     // add the React surface's window offset.
