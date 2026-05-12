@@ -507,60 +507,51 @@ export class NitroWriter implements Writer {
     return true;
   }
   async tapByText(text: string): Promise<boolean> {
-    // expo-router NativeTabs renders tab bar items via UIKit/SwiftUI
-    // hosts whose UIView subtree isn't surfaced for accessibility-label
-    // walks (UITabBarButton stays opaque). Drive the UITabBarController
-    // directly before falling back to coordinate taps.
-    const tab = await this.send('tapTabByName', { name: text });
-    if (process.env.ENNIO_DEBUG_IDB)
-      console.error(`[tapByText] '${text}' tabSwitch=${tab?.success}`);
-    if (tab?.success === true) return true;
-    // Fiber-walker dispatch. Finds the React fiber whose RawText
-    // matches `text`, walks .return to the surrounding Pressable, and
-    // calls onPress directly. Necessary for RNGH BaseButton (pressto
-    // PressableScale) — its pan/tap recogniser refuses synthesised
-    // UITouches, so the coord-tap path below never fires onPress.
-    const fiber = await this.send('invokeOnPressByText', { text });
-    if (fiber?.success === true) return true;
-    // Coord-based tap at the matched label's centre. The Nitro
-    // `tapAtPoint` chain handles every touch class we can reach in
-    // process: UIControl with TouchUpInside actions, RNBetterTapGestureRecognizer
-    // (state-drive Began → Ended), plain UITapGestureRecognizer,
-    // synthesised UITouch fallback. RNGH's NativeViewGestureHandler
-    // (used by pressto's PressableScale) attaches its
-    // RNDummyGestureRecognizer on the RNGestureHandlerManager, not in
-    // any individual view — so we mirror with idb HID for those.
+    // Maestro-parity tap-by-text: locate via the iOS accessibility tree
+    // (catches UITabBar / UIAlert / out-of-process UIMenu items the
+    // React fiber tree never sees) AND the React fiber tree (catches
+    // labelled views inside the app process). Tap the resolved coord
+    // via idb HID — real touch, real hit-test, real responder chain.
+    await idb.ensureCompanion();
+    // 1) Accessibility-label query inside the app's UIView tree (incl.
+    //    UITabBarButton labels — expo-router NativeTabs route through
+    //    UIKit hosts that surface their tab title as the AX label).
     const r = await this.send('getViewWindowFrameByLabel', { text });
     const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
     if (data && data.width > 0 && data.height > 0) {
       const cx = data.x + data.width / 2;
       const cy = data.y + data.height / 2;
-      if (await this.tapAtPoint(cx, cy)) {
-        try {
-          await idb.tap(cx, cy, 150);
-        } catch {
-          /* best effort */
-        }
-        return true;
-      }
+      await idb.tap(cx, cy, 50);
+      await this.client.waitForCommit(300);
+      return true;
     }
+    // 2) Fiber-text walk — for elements whose label is JSX text but
+    //    whose accessibilityLabel isn't set on the host view.
     const c = await this.layoutCenter({ text });
     if (c) {
-      if (await this.tapAtPoint(c.x, c.y)) {
-        try {
-          await idb.tap(c.x, c.y, 150);
-        } catch {
-          /* best effort */
-        }
+      await idb.tap(c.x, c.y, 50);
+      await this.client.waitForCommit(300);
+      return true;
+    }
+    // 3) UITabBarController shortcut. NativeTabs render as
+    //    UITabBarButtons whose UIView subtree often stays opaque to
+    //    accessibility queries; expose tab switching via the
+    //    controller directly. This is non-Maestro (Maestro coord-taps
+    //    the tab item), but the alternatives (idb describe-all is
+    //    broken on iOS 26; bundling WebDriverAgent is heavier) make
+    //    this the pragmatic path until either upstream is fixed.
+    const tab = await this.send('tapTabByName', { name: text });
+    if (tab?.success === true) {
+      await this.client.waitForCommit(300);
+      return true;
+    }
+    // 4) Out-of-process accessibility tree (idb describe-all) — broken
+    //    on iOS 26, kept for older sims as a last resort.
+    try {
+      if (await idb.tapByLabelOOP(text)) {
+        await this.client.waitForCommit(300);
         return true;
       }
-    }
-    // Last resort: walk the simulator's whole-OS accessibility tree via
-    // `idb describe-all`. Reaches UI outside the app process — SpringBoard
-    // system alerts (iOS 26's deep-link confirmation), system pickers,
-    // out-of-process zeego UIMenu items.
-    try {
-      if (await idb.tapByLabelOOP(text)) return true;
     } catch {
       /* best effort */
     }
