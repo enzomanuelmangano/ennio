@@ -304,11 +304,11 @@ generated `Podfile`, tagged with `:configurations => ['Debug']`.
 CocoaPods compiles + links the pod **only** for the listed Xcode
 build configurations:
 
-| Xcode configuration | Ennio in binary? |
-| ------------------- | ---------------- |
-| `Debug`             | Yes              |
-| `Release`           | **No** (zero code, zero symbols, zero `+load`) |
-| Custom config (e.g. `Staging`) | Only if listed in plugin options |
+| Xcode configuration            | Ennio in binary?                               |
+| ------------------------------ | ---------------------------------------------- |
+| `Debug`                        | Yes                                            |
+| `Release`                      | **No** (zero code, zero symbols, zero `+load`) |
+| Custom config (e.g. `Staging`) | Only if listed in plugin options               |
 
 No env var. No prebuild discipline. Release archives can't carry
 Ennio even if someone tries — CocoaPods literally skips the source.
@@ -320,20 +320,23 @@ Plugin options (all optional):
 ```json
 {
   "plugins": [
-    ["ennio-expo-plugin", {
-      "configurations": ["Debug", "Staging"],
-      "showRibbon": true,
-      "enabled": true
-    }]
+    [
+      "ennio-expo-plugin",
+      {
+        "configurations": ["Debug", "Staging"],
+        "showRibbon": true,
+        "enabled": true
+      }
+    ]
   ]
 }
 ```
 
-| Option            | Default     | What it does |
-| ----------------- | ----------- | ------------ |
-| `configurations`  | `["Debug"]` | Xcode build configurations to link EnnioCore into. Extend for custom configs (e.g. `Staging`). |
-| `showRibbon`      | `false`     | Paint the red diagonal **E2E** ribbon on every screen. Useful for QA artifact identification / demo videos. |
-| `enabled`         | `true`      | Set to `false` to skip the plugin entirely. |
+| Option           | Default     | What it does                                                                                                |
+| ---------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| `configurations` | `["Debug"]` | Xcode build configurations to link EnnioCore into. Extend for custom configs (e.g. `Staging`).              |
+| `showRibbon`     | `false`     | Paint the red diagonal **E2E** ribbon on every screen. Useful for QA artifact identification / demo videos. |
+| `enabled`        | `true`      | Set to `false` to skip the plugin entirely.                                                                 |
 
 CI sanity check before signing a release artifact (should always
 pass):
