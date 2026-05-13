@@ -112,10 +112,12 @@ export class NitroWriter implements Writer {
   private async hidTap(x: number, y: number, durationMs: number): Promise<void> {
     try {
       await hid.tap(x, y, durationMs);
-      if (process.env.ENNIO_DEBUG_IDB) console.error(`[hidTap] daemon ok (${x},${y},${durationMs}ms)`);
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[hidTap] daemon ok (${x},${y},${durationMs}ms)`);
       return;
     } catch (e) {
-      if (process.env.ENNIO_DEBUG_IDB) console.error(`[hidTap] daemon FAILED, fallback: ${(e as Error).message}`);
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[hidTap] daemon FAILED, fallback: ${(e as Error).message}`);
     }
     await idb.ensureCompanion();
     await idb.tap(x, y, durationMs);

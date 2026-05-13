@@ -67,13 +67,13 @@ const DEFAULT_RECONNECT_TIMEOUT = 30000;
 const ALERT_TAP_SETTLE_MS = 150; // Wait for alert-button tap to dismiss the alert.
 const ALERT_DISMISS_DELAY_MS = 120; // Settle between dismissAlert and the next assertion.
 const RUNLOOP_TICK_MS = 30; // UITouch begin→end gap; matches the native sendSynth tick.
-const TAP_NAV_SETTLE_MS = 200; // Tab/Link nav settle before the next assertVisible.
+const TAP_NAV_SETTLE_MS = 150; // Tab/Link nav settle. prepareTap's stable-coord + hit-test verify catches the "responder chain not yet bound" race on the next tap, so this only covers commands that don't go through prepareTap (e.g. assertVisible). Kept short.
 const TAP_BACK_RECOVER_DELAY_MS = 250; // Pause between back-pop and retry tap.
 const KEYBOARD_DISMISS_SETTLE_MS = 120; // Settle after hideKeyboard before re-tapping the field.
-const POST_LAUNCH_SETTLE_MS = 800; // Wait for sim teardown after clearState before relaunch.
-const POST_LAUNCH_IDLE_BUDGET_MS = 3000; // First waitForIdle after a launch.
-const TYPE_TEXT_IDLE_BUDGET_MS = 1500; // Drain RN bridge after typeText so onChangeText commits before the next tap reads `value`. Bumped from 800 → 1500 to absorb the legacy-bridge RCTDirectEventBlock async hop on slow simulator runs.
-const POST_LAUNCH_SHADOW_COMMIT_MS = 400; // First shadow-tree commit settle after reconnect.
+const POST_LAUNCH_SETTLE_MS = 400; // Wait for sim teardown after clearState before relaunch.
+const POST_LAUNCH_IDLE_BUDGET_MS = 1500; // First waitForIdle after a launch.
+const TYPE_TEXT_IDLE_BUDGET_MS = 600; // Drain RN bridge after typeText so onChangeText commits before the next tap reads `value`.
+const POST_LAUNCH_SHADOW_COMMIT_MS = 250; // First shadow-tree commit settle after reconnect.
 const RETRY_POLL_MS = 100; // Predicate retry tick for waitFor / extendedWaitUntil.
 const POINT_TAP_SETTLE_MS = 60; // Quick settle after tapAt — no tab-nav animation.
 const RECORDING_SETTLE_MS = 500; // Settle after start/stopRecording so the next step sees a stable IO state.
@@ -420,15 +420,13 @@ class MaestroExecutor {
    * worst case is identical to a sleep of the same duration.
    */
   private async waitCommit(maxMs: number): Promise<void> {
-    // Hermes Inspector + CDP can't reliably observe React's
-    // onCommitFiberRoot (the devtools-hook monkey-patch races React's
-    // own hook binding on Bridgeless; commit signal often never fires
-    // even though React commits ran). Hard-timeout 200 ms per call
-    // × ~30 taps = 6 s wasted per flow. Replace with a fixed micro-
-    // sleep that's enough for the React commit + UIKit transition to
-    // land before the next yaml step reads layout. Downstream polls
-    // pick up anything that lands later.
-    await this.sleep(Math.min(maxMs, 80));
+    // Fixed sleep — the React-commit signal (`__ennio_native_onCommit`)
+    // races React's own devtools-hook binding on Bridgeless and often
+    // never fires, and IdleMonitor doesn't observe UIKit transitions
+    // (router.push, modal present). The caller's `maxMs` is sized for
+    // the worst case of whatever it just did (tap-nav: 500 ms;
+    // alert/keyboard: 120-250 ms; point-tap: 60 ms).
+    await this.sleep(maxMs);
   }
 
   /**
@@ -563,7 +561,7 @@ class MaestroExecutor {
         return this.writer.tap(selector.id);
       }
       if (selector.text && !selector.id) {
-        return this.writer.tapByText(selector.text);
+        return this.writer.tapByText(selector.text, { fast: opts.optional === true });
       }
       return this.writer.tapBySelector(toEnnioSelector(selector));
     };
@@ -707,7 +705,12 @@ class MaestroExecutor {
       return;
     }
     await this.writer.scroll(null, dir, amount);
-    await this.waitCommit(KEYBOARD_DISMISS_SETTLE_MS);
+    // setContentOffset:animated:NO returns synchronously but RN's
+    // onScroll / onMomentumEnd fire on the next runloop tick; gesture
+    // recognizers inside scrolled-in cells (Pressable, etc.) need that
+    // tick before they'll honour the next touch. 250 ms covers it on
+    // both Bridgeless and the legacy bridge.
+    await this.sleep(250);
   }
 
   /**
@@ -970,7 +973,19 @@ class MaestroExecutor {
       const swipeCmd = cmd.swipe;
       if (swipeCmd.direction) {
         const amount = swipeCmd.duration || 400;
-        await this.scroll(swipeCmd.direction.toLowerCase(), amount);
+        // `swipe direction: X` is finger-swipe semantics in Maestro (a
+        // LEFT swipe drags the finger left → content moves left →
+        // reveals right). Invert to the scroll-direction semantics our
+        // native scroll handler expects (which uses
+        // direction-of-scroll: LEFT = reveal-left = offset.x-).
+        const inv: Record<string, string> = {
+          left: 'right',
+          right: 'left',
+          up: 'down',
+          down: 'up',
+        };
+        const dir = inv[swipeCmd.direction.toLowerCase()] ?? swipeCmd.direction.toLowerCase();
+        await this.scroll(dir, amount);
       } else if (swipeCmd.start && swipeCmd.end) {
         // Fast mode: best-effort vertical scroll inferred from y-delta.
         const dy =
