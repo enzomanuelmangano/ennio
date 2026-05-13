@@ -23,6 +23,7 @@ import type { EnnioClient, Selector } from './client';
 // reach it. ~50 ms HID nudge is the only way short of linking RNGH headers
 // from Ennio's pod target.
 import * as idb from './idb';
+import * as hierarchy from './hierarchy';
 
 // Safe-area-ish centre for the 402x874 / 440x956 iPhone sims we run
 // against. Used as the swipe origin when scrollAuto / scrollAtPoint
@@ -561,6 +562,21 @@ export class NitroWriter implements Writer {
     //    on iOS 26, kept for older sims as a last resort.
     try {
       if (await idb.tapByLabelOOP(text)) {
+        await this.client.waitForCommit(300);
+        return true;
+      }
+    } catch {
+      /* best effort */
+    }
+    // 5) iOS-26 AX-tree fallback via maestro hierarchy → WebDriverAgent.
+    //    Slow (~1-2 s) but the only working path for native UIMenu
+    //    items (zeego DropdownMenu choices), system pickers, and
+    //    SpringBoard alerts on iOS 26. Drops out once idb_companion
+    //    or a bundled WDA helper supports iOS 26 directly.
+    try {
+      const h = await hierarchy.findByText(text);
+      if (h) {
+        await idb.tap(h.cx, h.cy, 50);
         await this.client.waitForCommit(300);
         return true;
       }
