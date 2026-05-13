@@ -312,71 +312,81 @@ export class NitroWriter implements Writer {
     };
   }
   async doubleTap(testID: string): Promise<boolean> {
-    // Native Nitro doubleTap chains two taps with the right inter-tap
-    // gap UIKit's tap-count recogniser expects (~120 ms). Cheaper than
-    // two coord taps.
-    const r = await this.send('doubleTap', { testID });
-    if (r?.success === true) return true;
+    // Two real iOS HID taps with the inter-tap gap UIKit's
+    // tap-count recogniser expects (~120 ms). Same path as tap() —
+    // real touches drive gesture recognizers; no JSI shortcut.
     const c = await this.layoutCenter({ id: testID });
     if (!c) return false;
-    await this.tapAtPoint(c.x, c.y);
-    await new Promise((r) => setTimeout(r, 80));
-    await this.tapAtPoint(c.x, c.y);
+    await idb.ensureCompanion();
+    await idb.tap(c.x, c.y, 50);
+    await new Promise((r) => setTimeout(r, 120));
+    await idb.tap(c.x, c.y, 50);
+    await this.client.waitForCommit(300);
     return true;
   }
   async longPress(testID: string, durationMs: number): Promise<boolean> {
-    // Pressables that declare only onLongPress (no onPress) won't respond
-    // to a synthesised UITouch — UIKit dispatches no Began→long-Ended
-    // sequence, and the native long-press helper can't recognise the
-    // intended gesture. Direct fiber dispatch falls through to onLongPress
-    // when no onPress is wired (see kFiberWalkerSource), so try that
-    // first; only fall back to the native helper for elements where the
-    // fiber walk can't find a handler.
-    const direct = await this.send('invokeOnPress', { testID });
-    if (direct?.success === true) return true;
-    const r = await this.send('longPress', { testID, durationMs });
-    if (r?.success === true) return true;
+    // Real iOS HID touch with extended press duration. Drives
+    // UILongPressGestureRecognizer + RNGH long-press handlers the same
+    // way a real finger does. No JSI shortcut — fiber-dispatch onPress
+    // bypasses gesture state machines and silently masks layout bugs.
     const c = await this.layoutCenter({ id: testID });
     if (!c) return false;
-    return this.tapAtPoint(c.x, c.y);
+    await idb.ensureCompanion();
+    await idb.tap(c.x, c.y, durationMs);
+    await this.client.waitForCommit(300);
+    return true;
   }
   async typeText(testID: string | null, text: string): Promise<boolean> {
-    // Nitro's typeText finds the TextInput by testID and calls
-    // `insertText:` directly on the UITextInput protocol. No HID, no
-    // pre-tap to focus, no per-character latency.
+    // If a testID is provided, focus it first via real HID tap so the
+    // field becomes first responder. Then dispatch the text via idb
+    // typeText — real keystrokes on the system keyboard, same as
+    // Maestro/XCUITest. Per-char latency is higher than Nitro's
+    // insertText but onChangeText fires per character and validators
+    // get the chance to filter / format input the way a real user
+    // would experience it.
     if (testID) {
-      const r = await this.send('typeText', { testID, text });
-      if (r?.success === true) return true;
+      const c = await this.layoutCenter({ id: testID });
+      if (!c) return false;
+      await idb.ensureCompanion();
+      await idb.tap(c.x, c.y, 50);
+      await this.client.waitForCommit(200);
     }
-    // Fallback: tap-anywhere targeting via clipboard paste. Nitro
-    // exposes copyToClipboard + pasteFromClipboard; the latter pastes
-    // into whichever field is first responder. Used when the testID
-    // doesn't resolve to a Fabric TextInput (e.g. the runner already
-    // focused a field via tap and just calls typeText with null id).
-    if (!testID) {
-      await this.send('copyToClipboard', { text });
-      const r = await this.send('pasteFromClipboard', { testID: '' });
-      return r?.success === true;
-    }
-    return false;
+    await idb.ensureCompanion();
+    await idb.typeText(text);
+    await this.client.waitForCommit(300);
+    return true;
   }
   async clearText(testID: string): Promise<boolean> {
-    const r = await this.send('clearText', { testID });
-    return r?.success === true;
+    // Focus + select-all + delete via HID. Roughly equivalent to
+    // Nitro's clearText but uses real keystrokes for parity with
+    // Maestro semantics.
+    const c = await this.layoutCenter({ id: testID });
+    if (!c) return false;
+    await idb.ensureCompanion();
+    await idb.tap(c.x, c.y, 50);
+    await this.client.waitForCommit(200);
+    // Erase up to 100 chars — large enough for typical form fields.
+    for (let i = 0; i < 100; i++) {
+      await idb.pressKey(42);
+    }
+    await this.client.waitForCommit(300);
+    return true;
   }
   async eraseText(testID: string | null, count: number): Promise<boolean> {
-    // Single round-trip: Nitro's eraseText loops deleteBackward N times
-    // on the resolved UITextInput. Replaces N idb HID key presses.
+    // Real backspace via idb HID, count times. Focus the field first
+    // if a testID was given.
     if (testID) {
-      const r = await this.send('eraseText', { testID, count });
-      if (r?.success === true) return true;
+      const c = await this.layoutCenter({ id: testID });
+      if (!c) return false;
+      await idb.ensureCompanion();
+      await idb.tap(c.x, c.y, 50);
+      await this.client.waitForCommit(200);
     }
-    // No testID — drive backspace against the current first responder.
-    // pressHardwareKey(42) maps to deleteBackward via UIKeyInput.
+    await idb.ensureCompanion();
     for (let i = 0; i < count; i++) {
-      const r = await this.send('pressHardwareKey', { keyCode: 42 });
-      if (r?.success !== true) return i > 0;
+      await idb.pressKey(42);
     }
+    await this.client.waitForCommit(300);
     return true;
   }
   async pressKey(_testID: string | null, keyName: string): Promise<boolean> {
@@ -391,8 +401,10 @@ export class NitroWriter implements Writer {
     };
     const code = map[keyName.toLowerCase()];
     if (code === undefined) return false;
-    const r = await this.send('pressHardwareKey', { keyCode: code });
-    return r?.success === true;
+    await idb.ensureCompanion();
+    await idb.pressKey(code);
+    await this.client.waitForCommit(200);
+    return true;
   }
   async scroll(
     testID: string | null,
