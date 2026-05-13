@@ -63,6 +63,14 @@ export interface Writer {
     direction: 'up' | 'down' | 'left' | 'right',
     distance: number,
   ): Promise<boolean>;
+  /**
+   * Raw window-coord swipe. Routes through idb HID (real iOS touches
+   * the simulator's pan recogniser actually honours); falls back to
+   * synthesised UITouch via Nitro when idb is unavailable.
+   */
+  swipeAt(x1: number, y1: number, x2: number, y2: number, durationMs: number): Promise<boolean>;
+  /** Key window size in window-coord points (cached after first call). */
+  getScreenSize(): Promise<{ width: number; height: number }>;
   scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean>;
   back(): Promise<boolean>;
   hideKeyboard(): Promise<boolean>;
@@ -165,7 +173,7 @@ export class NitroWriter implements Writer {
   }
 
   private screenSize: { width: number; height: number } | null = null;
-  private async getScreenSize(): Promise<{ width: number; height: number }> {
+  async getScreenSize(): Promise<{ width: number; height: number }> {
     if (this.screenSize) return this.screenSize;
     try {
       const r = await this.send('getKeyWindowSize', {});
@@ -515,6 +523,24 @@ export class NitroWriter implements Writer {
     distance: number,
   ): Promise<boolean> {
     return this.scroll(testID, direction, distance);
+  }
+  async swipeAt(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    durationMs: number,
+  ): Promise<boolean> {
+    if (process.env.ENNIO_DEBUG_IDB)
+      console.error(`[swipeAt] (${x1},${y1})→(${x2},${y2}) ${durationMs}ms`);
+    try {
+      await idb.swipe(x1, y1, x2, y2, durationMs);
+      return true;
+    } catch (e) {
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[swipeAt] idb failed: ${(e as Error).message}, fallback`);
+    }
+    return this.swipeAtPoints(x1, y1, x2, y2, durationMs);
   }
   async scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean> {
     const r = await this.send('scrollTo', { scrollViewTestID, elementTestID });

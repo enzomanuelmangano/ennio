@@ -971,27 +971,88 @@ class MaestroExecutor {
 
     if ('swipe' in cmd) {
       const swipeCmd = cmd.swipe;
-      if (swipeCmd.direction) {
-        const amount = swipeCmd.duration || 400;
-        // `swipe direction: X` is finger-swipe semantics in Maestro (a
-        // LEFT swipe drags the finger left → content moves left →
-        // reveals right). Invert to the scroll-direction semantics our
-        // native scroll handler expects (which uses
-        // direction-of-scroll: LEFT = reveal-left = offset.x-).
-        const inv: Record<string, string> = {
-          left: 'right',
-          right: 'left',
-          up: 'down',
-          down: 'up',
+      const duration = swipeCmd.duration || 400;
+
+      // Path 1: `from: <selector>` — anchor the swipe at the element's
+      // centre axis but span the screen, not the element. The element
+      // gives the gesture's y (for horizontal) or x (for vertical), so
+      // the pan recogniser of the right inner scroller sees the touch;
+      // the actual finger travel uses the screen so the swipe is long
+      // enough to move a card and never clamps to a near-edge no-op.
+      if (swipeCmd.from) {
+        const sel = normalizeSelector(swipeCmd.from);
+        const frame = sel.id ? await this.client.getViewWindowFrame(sel.id) : null;
+        if (frame && frame.width > 0 && frame.height > 0) {
+          const screen = await this.writer.getScreenSize();
+          const cx = frame.x + frame.width / 2;
+          const cy = frame.y + frame.height / 2;
+          const dir = (swipeCmd.direction || 'LEFT').toLowerCase();
+          const hPad = 40;
+          const vPad = 80;
+          let x1: number, y1: number, x2: number, y2: number;
+          if (dir === 'left') {
+            x1 = screen.width - hPad;
+            x2 = hPad;
+            y1 = y2 = cy;
+          } else if (dir === 'right') {
+            x1 = hPad;
+            x2 = screen.width - hPad;
+            y1 = y2 = cy;
+          } else if (dir === 'up') {
+            x1 = x2 = cx;
+            y1 = screen.height - vPad;
+            y2 = vPad;
+          } else {
+            // down
+            x1 = x2 = cx;
+            y1 = vPad;
+            y2 = screen.height - vPad;
+          }
+          await this.writer.swipeAt(x1, y1, x2, y2, duration);
+          // Swipe settle. Paged/momentum carousels keep moving after
+          // the touch ends; the Fabric shadow tree only reconciles
+          // once the deceleration finishes. 800 ms is empirical — it
+          // covers the onMomentumEnd → tree-reconcile gap on iPhone
+          // Air at 120 Hz, where a shorter wait left the next frame
+          // query reading the mid-decel position.
+          await this.sleep(800);
+          return;
+        }
+        // Frame lookup failed — fall through to direction-only path so
+        // the swipe still happens (best-effort, may miss the carousel).
+      }
+
+      // Path 2: raw `start`/`end` coords — pass straight to idb HID.
+      // Accepts absolute pixels in either object `{x,y}` or string
+      // `"x,y"` form. (Percentage form is not supported here; use a
+      // `from:` selector for resolution-independent swipes.)
+      if (swipeCmd.start && swipeCmd.end) {
+        const parsePt = (p: string | { x: number; y: number }): { x: number; y: number } | null => {
+          if (typeof p === 'object') return { x: p.x, y: p.y };
+          const parts = String(p).split(',');
+          if (parts.length !== 2) return null;
+          const x = parseFloat(parts[0]);
+          const y = parseFloat(parts[1]);
+          return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
         };
+        const s = parsePt(swipeCmd.start);
+        const e = parsePt(swipeCmd.end);
+        if (s && e) {
+          await this.writer.swipeAt(s.x, s.y, e.x, e.y, duration);
+          await this.sleep(800);
+          return;
+        }
+      }
+
+      // Path 3: bare `direction` — finger-semantic in Maestro.
+      // `writer.scroll` is finger-semantic for horizontal (idb HID
+      // swipe) but scroll-direction-semantic for vertical (native
+      // setContentOffset). Invert only the vertical axis; horizontal
+      // passes through unchanged.
+      if (swipeCmd.direction) {
+        const inv: Record<string, string> = { up: 'down', down: 'up' };
         const dir = inv[swipeCmd.direction.toLowerCase()] ?? swipeCmd.direction.toLowerCase();
-        await this.scroll(dir, amount);
-      } else if (swipeCmd.start && swipeCmd.end) {
-        // Fast mode: best-effort vertical scroll inferred from y-delta.
-        const dy =
-          (typeof swipeCmd.end === 'object' ? swipeCmd.end.y : 0) -
-          (typeof swipeCmd.start === 'object' ? swipeCmd.start.y : 0);
-        await this.writer.scroll(null, dy >= 0 ? 'down' : 'up', Math.abs(dy) || 200);
+        await this.scroll(dir, duration);
       }
       return;
     }

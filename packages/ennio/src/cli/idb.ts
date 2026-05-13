@@ -113,6 +113,7 @@ export async function swipe(
       String(Math.round(y2)),
     ]),
   );
+  if (process.env.ENNIO_DEBUG_IDB) console.error(`[idb swipe] idb ${args.join(' ')}`);
   await run(args);
 }
 

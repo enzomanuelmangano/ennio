@@ -160,13 +160,12 @@ tags:
     direction: UP
 
 # Featured carousel is a horizontal ScrollView nested under the home
-# vertical ScrollView. Maestro's scrollUntilVisible LEFT can't always
-# pick the right scroller (it picks the outer one and finds nothing
-# horizontal there); a couple of explicit LEFT swipes on the carousel
-# reliably advance it to product-3.
+# vertical ScrollView. Maestro's scrollUntilVisible LEFT picks the
+# outer (vertical) scroller and finds nothing. Use `from:` to anchor
+# the swipe inside the carousel so idb HID hits the correct scroller.
 - swipe:
-    direction: LEFT
-- swipe:
+    from:
+      id: 'featured-product-1'
     direction: LEFT
 - tapOn:
     id: 'add-to-cart-featured-3'
