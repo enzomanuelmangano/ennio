@@ -258,11 +258,15 @@ export class NitroWriter implements Writer {
       // finger could never deliver) and let Ennio pass flows that
       // Maestro correctly failed.
       // Wait for the UIView's window-frame to be STABLE across two
-      // consecutive reads (~50 ms apart). UIScrollView paging snap +
-      // any UIView-level animation that React doesn't know about move
-      // the frame mid-flight; reading once gives an in-progress coord
-      // and the tap lands at the wrong x. Stable means snap is done.
+      // consecutive reads (~50 ms apart) WITH centre inside the visible
+      // viewport. Stability tolerance is 2 px. If the element is found
+      // but off-screen, drive a scrollTo to bring it into view —
+      // Maestro/XCUI does this implicitly via scrollToVisible, so for
+      // parity we do the same; users get to write yaml without
+      // boilerplate scroll commands before every off-screen tap.
       let lastCoord: { x: number; y: number } | null = null;
+      let lastOnScreen = false;
+      let didScroll = false;
       for (let i = 0; i < 30; i++) {
         const r = await this.send('getViewWindowFrame', { testID: selector.id });
         const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
@@ -271,11 +275,27 @@ export class NitroWriter implements Writer {
           const cy = data.y + data.height / 2;
           const onScreen = cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height;
           if (!onScreen) {
-            // UIView found but its centre lies outside the visible viewport.
-            // Refuse — the caller is expected to scroll first.
+            if (!didScroll) {
+              // Off-screen — scrollIntoView via enclosing UIScrollView
+              // (Maestro parity). Native scrollTo walks up to find the
+              // scroll view, sets contentOffset to put the element in
+              // viewport. Only attempt once; if it still doesn't help
+              // the caller needs a real scrollUntilVisible.
+              didScroll = true;
+              try {
+                await this.send('scrollTo', {
+                  scrollViewTestID: '',
+                  elementTestID: selector.id,
+                });
+              } catch {
+                /* best effort */
+              }
+              await new Promise((res) => setTimeout(res, 200));
+              continue;
+            }
             return null;
           }
-          if (lastCoord && Math.abs(lastCoord.x - cx) < 0.5 && Math.abs(lastCoord.y - cy) < 0.5) {
+          if (lastCoord && Math.abs(lastCoord.x - cx) < 2 && Math.abs(lastCoord.y - cy) < 2) {
             if (process.env.ENNIO_DEBUG_IDB) {
               console.error(
                 `[layout] id=${selector.id} stable → window=(${data.x},${data.y},${data.width},${data.height}) iter=${i}`,
@@ -284,12 +304,11 @@ export class NitroWriter implements Writer {
             return { x: cx, y: cy };
           }
           lastCoord = { x: cx, y: cy };
+          lastOnScreen = true;
         }
         await new Promise((res) => setTimeout(res, 50));
       }
-      // Fell through stability check — return last known coord (best
-      // effort; view may still be animating).
-      return lastCoord;
+      return lastOnScreen ? lastCoord : null;
     }
     // Compound / text-only selectors: walk the Fabric shadow tree, then
     // add the React surface's window offset.

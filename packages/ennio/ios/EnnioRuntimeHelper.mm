@@ -1840,10 +1840,19 @@ bool EnnioRuntimeHelper::scrollTo(const std::string& scrollViewTestID, const std
     NSString* elId = [NSString stringWithUTF8String:elementTestID.c_str()];
     __block bool ok = false;
     void (^block)(void) = ^{
-        UIView* svView = findViewByTestIDInAllWindows(svId);
         UIView* elView = findViewByTestIDInAllWindows(elId);
-        if (!svView || !elView) return;
-        UIScrollView* sv = [svView isKindOfClass:[UIScrollView class]] ? (UIScrollView*)svView : findEnclosingScrollView(svView);
+        if (!elView) return;
+        UIScrollView* sv = nil;
+        if (svId.length > 0) {
+            UIView* svView = findViewByTestIDInAllWindows(svId);
+            if (!svView) return;
+            sv = [svView isKindOfClass:[UIScrollView class]] ? (UIScrollView*)svView : findEnclosingScrollView(svView);
+        } else {
+            // Empty scrollViewTestID — walk up from the element to find
+            // the closest enclosing UIScrollView. Mirrors Maestro/XCUI
+            // scrollToVisible which only needs the target.
+            sv = findEnclosingScrollView(elView);
+        }
         if (!sv) return;
         CGRect frame = [elView convertRect:elView.bounds toView:sv];
         [sv scrollRectToVisible:frame animated:NO];
