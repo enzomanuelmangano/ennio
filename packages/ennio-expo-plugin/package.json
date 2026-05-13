@@ -1,7 +1,7 @@
 {
   "name": "ennio-expo-plugin",
   "version": "0.0.1",
-  "description": "Expo config plugin for Ennio E2E testing — gates the native runtime behind ENNIO_ENABLED.",
+  "description": "Expo config plugin for Ennio E2E testing — links the native runtime into Debug builds only via CocoaPods :configurations.",
   "main": "src/index.js",
   "files": [
     "src"
