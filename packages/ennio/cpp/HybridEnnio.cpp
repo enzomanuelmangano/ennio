@@ -252,42 +252,12 @@ bool HybridEnnio::isServerRunning() {
 // Element Queries
 // ============================================
 
-std::variant<nitro::NullType, ElementInfo> HybridEnnio::findByTestID(const std::string& testID) {
-    auto node = findNode(testID);
-    if (!node) {
-        return nitro::NullType();
-    }
-
-    auto root = getShadowTreeRoot();
-    auto infoOpt = ::ennio::ShadowTreeTraverser::getElementInfo(node);
-
-    if (!infoOpt) {
-        return nitro::NullType();
-    }
-
-    return convertElementInfo(*infoOpt);
-}
-
 bool HybridEnnio::exists(const std::string& testID) {
     if (findNode(testID) != nullptr) {
         return true;
     }
 
     return false;
-}
-
-std::variant<nitro::NullType, LayoutMetrics> HybridEnnio::getLayoutMetrics(const std::string& testID) {
-    auto root = getShadowTreeRoot();
-    if (!root) {
-        return nitro::NullType();
-    }
-
-    auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
-    if (!metrics) {
-        return nitro::NullType();
-    }
-
-    return convertLayoutMetrics(*metrics);
 }
 
 bool HybridEnnio::isVisible(const std::string& testID) {
@@ -399,13 +369,6 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
     auto& helper = ::ennio::EnnioRuntimeHelper::getInstance;
     static const std::unordered_map<std::string, HandlerFn> handlers = {
         // ---- Read queries ----
-        { "findByTestID", [](HybridEnnio* self, const auto& req, auto& r) {
-            auto result = self->findByTestID(::ennio::json::parseString(req.payload, "testID"));
-            r.success = true;
-            r.data = std::holds_alternative<nitro::NullType>(result)
-                     ? "null"
-                     : elementInfoToJson(std::get<ElementInfo>(result));
-        }},
         { "exists", [](HybridEnnio* self, const auto& req, auto& r) {
             r.success = true;
             r.data = self->exists(::ennio::json::parseString(req.payload, "testID")) ? "true" : "false";
@@ -432,20 +395,6 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             r.data = std::holds_alternative<nitro::NullType>(result)
                      ? "null"
                      : "\"" + escapeJsonString(std::get<std::string>(result)) + "\"";
-        }},
-        { "getLayoutMetrics", [](HybridEnnio* self, const auto& req, auto& r) {
-            auto result = self->getLayoutMetrics(::ennio::json::parseString(req.payload, "testID"));
-            r.success = true;
-            if (std::holds_alternative<nitro::NullType>(result)) {
-                r.data = "null";
-                return;
-            }
-            auto& m = std::get<LayoutMetrics>(result);
-            std::ostringstream oss;
-            oss << "{\"x\":" << m.x << ",\"y\":" << m.y
-                << ",\"width\":" << m.width << ",\"height\":" << m.height
-                << ",\"screenX\":" << m.screenX << ",\"screenY\":" << m.screenY << "}";
-            r.data = oss.str();
         }},
 
         // ---- Synchronization ----
@@ -535,9 +484,6 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
         }},
 
         // ---- Direct writes (UIKit/Fabric in-process) ----
-        { "tap", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->tap(::ennio::json::parseString(req.payload, "testID"));
-        }},
         { "tapAtPoint", [](HybridEnnio*, const auto& req, auto& r) {
             // Window-coordinate tap. CLI sends absolute logical points.
             r.success = ::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(
@@ -592,43 +538,6 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             r.data = oss.str();
             r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
         }},
-        { "tapByLabel", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->tapByLabel(::ennio::json::parseString(req.payload, "text"));
-        }},
-        { "doubleTap", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->doubleTap(::ennio::json::parseString(req.payload, "testID"));
-        }},
-        { "longPress", [](HybridEnnio* self, const auto& req, auto& r) {
-            std::string tid = ::ennio::json::parseString(req.payload, "testID");
-            double duration = ::ennio::json::parseDouble(req.payload, "duration");
-            // Caller didn't supply a positive duration — use the maestro
-            // default rather than passing 0 down to the gesture (which
-            // would make it a tap). Log so caller bugs are visible.
-            if (duration <= 0) {
-                ENNIO_LOG_DEBUG_F(LOG_TAG, "longPress: duration<=0, defaulting to 500ms");
-                duration = 500;
-            }
-            r.success = self->longPress(tid, duration);
-        }},
-        { "typeText", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->typeText(
-                ::ennio::json::parseString(req.payload, "testID"),
-                ::ennio::json::parseString(req.payload, "text"));
-        }},
-        { "clearText", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->clearText(::ennio::json::parseString(req.payload, "testID"));
-        }},
-        { "eraseText", [](HybridEnnio* self, const auto& req, auto& r) {
-            std::string tid = ::ennio::json::parseString(req.payload, "testID");
-            double count = ::ennio::json::parseDouble(req.payload, "count");
-            if (count <= 0) count = 1;
-            r.success = self->eraseText(tid, count);
-        }},
-        { "pressKey", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->pressKey(
-                ::ennio::json::parseString(req.payload, "testID"),
-                ::ennio::json::parseString(req.payload, "keyName"));
-        }},
         { "scroll", [](HybridEnnio* self, const auto& req, auto& r) {
             std::string tid = ::ennio::json::parseString(req.payload, "testID");
             std::string dir = ::ennio::json::parseString(req.payload, "direction");
@@ -641,135 +550,17 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             else if (dir == "right") sd = ScrollDirection::RIGHT;
             r.success = self->scroll(tid, sd, dist);
         }},
-        { "swipe", [](HybridEnnio* self, const auto& req, auto& r) {
-            std::string tid = ::ennio::json::parseString(req.payload, "testID");
-            std::string dir = ::ennio::json::parseString(req.payload, "direction");
-            if (dir.empty()) dir = "down";
-            double dist = ::ennio::json::parseDouble(req.payload, "distance");
-            if (dist <= 0) dist = 200;
-            ScrollDirection sd = ScrollDirection::DOWN;
-            if (dir == "up") sd = ScrollDirection::UP;
-            else if (dir == "left") sd = ScrollDirection::LEFT;
-            else if (dir == "right") sd = ScrollDirection::RIGHT;
-            r.success = self->swipe(tid, sd, dist);
-        }},
         { "scrollTo", [](HybridEnnio* self, const auto& req, auto& r) {
             r.success = self->scrollTo(
                 ::ennio::json::parseString(req.payload, "scrollViewTestID"),
                 ::ennio::json::parseString(req.payload, "elementTestID"));
         }},
-        { "tapTab", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->tapTab(::ennio::json::parseDouble(req.payload, "index"));
-        }},
         { "tapTabByName", [](HybridEnnio*, const auto& req, auto& r) {
             r.success = ::ennio::EnnioRuntimeHelper::getInstance().tapTabByName(
                 ::ennio::json::parseString(req.payload, "name"));
         }},
-        { "fireTap", [](HybridEnnio*, const auto& req, auto& r) {
-            r.success = ::ennio::EnnioRuntimeHelper::getInstance().fireTapByTestID(
-                ::ennio::json::parseString(req.payload, "testID"));
-        }},
-        { "invokeOnPress", [](HybridEnnio* self, const auto& req, auto& r) {
-            // Two-path viewport gate. Parity with Maestro / a real
-            // finger: refuse taps on elements outside the visible
-            // viewport, allow taps on visible ones — including custom
-            // button libraries whose UIView doesn't expose its testID
-            // via accessibilityIdentifier (RNGH BaseButton, pressto).
-            //
-            // Path 1 — UIView findable via accessibilityIdentifier:
-            //   strict window-frame intersection with key-window bounds.
-            //
-            // Path 2 — UIView not findable: fall back to Fabric shadow
-            //   tree. Accept when the testID's accumulated screenY/X
-            //   (relative to the React surface) places its frame inside
-            //   the surface rect. This is approximate — it doesn't
-            //   subtract ScrollView contentOffset, so an element
-            //   scrolled off the TOP can still pass. The bottom-of-fold
-            //   cheat (category-electronics on first home render) is
-            //   correctly refused because its accumulated screenY sits
-            //   below surfaceHeight.
-            auto testID = ::ennio::json::parseString(req.payload, "testID");
-            auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
-            auto frame = helper.getViewWindowFrame(testID);
-            double fx = std::get<0>(frame), fy = std::get<1>(frame);
-            double fw = std::get<2>(frame), fh = std::get<3>(frame);
-            bool viewFound = (fw > 0 && fh > 0);
-            bool inViewport = false;
-            if (viewFound) {
-                auto winSize = helper.getKeyWindowSize();
-                double wW = winSize.first, wH = winSize.second;
-                inViewport =
-                    (fx + fw > 0) && (fy + fh > 0) && (fx < wW) && (fy < wH);
-            } else {
-                auto layoutVariant = self->getLayoutMetrics(testID);
-                if (auto layout = std::get_if<LayoutMetrics>(&layoutVariant)) {
-                    if (layout->width > 0 && layout->height > 0) {
-                        auto winSize = helper.getKeyWindowSize();
-                        double wW = winSize.first, wH = winSize.second;
-                        inViewport =
-                            (layout->screenX + layout->width > 0) &&
-                            (layout->screenY + layout->height > 0) &&
-                            (layout->screenX < wW) &&
-                            (layout->screenY < wH);
-                    }
-                }
-            }
-            if (!inViewport) {
-                r.success = false;
-                r.error = "Element not in viewport: " + testID;
-                return;
-            }
-            // Schedules the Fiber walk on the JS thread via the Nitro
-            // Dispatcher captured by `bindRuntime` at boot. Blocks the WS
-            // thread on a condition variable until JS signals completion
-            // or the 1500 ms timeout fires.
-            r.success = HybridEnnio::invokeOnPressFromCpp(testID);
-        }},
-        { "invokeOnPressByText", [](HybridEnnio*, const auto& req, auto& r) {
-            // Tap-by-text fallback for elements whose UIView gesture
-            // recogniser refuses synthesised UITouches (pressto's
-            // PressableScale, RNGH BaseButton). Walks the React fiber
-            // tree to find a node whose RawText / stateNode equals the
-            // selector text, then invokes the surrounding Pressable's
-            // onPress directly. Skips iOS HID, the gesture coordinator,
-            // and UIPresentationController's hit-test gating.
-            auto text = ::ennio::json::parseString(req.payload, "text");
-            r.success = HybridEnnio::invokeOnPressByTextFromCpp(text);
-        }},
-        { "getReadyCoord", [](HybridEnnio*, const auto& req, auto& r) {
-            auto frame = ::ennio::EnnioRuntimeHelper::getInstance().getReadyCoord(
-                ::ennio::json::parseString(req.payload, "testID"),
-                static_cast<int>(::ennio::json::parseDouble(req.payload, "maxWaitMs")));
-            std::ostringstream oss;
-            oss << "{\"x\":" << std::get<0>(frame) << ",\"y\":" << std::get<1>(frame)
-                << ",\"width\":" << std::get<2>(frame) << ",\"height\":" << std::get<3>(frame) << "}";
-            r.data = oss.str();
-            r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
-        }},
         { "backGesture",  [](HybridEnnio* self, const auto&, auto& r) { r.success = self->backGesture(); }},
         { "hideKeyboard", [](HybridEnnio* self, const auto&, auto& r) { r.success = self->hideKeyboard(); }},
-
-        // ---- Selector-anchored writes ----
-        { "tapBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->tapBySelector(::ennio::json::parseString(req.payload, "selector"));
-        }},
-        { "doubleTapBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->doubleTapBySelector(::ennio::json::parseString(req.payload, "selector"));
-        }},
-        { "longPressBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
-            std::string sel = ::ennio::json::parseString(req.payload, "selector");
-            double duration = ::ennio::json::parseDouble(req.payload, "duration");
-            if (duration <= 0) duration = 500;
-            r.success = self->longPressBySelector(sel, duration);
-        }},
-        { "typeTextBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->typeTextBySelector(
-                ::ennio::json::parseString(req.payload, "selector"),
-                ::ennio::json::parseString(req.payload, "text"));
-        }},
-        { "clearTextBySelector", [](HybridEnnio* self, const auto& req, auto& r) {
-            r.success = self->clearTextBySelector(::ennio::json::parseString(req.payload, "selector"));
-        }},
 
         // ---- Pasteboard ----
         { "copyToClipboard", [](HybridEnnio* self, const auto& req, auto& r) {
@@ -777,10 +568,6 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
         }},
         { "pasteFromClipboard", [](HybridEnnio* self, const auto& req, auto& r) {
             r.success = self->pasteFromClipboard(::ennio::json::parseString(req.payload, "testID"));
-        }},
-        { "getClipboardText", [](HybridEnnio* self, const auto&, auto& r) {
-            r.success = true;
-            r.data = "\"" + escapeJsonString(self->getClipboardText()) + "\"";
         }},
     };
     (void)helper;  // suppress unused-capture-style warnings on some compilers.
@@ -812,24 +599,6 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
 // ============================================
 // Type Conversions
 // ============================================
-
-ElementInfo HybridEnnio::convertElementInfo(const ::ennio::ElementInfo& info) const {
-    ElementInfo result;
-    result.testID = info.testID;
-    result.type = info.type;
-    result.text = info.text; // Both are std::optional<std::string>
-    result.accessible = info.accessible;
-    result.enabled = info.enabled;
-
-    result.layout.x = info.layout.x;
-    result.layout.y = info.layout.y;
-    result.layout.width = info.layout.width;
-    result.layout.height = info.layout.height;
-    result.layout.screenX = info.layout.screenX;
-    result.layout.screenY = info.layout.screenY;
-
-    return result;
-}
 
 LayoutMetrics HybridEnnio::convertLayoutMetrics(const ::ennio::LayoutMetrics& metrics) const {
     LayoutMetrics result;
@@ -1157,88 +926,8 @@ const char* scrollDirectionToString(ScrollDirection direction) {
 
 } // namespace
 
-bool HybridEnnio::tap(const std::string& testID) {
-    // Find the node in the Fabric shadow tree → grab its window-coord
-    // centre → synthesise a UITouch at that point. UIKit's hit-test
-    // routes the touch through the responder chain, so onPress fires
-    // for whatever view is on top: UIControl, Pressable, RNGH BaseButton.
-    // ~5 ms in-process, no UIView walk, no chain of activation guesses.
-    auto root = getShadowTreeRoot();
-    if (!root) return false;
-    auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
-    if (!metrics || metrics->width <= 0 || metrics->height <= 0) return false;
-    double cx = metrics->screenX + metrics->width / 2.0;
-    double cy = metrics->screenY + metrics->height / 2.0;
-    return ::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(cx, cy);
-}
-bool HybridEnnio::tapByLabel(const std::string& text) {
-    // Match by text in Fabric tree → tap at the matched node's
-    // window-coord centre. Covers Pressable inner Text, TextInput
-    // placeholder, custom card text.
-    ::ennio::SelectorCriteria criteria;
-    criteria.text = ::ennio::TextMatcher{text, ::ennio::TextMatchMode::Contains};
-    auto root = getShadowTreeRoot();
-    if (root) {
-        auto node = ::ennio::ElementMatcher::findFirst(root, criteria);
-        if (node) {
-            auto info = ::ennio::ElementMatcher::getExtendedElementInfo(root, node);
-            if (info && info->layout.width > 0 && info->layout.height > 0) {
-                double cx = info->layout.screenX + info->layout.width / 2.0;
-                double cy = info->layout.screenY + info->layout.height / 2.0;
-                if (::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(cx, cy)) {
-                    return true;
-                }
-            }
-        }
-    }
-    // Native widgets that don't show up in the Fabric shadow tree
-    // (UITabBar items, system alert buttons, RNScreens-presented stack
-    // headers) — walk the UIKit accessibility tree and fire the
-    // matched widget's activation. This is the ONLY remaining UIKit
-    // path; everything else goes through layout-coord.
-    return ::ennio::EnnioRuntimeHelper::getInstance().tapByLabel(text);
-}
-bool HybridEnnio::doubleTap(const std::string& testID) {
-    // Same shadow-tree-coords path as `tap()`. The legacy
-    // EnnioRuntimeHelper::doubleTap calls EnnioRuntimeHelper::tap which
-    // searches by accessibilityIdentifier — RN Pressable's testID
-    // doesn't always reach the host UIView. Two synthesised UITouches
-    // 120 ms apart through hit-testing reliably engage RN's tap-count
-    // machinery (DoubleTapBox: <350 ms gap → onDoubleTap).
-    auto root = getShadowTreeRoot();
-    if (!root) return false;
-    auto metrics = ::ennio::ShadowTreeTraverser::getLayoutMetrics(root, testID);
-    if (!metrics || metrics->width <= 0 || metrics->height <= 0) return false;
-    double cx = metrics->screenX + metrics->width / 2.0;
-    double cy = metrics->screenY + metrics->height / 2.0;
-    auto& helper = ::ennio::EnnioRuntimeHelper::getInstance();
-    if (!helper.tapAtScreenPoint(cx, cy)) return false;
-    // RN's tap-count Pressable detects double-tap at <350 ms gap. Use
-    // 200 ms — long enough for the gesture coordinator to mark the
-    // first tap as Ended before the second Began arrives.
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    return helper.tapAtScreenPoint(cx, cy);
-}
-bool HybridEnnio::longPress(const std::string& testID, double durationMs) {
-    return ::ennio::EnnioRuntimeHelper::getInstance().longPress(testID, static_cast<int>(durationMs));
-}
-bool HybridEnnio::typeText(const std::string& testID, const std::string& text) {
-    return ::ennio::EnnioRuntimeHelper::getInstance().typeText(testID, text);
-}
-bool HybridEnnio::clearText(const std::string& testID) {
-    return ::ennio::EnnioRuntimeHelper::getInstance().clearText(testID);
-}
-bool HybridEnnio::eraseText(const std::string& testID, double count) {
-    return ::ennio::EnnioRuntimeHelper::getInstance().eraseText(testID, static_cast<int>(count));
-}
-bool HybridEnnio::pressKey(const std::string& testID, const std::string& keyName) {
-    return ::ennio::EnnioRuntimeHelper::getInstance().pressKey(testID, keyName);
-}
 bool HybridEnnio::scroll(const std::string& testID, ScrollDirection direction, double distance) {
     return ::ennio::EnnioRuntimeHelper::getInstance().scroll(testID, scrollDirectionToString(direction), distance);
-}
-bool HybridEnnio::swipe(const std::string& testID, ScrollDirection direction, double distance) {
-    return ::ennio::EnnioRuntimeHelper::getInstance().swipe(testID, scrollDirectionToString(direction), distance);
 }
 bool HybridEnnio::scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) {
     return ::ennio::EnnioRuntimeHelper::getInstance().scrollTo(scrollViewTestID, elementTestID);
@@ -1248,9 +937,6 @@ bool HybridEnnio::swipeAtPoints(double x1, double y1, double x2, double y2, doub
 }
 bool HybridEnnio::pressHardwareKey(double keyCode) {
     return ::ennio::EnnioRuntimeHelper::getInstance().pressHardwareKey(keyCode);
-}
-bool HybridEnnio::tapTab(double index) {
-    return ::ennio::EnnioRuntimeHelper::getInstance().tapTab(static_cast<int>(index));
 }
 bool HybridEnnio::backGesture() {
     return ::ennio::EnnioRuntimeHelper::getInstance().backGesture();
@@ -1270,96 +956,26 @@ bool HybridEnnio::copyToClipboard(const std::string& text) {
 bool HybridEnnio::pasteFromClipboard(const std::string& testID) {
     return ::ennio::EnnioRuntimeHelper::getInstance().pasteFromClipboard(testID);
 }
-std::string HybridEnnio::getClipboardText() {
-    return ::ennio::EnnioRuntimeHelper::getInstance().getClipboardText();
-}
 
 #else
 
 // Non-Apple stubs so the spec can still build. Android writes are out
 // of scope — they need UIAutomator + a different in-process surface.
-bool HybridEnnio::tap(const std::string&) { return false; }
-bool HybridEnnio::tapByLabel(const std::string&) { return false; }
-bool HybridEnnio::doubleTap(const std::string&) { return false; }
-bool HybridEnnio::longPress(const std::string&, double) { return false; }
-bool HybridEnnio::typeText(const std::string&, const std::string&) { return false; }
-bool HybridEnnio::clearText(const std::string&) { return false; }
-bool HybridEnnio::eraseText(const std::string&, double) { return false; }
-bool HybridEnnio::pressKey(const std::string&, const std::string&) { return false; }
 bool HybridEnnio::scroll(const std::string&, ScrollDirection, double) { return false; }
-bool HybridEnnio::swipe(const std::string&, ScrollDirection, double) { return false; }
 bool HybridEnnio::scrollTo(const std::string&, const std::string&) { return false; }
 bool HybridEnnio::swipeAtPoints(double, double, double, double, double) { return false; }
 bool HybridEnnio::pressHardwareKey(double) { return false; }
-bool HybridEnnio::tapTab(double) { return false; }
 bool HybridEnnio::backGesture() { return false; }
 bool HybridEnnio::hideKeyboard() { return false; }
 bool HybridEnnio::tapAlertButton(const std::string&) { return false; }
 bool HybridEnnio::dismissAlert() { return false; }
 bool HybridEnnio::copyToClipboard(const std::string&) { return false; }
 bool HybridEnnio::pasteFromClipboard(const std::string&) { return false; }
-std::string HybridEnnio::getClipboardText() { return ""; }
 
 #endif
 
-// Selector-based writes: resolve the selector to a testID via the shadow
-// tree, then dispatch through the testID-keyed write. Skips wires that
-// would require a different code path (the shadow-tree finder already
-// handles all the complex Maestro selector forms).
-
-namespace {
-
-// Pass `self` by mutable reference: `findBySelector` acquires the
-// instance mutex internally, so it can't be called from a const context.
-// Callers all hold a non-const `*this`, so this is a pure type-system
-// fix — no `const_cast`, no behavioural change.
-std::optional<std::string> resolveSelectorToTestID(
-    HybridEnnio& self,
-    const std::string& selectorJson
-) {
-    auto found = self.findBySelector(selectorJson);
-    if (std::holds_alternative<nitro::NullType>(found)) return std::nullopt;
-    auto info = std::get<ExtendedElementInfo>(found);
-    if (info.testID.empty()) return std::nullopt;
-    return info.testID;
-}
-
-} // namespace
-
-bool HybridEnnio::tapBySelector(const std::string& selectorJson) {
-    // Resolve selector via Fabric shadow tree → tap at the matched
-    // node's window-coord centre. Single path, no UIView walk, no
-    // testID-resolution chain.
-    auto& mutSelf = *this;
-    auto found = mutSelf.findBySelector(selectorJson);
-    if (std::holds_alternative<nitro::NullType>(found)) return false;
-    const auto info = std::get<ExtendedElementInfo>(found);
-    const auto& layout = info.layout;
-    if (layout.width <= 0 || layout.height <= 0) return false;
-    double cx = layout.screenX + layout.width / 2.0;
-    double cy = layout.screenY + layout.height / 2.0;
-    return ::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(cx, cy);
-}
-bool HybridEnnio::doubleTapBySelector(const std::string& selectorJson) {
-    auto id = resolveSelectorToTestID(*this, selectorJson);
-    return id ? doubleTap(*id) : false;
-}
-bool HybridEnnio::longPressBySelector(const std::string& selectorJson, double durationMs) {
-    auto id = resolveSelectorToTestID(*this, selectorJson);
-    return id ? longPress(*id, durationMs) : false;
-}
-bool HybridEnnio::typeTextBySelector(const std::string& selectorJson, const std::string& text) {
-    auto id = resolveSelectorToTestID(*this, selectorJson);
-    return id ? typeText(*id, text) : false;
-}
-bool HybridEnnio::clearTextBySelector(const std::string& selectorJson) {
-    auto id = resolveSelectorToTestID(*this, selectorJson);
-    return id ? clearText(*id) : false;
-}
-
 // ============================================
-// JS bridge: runtime + dispatcher capture, fiber walker install,
-// WS-thread → JS-thread invokeOnPress dispatch.
+// JS bridge: runtime capture + commit-signal install.
 // ============================================
 
 // React Fiber walker — installed onto globalThis once at boot. Invokes
@@ -1370,116 +986,11 @@ bool HybridEnnio::clearTextBySelector(const std::string& selectorJson) {
 namespace {
     constexpr const char* kFiberWalkerSource = R"JS(
 (function () {
-  function findFiberByTestID(fiber, testID) {
-    if (!fiber) return null;
-    if (fiber.memoizedProps && fiber.memoizedProps.testID === testID) return fiber;
-    var found = findFiberByTestID(fiber.child, testID);
-    if (found) return found;
-    return findFiberByTestID(fiber.sibling, testID);
-  }
-  // pointerEvents semantics (RN matches web):
-  //   "none"     — view + descendants are not touch targets.
-  //   "box-only" — view is a target, descendants are not.
-  //   "box-none" — view is not a target, descendants are.
-  //   "auto"     — both target.
-  // Walk the fiber chain (.return) and reject if the target's chain has
-  // a pointerEvents value that would block a real finger.
-  function pointerEventsBlocks(target) {
-    for (var cursor = target; cursor; cursor = cursor.return) {
-      var pe = cursor.memoizedProps && cursor.memoizedProps.pointerEvents;
-      if (pe === 'none') return true;
-      if (pe === 'box-only' && cursor !== target) return true;
-    }
-    return false;
-  }
-  function invokeFromFiber(fiber) {
-    if (!fiber) return false;
-    if (pointerEventsBlocks(fiber)) return false;
-    // Walk up the fiber chain (.return) until we find a node with an
-    // onPress / onLongPress closure. Text-anchored taps land on the
-    // Paragraph fiber whose own props don't carry onPress; the
-    // surrounding Pressable / TouchableOpacity / RNGH BaseButton
-    // (pressto's PressableScale) is the actual touch target.
-    for (var cursor = fiber; cursor; cursor = cursor.return) {
-      var props = cursor.memoizedProps || {};
-      var onPress = props.onPress || props.onLongPress;
-      if (typeof onPress === 'function') {
-        try {
-          onPress({
-            nativeEvent: {},
-            currentTarget: null,
-            target: null,
-            preventDefault: function () {},
-            stopPropagation: function () {},
-            persist: function () {},
-          });
-          return true;
-        } catch (e) { return false; }
-      }
-    }
-    return false;
-  }
-  function findFiberByText(fiber, needle) {
-    if (!fiber) return null;
-    var props = fiber.memoizedProps;
-    // Match strategies, in order of specificity:
-    //   1. RawText fiber: memoizedProps.text equals needle.
-    //   2. Text fiber: a single string child equals needle (RawText
-    //      wrapped one level up).
-    //   3. memoizedProps.children equals needle (a `<Text>foo</Text>`
-    //      with a primitive child).
-    //   4. Substring match against any non-empty string memoizedProps
-    //      key — covers `accessibilityLabel`, `aria-label` etc.
-    if (props) {
-      if (typeof props.text === 'string' && props.text === needle) return fiber;
-      if (typeof props.children === 'string' && props.children === needle) return fiber;
-      if (typeof props.accessibilityLabel === 'string' && props.accessibilityLabel === needle) return fiber;
-    }
-    var found = findFiberByText(fiber.child, needle);
-    if (found) return found;
-    return findFiberByText(fiber.sibling, needle);
-  }
-  function eachFiberRoot(fn) {
-    var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-    if (!hook || !hook.renderers || !hook.getFiberRoots) return false;
-    var iter = hook.renderers.entries();
-    while (true) {
-      var step = iter.next();
-      if (step.done) break;
-      var rendererID = typeof step.value[0] === 'number' ? step.value[0] : 1;
-      var roots;
-      try { roots = hook.getFiberRoots(rendererID); } catch (e) { continue; }
-      if (!roots) continue;
-      var rootsIter = roots.values();
-      while (true) {
-        var r = rootsIter.next();
-        if (r.done) break;
-        var current = r.value && r.value.current;
-        if (!current) continue;
-        if (fn(current) === true) return true;
-      }
-    }
-    return false;
-  }
-  globalThis.__ennio_invokeOnPress = function (testID) {
-    return eachFiberRoot(function (root) {
-      var fiber = findFiberByTestID(root, testID);
-      if (!fiber) return false;
-      return invokeFromFiber(fiber);
-    });
-  };
-  globalThis.__ennio_invokeOnPressByText = function (text) {
-    return eachFiberRoot(function (root) {
-      var fiber = findFiberByText(root, text);
-      if (!fiber) return false;
-      return invokeFromFiber(fiber);
-    });
-  };
   // Commit signal — monkey-patch onCommitFiberRoot so the native
   // side learns the moment React finishes a commit. Same pattern
   // React DevTools uses; stable across React versions. The native
   // callback is installed by HybridEnnio::nativeBootstrap right
-  // after this walker source is evaluated.
+  // after this snippet is evaluated.
   var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
   if (hook && typeof hook.onCommitFiberRoot === 'function') {
     var originalOnCommit = hook.onCommitFiberRoot.bind(hook);
@@ -1495,15 +1006,9 @@ namespace {
 
     std::mutex g_jsContextMutex;
     facebook::jsi::Runtime* g_jsRuntime = nullptr;
-    HybridEnnio::JSThreadExecutor g_jsExecutor;
 
     std::mutex g_instanceMutex;
     std::shared_ptr<HybridEnnio> g_instance;
-}
-
-void HybridEnnio::setJSThreadExecutor(HybridEnnio::JSThreadExecutor exec) {
-    std::lock_guard<std::mutex> lock(g_jsContextMutex);
-    g_jsExecutor = std::move(exec);
 }
 
 void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
@@ -1564,65 +1069,6 @@ void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
             ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: startServer threw: " << e.what()));
         }
     }
-}
-
-namespace {
-    bool invokeJSStringFn(const std::string& funcName, const std::string& arg) {
-        HybridEnnio::JSThreadExecutor executor;
-        {
-            std::lock_guard<std::mutex> lock(g_jsContextMutex);
-            executor = g_jsExecutor;
-        }
-        if (!executor) {
-            // Bootstrap hasn't run yet — caller falls back to idb HID tap.
-            return false;
-        }
-
-        // Schedule on JS thread, block here on a heap-allocated cv slot
-        // (closure may outlive the waiter on timeout, so the slot can't
-        // live on the WS thread's stack).
-        struct Slot {
-            std::mutex m;
-            std::condition_variable cv;
-            bool ready = false;
-            bool success = false;
-        };
-        auto slot = std::make_shared<Slot>();
-        std::string fname = funcName;
-        std::string a = arg;
-
-        executor([slot, fname, a](facebook::jsi::Runtime& rt) {
-            bool ok = false;
-            try {
-                auto fn = rt.global().getProperty(rt, fname.c_str());
-                if (fn.isObject() && fn.asObject(rt).isFunction(rt)) {
-                    auto result = fn.asObject(rt)
-                        .asFunction(rt)
-                        .call(rt, facebook::jsi::String::createFromUtf8(rt, a));
-                    ok = result.isBool() && result.getBool();
-                }
-            } catch (...) {
-                ok = false;
-            }
-            std::lock_guard<std::mutex> lock(slot->m);
-            slot->success = ok;
-            slot->ready = true;
-            slot->cv.notify_one();
-        });
-
-        std::unique_lock<std::mutex> lock(slot->m);
-        bool finished = slot->cv.wait_for(lock, std::chrono::milliseconds(1500),
-                                           [&]() { return slot->ready; });
-        return finished && slot->success;
-    }
-}
-
-bool HybridEnnio::invokeOnPressFromCpp(const std::string& testID) {
-    return invokeJSStringFn("__ennio_invokeOnPress", testID);
-}
-
-bool HybridEnnio::invokeOnPressByTextFromCpp(const std::string& text) {
-    return invokeJSStringFn("__ennio_invokeOnPressByText", text);
 }
 
 } // namespace margelo::nitro::ennio

@@ -227,24 +227,10 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   // ============================================
 
   /**
-   * Find an element by testID
-   * @param testID - The testID prop value to search for
-   * @returns ElementInfo if found, null otherwise
-   */
-  findByTestID(testID: string): ElementInfo | null;
-
-  /**
    * Check if an element with the given testID exists in the tree
    * @param testID - The testID prop value to search for
    */
   exists(testID: string): boolean;
-
-  /**
-   * Get layout metrics for an element
-   * @param testID - The testID prop value
-   * @returns LayoutMetrics if found, null otherwise
-   */
-  getLayoutMetrics(testID: string): LayoutMetrics | null;
 
   /**
    * Check if an element is visible on screen
@@ -342,42 +328,19 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   getAlertButtons(): string[];
 
   // ============================================
-  // In-app writes (no HID, no out-of-process driver)
+  // In-app writes (no JSI invokeOnPress, no UITouch synth)
   //
-  // All actions resolve a UIView by accessibilityIdentifier (testID) and
-  // drive sanctioned-ish UIKit APIs:
-  //   - tap        -> UIView.accessibilityActivate
-  //   - typeText   -> [textInput insertText:]
-  //   - clearText  -> setText:@"" + delegate fire
-  //   - eraseText  -> deleteBackward × n
-  //   - scroll     -> UIScrollView.setContentOffset(animated:NO)
-  //   - alerts     -> walk UIAlertController.actions, invoke handler
-  //   - back       -> UINavigationController.popViewController
-  //
-  // Skips iOS gesture recognizer entirely. Reliable for the standard
-  // RN component set (Pressable, Touchable*, TextInput, ScrollView,
-  // FlatList, native iOS alert). Will not work for RN-gesture-handler-
-  // driven gestures (pinch, pan, swipe-to-dismiss) — use --stable for
-  // flows that exercise those.
+  // CLI actuation goes through idb HID at measured coords — Maestro /
+  // XCUITest parity. These methods cover the scroll / keyboard / nav
+  // operations that idb can't model cleanly:
+  //   - scroll / scrollTo -> UIScrollView.setContentOffset
+  //   - swipeAtPoints     -> UITouch-loop pan (cross-view drags)
+  //   - back              -> UINavigationController.popViewController
+  //   - alerts            -> walk UIAlertController.actions
+  //   - hideKeyboard      -> [keyboardWindow firstResponder] resignFirstResponder
   // ============================================
 
-  tap(testID: string): boolean;
-  /**
-   * Walk the UIKit view tree (not the Fabric shadow tree) looking for any
-   * UIView whose accessibilityLabel matches `text` and invoke
-   * accessibilityActivate on it. This is the only way to hit native UIKit
-   * elements that don't appear in the React shadow tree — UITabBar items,
-   * UIAlertController buttons, system pickers, etc.
-   */
-  tapByLabel(text: string): boolean;
-  doubleTap(testID: string): boolean;
-  longPress(testID: string, durationMs: number): boolean;
-  typeText(testID: string, text: string): boolean;
-  clearText(testID: string): boolean;
-  eraseText(testID: string, count: number): boolean;
-  pressKey(testID: string, keyName: string): boolean;
   scroll(testID: string, direction: ScrollDirection, distance: number): boolean;
-  swipe(testID: string, direction: ScrollDirection, distance: number): boolean;
   scrollTo(scrollViewTestID: string, elementTestID: string): boolean;
 
   /**
@@ -402,28 +365,12 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   pressHardwareKey(keyCode: number): boolean;
 
   /**
-   * Tap the n-th tab in the topmost UITabBar. 0-indexed left to right.
-   * RN's NativeTabs items don't expose their accessibilityIdentifier on
-   * the underlying UITabBarItem reliably, so we index instead.
-   */
-  tapTab(index: number): boolean;
-
-  /**
    * Drive a back navigation. Pops the top view controller of the
    * current UINavigationController.
    */
   backGesture(): boolean;
 
   hideKeyboard(): boolean;
-
-  // Selector-aware variants. Underlying impl resolves the selector
-  // through the same shadow-tree finder as findBySelector, then
-  // applies the matching write to the resolved testID.
-  tapBySelector(selectorJson: string): boolean;
-  doubleTapBySelector(selectorJson: string): boolean;
-  longPressBySelector(selectorJson: string, durationMs: number): boolean;
-  typeTextBySelector(selectorJson: string, text: string): boolean;
-  clearTextBySelector(selectorJson: string): boolean;
 
   // Alert writes (the matching reads — isAlertPresent, getAlertText,
   // getAlertButtons — already exist above).
@@ -433,5 +380,4 @@ export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   // Pasteboard
   copyToClipboard(text: string): boolean;
   pasteFromClipboard(testID: string): boolean;
-  getClipboardText(): string;
 }

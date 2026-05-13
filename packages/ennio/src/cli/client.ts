@@ -300,12 +300,6 @@ export class EnnioClient {
     return typeof response.data === 'string' ? response.data : null;
   }
 
-  async getElementInfo(testID: string): Promise<ExtendedElementInfo | null> {
-    const response = await this.send('getElementInfo', { testID });
-    if (!response.success || !response.data) return null;
-    return response.data as ExtendedElementInfo;
-  }
-
   /**
    * UIKit-frame visibility check. Reader uses this instead of the
    * Fabric-shadow `isVisible` because shadow node coords are surface-

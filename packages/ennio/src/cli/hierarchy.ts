@@ -22,7 +22,9 @@ interface HierarchyNode {
   children?: HierarchyNode[];
 }
 
-function parseBounds(b: string | undefined): { x: number; y: number; width: number; height: number } | null {
+function parseBounds(
+  b: string | undefined,
+): { x: number; y: number; width: number; height: number } | null {
   if (!b) return null;
   const m = b.match(/\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/);
   if (!m) return null;
@@ -35,8 +37,9 @@ function parseBounds(b: string | undefined): { x: number; y: number; width: numb
 
 function nodeTexts(n: HierarchyNode): string[] {
   const a = n.attributes || {};
-  return [a.accessibilityText, a.text, a.title, a.value, a.hintText]
-    .filter((s): s is string => typeof s === 'string' && s.length > 0);
+  return [a.accessibilityText, a.text, a.title, a.value, a.hintText].filter(
+    (s): s is string => typeof s === 'string' && s.length > 0,
+  );
 }
 
 function nodeId(n: HierarchyNode): string | null {

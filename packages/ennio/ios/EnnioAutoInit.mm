@@ -221,18 +221,9 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
 #ifdef ENNIO_HAVE_RCTINSTANCE
         if ([rctInstance isKindOfClass:[RCTInstance class]]) {
             __strong RCTInstance* strongInstance = (RCTInstance*)rctInstance;
-            // Hand a JS-thread executor to HybridEnnio. The WS-server
-            // thread will call this when it needs to invoke the React
-            // fiber walker on the JS thread.
-            margelo::nitro::ennio::HybridEnnio::JSThreadExecutor exec =
-                [strongInstance](std::function<void(facebook::jsi::Runtime&)>&& fn) {
-                    [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(fn)];
-                };
-            margelo::nitro::ennio::HybridEnnio::setJSThreadExecutor(std::move(exec));
-
-            // Bootstrap (capture runtime, install fiber walker, start
-            // WS server) once the JS thread is ready. Same RCTInstance
-            // method delivers our C++ lambda onto the JS thread.
+            // Bootstrap (capture runtime, install commit signal, start
+            // WS server) once the JS thread is ready. RCTInstance
+            // delivers our C++ lambda onto the JS thread.
             std::function<void(facebook::jsi::Runtime&)> boot =
                 [](facebook::jsi::Runtime& rt) {
                     NSString* m = [NSString stringWithFormat:@"%@/Library/_ennio_jsthread_fired.txt", NSHomeDirectory()];
