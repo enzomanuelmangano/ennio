@@ -226,8 +226,7 @@ export class EnnioClient {
           reject(e as Error);
         }
       };
-      this.ws.onerror = () =>
-        reject(new Error(`Failed to connect to Hermes Inspector at ${url}`));
+      this.ws.onerror = () => reject(new Error(`Failed to connect to Hermes Inspector at ${url}`));
 
       this.ws.onmessage = (event) => {
         try {
@@ -350,9 +349,7 @@ export class EnnioClient {
     // scheduled a background worker that will write the result into
     // `globalThis.__ennioResults[token]` once the React event we're
     // waiting on fires. CLI distinguishes by null/string.
-    const direct = await this.eval(
-      `__ennioDispatch(${typeLit}, ${payloadLit}, ${tokenLit})`,
-    );
+    const direct = await this.eval(`__ennioDispatch(${typeLit}, ${payloadLit}, ${tokenLit})`);
     if (typeof direct === 'string') {
       return JSON.parse(direct) as EnnioResponse;
     }

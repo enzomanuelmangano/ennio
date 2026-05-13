@@ -466,6 +466,13 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             r.success = ::ennio::EnnioRuntimeHelper::getInstance().pressHardwareKey(
                 static_cast<int>(::ennio::json::parseDouble(req.payload, "keyCode")));
         }},
+        { "getKeyWindowSize", [](HybridEnnio*, const auto&, auto& r) {
+            auto sz = ::ennio::EnnioRuntimeHelper::getInstance().getKeyWindowSize();
+            std::ostringstream oss;
+            oss << "{\"width\":" << sz.first << ",\"height\":" << sz.second << "}";
+            r.data = oss.str();
+            r.success = sz.first > 0 && sz.second > 0;
+        }},
         { "getSurfaceOffset", [](HybridEnnio*, const auto&, auto& r) {
             // React-surface origin in the user app's window. Lets the
             // CLI translate Fabric's surface-relative `screenX/screenY`

@@ -833,12 +833,9 @@ static UIView* findViewByTestID(UIView* root, NSString* testID) {
     if (!root || root.hidden) return nil;
     if (root.accessibilityElementsHidden) return nil;
     if ([root.accessibilityIdentifier isEqualToString:testID]) {
-        // Reject matches inside inactive VC chains (pushed-under
-        // react-native-screens frames, deselected tabs, presented-modal
-        // underlay). Without this, taps fire on stale UIViews that no
-        // longer drive the live React state and assertions pass against
-        // ghost elements the user can't see.
-        if (!isViewInActiveVCChain(root)) return nil;
+        if (!isViewInActiveVCChain(root)) {
+            return nil;
+        }
         return root;
     }
     for (UIView* sub in root.subviews) {
@@ -1233,8 +1230,8 @@ std::string EnnioRuntimeHelper::prepareTap(const std::string& testID, double scr
     // for the hottest yaml verb. The actual tap stays on the CLI side
     // through idb HID — UITouch synth doesn't reliably fire RNGH-wrapped
     // gesture recognizers (PressableScale, RNBetterTapGestureRecognizer).
-    const int maxIters = 30;
-    const int probeSleepMs = 50;
+    const int maxIters = 100;
+    const int probeSleepMs = 20;
     double lastCx = 0, lastCy = 0;
     bool haveLast = false;
     bool didScroll = false;
@@ -1258,10 +1255,40 @@ std::string EnnioRuntimeHelper::prepareTap(const std::string& testID, double scr
                 return "";  // Off-screen even after scroll attempt.
             }
             if (haveLast && std::abs(lastCx - cx) < 2.0 && std::abs(lastCy - cy) < 2.0) {
-                finalCx = cx;
-                finalCy = cy;
-                foundStable = true;
-                break;
+                // Coord-stable. Now verify a hit-test at the centre actually
+                // resolves to the testID's view (or a descendant). During a
+                // UIKit stack-push transition the destination Pressable's
+                // frame is reported stable in window coords, but the
+                // responder chain isn't bound yet — the topmost view at
+                // (cx, cy) is the still-fading source screen. Tapping there
+                // misses. Hit-test reflects the real interaction graph.
+                __block bool hitOk = false;
+                void (^hitBlock)(void) = ^{
+                    UIView* target = findViewByTestIDInAllWindows(
+                        [NSString stringWithUTF8String:testID.c_str()]);
+                    if (!target || !target.window) return;
+                    UIWindow* win = target.window;
+                    CGPoint p = CGPointMake((CGFloat)cx, (CGFloat)cy);
+                    UIView* top = [win hitTest:p withEvent:nil];
+                    if (!top) return;
+                    // Strict: top must be target itself or a descendant.
+                    // The deepest hit-tested view is whichever React leaf
+                    // (icon glyph, text, container) sits at the point —
+                    // walk up to the target Pressable. Reject if the
+                    // walk hits a UIKit wrapper or a sibling first; that
+                    // means a real touch would be delivered somewhere
+                    // else, not to the testID we resolved.
+                    for (UIView* cursor = top; cursor; cursor = cursor.superview) {
+                        if (cursor == target) { hitOk = true; return; }
+                    }
+                };
+                if ([NSThread isMainThread]) hitBlock(); else dispatchSyncMainWithTimeout(hitBlock);
+                if (hitOk) {
+                    finalCx = cx;
+                    finalCy = cy;
+                    foundStable = true;
+                    break;
+                }
             }
             lastCx = cx;
             lastCy = cy;
@@ -1821,17 +1848,25 @@ bool EnnioRuntimeHelper::pressKey(const std::string& testID, const std::string& 
 // Find the topmost user-visible UIScrollView in a window tree. Used as a
 // "scroll something on this screen" fallback when the runner doesn't
 // hand us a testID — Maestro's `scroll: direction: DOWN` semantics.
-static UIScrollView* findTopmostScrollView(UIView* root) {
+// `axis` 0 = either, 1 = horizontal-only, 2 = vertical-only.
+// Direction-aware filtering lets `swipe LEFT/RIGHT` find a horizontal
+// carousel nested under a vertical outer ScrollView (Home: featured
+// products carousel inside the page scroller). Without this filter the
+// outer vertical scroller wins and a LEFT swipe clamps to offset.x=0.
+static UIScrollView* findTopmostScrollView(UIView* root, int axis) {
     if (!root || root.hidden || root.alpha < 0.01) return nil;
     if ([root isKindOfClass:[UIScrollView class]]) {
         UIScrollView* sv = (UIScrollView*)root;
-        // Skip degenerate scroll views (zero content size, hidden).
-        if (sv.contentSize.height > sv.bounds.size.height || sv.contentSize.width > sv.bounds.size.width) {
-            return sv;
-        }
+        BOOL hScroll = sv.contentSize.width > sv.bounds.size.width;
+        BOOL vScroll = sv.contentSize.height > sv.bounds.size.height;
+        BOOL accept =
+            axis == 0 ? (hScroll || vScroll) :
+            axis == 1 ? hScroll :
+                        vScroll;
+        if (accept) return sv;
     }
     for (UIView* sub in [root.subviews reverseObjectEnumerator]) {
-        UIScrollView* hit = findTopmostScrollView(sub);
+        UIScrollView* hit = findTopmostScrollView(sub, axis);
         if (hit) return hit;
     }
     return nil;
@@ -1840,35 +1875,38 @@ static UIScrollView* findTopmostScrollView(UIView* root) {
 // testID-less scroll: pick the deepest scrollable on screen, mirroring
 // what a user would touch. Iterates windows in reverse so the most-
 // recently-presented (modal/sheet) scroll view wins over the underlying.
-static UIScrollView* findFirstVisibleScrollView() {
+static UIScrollView* findFirstVisibleScrollView(int axis) {
     for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
         if (![scene isKindOfClass:[UIWindowScene class]]) continue;
         for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
-            UIScrollView* sv = findTopmostScrollView(win);
+            UIScrollView* sv = findTopmostScrollView(win, axis);
             if (sv) return sv;
         }
     }
     return nil;
 }
 
-static UIScrollView* resolveScrollTarget(NSString* tid) {
+static UIScrollView* resolveScrollTarget(NSString* tid, int axis) {
     if (tid.length > 0) {
         UIView* view = findViewByTestIDInAllWindows(tid);
         if (view) {
             return [view isKindOfClass:[UIScrollView class]] ? (UIScrollView*)view : findEnclosingScrollView(view);
         }
     }
-    return findFirstVisibleScrollView();
+    return findFirstVisibleScrollView(axis);
 }
 
 static bool scrollImpl(NSString* tid, NSString* direction, double distance) {
     __block bool ok = false;
     void (^block)(void) = ^{
-        UIScrollView* sv = resolveScrollTarget(tid);
+        NSString* d = [direction lowercaseString];
+        int axis = ([d isEqualToString:@"left"] || [d isEqualToString:@"right"]) ? 1
+                 : ([d isEqualToString:@"up"]   || [d isEqualToString:@"down"])  ? 2
+                 : 0;
+        UIScrollView* sv = resolveScrollTarget(tid, axis);
         if (!sv) return;
         CGPoint offset = sv.contentOffset;
         CGFloat dx = 0, dy = 0;
-        NSString* d = [direction lowercaseString];
         if ([d isEqualToString:@"up"]) dy = -distance;
         else if ([d isEqualToString:@"down"]) dy = distance;
         else if ([d isEqualToString:@"left"]) dx = -distance;

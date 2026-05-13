@@ -23,6 +23,7 @@ import type { EnnioClient, Selector } from './client';
 // reach it. ~50 ms HID nudge is the only way short of linking RNGH headers
 // from Ennio's pod target.
 import * as idb from './idb';
+import * as hid from './hid';
 import * as hierarchy from './hierarchy';
 
 // Safe-area-ish centre for the 402x874 / 440x956 iPhone sims we run
@@ -73,7 +74,7 @@ export interface Writer {
   typeTextBySelector(selector: Selector, text: string): Promise<boolean>;
   clearTextBySelector(selector: Selector): Promise<boolean>;
   /** Tap any element whose visible label matches `text`. */
-  tapByText(text: string): Promise<boolean>;
+  tapByText(text: string, opts?: { fast?: boolean }): Promise<boolean>;
 
   // ---- alerts ----
   tapAlertButton(buttonText: string): Promise<boolean>;
@@ -99,6 +100,25 @@ export class NitroWriter implements Writer {
 
   private send(type: string, payload: Record<string, unknown> = {}) {
     return this.client.send(type, payload);
+  }
+
+  /**
+   * HID tap with hot-fallback. Tries the persistent python daemon
+   * (~5 ms per call) first; on any failure (no companion, daemon
+   * crashed) drops back to spawning `idb ui tap` per call (~250 ms,
+   * always works). Same wire format either way — both ultimately
+   * speak gRPC to idb_companion.
+   */
+  private async hidTap(x: number, y: number, durationMs: number): Promise<void> {
+    try {
+      await hid.tap(x, y, durationMs);
+      if (process.env.ENNIO_DEBUG_IDB) console.error(`[hidTap] daemon ok (${x},${y},${durationMs}ms)`);
+      return;
+    } catch (e) {
+      if (process.env.ENNIO_DEBUG_IDB) console.error(`[hidTap] daemon FAILED, fallback: ${(e as Error).message}`);
+    }
+    await idb.ensureCompanion();
+    await idb.tap(x, y, durationMs);
   }
 
   /**
@@ -146,11 +166,7 @@ export class NitroWriter implements Writer {
   private async getScreenSize(): Promise<{ width: number; height: number }> {
     if (this.screenSize) return this.screenSize;
     try {
-      // The "home" / first scene's window-frame doubles as the app
-      // viewport — we use it to decide if a tap centre is on-screen.
-      // Falling back to an iPhone-sized default keeps things safe if
-      // Nitro hasn't surfaced a key window yet.
-      const r = await this.send('getViewWindowFrame', { testID: '__ennio_screen__' });
+      const r = await this.send('getKeyWindowSize', {});
       const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
       if (data && data.width > 0 && data.height > 0) {
         this.screenSize = { width: data.width, height: data.height };
@@ -159,7 +175,9 @@ export class NitroWriter implements Writer {
     } catch {
       /* fall through */
     }
-    this.screenSize = { width: 402, height: 874 };
+    // Last-resort sentinel only — large enough that any real iPhone Pro
+    // Max viewport (~440×956) still falls inside the on-screen gate.
+    this.screenSize = { width: 480, height: 1024 };
     return this.screenSize;
   }
 
@@ -234,14 +252,13 @@ export class NitroWriter implements Writer {
     } catch {
       return false;
     }
-    // Actuation: idb HID. Real CoreSimulator touch event drives the
-    // gesture-recognizer chain including RNGH (pressto's
-    // PressableScale, RNBetterTapGestureRecognizer). Costs ~250 ms
-    // per call (python interpreter startup) but the only path that
-    // reliably fires onPress on RNGH-wrapped pressables.
+    // Actuation: persistent HID daemon (python idb client over a
+    // pre-warmed gRPC channel to idb_companion). Real CoreSimulator
+    // touch event — same wire format as `idb ui tap` — minus the
+    // ~250 ms python startup we'd pay per call. Falls back to
+    // spawning `idb` if the daemon is unavailable.
     try {
-      await idb.ensureCompanion();
-      await idb.tap(center.x, center.y, isMenu ? 100 : 80);
+      await this.hidTap(center.x, center.y, isMenu ? 100 : 80);
     } catch {
       return false;
     }
@@ -355,11 +372,10 @@ export class NitroWriter implements Writer {
     // real touches drive gesture recognizers; no JSI shortcut.
     const c = await this.layoutCenter({ id: testID });
     if (!c) return false;
-    await idb.ensureCompanion();
-    await idb.tap(c.x, c.y, 50);
+    await this.hidTap(c.x, c.y, 50);
     await new Promise((r) => setTimeout(r, 120));
-    await idb.tap(c.x, c.y, 50);
-    await this.client.waitForCommit(300);
+    await this.hidTap(c.x, c.y, 50);
+    await new Promise((r) => setTimeout(r, 100));
     return true;
   }
   async longPress(testID: string, durationMs: number): Promise<boolean> {
@@ -369,9 +385,8 @@ export class NitroWriter implements Writer {
     // bypasses gesture state machines and silently masks layout bugs.
     const c = await this.layoutCenter({ id: testID });
     if (!c) return false;
-    await idb.ensureCompanion();
-    await idb.tap(c.x, c.y, durationMs);
-    await this.client.waitForCommit(300);
+    await this.hidTap(c.x, c.y, durationMs);
+    await new Promise((r) => setTimeout(r, 100));
     return true;
   }
   async typeText(testID: string | null, text: string): Promise<boolean> {
@@ -385,13 +400,12 @@ export class NitroWriter implements Writer {
     if (testID) {
       const c = await this.layoutCenter({ id: testID });
       if (!c) return false;
-      await idb.ensureCompanion();
-      await idb.tap(c.x, c.y, 50);
+      await this.hidTap(c.x, c.y, 50);
       await this.client.waitForCommit(200);
     }
     await idb.ensureCompanion();
     await idb.typeText(text);
-    await this.client.waitForCommit(300);
+    await new Promise((r) => setTimeout(r, 100));
     return true;
   }
   async clearText(testID: string): Promise<boolean> {
@@ -400,14 +414,13 @@ export class NitroWriter implements Writer {
     // Maestro semantics.
     const c = await this.layoutCenter({ id: testID });
     if (!c) return false;
-    await idb.ensureCompanion();
-    await idb.tap(c.x, c.y, 50);
+    await this.hidTap(c.x, c.y, 50);
     await this.client.waitForCommit(200);
     // Erase up to 100 chars — large enough for typical form fields.
     for (let i = 0; i < 100; i++) {
       await idb.pressKey(42);
     }
-    await this.client.waitForCommit(300);
+    await new Promise((r) => setTimeout(r, 100));
     return true;
   }
   async eraseText(testID: string | null, count: number): Promise<boolean> {
@@ -416,15 +429,14 @@ export class NitroWriter implements Writer {
     if (testID) {
       const c = await this.layoutCenter({ id: testID });
       if (!c) return false;
-      await idb.ensureCompanion();
-      await idb.tap(c.x, c.y, 50);
+      await this.hidTap(c.x, c.y, 50);
       await this.client.waitForCommit(200);
     }
     await idb.ensureCompanion();
     for (let i = 0; i < count; i++) {
       await idb.pressKey(42);
     }
-    await this.client.waitForCommit(300);
+    await new Promise((r) => setTimeout(r, 100));
     return true;
   }
   async pressKey(_testID: string | null, keyName: string): Promise<boolean> {
@@ -556,14 +568,29 @@ export class NitroWriter implements Writer {
     }
     return true;
   }
-  async tapByText(text: string): Promise<boolean> {
+  async tapByText(text: string, opts: { fast?: boolean } = {}): Promise<boolean> {
     // Maestro-parity tap-by-text: locate via the iOS accessibility tree
     // (catches UITabBar / UIAlert / out-of-process UIMenu items the
     // React fiber tree never sees) AND the React fiber tree (catches
     // labelled views inside the app process). Tap the resolved coord
     // via idb HID — real touch, real hit-test, real responder chain.
     await idb.ensureCompanion();
-    // 1) Accessibility-label query inside the app's UIView tree (incl.
+    // 1) UITabBarController shortcut FIRST. When the text matches a
+    //    tab name, this is unambiguous and fast — switches the active
+    //    tab directly. Avoids the failure mode where AX-label search
+    //    latches onto stale "Cart" header text in a stack-pushed
+    //    screen of an inactive tab (cart tab keeps its UIViews mounted
+    //    behind the Products tab; their AX labels stay queryable but
+    //    tapping them does nothing).
+    const tab = await this.send('tapTabByName', { name: text });
+    if (tab?.success === true) {
+      // Minimal settle — prepareTap on the next tap does its own
+      // stable-coord + hit-test verify polling so it can wait out the
+      // first-commit gap on the destination tab.
+      await new Promise((r) => setTimeout(r, 100));
+      return true;
+    }
+    // 2) Accessibility-label query inside the app's UIView tree (incl.
     //    UITabBarButton labels — expo-router NativeTabs route through
     //    UIKit hosts that surface their tab title as the AX label).
     const r = await this.send('getViewWindowFrameByLabel', { text });
@@ -571,35 +598,29 @@ export class NitroWriter implements Writer {
     if (data && data.width > 0 && data.height > 0) {
       const cx = data.x + data.width / 2;
       const cy = data.y + data.height / 2;
-      await idb.tap(cx, cy, 50);
-      await this.client.waitForCommit(300);
+      await this.hidTap(cx, cy, 50);
+      await new Promise((r) => setTimeout(r, 100));
       return true;
     }
-    // 2) Fiber-text walk — for elements whose label is JSX text but
+    // 3) Fiber-text walk — for elements whose label is JSX text but
     //    whose accessibilityLabel isn't set on the host view.
     const c = await this.layoutCenter({ text });
     if (c) {
-      await idb.tap(c.x, c.y, 50);
-      await this.client.waitForCommit(300);
+      await this.hidTap(c.x, c.y, 50);
+      await new Promise((r) => setTimeout(r, 100));
       return true;
     }
-    // 3) UITabBarController shortcut. NativeTabs render as
-    //    UITabBarButtons whose UIView subtree often stays opaque to
-    //    accessibility queries; expose tab switching via the
-    //    controller directly. This is non-Maestro (Maestro coord-taps
-    //    the tab item), but the alternatives (idb describe-all is
-    //    broken on iOS 26; bundling WebDriverAgent is heavier) make
-    //    this the pragmatic path until either upstream is fixed.
-    const tab = await this.send('tapTabByName', { name: text });
-    if (tab?.success === true) {
-      await this.client.waitForCommit(300);
-      return true;
-    }
+    // Tiers 4-5 are expensive (~3 s idb describe-all + ~10-20 s
+    // maestro hierarchy/WDA). Skip them for `optional` taps where the
+    // caller already accepts failure — burning 20 s on every probe
+    // tap that's expected to miss is the slowest single line in any
+    // flow that uses `optional: true` as a feature-detect.
+    if (opts.fast) return false;
     // 4) Out-of-process accessibility tree (idb describe-all) — broken
     //    on iOS 26, kept for older sims as a last resort.
     try {
       if (await idb.tapByLabelOOP(text)) {
-        await this.client.waitForCommit(300);
+        await new Promise((r) => setTimeout(r, 100));
         return true;
       }
     } catch {
@@ -613,8 +634,8 @@ export class NitroWriter implements Writer {
     try {
       const h = await hierarchy.findByText(text);
       if (h) {
-        await idb.tap(h.cx, h.cy, 50);
-        await this.client.waitForCommit(300);
+        await this.hidTap(h.cx, h.cy, 50);
+        await new Promise((r) => setTimeout(r, 100));
         return true;
       }
     } catch {

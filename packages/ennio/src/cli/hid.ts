@@ -36,9 +36,10 @@ function findDaemonScript(): string {
   // file's location at runtime — works when developing (TS via tsx)
   // and when published (lib/ + dist/ + src/cli/hid-daemon.py).
   // esbuild inlines `__dirname` so we can rely on it at runtime.
-  const here = typeof __dirname !== 'undefined' ? __dirname : dirname(fileURLToPath(import.meta.url));
+  const here =
+    typeof __dirname !== 'undefined' ? __dirname : dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    join(here, 'hid-daemon.py'),            // dev: src/cli/
+    join(here, 'hid-daemon.py'), // dev: src/cli/
     join(here, '..', 'src', 'cli', 'hid-daemon.py'),
     join(here, '..', '..', 'src', 'cli', 'hid-daemon.py'),
     join(here, '..', '..', '..', 'src', 'cli', 'hid-daemon.py'),
@@ -60,7 +61,8 @@ class HidDaemon {
     });
     this.proc.stdout.on('data', (chunk: Buffer) => this.onStdout(chunk.toString()));
     this.proc.stderr.on('data', (chunk: Buffer) => {
-      if (process.env.ENNIO_DEBUG_IDB) console.error(`[hid-daemon stderr] ${chunk.toString().trim()}`);
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[hid-daemon stderr] ${chunk.toString().trim()}`);
     });
     this.proc.on('exit', (code) => {
       this.dead = true;
