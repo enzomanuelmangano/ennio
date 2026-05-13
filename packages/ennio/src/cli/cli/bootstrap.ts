@@ -84,6 +84,6 @@ export async function connectOrLaunch(opts: BootstrapOptions): Promise<Bootstrap
     reason:
       `Could not connect to the Hermes Inspector.\n` +
       `Tried auto-launching ${appId}; Inspector never exposed a JS context.\n` +
-      `Confirm Metro is running (\`bun start\`) and the app has ennio wired (ENNIO_ENABLED=1 at pod install).`,
+      `Confirm Metro is running (\`bun start\` or \`npx expo start\`) and the app is a Debug build with ennio-expo-plugin installed.`,
   };
 }

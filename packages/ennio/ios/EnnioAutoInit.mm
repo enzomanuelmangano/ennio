@@ -28,9 +28,10 @@ static const int kEnnioDefaultPort = 9876;
 static BOOL _ennioInitialized = NO;
 
 // Distribution channel detection. Ennio is a dev / QA tool and must
-// refuse to start on App Store production or Enterprise builds — the
-// build-time `ENNIO_ENABLED` gate is necessary but not sufficient,
-// because a single CI misconfiguration could ship the pod.
+// refuse to start on App Store production or Enterprise builds. The
+// pod is already excluded from Release configurations at the
+// CocoaPods level, so this is a runtime backstop in case a custom
+// build setup links Ennio into a production binary anyway.
 typedef NS_ENUM(NSInteger, EnnioDistribution) {
     EnnioDistDev,
     EnnioDistAdHoc,
@@ -194,10 +195,10 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
     // Call original implementation
     [self ennio_start];
 
-    // Distribution gate. Even if the build-time gate slipped and Ennio
-    // is linked into an App Store / Enterprise binary, refuse to start
-    // the WS server, fiber walker, or banner. This is the runtime
-    // backstop to the `ENNIO_ENABLED=1` plugin gate.
+    // Distribution gate. Even if the CocoaPods `:configurations`
+    // gate slipped and Ennio is linked into an App Store / Enterprise
+    // binary, refuse to install `__ennioDispatch`, the commit hook,
+    // or the ribbon. Runtime backstop on top of the build-time gate.
     EnnioDistribution dist = ennioDetectDistribution();
     if (dist == EnnioDistAppStore || dist == EnnioDistEnterprise) {
         NSLog(@"[Ennio] REFUSING to start: %@ distribution detected. "
@@ -260,11 +261,18 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
                   @"if you see this in production, your build pipeline is broken.",
                   ennioDistributionName(dist));
 
-            // Show the top-right "E2E" ribbon. Tied to the same gate
-            // as the JSI dispatch surface: if Ennio is in this build,
-            // the ribbon shows; if Ennio isn't (ENNIO_ENABLED unset /
-            // =0 at prebuild), this whole file isn't compiled in.
-            [EnnioDebugBanner show];
+            // Show the top-right "E2E" ribbon — opt-in via the
+            // `ENNIORibbonEnabled` Info.plist key (written by
+            // `ennio-expo-plugin` when `showRibbon: true`). Default
+            // off so devs iterating on UI don't get an always-on
+            // overlay. Release builds don't compile this file at all
+            // (CocoaPods :configurations gate), so the check is only
+            // ever reached in Debug.
+            id ribbonFlag = [[NSBundle mainBundle].infoDictionary objectForKey:@"ENNIORibbonEnabled"];
+            BOOL showRibbon = [ribbonFlag isKindOfClass:[NSNumber class]] && [(NSNumber*)ribbonFlag boolValue];
+            if (showRibbon) {
+                [EnnioDebugBanner show];
+            }
         } else {
             NSLog(@"[Ennio] _instance is not an RCTInstance (got %@)", [rctInstance class]);
         }
