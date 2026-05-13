@@ -206,31 +206,49 @@ export class NitroWriter implements Writer {
   }
 
   async tap(testID: string): Promise<boolean> {
-    // Maestro-parity tap: locate via JSI + Fabric measure (fast), then
-    // dispatch a real iOS HID event via idb at the centre coord. No
-    // invokeOnPress shortcut — real touches go through UIKit hit-test,
-    // gesture recognizers, the responder chain. Same path Maestro/
-    // XCUITest uses. Catches keyboard occlusion, modal overlays,
-    // RNGH gestures, UIMenu triggers, Switch onValueChange.
-    const center = await this.layoutCenter({ id: testID });
-    if (!center) return false;
-    if (process.env.ENNIO_DEBUG_TAP) {
-      console.error(`[ennio tap] id=${testID} → (${center.x.toFixed(1)}, ${center.y.toFixed(1)})`);
-    }
+    // Batched JSI prepare: stable-coord poll + auto-scroll + UIMenu
+    // check in one CDP round trip. ~5-10× fewer round trips than the
+    // old CLI-side layoutCenter loop. Actuation stays on idb HID —
+    // UITouch synth misfires on RNGH-wrapped components (PressableScale,
+    // RNBetterTapGestureRecognizer state machine).
+    const screen = await this.getScreenSize();
+    let center: { x: number; y: number };
+    let isMenu = false;
     try {
-      await idb.ensureCompanion();
-      const isMenu = await this.client.isMenuTriggerAncestor(testID);
-      const dur = isMenu ? 100 : 80;
-      await idb.tap(center.x, center.y, dur);
-      // Deterministic settle: wait for React's next fiber commit (signals
-      // the press handler ran + state updated). UIMenu present-animation
-      // takes ~250 ms regardless of React; cap higher for that case.
-      const cap = isMenu ? 600 : 300;
-      await this.client.waitForCommit(cap);
-      return true;
+      const r = await this.send('prepareTap', {
+        testID,
+        screenW: screen.width,
+        screenH: screen.height,
+      });
+      if (!r?.success) return false;
+      const data =
+        typeof r.data === 'string' ? JSON.parse(r.data) : (r.data as Record<string, unknown>);
+      if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return false;
+      center = { x: data.x as number, y: data.y as number };
+      isMenu = data.isMenu === true;
+      if (process.env.ENNIO_DEBUG_TAP) {
+        console.error(
+          `[ennio tap] id=${testID} → (${center.x.toFixed(1)}, ${center.y.toFixed(1)}) menu=${isMenu}`,
+        );
+      }
     } catch {
       return false;
     }
+    // Actuation: idb HID. Real CoreSimulator touch event drives the
+    // gesture-recognizer chain including RNGH (pressto's
+    // PressableScale, RNBetterTapGestureRecognizer). Costs ~250 ms
+    // per call (python interpreter startup) but the only path that
+    // reliably fires onPress on RNGH-wrapped pressables.
+    try {
+      await idb.ensureCompanion();
+      await idb.tap(center.x, center.y, isMenu ? 100 : 80);
+    } catch {
+      return false;
+    }
+    if (isMenu) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return true;
   }
   async tapAt(x: number, y: number): Promise<boolean> {
     return this.tapAtPoint(x, y);

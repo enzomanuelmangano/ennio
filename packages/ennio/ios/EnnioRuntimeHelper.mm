@@ -10,6 +10,10 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <chrono>
+#include <cmath>
+#include <sstream>
+#include <thread>
 
 // Timeout for main thread dispatch (5 seconds)
 static const int64_t MAIN_THREAD_TIMEOUT_NS = 5 * NSEC_PER_SEC;
@@ -1220,6 +1224,61 @@ bool EnnioRuntimeHelper::tapAtScreenPoint(double x, double y) {
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return ok;
+}
+
+std::string EnnioRuntimeHelper::prepareTap(const std::string& testID, double screenW, double screenH) {
+    // Stable-coord poll + auto-scroll fallback + UIMenu check, all in
+    // one JSI call. CLI-side `layoutCenter` previously did this via
+    // ~5-10 separate CDP round trips; batching cuts the CDP overhead
+    // for the hottest yaml verb. The actual tap stays on the CLI side
+    // through idb HID — UITouch synth doesn't reliably fire RNGH-wrapped
+    // gesture recognizers (PressableScale, RNBetterTapGestureRecognizer).
+    const int maxIters = 30;
+    const int probeSleepMs = 50;
+    double lastCx = 0, lastCy = 0;
+    bool haveLast = false;
+    bool didScroll = false;
+    double finalCx = 0, finalCy = 0;
+    bool foundStable = false;
+    for (int i = 0; i < maxIters; i++) {
+        auto frame = getViewWindowFrame(testID);
+        double fx = std::get<0>(frame), fy = std::get<1>(frame);
+        double fw = std::get<2>(frame), fh = std::get<3>(frame);
+        if (fw > 0 && fh > 0) {
+            double cx = fx + fw / 2.0;
+            double cy = fy + fh / 2.0;
+            bool onScreen = (cx >= 0 && cx <= screenW && cy >= 0 && cy <= screenH);
+            if (!onScreen) {
+                if (!didScroll) {
+                    didScroll = true;
+                    scrollTo(std::string(), testID);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    continue;
+                }
+                return "";  // Off-screen even after scroll attempt.
+            }
+            if (haveLast && std::abs(lastCx - cx) < 2.0 && std::abs(lastCy - cy) < 2.0) {
+                finalCx = cx;
+                finalCy = cy;
+                foundStable = true;
+                break;
+            }
+            lastCx = cx;
+            lastCy = cy;
+            haveLast = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(probeSleepMs));
+    }
+    if (!foundStable) {
+        if (!haveLast) return "";
+        finalCx = lastCx;
+        finalCy = lastCy;
+    }
+    bool isMenu = isMenuTriggerAncestor(testID);
+    std::ostringstream oss;
+    oss << "{\"x\":" << finalCx << ",\"y\":" << finalCy
+        << ",\"isMenu\":" << (isMenu ? "true" : "false") << "}";
+    return oss.str();
 }
 
 bool EnnioRuntimeHelper::swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs) {

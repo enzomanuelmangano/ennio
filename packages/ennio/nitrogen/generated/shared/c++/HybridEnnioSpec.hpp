@@ -56,9 +56,6 @@ namespace margelo::nitro::ennio {
 
     public:
       // Methods
-      virtual void startServer(double port) = 0;
-      virtual void stopServer() = 0;
-      virtual bool isServerRunning() = 0;
       virtual bool exists(const std::string& testID) = 0;
       virtual bool isVisible(const std::string& testID) = 0;
       virtual std::variant<nitro::NullType, std::string> getText(const std::string& testID) = 0;

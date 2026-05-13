@@ -1,45 +1,12 @@
 {
   "name": "ennio",
   "version": "0.0.1",
-  "description": "Maestro-compatible E2E test runner for React Native iOS. Direct JSI fiber-walk invokes onPress synchronously.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/enzomanuelmangano/ennio.git",
+    "directory": "packages/ennio"
+  },
   "main": "lib/index.js",
-  "types": "lib/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./lib/index.d.ts",
-      "default": "./lib/index.js"
-    }
-  },
-  "bin": {
-    "ennio": "./dist/cli.js"
-  },
-  "files": [
-    "lib/",
-    "dist/",
-    "src/Ennio.nitro.ts",
-    "src/index.ts",
-    "cpp/",
-    "android/",
-    "ios/",
-    "nitrogen/generated/",
-    "nitro.json",
-    "EnnioCore.podspec",
-    "react-native.config.js"
-  ],
-  "scripts": {
-    "build:lib": "tsc",
-    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --external:fsevents --external:bufferutil --external:utf-8-validate",
-    "build": "npm run build:lib && npm run build:cli && chmod +x dist/cli.js",
-    "clean": "rm -rf lib dist",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
-    "lint": "eslint . --max-warnings=0",
-    "prepublishOnly": "npm run clean && npm run build"
-  },
-  "peerDependencies": {
-    "react": "*",
-    "react-native": "*",
-    "react-native-nitro-modules": ">=0.18.0"
-  },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
@@ -53,15 +20,34 @@
     "typescript": "^5.4.0",
     "ws": "^8.18.0"
   },
-  "publishConfig": {
-    "access": "public"
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*",
+    "react-native-nitro-modules": ">=0.18.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/enzomanuelmangano/ennio.git",
-    "directory": "packages/ennio"
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
   },
-  "license": "MIT",
+  "bin": {
+    "ennio": "./dist/cli.js"
+  },
+  "description": "Maestro-compatible E2E test runner for React Native iOS. Direct JSI fiber-walk invokes onPress synchronously.",
+  "files": [
+    "lib/",
+    "dist/",
+    "src/Ennio.nitro.ts",
+    "src/index.ts",
+    "cpp/",
+    "android/",
+    "ios/",
+    "nitrogen/generated/",
+    "nitro.json",
+    "EnnioCore.podspec",
+    "react-native.config.js"
+  ],
   "keywords": [
     "react-native",
     "e2e",
@@ -70,5 +56,19 @@
     "nitro",
     "maestro",
     "ios"
-  ]
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build:lib": "tsc",
+    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --external:fsevents --external:bufferutil --external:utf-8-validate",
+    "build": "npm run build:lib && npm run build:cli && chmod +x dist/cli.js",
+    "clean": "rm -rf lib dist",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "types": "lib/index.d.ts"
 }

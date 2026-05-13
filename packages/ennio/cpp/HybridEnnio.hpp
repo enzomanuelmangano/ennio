@@ -19,7 +19,7 @@
 namespace margelo::nitro { class Dispatcher; }
 
 // Internal components
-#include "WebSocketServer.hpp"
+#include "Protocol.hpp"
 #include "TestIDRegistry.hpp"
 #include "ShadowTreeTraverser.hpp"
 #include "SelectorCriteria.hpp"
@@ -41,13 +41,6 @@ class HybridEnnio : public HybridEnnioSpec {
 public:
     HybridEnnio();
     ~HybridEnnio() override = default;
-
-    // ============================================
-    // Server Management
-    // ============================================
-    void startServer(double port) override;
-    void stopServer() override;
-    bool isServerRunning() override;
 
     // ============================================
     // Element Queries
@@ -116,21 +109,25 @@ public:
     bool isInitialized() const;
 
     /**
+     * JS-thread executor — wraps `RCTInstance.callFunctionOnBufferedRuntimeExecutor:`
+     * (or any equivalent scheduler) so background dispatch worker
+     * threads can schedule result-writes back onto JS. Stored once
+     * during bootstrap by `EnnioAutoInit`.
+     */
+    using JSThreadExecutor = std::function<void(std::function<void(facebook::jsi::Runtime&)>&&)>;
+    static void setJSThreadExecutor(JSThreadExecutor exec);
+
+    /**
      * Pure-native bootstrap. Called from `EnnioAutoInit`'s post-start
      * hook on the JS thread (after the runtime is initialised).
-     * Captures the runtime, evaluates the Fiber walker into globalThis,
-     * constructs a singleton HybridEnnio + starts the WebSocket server.
-     * Idempotent.
+     * Captures the runtime, evaluates the commit-signal walker, installs
+     * `__ennioDispatch` JSI host function so the external CLI can drive
+     * the runner via Hermes Inspector `Runtime.evaluate`. Idempotent.
      */
     static void nativeBootstrap(facebook::jsi::Runtime& runtime, int port);
 
 
 private:
-    // Server state
-    bool serverRunning_ = false;
-    int serverPort_ = 0;
-    std::unique_ptr<::ennio::WebSocketServer> webSocketServer_;
-
     // Shadow tree access
     std::weak_ptr<facebook::react::UIManager> uiManager_;
     facebook::react::SurfaceId surfaceId_ = 0;

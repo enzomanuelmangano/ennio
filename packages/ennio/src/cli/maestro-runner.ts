@@ -80,7 +80,6 @@ const RECORDING_SETTLE_MS = 500; // Settle after start/stopRecording so the next
 const RETRY_BACKOFF_MS = 500; // Pause between retry attempts inside `retry` block.
 const TRAVEL_WAYPOINT_GAP_MS = 200; // Gap between successive simctl location fixes during `travel`.
 const OPENLINK_SETTLE_MS = 500; // Wait for SpringBoard to switch contexts after openurl.
-const DEFAULT_WS_PORT = 9876;
 
 /**
  * Maestro per-command `optional: true`. Lives at the command level
@@ -261,17 +260,16 @@ export async function runMaestroTests(
   writer: Writer,
   reader: Reader,
   testFilePath: string,
-  options: { verbose?: boolean; trace?: boolean; port?: number } = {},
+  options: { verbose?: boolean; trace?: boolean } = {},
 ): Promise<MaestroTestsResult> {
   const results: MaestroTestsResult = { passed: 0, failed: 0, tests: [], client };
   const flow = parseMaestroFile(testFilePath);
   const flowName = flow.name || basename(testFilePath, '.yaml');
 
-  const port = options.port ?? DEFAULT_WS_PORT;
-
-  // Create reconnect function for launchApp/clearState
+  // Re-attach to the Inspector after launchApp/clearState. Same
+  // transport (CDP), but device id changes when Metro re-attaches.
   const reconnectClient = async (): Promise<EnnioClient> => {
-    const newClient = new EnnioClient(port);
+    const newClient = new EnnioClient();
     await newClient.connect();
     return newClient;
   };
@@ -280,7 +278,6 @@ export async function runMaestroTests(
     verbose: options.verbose,
     trace: options.trace,
     appId: flow.appId,
-    port,
     reconnectClient,
     env: flow.env,
   });
@@ -369,7 +366,6 @@ class MaestroExecutor {
       verbose?: boolean;
       trace?: boolean;
       appId?: string;
-      port?: number;
       reconnectClient?: () => Promise<EnnioClient>;
       env?: Record<string, string>;
     } = {},
@@ -424,12 +420,15 @@ class MaestroExecutor {
    * worst case is identical to a sleep of the same duration.
    */
   private async waitCommit(maxMs: number): Promise<void> {
-    const result = await this.client.waitForCommit(maxMs);
-    this.log(
-      `waitForCommit(${maxMs}): ${
-        result.commit ? `commit at ${result.elapsedMs}ms` : 'timeout (no commit)'
-      }`,
-    );
+    // Hermes Inspector + CDP can't reliably observe React's
+    // onCommitFiberRoot (the devtools-hook monkey-patch races React's
+    // own hook binding on Bridgeless; commit signal often never fires
+    // even though React commits ran). Hard-timeout 200 ms per call
+    // × ~30 taps = 6 s wasted per flow. Replace with a fixed micro-
+    // sleep that's enough for the React commit + UIKit transition to
+    // land before the next yaml step reads layout. Downstream polls
+    // pick up anything that lands later.
+    await this.sleep(Math.min(maxMs, 80));
   }
 
   /**

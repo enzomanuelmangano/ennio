@@ -191,64 +191,6 @@ ShadowNodePtr HybridEnnio::findNode(const std::string& testID) const {
 }
 
 // ============================================
-// Server Management
-// ============================================
-
-void HybridEnnio::startServer(double port) {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    if (serverRunning_) {
-        ENNIO_LOG_WARN(LOG_TAG, "Server already running");
-        return;
-    }
-
-    serverPort_ = static_cast<int>(port);
-    ENNIO_LOG_INFO(LOG_TAG, ENNIO_LOG_FMT("Starting WebSocket server on port " << serverPort_));
-
-    // Create and start WebSocket server
-    webSocketServer_ = std::make_unique<::ennio::WebSocketServer>();
-    webSocketServer_->setCommandHandler([this](const ::ennio::Request& request) {
-        return handleCommand(request);
-    });
-
-    if (webSocketServer_->start(serverPort_)) {
-        serverRunning_ = true;
-        ENNIO_LOG_INFO(LOG_TAG, "WebSocket server started successfully");
-        // Diagnostic marker (mirror NSLog which gets filtered on device).
-        std::string mark = std::string(getenv("HOME") ? getenv("HOME") : "/tmp") + "/Library/_ennio_ws_started.txt";
-        FILE* fp = fopen(mark.c_str(), "w");
-        if (fp) { fprintf(fp, "port=%d", serverPort_); fclose(fp); }
-    } else {
-        ENNIO_LOG_ERROR(LOG_TAG, "Failed to start WebSocket server");
-        std::string mark = std::string(getenv("HOME") ? getenv("HOME") : "/tmp") + "/Library/_ennio_ws_failed.txt";
-        FILE* fp = fopen(mark.c_str(), "w");
-        if (fp) { fprintf(fp, "port=%d errno=%d", serverPort_, errno); fclose(fp); }
-        webSocketServer_.reset();
-    }
-}
-
-void HybridEnnio::stopServer() {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    if (!serverRunning_) {
-        return;
-    }
-
-    if (webSocketServer_) {
-        webSocketServer_->stop();
-        webSocketServer_.reset();
-    }
-
-    serverRunning_ = false;
-    serverPort_ = 0;
-}
-
-bool HybridEnnio::isServerRunning() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return serverRunning_;
-}
-
-// ============================================
 // Element Queries
 // ============================================
 
@@ -354,14 +296,14 @@ bool HybridEnnio::waitForNextCommit(double maxMs) {
 }
 
 // ============================================
-// WebSocket Command Handler
+// Command Dispatch
 // ============================================
 //
-// Replaces the legacy 445-line if-chain with a string→lambda dispatch
-// table. Each handler is small (parse args → call method → fill
-// response). Adding a new command is one map entry. Hot-loop cost: a
-// single unordered_map lookup per request, vs the previous O(n)
-// string compare cascade.
+// Each handler is `(self, request, response)` — parse args, call the
+// instance method, fill the response. Map lookup is O(1). Reached
+// either from the legacy in-app WS server (removed) or — in v2 — from
+// the JSI `__ennioDispatch` host function the CLI calls via Hermes
+// Inspector. Same dispatch table, two transports.
 
 using HandlerFn = std::function<void(HybridEnnio*, const ::ennio::Request&, ::ennio::Response&)>;
 
@@ -484,6 +426,24 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
         }},
 
         // ---- Direct writes (UIKit/Fabric in-process) ----
+        { "prepareTap", [](HybridEnnio*, const auto& req, auto& r) {
+            // Batched: stable-coord poll + auto-scroll + UIMenu check
+            // in one JSI call. Saves ~5-10 CDP round trips per tap vs
+            // letting the CLI run the poll loop. Empty result string
+            // = the testID couldn't be measured on-screen. The actual
+            // tap still uses idb HID — UITouch synth misfires on
+            // RNGH-wrapped pressables.
+            auto out = ::ennio::EnnioRuntimeHelper::getInstance().prepareTap(
+                ::ennio::json::parseString(req.payload, "testID"),
+                ::ennio::json::parseDouble(req.payload, "screenW"),
+                ::ennio::json::parseDouble(req.payload, "screenH"));
+            if (out.empty()) {
+                r.success = false;
+            } else {
+                r.success = true;
+                r.data = out;
+            }
+        }},
         { "tapAtPoint", [](HybridEnnio*, const auto& req, auto& r) {
             // Window-coordinate tap. CLI sends absolute logical points.
             r.success = ::ennio::EnnioRuntimeHelper::getInstance().tapAtScreenPoint(
@@ -1006,9 +966,15 @@ namespace {
 
     std::mutex g_jsContextMutex;
     facebook::jsi::Runtime* g_jsRuntime = nullptr;
+    HybridEnnio::JSThreadExecutor g_jsExecutor;
 
     std::mutex g_instanceMutex;
     std::shared_ptr<HybridEnnio> g_instance;
+}
+
+void HybridEnnio::setJSThreadExecutor(HybridEnnio::JSThreadExecutor exec) {
+    std::lock_guard<std::mutex> lock(g_jsContextMutex);
+    g_jsExecutor = std::move(exec);
 }
 
 void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
@@ -1038,13 +1004,27 @@ void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
             runtime,
             facebook::jsi::PropNameID::forAscii(runtime, "__ennio_native_onCommit"),
             0,
-            [](facebook::jsi::Runtime&, const facebook::jsi::Value&,
+            [](facebook::jsi::Runtime& rt, const facebook::jsi::Value&,
                const facebook::jsi::Value*, size_t) -> facebook::jsi::Value {
-                g_commitCounter.fetch_add(1, std::memory_order_release);
+                auto next = g_commitCounter.fetch_add(1, std::memory_order_release) + 1;
                 g_commitCv.notify_all();
+                // Mirror to a JS-readable global so the external CLI can
+                // poll commits via `Runtime.evaluate` without going through
+                // the slow async-token path.
+                try {
+                    rt.global().setProperty(
+                        rt,
+                        "__ennioCommitCounter",
+                        facebook::jsi::Value(static_cast<double>(next)));
+                } catch (...) {
+                    /* runtime might be transitioning; commit signal still wakes the cv */
+                }
                 return facebook::jsi::Value::undefined();
             });
         runtime.global().setProperty(runtime, "__ennio_native_onCommit", onCommitFn);
+        // Seed the JS-visible counter so the CLI's first read returns 0
+        // instead of `undefined` before any commit fires.
+        runtime.global().setProperty(runtime, "__ennioCommitCounter", facebook::jsi::Value(0.0));
     } catch (const std::exception& e) {
         ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: onCommit install failed: " << e.what()));
     }
@@ -1062,12 +1042,115 @@ void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
         }
         instance = g_instance;
     }
-    if (!instance->isServerRunning()) {
-        try {
-            instance->startServer(static_cast<double>(port));
-        } catch (const std::exception& e) {
-            ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: startServer threw: " << e.what()));
-        }
+    (void)port;  // No longer used — transport is CDP via Hermes Inspector.
+
+    // Seed the JS-side result bucket. External CLI posts work via
+    // `__ennioDispatch(type, payloadJson, token)` and polls
+    // `globalThis.__ennioResults[token]` until the background worker
+    // writes a response.
+    try {
+        auto code = facebook::jsi::String::createFromUtf8(runtime,
+            "globalThis.__ennioResults = globalThis.__ennioResults || {};");
+        runtime.evaluateJavaScript(
+            std::make_shared<facebook::jsi::StringBuffer>(
+                "globalThis.__ennioResults = globalThis.__ennioResults || {};"),
+            "ennio_results_seed.js");
+        (void)code;
+    } catch (const std::exception& e) {
+        ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: results seed failed: " << e.what()));
+    }
+
+    // Install `__ennioDispatch(type, payloadJson, token)` JSI host
+    // function. Returns immediately to JS; spawns a background worker
+    // that runs the existing command handlers and schedules a JS-thread
+    // callback to write the response into `globalThis.__ennioResults`.
+    //
+    // Why async + poll vs. synchronous return?
+    //   `waitForCommit` blocks until React fires `__ennio_native_onCommit`
+    //   (a JS callback). If `__ennioDispatch` blocked the JS thread
+    //   waiting for its worker, the React commit could never run and the
+    //   waiter would deadlock. Async pattern: worker waits on the cv,
+    //   JS thread stays free to advance React, commits fire, cv signals,
+    //   worker finishes, result lands on globalThis. CLI polls.
+    try {
+        auto dispatchFn = facebook::jsi::Function::createFromHostFunction(
+            runtime,
+            facebook::jsi::PropNameID::forAscii(runtime, "__ennioDispatch"),
+            3,
+            [](facebook::jsi::Runtime& rt, const facebook::jsi::Value&,
+               const facebook::jsi::Value* args, size_t count) -> facebook::jsi::Value {
+                if (count < 3) return facebook::jsi::Value::undefined();
+                std::string type = args[0].getString(rt).utf8(rt);
+                std::string payloadJson = args[1].getString(rt).utf8(rt);
+                std::string token = args[2].getString(rt).utf8(rt);
+
+                std::shared_ptr<HybridEnnio> inst;
+                JSThreadExecutor exec;
+                {
+                    std::lock_guard<std::mutex> ilock(g_instanceMutex);
+                    inst = g_instance;
+                }
+                {
+                    std::lock_guard<std::mutex> jlock(g_jsContextMutex);
+                    exec = g_jsExecutor;
+                }
+                if (!inst || !exec) {
+                    return facebook::jsi::Value::undefined();
+                }
+
+                ::ennio::Request req;
+                req.id = token;
+                req.type = type;
+                req.payload = payloadJson;
+
+                // Fast path: most handlers run synchronously on the
+                // main thread via `dispatchSyncMainWithTimeout`. Total
+                // time on JS thread is ~1-10 ms — well under the
+                // ~25 ms a CDP-poll round trip would cost. Run inline
+                // and return the JSON directly to the CLI.
+                //
+                // Slow path: `waitForCommit` and `waitForIdle` wait
+                // for the JS thread to run React commits, which can't
+                // happen while THIS host function is blocking the JS
+                // thread. They MUST go through the background worker
+                // + JS-callback to leave the JS thread free for the
+                // commits we're waiting on.
+                const bool needsAsync = (type == "waitForCommit" || type == "waitForIdle");
+
+                if (!needsAsync) {
+                    auto resp = inst->handleCommand(req);
+                    return facebook::jsi::String::createFromUtf8(rt, resp.toJSON());
+                }
+
+                // Async path. Background worker → JS-thread callback
+                // writes into `globalThis.__ennioResults[token]`. CLI
+                // polls.
+                std::thread([inst, req, token, exec]() {
+                    auto resp = inst->handleCommand(req);
+                    std::string json = resp.toJSON();
+                    exec([token, json](facebook::jsi::Runtime& rt2) {
+                        try {
+                            auto results = rt2.global().getProperty(rt2, "__ennioResults");
+                            if (!results.isObject()) {
+                                auto fresh = facebook::jsi::Object(rt2);
+                                rt2.global().setProperty(rt2, "__ennioResults", fresh);
+                                results = rt2.global().getProperty(rt2, "__ennioResults");
+                            }
+                            results.asObject(rt2).setProperty(
+                                rt2,
+                                token.c_str(),
+                                facebook::jsi::String::createFromUtf8(rt2, json));
+                        } catch (...) {
+                            /* runtime gone — orphan token, CLI times out. */
+                        }
+                    });
+                }).detach();
+
+                return facebook::jsi::Value::undefined();
+            });
+        runtime.global().setProperty(runtime, "__ennioDispatch", dispatchFn);
+    } catch (const std::exception& e) {
+        ENNIO_LOG_TRACE(LOG_TAG, ENNIO_LOG_FMT("nativeBootstrap: __ennioDispatch install failed: " << e.what()));
     }
 }
 

@@ -14,9 +14,6 @@ namespace margelo::nitro::ennio {
     HybridObject::loadHybridMethods();
     // load custom methods/properties
     registerHybrids(this, [](Prototype& prototype) {
-      prototype.registerHybridMethod("startServer", &HybridEnnioSpec::startServer);
-      prototype.registerHybridMethod("stopServer", &HybridEnnioSpec::stopServer);
-      prototype.registerHybridMethod("isServerRunning", &HybridEnnioSpec::isServerRunning);
       prototype.registerHybridMethod("exists", &HybridEnnioSpec::exists);
       prototype.registerHybridMethod("isVisible", &HybridEnnioSpec::isVisible);
       prototype.registerHybridMethod("getText", &HybridEnnioSpec::getText);

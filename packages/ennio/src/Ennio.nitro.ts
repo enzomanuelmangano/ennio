@@ -203,26 +203,6 @@ export interface Selector {
  */
 export interface Ennio extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
   // ============================================
-  // Server Management
-  // ============================================
-
-  /**
-   * Start the WebSocket server on the specified port
-   * @param port - Port number for WebSocket server (default: 9876)
-   */
-  startServer(port: number): void;
-
-  /**
-   * Stop the WebSocket server
-   */
-  stopServer(): void;
-
-  /**
-   * Check if server is currently running
-   */
-  isServerRunning(): boolean;
-
-  // ============================================
   // Element Queries
   // ============================================
 
