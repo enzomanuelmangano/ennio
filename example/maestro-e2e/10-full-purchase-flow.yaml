@@ -312,7 +312,16 @@ tags:
 # add-to-cart button sits below the right edge.
 - runFlow:
     file: subflows/navigate-home.yaml
+- waitForAnimationToEnd
 
+# Wait for the featured carousel to fully render — the carousel uses
+# a horizontal ScrollView whose first paint can leave the inner
+# add-to-cart Pressable laid out at (0,0) for a frame before the
+# real layout pass lands. Without this gate the next tap reads the
+# stale frame and dispatches under the status bar.
+- waitFor:
+    id: 'featured-product-1'
+    timeout: 10000
 - tapOn:
     id: 'add-to-cart-featured-1'
 
