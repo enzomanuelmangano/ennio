@@ -160,10 +160,14 @@ tags:
 - assertVisible:
     id: 'products-list'
 
-# Reset all filters (optional — only present when filters applied).
-- tapOn:
-    id: 'reset-filters'
-    optional: true
+# Reset all filters — only present when filters applied.
+- runFlow:
+    when:
+      visible:
+        id: 'reset-filters'
+    commands:
+      - tapOn:
+          id: 'reset-filters'
 
 # ============================================
 # TEST: Product detail navigation
@@ -231,8 +235,8 @@ tags:
 # Pop the product-detail Stack screen. `headerLargeTitle: true` collapses
 # the `< (tabs)` chevron when scrolled. Scroll to top first so the
 # chevron is exposed, then `back`.
-- scroll:
-    direction: UP
+- swipe:
+    direction: DOWN
 - back
 
 - assertVisible:

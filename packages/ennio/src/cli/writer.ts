@@ -23,6 +23,8 @@ import type { EnnioClient, Selector } from './client';
 // reach it. ~50 ms HID nudge is the only way short of linking RNGH headers
 // from Ennio's pod target.
 import * as idb from './idb';
+import * as hid from './hid';
+import * as hierarchy from './hierarchy';
 
 // Safe-area-ish centre for the 402x874 / 440x956 iPhone sims we run
 // against. Used as the swipe origin when scrollAuto / scrollAtPoint
@@ -61,6 +63,14 @@ export interface Writer {
     direction: 'up' | 'down' | 'left' | 'right',
     distance: number,
   ): Promise<boolean>;
+  /**
+   * Raw window-coord swipe. Routes through idb HID (real iOS touches
+   * the simulator's pan recogniser actually honours); falls back to
+   * synthesised UITouch via Nitro when idb is unavailable.
+   */
+  swipeAt(x1: number, y1: number, x2: number, y2: number, durationMs: number): Promise<boolean>;
+  /** Key window size in window-coord points (cached after first call). */
+  getScreenSize(): Promise<{ width: number; height: number }>;
   scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean>;
   back(): Promise<boolean>;
   hideKeyboard(): Promise<boolean>;
@@ -72,7 +82,7 @@ export interface Writer {
   typeTextBySelector(selector: Selector, text: string): Promise<boolean>;
   clearTextBySelector(selector: Selector): Promise<boolean>;
   /** Tap any element whose visible label matches `text`. */
-  tapByText(text: string): Promise<boolean>;
+  tapByText(text: string, opts?: { fast?: boolean }): Promise<boolean>;
 
   // ---- alerts ----
   tapAlertButton(buttonText: string): Promise<boolean>;
@@ -98,6 +108,27 @@ export class NitroWriter implements Writer {
 
   private send(type: string, payload: Record<string, unknown> = {}) {
     return this.client.send(type, payload);
+  }
+
+  /**
+   * HID tap with hot-fallback. Tries the persistent python daemon
+   * (~5 ms per call) first; on any failure (no companion, daemon
+   * crashed) drops back to spawning `idb ui tap` per call (~250 ms,
+   * always works). Same wire format either way — both ultimately
+   * speak gRPC to idb_companion.
+   */
+  private async hidTap(x: number, y: number, durationMs: number): Promise<void> {
+    try {
+      await hid.tap(x, y, durationMs);
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[hidTap] daemon ok (${x},${y},${durationMs}ms)`);
+      return;
+    } catch (e) {
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[hidTap] daemon FAILED, fallback: ${(e as Error).message}`);
+    }
+    await idb.ensureCompanion();
+    await idb.tap(x, y, durationMs);
   }
 
   /**
@@ -142,14 +173,10 @@ export class NitroWriter implements Writer {
   }
 
   private screenSize: { width: number; height: number } | null = null;
-  private async getScreenSize(): Promise<{ width: number; height: number }> {
+  async getScreenSize(): Promise<{ width: number; height: number }> {
     if (this.screenSize) return this.screenSize;
     try {
-      // The "home" / first scene's window-frame doubles as the app
-      // viewport — we use it to decide if a tap centre is on-screen.
-      // Falling back to an iPhone-sized default keeps things safe if
-      // Nitro hasn't surfaced a key window yet.
-      const r = await this.send('getViewWindowFrame', { testID: '__ennio_screen__' });
+      const r = await this.send('getKeyWindowSize', {});
       const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
       if (data && data.width > 0 && data.height > 0) {
         this.screenSize = { width: data.width, height: data.height };
@@ -158,7 +185,9 @@ export class NitroWriter implements Writer {
     } catch {
       /* fall through */
     }
-    this.screenSize = { width: 402, height: 874 };
+    // Last-resort sentinel only — large enough that any real iPhone Pro
+    // Max viewport (~440×956) still falls inside the on-screen gate.
+    this.screenSize = { width: 480, height: 1024 };
     return this.screenSize;
   }
 
@@ -175,10 +204,18 @@ export class NitroWriter implements Writer {
     // recogniser claims it. Maestro convention: `LEFT` is finger
     // right→left (advance to next page); `RIGHT` is left→right.
     if (direction === 'left' || direction === 'right') {
-      const endX = direction === 'right' ? SAFE_CENTER_X + distance : SAFE_CENTER_X - distance;
+      // Use opposite-edge start + opposite-edge end to maximise travel
+      // and stay inside the window. A swipe with negative endpoints
+      // (e.g. start 200, end -200 on a 420-wide window) is silently
+      // dropped by UIKit because the second touch lands off-screen,
+      // never reaches the responder, and the pan recogniser bails.
+      const startX =
+        direction === 'left' ? Math.round(SAFE_CENTER_X * 1.75) : Math.round(SAFE_CENTER_X * 0.25);
+      const endX =
+        direction === 'left' ? Math.round(SAFE_CENTER_X * 0.25) : Math.round(SAFE_CENTER_X * 1.75);
       try {
         await this.swipeAtPoints(
-          SAFE_CENTER_X,
+          startX,
           SAFE_CENTER_Y,
           endX,
           SAFE_CENTER_Y,
@@ -197,61 +234,55 @@ export class NitroWriter implements Writer {
   }
 
   async tap(testID: string): Promise<boolean> {
-    // UIMenu trigger detection: zeego DropdownMenu / UIButton.menu opens
-    // its menu via a private UIContextMenuInteraction recogniser that
-    // only fires off real HID input. UIControl.sendActions and Fiber
-    // walker invokeOnPress both report YES without ever opening the
-    // menu (false positive). Route through idb HID.
-    if (await this.client.isMenuTriggerAncestor(testID)) {
-      const center = await this.layoutCenter({ id: testID });
-      if (!center) return false;
-      try {
-        await idb.ensureCompanion();
-        // 100 ms duration mirrors a normal finger tap; instant taps
-        // (default 0 ms) sometimes get swallowed by the menu button's
-        // begin/end gesture coalescing.
-        await idb.tap(center.x, center.y, 100);
-        // UIMenu present-animation runs ~250 ms; let it land before the
-        // caller queries for menu items by label.
-        await new Promise((r) => setTimeout(r, 400));
-        return true;
-      } catch {
-        return false;
+    // Batched JSI prepare: stable-coord poll + auto-scroll + UIMenu
+    // check in one CDP round trip. ~5-10× fewer round trips than the
+    // old CLI-side layoutCenter loop. Actuation stays on idb HID —
+    // UITouch synth misfires on RNGH-wrapped components (PressableScale,
+    // RNBetterTapGestureRecognizer state machine).
+    const screen = await this.getScreenSize();
+    let center: { x: number; y: number };
+    let isMenu = false;
+    try {
+      const r = await this.send('prepareTap', {
+        testID,
+        screenW: screen.width,
+        screenH: screen.height,
+      });
+      if (!r?.success) return false;
+      const data =
+        typeof r.data === 'string' ? JSON.parse(r.data) : (r.data as Record<string, unknown>);
+      if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return false;
+      center = { x: data.x as number, y: data.y as number };
+      isMenu = data.isMenu === true;
+      if (process.env.ENNIO_DEBUG_TAP) {
+        console.error(
+          `[ennio tap] id=${testID} → (${center.x.toFixed(1)}, ${center.y.toFixed(1)}) menu=${isMenu}`,
+        );
       }
-    }
-    // Direct onPress invocation. The native helper walks the React
-    // Fiber tree, finds the testID, and calls its onPress prop. Skips
-    // iOS HID, gesture coordinator, UIPresentationController gating.
-    // Library-agnostic — works for Pressable, TouchableOpacity, RNGH
-    // BaseButton, pressto. Falls back to a coord-based synthesised
-    // UITouch when no onPress is found in the fiber tree (typically a
-    // TextInput that needs becomeFirstResponder).
-    const direct = await this.send('invokeOnPress', { testID });
-    if (direct?.success === true) return true;
-    // Native side rejected because the view is offscreen / not laid
-    // out. Don't fall back to a coord tap — synthesising a touch at an
-    // offscreen point is meaningless. Surface a clear failure so the
-    // caller can scroll first.
-    if (typeof direct?.error === 'string' && direct.error.startsWith('Element not in viewport')) {
+    } catch {
       return false;
     }
-    const center = await this.layoutCenter({ id: testID });
-    if (!center) return false;
-    // The fiber walk found the testID but no onPress — typically a
-    // TextInput. If a keyboard is up from a previously-focused field,
-    // the next tap could land on the keyboard window (which sits over
-    // the field), focus stays on the prior input, and a subsequent
-    // typeText injects characters into the wrong place. Drop the
-    // keyboard first so the target field is hit-testable.
+    // Actuation: persistent HID daemon (python idb client over a
+    // pre-warmed gRPC channel to idb_companion). Real CoreSimulator
+    // touch event — same wire format as `idb ui tap` — minus the
+    // ~250 ms python startup we'd pay per call. Falls back to
+    // spawning `idb` if the daemon is unavailable.
     try {
-      await this.send('hideKeyboard', {});
-      await new Promise((r) => setTimeout(r, 120));
+      // 120 ms tap duration matches what an average human-finger tap
+      // looks like on the simulator's IOHID layer. Shorter durations
+      // (~80 ms) work for plain Pressable but Pressto's
+      // PressableScale uses a Reanimated worklet whose pressIn →
+      // pressOut state machine wants more time to register; the
+      // delta is visible specifically on RN's `<Modal/>`-presented
+      // buttons where the dismiss never fires on the short tap.
+      await this.hidTap(center.x, center.y, isMenu ? 150 : 120);
     } catch {
-      /* best effort */
+      return false;
     }
-    const fresh = await this.layoutCenter({ id: testID });
-    const target = fresh ?? center;
-    return this.tapAtPoint(target.x, target.y);
+    if (isMenu) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return true;
   }
   async tapAt(x: number, y: number): Promise<boolean> {
     return this.tapAtPoint(x, y);
@@ -278,28 +309,58 @@ export class NitroWriter implements Writer {
       // here masked legitimate flow bugs (off-screen taps that a real
       // finger could never deliver) and let Ennio pass flows that
       // Maestro correctly failed.
-      for (let i = 0; i < 4; i++) {
+      // Wait for the UIView's window-frame to be STABLE across two
+      // consecutive reads (~50 ms apart) WITH centre inside the visible
+      // viewport. Stability tolerance is 2 px. If the element is found
+      // but off-screen, drive a scrollTo to bring it into view —
+      // Maestro/XCUI does this implicitly via scrollToVisible, so for
+      // parity we do the same; users get to write yaml without
+      // boilerplate scroll commands before every off-screen tap.
+      let lastCoord: { x: number; y: number } | null = null;
+      let lastOnScreen = false;
+      let didScroll = false;
+      for (let i = 0; i < 30; i++) {
         const r = await this.send('getViewWindowFrame', { testID: selector.id });
         const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
         if (data && data.width > 0 && data.height > 0) {
           const cx = data.x + data.width / 2;
           const cy = data.y + data.height / 2;
           const onScreen = cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height;
-          if (onScreen) {
+          if (!onScreen) {
+            if (!didScroll) {
+              // Off-screen — scrollIntoView via enclosing UIScrollView
+              // (Maestro parity). Native scrollTo walks up to find the
+              // scroll view, sets contentOffset to put the element in
+              // viewport. Only attempt once; if it still doesn't help
+              // the caller needs a real scrollUntilVisible.
+              didScroll = true;
+              try {
+                await this.send('scrollTo', {
+                  scrollViewTestID: '',
+                  elementTestID: selector.id,
+                });
+              } catch {
+                /* best effort */
+              }
+              await new Promise((res) => setTimeout(res, 200));
+              continue;
+            }
+            return null;
+          }
+          if (lastCoord && Math.abs(lastCoord.x - cx) < 2 && Math.abs(lastCoord.y - cy) < 2) {
             if (process.env.ENNIO_DEBUG_IDB) {
               console.error(
-                `[layout] id=${selector.id} → window=(${data.x},${data.y},${data.width},${data.height})`,
+                `[layout] id=${selector.id} stable → window=(${data.x},${data.y},${data.width},${data.height}) iter=${i}`,
               );
             }
             return { x: cx, y: cy };
           }
-          // UIView found but its centre lies outside the visible viewport.
-          // Refuse — the caller is expected to scroll first.
-          return null;
+          lastCoord = { x: cx, y: cy };
+          lastOnScreen = true;
         }
-        await new Promise((res) => setTimeout(res, 100));
+        await new Promise((res) => setTimeout(res, 50));
       }
-      return null;
+      return lastOnScreen ? lastCoord : null;
     }
     // Compound / text-only selectors: walk the Fabric shadow tree, then
     // add the React surface's window offset.
@@ -323,71 +384,98 @@ export class NitroWriter implements Writer {
     };
   }
   async doubleTap(testID: string): Promise<boolean> {
-    // Native Nitro doubleTap chains two taps with the right inter-tap
-    // gap UIKit's tap-count recogniser expects (~120 ms). Cheaper than
-    // two coord taps.
-    const r = await this.send('doubleTap', { testID });
-    if (r?.success === true) return true;
+    // Two real iOS HID taps with the inter-tap gap UIKit's
+    // tap-count recogniser expects (~120 ms). Same path as tap() —
+    // real touches drive gesture recognizers; no JSI shortcut.
     const c = await this.layoutCenter({ id: testID });
     if (!c) return false;
-    await this.tapAtPoint(c.x, c.y);
-    await new Promise((r) => setTimeout(r, 80));
-    await this.tapAtPoint(c.x, c.y);
+    await this.hidTap(c.x, c.y, 50);
+    await new Promise((r) => setTimeout(r, 120));
+    await this.hidTap(c.x, c.y, 50);
+    await new Promise((r) => setTimeout(r, 100));
     return true;
   }
   async longPress(testID: string, durationMs: number): Promise<boolean> {
-    // Pressables that declare only onLongPress (no onPress) won't respond
-    // to a synthesised UITouch — UIKit dispatches no Began→long-Ended
-    // sequence, and the native long-press helper can't recognise the
-    // intended gesture. Direct fiber dispatch falls through to onLongPress
-    // when no onPress is wired (see kFiberWalkerSource), so try that
-    // first; only fall back to the native helper for elements where the
-    // fiber walk can't find a handler.
-    const direct = await this.send('invokeOnPress', { testID });
-    if (direct?.success === true) return true;
-    const r = await this.send('longPress', { testID, durationMs });
-    if (r?.success === true) return true;
+    // Real iOS HID touch with extended press duration. Drives
+    // UILongPressGestureRecognizer + RNGH long-press handlers the same
+    // way a real finger does. No JSI shortcut — fiber-dispatch onPress
+    // bypasses gesture state machines and silently masks layout bugs.
     const c = await this.layoutCenter({ id: testID });
     if (!c) return false;
-    return this.tapAtPoint(c.x, c.y);
+    await this.hidTap(c.x, c.y, durationMs);
+    await new Promise((r) => setTimeout(r, 100));
+    return true;
   }
   async typeText(testID: string | null, text: string): Promise<boolean> {
-    // Nitro's typeText finds the TextInput by testID and calls
-    // `insertText:` directly on the UITextInput protocol. No HID, no
-    // pre-tap to focus, no per-character latency.
+    // Focus the target first (real HID tap → first-responder). Then
+    // dispatch the text either via idb's keyboard injection (real
+    // keystrokes, fires onChangeText per char, validators see input
+    // as a user would) or via pasteboard (whole-string commit, no
+    // per-key fidelity, but reliable for any character).
+    //
+    // idb's `ui text` drives the simulator's IOHID layer with US-
+    // layout assumptions; characters that need the Shift modifier
+    // (`@`, `?`, `&`, etc.) come out wrong on layouts where those
+    // glyphs sit elsewhere. Detect those and switch to the
+    // pasteboard path so RHF/zod/etc see the actual text we asked
+    // for. Plain ASCII letters/digits/space/`.,_-` stay on the
+    // keyboard path so per-char validators still fire.
     if (testID) {
-      const r = await this.send('typeText', { testID, text });
-      if (r?.success === true) return true;
+      const c = await this.layoutCenter({ id: testID });
+      if (!c) return false;
+      await this.hidTap(c.x, c.y, 50);
+      await this.client.waitForCommit(200);
     }
-    // Fallback: tap-anywhere targeting via clipboard paste. Nitro
-    // exposes copyToClipboard + pasteFromClipboard; the latter pastes
-    // into whichever field is first responder. Used when the testID
-    // doesn't resolve to a Fabric TextInput (e.g. the runner already
-    // focused a field via tap and just calls typeText with null id).
-    if (!testID) {
-      await this.send('copyToClipboard', { text });
-      const r = await this.send('pasteFromClipboard', { testID: '' });
-      return r?.success === true;
+    const keyboardSafe = /^[a-zA-Z0-9 .,_\-+/=:;]*$/.test(text);
+    if (!keyboardSafe) {
+      // Pasteboard path: drop the string onto the system pasteboard
+      // then ask native to read it back and dispatch via insertText:
+      // on the testID-bearing input. insertText: doesn't depend on
+      // keyboard layout, so `@`, `?`, etc. land as themselves.
+      // Requires a testID for the destination — without one, we
+      // can't address an input. Fall through to the idb path in
+      // that case (best-effort).
+      if (testID) {
+        await this.setClipboard(text);
+        await this.send('pasteFromClipboard', { testID });
+        await new Promise((r) => setTimeout(r, 100));
+        return true;
+      }
     }
-    return false;
+    await idb.ensureCompanion();
+    await idb.typeText(text);
+    await new Promise((r) => setTimeout(r, 100));
+    return true;
   }
   async clearText(testID: string): Promise<boolean> {
-    const r = await this.send('clearText', { testID });
-    return r?.success === true;
+    // Focus + select-all + delete via HID. Roughly equivalent to
+    // Nitro's clearText but uses real keystrokes for parity with
+    // Maestro semantics.
+    const c = await this.layoutCenter({ id: testID });
+    if (!c) return false;
+    await this.hidTap(c.x, c.y, 50);
+    await this.client.waitForCommit(200);
+    // Erase up to 100 chars — large enough for typical form fields.
+    for (let i = 0; i < 100; i++) {
+      await idb.pressKey(42);
+    }
+    await new Promise((r) => setTimeout(r, 100));
+    return true;
   }
   async eraseText(testID: string | null, count: number): Promise<boolean> {
-    // Single round-trip: Nitro's eraseText loops deleteBackward N times
-    // on the resolved UITextInput. Replaces N idb HID key presses.
+    // Real backspace via idb HID, count times. Focus the field first
+    // if a testID was given.
     if (testID) {
-      const r = await this.send('eraseText', { testID, count });
-      if (r?.success === true) return true;
+      const c = await this.layoutCenter({ id: testID });
+      if (!c) return false;
+      await this.hidTap(c.x, c.y, 50);
+      await this.client.waitForCommit(200);
     }
-    // No testID — drive backspace against the current first responder.
-    // pressHardwareKey(42) maps to deleteBackward via UIKeyInput.
+    await idb.ensureCompanion();
     for (let i = 0; i < count; i++) {
-      const r = await this.send('pressHardwareKey', { keyCode: 42 });
-      if (r?.success !== true) return i > 0;
+      await idb.pressKey(42);
     }
+    await new Promise((r) => setTimeout(r, 100));
     return true;
   }
   async pressKey(_testID: string | null, keyName: string): Promise<boolean> {
@@ -402,8 +490,10 @@ export class NitroWriter implements Writer {
     };
     const code = map[keyName.toLowerCase()];
     if (code === undefined) return false;
-    const r = await this.send('pressHardwareKey', { keyCode: code });
-    return r?.success === true;
+    await idb.ensureCompanion();
+    await idb.pressKey(code);
+    await this.client.waitForCommit(200);
+    return true;
   }
   async scroll(
     testID: string | null,
@@ -463,6 +553,35 @@ export class NitroWriter implements Writer {
   ): Promise<boolean> {
     return this.scroll(testID, direction, distance);
   }
+  async swipeAt(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    durationMs: number,
+  ): Promise<boolean> {
+    if (process.env.ENNIO_DEBUG_IDB)
+      console.error(`[swipeAt] (${x1},${y1})→(${x2},${y2}) ${durationMs}ms`);
+    // Hot path: persistent HID daemon over the pre-warmed gRPC channel
+    // to idb_companion (~5 ms). Mirrors hidTap; avoids the ~250 ms
+    // `idb ui swipe` fork-per-call. Fall back to spawning `idb` if the
+    // daemon is unavailable, then to in-app UITouchPhaseMoved dispatch.
+    try {
+      await hid.swipe(x1, y1, x2, y2, durationMs);
+      return true;
+    } catch (e) {
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[swipeAt] daemon failed: ${(e as Error).message}, fallback`);
+    }
+    try {
+      await idb.swipe(x1, y1, x2, y2, durationMs);
+      return true;
+    } catch (e) {
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[swipeAt] idb failed: ${(e as Error).message}, fallback`);
+    }
+    return this.swipeAtPoints(x1, y1, x2, y2, durationMs);
+  }
   async scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean> {
     const r = await this.send('scrollTo', { scrollViewTestID, elementTestID });
     return r?.success === true;
@@ -517,61 +636,76 @@ export class NitroWriter implements Writer {
     }
     return true;
   }
-  async tapByText(text: string): Promise<boolean> {
-    // expo-router NativeTabs renders tab bar items via UIKit/SwiftUI
-    // hosts whose UIView subtree isn't surfaced for accessibility-label
-    // walks (UITabBarButton stays opaque). Drive the UITabBarController
-    // directly before falling back to coordinate taps.
+  async tapByText(text: string, opts: { fast?: boolean } = {}): Promise<boolean> {
+    // Maestro-parity tap-by-text: locate via the iOS accessibility tree
+    // (catches UITabBar / UIAlert / out-of-process UIMenu items the
+    // React fiber tree never sees) AND the React fiber tree (catches
+    // labelled views inside the app process). Tap the resolved coord
+    // via idb HID — real touch, real hit-test, real responder chain.
+    await idb.ensureCompanion();
+    // 1) UITabBarController shortcut FIRST. When the text matches a
+    //    tab name, this is unambiguous and fast — switches the active
+    //    tab directly. Avoids the failure mode where AX-label search
+    //    latches onto stale "Cart" header text in a stack-pushed
+    //    screen of an inactive tab (cart tab keeps its UIViews mounted
+    //    behind the Products tab; their AX labels stay queryable but
+    //    tapping them does nothing).
     const tab = await this.send('tapTabByName', { name: text });
-    if (process.env.ENNIO_DEBUG_IDB)
-      console.error(`[tapByText] '${text}' tabSwitch=${tab?.success}`);
-    if (tab?.success === true) return true;
-    // Fiber-walker dispatch. Finds the React fiber whose RawText
-    // matches `text`, walks .return to the surrounding Pressable, and
-    // calls onPress directly. Necessary for RNGH BaseButton (pressto
-    // PressableScale) — its pan/tap recogniser refuses synthesised
-    // UITouches, so the coord-tap path below never fires onPress.
-    const fiber = await this.send('invokeOnPressByText', { text });
-    if (fiber?.success === true) return true;
-    // Coord-based tap at the matched label's centre. The Nitro
-    // `tapAtPoint` chain handles every touch class we can reach in
-    // process: UIControl with TouchUpInside actions, RNBetterTapGestureRecognizer
-    // (state-drive Began → Ended), plain UITapGestureRecognizer,
-    // synthesised UITouch fallback. RNGH's NativeViewGestureHandler
-    // (used by pressto's PressableScale) attaches its
-    // RNDummyGestureRecognizer on the RNGestureHandlerManager, not in
-    // any individual view — so we mirror with idb HID for those.
+    if (tab?.success === true) {
+      // Minimal settle — prepareTap on the next tap does its own
+      // stable-coord + hit-test verify polling so it can wait out the
+      // first-commit gap on the destination tab.
+      await new Promise((r) => setTimeout(r, 100));
+      return true;
+    }
+    // 2) Accessibility-label query inside the app's UIView tree (incl.
+    //    UITabBarButton labels — expo-router NativeTabs route through
+    //    UIKit hosts that surface their tab title as the AX label).
     const r = await this.send('getViewWindowFrameByLabel', { text });
     const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
     if (data && data.width > 0 && data.height > 0) {
       const cx = data.x + data.width / 2;
       const cy = data.y + data.height / 2;
-      if (await this.tapAtPoint(cx, cy)) {
-        try {
-          await idb.tap(cx, cy, 150);
-        } catch {
-          /* best effort */
-        }
-        return true;
-      }
+      await this.hidTap(cx, cy, 50);
+      await new Promise((r) => setTimeout(r, 100));
+      return true;
     }
+    // 3) Fiber-text walk — for elements whose label is JSX text but
+    //    whose accessibilityLabel isn't set on the host view.
     const c = await this.layoutCenter({ text });
     if (c) {
-      if (await this.tapAtPoint(c.x, c.y)) {
-        try {
-          await idb.tap(c.x, c.y, 150);
-        } catch {
-          /* best effort */
-        }
+      await this.hidTap(c.x, c.y, 50);
+      await new Promise((r) => setTimeout(r, 100));
+      return true;
+    }
+    // Tiers 4-5 are expensive (~3 s idb describe-all + ~10-20 s
+    // maestro hierarchy/WDA). Skip them for `optional` taps where the
+    // caller already accepts failure — burning 20 s on every probe
+    // tap that's expected to miss is the slowest single line in any
+    // flow that uses `optional: true` as a feature-detect.
+    if (opts.fast) return false;
+    // 4) Out-of-process accessibility tree (idb describe-all) — broken
+    //    on iOS 26, kept for older sims as a last resort.
+    try {
+      if (await idb.tapByLabelOOP(text)) {
+        await new Promise((r) => setTimeout(r, 100));
         return true;
       }
+    } catch {
+      /* best effort */
     }
-    // Last resort: walk the simulator's whole-OS accessibility tree via
-    // `idb describe-all`. Reaches UI outside the app process — SpringBoard
-    // system alerts (iOS 26's deep-link confirmation), system pickers,
-    // out-of-process zeego UIMenu items.
+    // 5) iOS-26 AX-tree fallback via maestro hierarchy → WebDriverAgent.
+    //    Slow (~1-2 s) but the only working path for native UIMenu
+    //    items (zeego DropdownMenu choices), system pickers, and
+    //    SpringBoard alerts on iOS 26. Drops out once idb_companion
+    //    or a bundled WDA helper supports iOS 26 directly.
     try {
-      if (await idb.tapByLabelOOP(text)) return true;
+      const h = await hierarchy.findByText(text);
+      if (h) {
+        await this.hidTap(h.cx, h.cy, 50);
+        await new Promise((r) => setTimeout(r, 100));
+        return true;
+      }
     } catch {
       /* best effort */
     }

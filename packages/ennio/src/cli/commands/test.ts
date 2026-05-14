@@ -12,7 +12,7 @@ import { parseMaestroFile } from '../maestro-parser';
 import { NitroWriter, type Writer } from '../writer';
 import { NitroReader, type Reader } from '../reader';
 import type { EnnioClient } from '../client';
-import { connectOrLaunch, DEFAULT_WS_PORT } from '../cli/bootstrap';
+import { connectOrLaunch } from '../cli/bootstrap';
 import type { Flags } from '../cli/args';
 
 function isMaestroFile(filePath: string): boolean {
@@ -72,7 +72,6 @@ async function runTestFile(
 }
 
 export async function runTestCommand(positional: string[], flags: Flags): Promise<number> {
-  const port = flags.port ?? DEFAULT_WS_PORT;
   const verbose = flags.verbose ?? false;
   const trace = flags.trace ?? false;
 
@@ -96,12 +95,12 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     /* tolerate; bootstrap will surface */
   }
 
-  const result = await connectOrLaunch({ port, appId });
+  const result = await connectOrLaunch({ appId });
   if (!result.ok) {
     console.error(result.reason);
     return 1;
   }
-  console.log(`(Connected via WebSocket on port ${port})\n`);
+  console.log(`(Connected via Hermes Inspector)\n`);
 
   let writer: Writer = new NitroWriter(result.client);
   let reader: Reader = new NitroReader(result.client);
@@ -111,7 +110,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   let totalFailed = 0;
   try {
     for (const file of files) {
-      const r = await runTestFile(currentClient, writer, reader, file, { verbose, trace, port });
+      const r = await runTestFile(currentClient, writer, reader, file, { verbose, trace });
       totalPassed += r.passed;
       totalFailed += r.failed;
       if (r.client) {

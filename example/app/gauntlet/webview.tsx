@@ -5,7 +5,7 @@ import { useState } from 'react';
 export default function WebViewScreen() {
   const [loaded, setLoaded] = useState(false);
   return (
-    <View style={{ flex: 1 }} testID="webview-screen">
+    <View style={styles.container} testID="webview-screen">
       <Text style={styles.title}>WebView test</Text>
       <View style={{ flex: 1 }}>
         <WebView
@@ -24,6 +24,7 @@ export default function WebViewScreen() {
 }
 
 const styles = StyleSheet.create({
+  container: { flex: 1, paddingBottom: 60 },
   title: { fontSize: 22, fontWeight: '600', padding: 16 },
   loaded: { padding: 12, color: '#34C759', textAlign: 'center' },
 });

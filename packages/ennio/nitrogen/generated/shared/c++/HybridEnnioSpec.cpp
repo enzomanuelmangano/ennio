@@ -14,12 +14,7 @@ namespace margelo::nitro::ennio {
     HybridObject::loadHybridMethods();
     // load custom methods/properties
     registerHybrids(this, [](Prototype& prototype) {
-      prototype.registerHybridMethod("startServer", &HybridEnnioSpec::startServer);
-      prototype.registerHybridMethod("stopServer", &HybridEnnioSpec::stopServer);
-      prototype.registerHybridMethod("isServerRunning", &HybridEnnioSpec::isServerRunning);
-      prototype.registerHybridMethod("findByTestID", &HybridEnnioSpec::findByTestID);
       prototype.registerHybridMethod("exists", &HybridEnnioSpec::exists);
-      prototype.registerHybridMethod("getLayoutMetrics", &HybridEnnioSpec::getLayoutMetrics);
       prototype.registerHybridMethod("isVisible", &HybridEnnioSpec::isVisible);
       prototype.registerHybridMethod("getText", &HybridEnnioSpec::getText);
       prototype.registerHybridMethod("waitForIdle", &HybridEnnioSpec::waitForIdle);
@@ -33,32 +28,16 @@ namespace margelo::nitro::ennio {
       prototype.registerHybridMethod("isAlertPresent", &HybridEnnioSpec::isAlertPresent);
       prototype.registerHybridMethod("getAlertText", &HybridEnnioSpec::getAlertText);
       prototype.registerHybridMethod("getAlertButtons", &HybridEnnioSpec::getAlertButtons);
-      prototype.registerHybridMethod("tap", &HybridEnnioSpec::tap);
-      prototype.registerHybridMethod("tapByLabel", &HybridEnnioSpec::tapByLabel);
-      prototype.registerHybridMethod("doubleTap", &HybridEnnioSpec::doubleTap);
-      prototype.registerHybridMethod("longPress", &HybridEnnioSpec::longPress);
-      prototype.registerHybridMethod("typeText", &HybridEnnioSpec::typeText);
-      prototype.registerHybridMethod("clearText", &HybridEnnioSpec::clearText);
-      prototype.registerHybridMethod("eraseText", &HybridEnnioSpec::eraseText);
-      prototype.registerHybridMethod("pressKey", &HybridEnnioSpec::pressKey);
       prototype.registerHybridMethod("scroll", &HybridEnnioSpec::scroll);
-      prototype.registerHybridMethod("swipe", &HybridEnnioSpec::swipe);
       prototype.registerHybridMethod("scrollTo", &HybridEnnioSpec::scrollTo);
       prototype.registerHybridMethod("swipeAtPoints", &HybridEnnioSpec::swipeAtPoints);
       prototype.registerHybridMethod("pressHardwareKey", &HybridEnnioSpec::pressHardwareKey);
-      prototype.registerHybridMethod("tapTab", &HybridEnnioSpec::tapTab);
       prototype.registerHybridMethod("backGesture", &HybridEnnioSpec::backGesture);
       prototype.registerHybridMethod("hideKeyboard", &HybridEnnioSpec::hideKeyboard);
-      prototype.registerHybridMethod("tapBySelector", &HybridEnnioSpec::tapBySelector);
-      prototype.registerHybridMethod("doubleTapBySelector", &HybridEnnioSpec::doubleTapBySelector);
-      prototype.registerHybridMethod("longPressBySelector", &HybridEnnioSpec::longPressBySelector);
-      prototype.registerHybridMethod("typeTextBySelector", &HybridEnnioSpec::typeTextBySelector);
-      prototype.registerHybridMethod("clearTextBySelector", &HybridEnnioSpec::clearTextBySelector);
       prototype.registerHybridMethod("tapAlertButton", &HybridEnnioSpec::tapAlertButton);
       prototype.registerHybridMethod("dismissAlert", &HybridEnnioSpec::dismissAlert);
       prototype.registerHybridMethod("copyToClipboard", &HybridEnnioSpec::copyToClipboard);
       prototype.registerHybridMethod("pasteFromClipboard", &HybridEnnioSpec::pasteFromClipboard);
-      prototype.registerHybridMethod("getClipboardText", &HybridEnnioSpec::getClipboardText);
     });
   }
 

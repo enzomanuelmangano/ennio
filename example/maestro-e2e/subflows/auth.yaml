@@ -3,7 +3,11 @@
 appId: com.ennio.example
 
 ---
-# Demo login — optional taps so subflow no-ops when already logged in.
-- tapOn:
-    id: 'demo-login-btn'
-    optional: true
+# Demo login — conditional so subflow no-ops when already logged in.
+- runFlow:
+    when:
+      visible:
+        id: 'demo-login-btn'
+    commands:
+      - tapOn:
+          id: 'demo-login-btn'

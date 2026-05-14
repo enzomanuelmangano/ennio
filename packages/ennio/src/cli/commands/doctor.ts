@@ -3,9 +3,8 @@
  *
  * Checks, in order:
  *   1. Booted iOS simulator (or ENNIO_UDID)
- *   2. idb_companion connected (used for OOP a11y fallbacks)
- *   3. WebSocket reachable on the configured port
- *   4. (if both) ping → pong roundtrip
+ *   2. idb_companion connected (used for HID actuation + a11y fallbacks)
+ *   3. Hermes Inspector reachable (Metro on :8081, app exposes JS context)
  *
  * Each check prints `[PASS]` / `[FAIL]` + a one-line cause. Exit code is
  * 0 only when every check passes.
@@ -13,13 +12,12 @@
 
 import { execSync } from 'child_process';
 import { getBootedSimulatorId } from '../maestro-runner';
-import { tryWebSocketConnection, DEFAULT_WS_PORT } from '../cli/bootstrap';
+import { tryConnection } from '../cli/bootstrap';
 import type { Flags } from '../cli/args';
 
 type Result = { name: string; ok: boolean; detail: string };
 
-export async function runDoctorCommand(_positional: string[], flags: Flags): Promise<number> {
-  const port = flags.port ?? DEFAULT_WS_PORT;
+export async function runDoctorCommand(_positional: string[], _flags: Flags): Promise<number> {
   const results: Result[] = [];
 
   const udid = getBootedSimulatorId();
@@ -49,13 +47,13 @@ export async function runDoctorCommand(_positional: string[], flags: Flags): Pro
   }
   results.push({ name: 'idb_companion', ok: idbOk, detail: idbDetail });
 
-  const client = await tryWebSocketConnection(port);
+  const client = await tryConnection();
   results.push({
-    name: `WebSocket :${port}`,
+    name: 'Hermes Inspector',
     ok: !!client,
     detail: client
       ? 'connected'
-      : 'no listener — launch the app, confirm ennio wired + ENNIO_ENABLED=1 at pod install',
+      : 'no JS context — launch a Debug build, confirm Metro is running, confirm ennio-expo-plugin was applied at last prebuild',
   });
   if (client) client.disconnect();
 

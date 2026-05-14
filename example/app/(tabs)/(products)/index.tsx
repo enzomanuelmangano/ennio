@@ -133,34 +133,40 @@ function SortDropdown({
   };
 
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <Pressable
-          style={styles.sortButton}
-          testID="sort-dropdown"
-          accessibilityIdentifier="sort-dropdown"
-          accessible
-        >
-          <View style={styles.sortButtonInner} pointerEvents="none">
-            <Text style={styles.sortButtonText}>{selectedLabel}</Text>
-            <Ionicons name="chevron-down" size={14} color={theme.colors.text.muted} />
+    // Outer wrapper carries the testID + accessibilityIdentifier so Maestro's
+    // iOS accessibility-tree lookup can find the trigger. Zeego's
+    // DropdownMenu.Trigger asChild renders the inner View inside a native
+    // RNIContextMenuButton (UIButton) host whose accessibilityIdentifier
+    // is set by the React Native fabric descriptor and does NOT propagate
+    // the inner child View's testID. The wrapper has no onPress; a tap on
+    // it falls through UIKit hit-testing to the UIButton, which opens the
+    // menu. Ennio's isMenuTriggerAncestor walks descendants from this
+    // outer wrapper to find the UIButton.menu.
+    <View testID="sort-dropdown" accessibilityIdentifier="sort-dropdown" accessible>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <View style={styles.sortButton}>
+            <View style={styles.sortButtonInner} pointerEvents="none">
+              <Text style={styles.sortButtonText}>{selectedLabel}</Text>
+              <Ionicons name="chevron-down" size={14} color={theme.colors.text.muted} />
+            </View>
           </View>
-        </Pressable>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Content>
-        <DropdownMenu.Label>Sort by</DropdownMenu.Label>
-        {SORT_OPTIONS.map((o) => (
-          <DropdownMenu.CheckboxItem
-            key={o.value}
-            value={value === o.value ? 'on' : 'off'}
-            onValueChange={() => handleSelect(o.value)}
-          >
-            <DropdownMenu.ItemTitle>{o.label}</DropdownMenu.ItemTitle>
-            <DropdownMenu.ItemIndicator />
-          </DropdownMenu.CheckboxItem>
-        ))}
-      </DropdownMenu.Content>
-    </DropdownMenu.Root>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content>
+          <DropdownMenu.Label>Sort by</DropdownMenu.Label>
+          {SORT_OPTIONS.map((o) => (
+            <DropdownMenu.CheckboxItem
+              key={o.value}
+              value={value === o.value ? 'on' : 'off'}
+              onValueChange={() => handleSelect(o.value)}
+            >
+              <DropdownMenu.ItemTitle>{o.label}</DropdownMenu.ItemTitle>
+              <DropdownMenu.ItemIndicator />
+            </DropdownMenu.CheckboxItem>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    </View>
   );
 }
 
@@ -262,6 +268,7 @@ export default function ProductsScreen() {
       testID="products-list"
       accessibilityLabel="products-screen"
       contentInsetAdjustmentBehavior="automatic"
+      keyboardShouldPersistTaps="handled"
       ListHeaderComponent={ListHeader}
       ListEmptyComponent={
         <View style={styles.emptyState} testID="no-products">

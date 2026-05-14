@@ -10,6 +10,10 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <chrono>
+#include <cmath>
+#include <sstream>
+#include <thread>
 
 // Timeout for main thread dispatch (5 seconds)
 static const int64_t MAIN_THREAD_TIMEOUT_NS = 5 * NSEC_PER_SEC;
@@ -451,6 +455,14 @@ static BOOL tryUIControlChain(UIView* hit) {
 // does on real HID — walk up invoking any tap-class GR's target directly.
 static BOOL tryAncestorTapGestures(UIView* hit) {
     for (UIView* cursor = hit; cursor != nil; cursor = cursor.superview) {
+        if (cursor.gestureRecognizers.count > 0) {
+            NSMutableString* dump = [NSMutableString string];
+            for (UIGestureRecognizer* gr in cursor.gestureRecognizers) {
+                [dump appendFormat:@"%@(%ld) ", NSStringFromClass([gr class]), (long)gr.state];
+            }
+            NSLog(@"[Ennio] tryAncestorTapGestures view=%@ recognizers=[%@]",
+                  NSStringFromClass([cursor class]), dump);
+        }
         if (invokeTapGestureRecognizers(cursor)) return YES;
     }
     return NO;
@@ -499,7 +511,13 @@ static BOOL tryRNGestureHandlerDirect(UIView* hit, UIWindow* window, UIEvent* ev
         for (UIGestureRecognizer* gr in cursor.gestureRecognizers) {
             if (!gr.enabled) continue;
             NSString* clsName = NSStringFromClass([gr class]);
-            if (![clsName hasPrefix:@"RNDummy"] && ![clsName hasPrefix:@"RNNative"]) continue;
+            // RNGH 2.x recognizer prefixes:
+            //   RNDummyGestureRecognizer / RNNativeViewGestureRecognizer — wraps a base RN view.
+            //   RN<Type>GestureHandler — direct Gesture.Tap() / Gesture.Pan() etc.
+            //   RNGestureHandlerButton — RNGH's Button wrapper.
+            // Widened from {RNDummy, RNNative} so Gesture.Tap() on a bare
+            // View (no Pressable wrapper) routes through this path.
+            if (![clsName hasPrefix:@"RN"]) continue;
             @try {
                 if ([gr respondsToSelector:@selector(touchesBegan:withEvent:)]) {
                     [gr touchesBegan:touchSet withEvent:event];
@@ -644,6 +662,28 @@ static BOOL invokeTapGestureRecognizers(UIView* view) {
                 continue;
             } @catch (NSException* e) {
                 NSLog(@"[Ennio] state-drive %@: %@", NSStringFromClass([gr class]), e.reason);
+            }
+        }
+        // RNGH 2.x exposes a public `triggerAction` on every RN* tap
+        // recogniser that bypasses the UIKit state machine and fires
+        // `handleGesture:fromReset:` on the wrapping RNGestureHandler.
+        // That's the only path that delivers a tap event into the JS
+        // event chain for Gesture.Tap() on a bare View (no Pressable
+        // wrapper, no UIControl). State-drive alone leaves the gesture
+        // handler in Possible because RN's pointer tracker never saw
+        // a touchesBegan, so JS `onEnd` is never resolved.
+        NSString* grClassName = NSStringFromClass([gr class]);
+        if ([grClassName hasPrefix:@"RN"] &&
+            [gr respondsToSelector:NSSelectorFromString(@"triggerAction")]) {
+            @try {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [gr performSelector:NSSelectorFromString(@"triggerAction")];
+                #pragma clang diagnostic pop
+                fired = YES;
+                continue;
+            } @catch (NSException* e) {
+                NSLog(@"[Ennio] triggerAction %@: %@", grClassName, e.reason);
             }
         }
         // Fallback for unrecognised tap-class GRs: walk `_targets` and
@@ -793,12 +833,9 @@ static UIView* findViewByTestID(UIView* root, NSString* testID) {
     if (!root || root.hidden) return nil;
     if (root.accessibilityElementsHidden) return nil;
     if ([root.accessibilityIdentifier isEqualToString:testID]) {
-        // Reject matches inside inactive VC chains (pushed-under
-        // react-native-screens frames, deselected tabs, presented-modal
-        // underlay). Without this, taps fire on stale UIViews that no
-        // longer drive the live React state and assertions pass against
-        // ghost elements the user can't see.
-        if (!isViewInActiveVCChain(root)) return nil;
+        if (!isViewInActiveVCChain(root)) {
+            return nil;
+        }
         return root;
     }
     for (UIView* sub in root.subviews) {
@@ -1055,6 +1092,8 @@ bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
         UIView* view = findViewByTestIDInAllWindows(tid);
         if (!view) return;
         if (@available(iOS 14.0, *)) {
+            // Walk up: testID may sit on the asChild child of zeego's
+            // DropdownMenu.Trigger; the UIButton.menu host is its superview.
             for (UIView* cursor = view; cursor; cursor = cursor.superview) {
                 if (![cursor isKindOfClass:[UIButton class]]) continue;
                 UIButton* b = (UIButton*)cursor;
@@ -1062,6 +1101,22 @@ bool EnnioRuntimeHelper::isMenuTriggerAncestor(const std::string& testID) {
                     isMenuTrigger = true;
                     return;
                 }
+            }
+            // Walk down: testID may sit on an outer wrapper View hoisted
+            // above DropdownMenu.Root so Maestro can see it in the iOS
+            // accessibility tree. Find the UIButton.menu in the subtree.
+            NSMutableArray<UIView*>* stack = [NSMutableArray arrayWithObject:view];
+            while (stack.count > 0) {
+                UIView* cur = stack.lastObject;
+                [stack removeLastObject];
+                if ([cur isKindOfClass:[UIButton class]]) {
+                    UIButton* b = (UIButton*)cur;
+                    if (b.menu && b.showsMenuAsPrimaryAction) {
+                        isMenuTrigger = true;
+                        return;
+                    }
+                }
+                for (UIView* sub in cur.subviews) [stack addObject:sub];
             }
         }
     };
@@ -1166,6 +1221,103 @@ bool EnnioRuntimeHelper::tapAtScreenPoint(double x, double y) {
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return ok;
+}
+
+std::string EnnioRuntimeHelper::prepareTap(const std::string& testID, double screenW, double screenH) {
+    // Stable-coord poll + auto-scroll fallback + UIMenu check, all in
+    // one JSI call. CLI-side `layoutCenter` previously did this via
+    // ~5-10 separate CDP round trips; batching cuts the CDP overhead
+    // for the hottest yaml verb. The actual tap stays on the CLI side
+    // through idb HID — UITouch synth doesn't reliably fire RNGH-wrapped
+    // gesture recognizers (PressableScale, RNBetterTapGestureRecognizer).
+    const int maxIters = 100;
+    const int probeSleepMs = 20;
+    double lastCx = 0, lastCy = 0;
+    bool haveLast = false;
+    bool didScroll = false;
+    double finalCx = 0, finalCy = 0;
+    bool foundStable = false;
+    for (int i = 0; i < maxIters; i++) {
+        auto frame = getViewWindowFrame(testID);
+        double fx = std::get<0>(frame), fy = std::get<1>(frame);
+        double fw = std::get<2>(frame), fh = std::get<3>(frame);
+        if (fw > 0 && fh > 0) {
+            double cx = fx + fw / 2.0;
+            double cy = fy + fh / 2.0;
+            bool onScreen = (cx >= 0 && cx <= screenW && cy >= 0 && cy <= screenH);
+            if (!onScreen) {
+                if (!didScroll) {
+                    didScroll = true;
+                    scrollTo(std::string(), testID);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    continue;
+                }
+                return "";  // Off-screen even after scroll attempt.
+            }
+            if (haveLast && std::abs(lastCx - cx) < 2.0 && std::abs(lastCy - cy) < 2.0) {
+                // Coord-stable. Now verify a hit-test at the centre actually
+                // resolves to the testID's view (or a descendant). During a
+                // UIKit stack-push transition the destination Pressable's
+                // frame is reported stable in window coords, but the
+                // responder chain isn't bound yet — the topmost view at
+                // (cx, cy) is the still-fading source screen. Tapping there
+                // misses. Hit-test reflects the real interaction graph.
+                __block bool hitOk = false;
+                void (^hitBlock)(void) = ^{
+                    UIView* target = findViewByTestIDInAllWindows(
+                        [NSString stringWithUTF8String:testID.c_str()]);
+                    if (!target || !target.window) return;
+                    UIWindow* win = target.window;
+                    CGPoint p = CGPointMake((CGFloat)cx, (CGFloat)cy);
+                    UIView* top = [win hitTest:p withEvent:nil];
+                    if (!top) return;
+                    // Strict: top must be target itself or a descendant.
+                    // The deepest hit-tested view is whichever React leaf
+                    // (icon glyph, text, container) sits at the point —
+                    // walk up to the target Pressable. Reject if the
+                    // walk hits a UIKit wrapper or a sibling first; that
+                    // means a real touch would be delivered somewhere
+                    // else, not to the testID we resolved.
+                    for (UIView* cursor = top; cursor; cursor = cursor.superview) {
+                        if (cursor == target) { hitOk = true; return; }
+                    }
+                };
+                if ([NSThread isMainThread]) hitBlock(); else dispatchSyncMainWithTimeout(hitBlock);
+                if (hitOk) {
+                    finalCx = cx;
+                    finalCy = cy;
+                    foundStable = true;
+                    break;
+                }
+            }
+            lastCx = cx;
+            lastCy = cy;
+            haveLast = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(probeSleepMs));
+    }
+    if (!foundStable) {
+        // Hit-test never confirmed the testID's view as topmost.
+        // Could be:
+        //   (a) a pointerEvents="none" wrapper — the tap is expected
+        //       to fall through to whatever sits beneath (test
+        //       authors rely on this for "blocked" cases).
+        //   (b) the view is obscured by a tab bar / large title —
+        //       the tap would land on the obscuring view and fire
+        //       the wrong action.
+        // We can't distinguish (a) from (b) here, so fall through to
+        // the best-effort last-stable coord and let the CLI-side
+        // scrollUntilVisible safe-tap-zone buffer prevent (b) before
+        // a user-driven `tapOn` ever reaches this branch.
+        if (!haveLast) return "";
+        finalCx = lastCx;
+        finalCy = lastCy;
+    }
+    bool isMenu = isMenuTriggerAncestor(testID);
+    std::ostringstream oss;
+    oss << "{\"x\":" << finalCx << ",\"y\":" << finalCy
+        << ",\"isMenu\":" << (isMenu ? "true" : "false") << "}";
+    return oss.str();
 }
 
 bool EnnioRuntimeHelper::swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs) {
@@ -1708,17 +1860,25 @@ bool EnnioRuntimeHelper::pressKey(const std::string& testID, const std::string& 
 // Find the topmost user-visible UIScrollView in a window tree. Used as a
 // "scroll something on this screen" fallback when the runner doesn't
 // hand us a testID — Maestro's `scroll: direction: DOWN` semantics.
-static UIScrollView* findTopmostScrollView(UIView* root) {
+// `axis` 0 = either, 1 = horizontal-only, 2 = vertical-only.
+// Direction-aware filtering lets `swipe LEFT/RIGHT` find a horizontal
+// carousel nested under a vertical outer ScrollView (Home: featured
+// products carousel inside the page scroller). Without this filter the
+// outer vertical scroller wins and a LEFT swipe clamps to offset.x=0.
+static UIScrollView* findTopmostScrollView(UIView* root, int axis) {
     if (!root || root.hidden || root.alpha < 0.01) return nil;
     if ([root isKindOfClass:[UIScrollView class]]) {
         UIScrollView* sv = (UIScrollView*)root;
-        // Skip degenerate scroll views (zero content size, hidden).
-        if (sv.contentSize.height > sv.bounds.size.height || sv.contentSize.width > sv.bounds.size.width) {
-            return sv;
-        }
+        BOOL hScroll = sv.contentSize.width > sv.bounds.size.width;
+        BOOL vScroll = sv.contentSize.height > sv.bounds.size.height;
+        BOOL accept =
+            axis == 0 ? (hScroll || vScroll) :
+            axis == 1 ? hScroll :
+                        vScroll;
+        if (accept) return sv;
     }
     for (UIView* sub in [root.subviews reverseObjectEnumerator]) {
-        UIScrollView* hit = findTopmostScrollView(sub);
+        UIScrollView* hit = findTopmostScrollView(sub, axis);
         if (hit) return hit;
     }
     return nil;
@@ -1727,35 +1887,38 @@ static UIScrollView* findTopmostScrollView(UIView* root) {
 // testID-less scroll: pick the deepest scrollable on screen, mirroring
 // what a user would touch. Iterates windows in reverse so the most-
 // recently-presented (modal/sheet) scroll view wins over the underlying.
-static UIScrollView* findFirstVisibleScrollView() {
+static UIScrollView* findFirstVisibleScrollView(int axis) {
     for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
         if (![scene isKindOfClass:[UIWindowScene class]]) continue;
         for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
-            UIScrollView* sv = findTopmostScrollView(win);
+            UIScrollView* sv = findTopmostScrollView(win, axis);
             if (sv) return sv;
         }
     }
     return nil;
 }
 
-static UIScrollView* resolveScrollTarget(NSString* tid) {
+static UIScrollView* resolveScrollTarget(NSString* tid, int axis) {
     if (tid.length > 0) {
         UIView* view = findViewByTestIDInAllWindows(tid);
         if (view) {
             return [view isKindOfClass:[UIScrollView class]] ? (UIScrollView*)view : findEnclosingScrollView(view);
         }
     }
-    return findFirstVisibleScrollView();
+    return findFirstVisibleScrollView(axis);
 }
 
 static bool scrollImpl(NSString* tid, NSString* direction, double distance) {
     __block bool ok = false;
     void (^block)(void) = ^{
-        UIScrollView* sv = resolveScrollTarget(tid);
+        NSString* d = [direction lowercaseString];
+        int axis = ([d isEqualToString:@"left"] || [d isEqualToString:@"right"]) ? 1
+                 : ([d isEqualToString:@"up"]   || [d isEqualToString:@"down"])  ? 2
+                 : 0;
+        UIScrollView* sv = resolveScrollTarget(tid, axis);
         if (!sv) return;
         CGPoint offset = sv.contentOffset;
         CGFloat dx = 0, dy = 0;
-        NSString* d = [direction lowercaseString];
         if ([d isEqualToString:@"up"]) dy = -distance;
         else if ([d isEqualToString:@"down"]) dy = distance;
         else if ([d isEqualToString:@"left"]) dx = -distance;
@@ -1786,10 +1949,19 @@ bool EnnioRuntimeHelper::scrollTo(const std::string& scrollViewTestID, const std
     NSString* elId = [NSString stringWithUTF8String:elementTestID.c_str()];
     __block bool ok = false;
     void (^block)(void) = ^{
-        UIView* svView = findViewByTestIDInAllWindows(svId);
         UIView* elView = findViewByTestIDInAllWindows(elId);
-        if (!svView || !elView) return;
-        UIScrollView* sv = [svView isKindOfClass:[UIScrollView class]] ? (UIScrollView*)svView : findEnclosingScrollView(svView);
+        if (!elView) return;
+        UIScrollView* sv = nil;
+        if (svId.length > 0) {
+            UIView* svView = findViewByTestIDInAllWindows(svId);
+            if (!svView) return;
+            sv = [svView isKindOfClass:[UIScrollView class]] ? (UIScrollView*)svView : findEnclosingScrollView(svView);
+        } else {
+            // Empty scrollViewTestID — walk up from the element to find
+            // the closest enclosing UIScrollView. Mirrors Maestro/XCUI
+            // scrollToVisible which only needs the target.
+            sv = findEnclosingScrollView(elView);
+        }
         if (!sv) return;
         CGRect frame = [elView convertRect:elView.bounds toView:sv];
         [sv scrollRectToVisible:frame animated:NO];

@@ -2,7 +2,7 @@
 // pan-driven elements (it shouldn't tap them, but should be able to
 // query their position and assert visibility).
 
-import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { View, Text, StyleSheet } from 'react-native';
 import { useState } from 'react';
@@ -30,30 +30,28 @@ export default function PanScreen() {
   }));
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container} testID="pan-screen">
-        <Text style={styles.title}>Pan gesture (drag the box)</Text>
-        <GestureDetector gesture={pan}>
-          <Animated.View style={[styles.box, style]} testID="pan-box">
-            <Text style={styles.boxLabel}>Drag me</Text>
-          </Animated.View>
-        </GestureDetector>
-        <PressableScale
-          testID="pan-reset"
-          style={styles.button}
-          onPress={() => {
-            x.value = withSpring(0);
-            y.value = withSpring(0);
-            setResetCount((c) => c + 1);
-          }}
-        >
-          <Text style={styles.buttonText}>Reset</Text>
-        </PressableScale>
-        <Text testID="pan-reset-count" style={styles.counter}>
-          Resets: {resetCount}
-        </Text>
-      </View>
-    </GestureHandlerRootView>
+    <View style={styles.container} testID="pan-screen">
+      <Text style={styles.title}>Pan gesture (drag the box)</Text>
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[styles.box, style]} testID="pan-box">
+          <Text style={styles.boxLabel}>Drag me</Text>
+        </Animated.View>
+      </GestureDetector>
+      <PressableScale
+        testID="pan-reset"
+        style={styles.button}
+        onPress={() => {
+          x.value = withSpring(0);
+          y.value = withSpring(0);
+          setResetCount((c) => c + 1);
+        }}
+      >
+        <Text style={styles.buttonText}>Reset</Text>
+      </PressableScale>
+      <Text testID="pan-reset-count" style={styles.counter}>
+        Resets: {resetCount}
+      </Text>
+    </View>
   );
 }
 

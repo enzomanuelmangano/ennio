@@ -1,30 +1,44 @@
 /**
- * Ennio WebSocket Client
+ * Ennio CDP Client
  *
- * Connects directly to the native Ennio WebSocket server running in the
- * app. Works in both debug and release builds. Reads (queries, selectors,
- * alert state, synchronization) and writes (taps, swipes, typeText, …)
- * both flow through this single channel — the writer goes via NitroWriter
- * which forwards command names to the in-app dispatch table over WS.
+ * Drives the in-app dispatcher via Hermes Inspector — no custom WS
+ * server in the app. Connects to Metro's Inspector page at
+ * `ws://localhost:8081/inspector?device=…&page=…`, then for every
+ * `send(type, payload)`:
+ *
+ *   1. Generates a unique token.
+ *   2. Evaluates `__ennioDispatch(type, payloadJson, token)` via
+ *      `Runtime.evaluate`. The host function (installed by
+ *      HybridEnnio::nativeBootstrap) spawns a background worker and
+ *      returns immediately — JS thread stays free to advance React
+ *      commits while the worker runs.
+ *   3. Polls `globalThis.__ennioResults[token]` until present, then
+ *      parses + returns the Response.
+ *
+ * Why the async/poll dance instead of awaiting the host function?
+ * `waitForCommit` (and any handler that needs React to progress)
+ * would deadlock if `__ennioDispatch` blocked the JS thread —
+ * commits run on the JS thread we'd be blocking. The poll loop keeps
+ * the JS thread free; commits fire; the worker thread's cv wakes;
+ * the result lands on globalThis; CLI reads it next tick.
  */
 
+import WebSocket from 'ws';
 import { selectorToJson } from './selector';
 
-const DEFAULT_PORT = 9876;
+const METRO_BASE = process.env.ENNIO_METRO_URL || 'http://localhost:8081';
 // Per-request hard cap. Long enough for an asset-heavy assertVisible
-// after a launchApp; short enough that a hung WS doesn't deadlock the
-// runner indefinitely. Cancelled if a reconnect succeeds first.
+// after a launchApp; short enough that a hung Inspector eval doesn't
+// deadlock the runner.
 const REQUEST_TIMEOUT_MS = 30_000;
-// Reconnect window when the WS drops mid-request (Metro reload, sim
-// hiccup). 6 s covers a JS bundle reload; longer would compete with
-// the request timeout above.
+// Reconnect window when the Inspector WS drops mid-request (Metro
+// reload, sim hiccup). 6 s covers a JS bundle reload.
 const RECONNECT_TIMEOUT_MS = 6_000;
-
-interface EnnioRequest {
-  id: string;
-  type: string;
-  payload: Record<string, unknown>;
-}
+// Result-poll interval for the slow path (`waitForCommit` /
+// `waitForIdle`). Fast handlers return inline from `__ennioDispatch`
+// — no polling at all. 15 ms keeps the loop tight while leaving the
+// JS thread enough idle to run React commits we're waiting on.
+const POLL_INTERVAL_MS = 15;
 
 export interface EnnioResponse {
   id: string;
@@ -123,50 +137,115 @@ export interface Selector {
   traits?: Trait[];
 }
 
+interface CdpPage {
+  id: string;
+  title: string;
+  description: string;
+  appId?: string;
+  webSocketDebuggerUrl: string;
+}
+
+interface CdpResponse {
+  id: number;
+  result?: {
+    result?: { type: string; value?: unknown; description?: string };
+    exceptionDetails?: { text: string; exception?: { description?: string } };
+  };
+  error?: { message: string };
+}
+
 export class EnnioClient {
   private ws: WebSocket | null = null;
   private pending = new Map<
-    string,
-    {
-      resolve: (r: EnnioResponse) => void;
-      reject: (e: Error) => void;
-      timeoutHandle?: ReturnType<typeof setTimeout>;
-    }
+    number,
+    { resolve: (r: CdpResponse) => void; reject: (e: Error) => void }
   >();
-  private messageId = 0;
-  private port: number;
+  private rpcId = 0;
+  private tokenSeq = 0;
+  private debuggerUrl: string | null = null;
 
-  constructor(port: number = DEFAULT_PORT) {
-    this.port = port;
+  /**
+   * Discover Metro Inspector pages, pick the JS context. Bridgeless
+   * apps expose two pages — "Bridgeless [C++ connection]" (Hermes JS
+   * runtime — what we want) and "UI [C++ connection]" (RN UI thread,
+   * no globals).
+   */
+  private async discoverPage(): Promise<string> {
+    const res = await fetch(`${METRO_BASE}/json`);
+    if (!res.ok) throw new Error(`Metro /json: HTTP ${res.status}`);
+    const pages = (await res.json()) as CdpPage[];
+    const js = pages.find(
+      (p) =>
+        /bridgeless|jscontext|hermes/i.test(p.description) ||
+        /bridgeless|jscontext|hermes/i.test(p.title),
+    );
+    const pick = js || pages[0];
+    if (!pick?.webSocketDebuggerUrl) {
+      throw new Error('No Inspector pages found on Metro (is the app running?)');
+    }
+    return pick.webSocketDebuggerUrl;
   }
 
   async connect(): Promise<void> {
+    if (!this.debuggerUrl) {
+      this.debuggerUrl = await this.discoverPage();
+    }
     return new Promise((resolve, reject) => {
-      const url = `ws://localhost:${this.port}`;
+      const url = this.debuggerUrl!;
       this.ws = new WebSocket(url);
 
-      this.ws.onopen = () => resolve();
-      this.ws.onerror = () =>
-        reject(new Error(`Failed to connect to Ennio server on port ${this.port}`));
+      this.ws.onopen = async () => {
+        try {
+          await this.cdpCall('Runtime.enable', {});
+          // Re-install the React commit-hook patch every time we
+          // connect. The pod's `+load` eval can race React's devtools-
+          // hook binding (hook may not be `function` at app-boot time),
+          // leaving `__ennio_native_onCommit` orphaned and `waitForCommit`
+          // permanently timing out. Idempotent — sees the JSI host fn
+          // already installed on globalThis and just wraps the current
+          // onCommitFiberRoot.
+          await this.cdpCall('Runtime.evaluate', {
+            expression: `(function(){
+  var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  if (!hook || typeof hook.onCommitFiberRoot !== 'function') return false;
+  if (hook.__ennioPatched) return true;
+  var original = hook.onCommitFiberRoot.bind(hook);
+  hook.onCommitFiberRoot = function(r, root, p, e) {
+    try { original(r, root, p, e); } catch(_) {}
+    if (typeof globalThis.__ennio_native_onCommit === 'function') {
+      try { globalThis.__ennio_native_onCommit(); } catch(_) {}
+    }
+  };
+  hook.__ennioPatched = true;
+  return true;
+})()`,
+            returnByValue: true,
+          });
+          resolve();
+        } catch (e) {
+          reject(e as Error);
+        }
+      };
+      this.ws.onerror = () => reject(new Error(`Failed to connect to Hermes Inspector at ${url}`));
 
       this.ws.onmessage = (event) => {
         try {
-          const response: EnnioResponse = JSON.parse(event.data as string);
-          const handler = this.pending.get(response.id);
-          if (handler) {
-            this.pending.delete(response.id);
-            if (handler.timeoutHandle) clearTimeout(handler.timeoutHandle);
-            handler.resolve(response);
+          const msg = JSON.parse(event.data as string) as CdpResponse;
+          if (typeof msg.id === 'number') {
+            const handler = this.pending.get(msg.id);
+            if (handler) {
+              this.pending.delete(msg.id);
+              handler.resolve(msg);
+            }
           }
         } catch {
-          // Malformed message — drop. Timeout will fire if no valid reply follows.
+          /* drop malformed */
         }
       };
 
       this.ws.onclose = () => {
-        for (const [id, handler] of this.pending) {
-          if (handler.timeoutHandle) clearTimeout(handler.timeoutHandle);
-          handler.reject(new Error('Connection closed'));
+        for (const [id, h] of this.pending) {
+          h.reject(new Error('Connection closed'));
           this.pending.delete(id);
         }
       };
@@ -180,13 +259,10 @@ export class EnnioClient {
     }
   }
 
-  /**
-   * Try to re-establish the WebSocket connection. Used after a transient
-   * drop (RN bundle reload, sim hiccup). Polls until the app rebinds the
-   * WS server, up to ~6s.
-   */
   async reconnect(maxWaitMs: number = RECONNECT_TIMEOUT_MS): Promise<boolean> {
     this.disconnect();
+    // Re-discover the page — the device id changes after Metro restart.
+    this.debuggerUrl = null;
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
       try {
@@ -200,58 +276,103 @@ export class EnnioClient {
   }
 
   /**
-   * Public escape hatch for callers that need a command type not yet
-   * wrapped in a typed method (NitroWriter forwards arbitrary command
-   * names from the maestro-runner dispatch chain). Prefer adding a typed
-   * wrapper here when a use site stabilizes — direct send leaves the
-   * payload schema untyped, so typos surface only at runtime.
+   * Raw CDP JSON-RPC call. Resolves with the full envelope so callers
+   * can inspect `error` / `exceptionDetails` directly. Per-request
+   * timeout matches the outer `send()` timeout.
+   */
+  private cdpCall(method: string, params: Record<string, unknown>): Promise<CdpResponse> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('Inspector socket not open'));
+    }
+    const id = ++this.rpcId;
+    const payload = JSON.stringify({ id, method, params });
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(new Error(`CDP timeout: ${method}`));
+        }
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
+      this.ws!.send(payload);
+    });
+  }
+
+  /**
+   * `Runtime.evaluate` with `returnByValue: true`. Throws on
+   * `exceptionDetails` (eval threw inside the runtime — usually a
+   * caller bug worth surfacing loudly).
+   */
+  private async eval(expression: string): Promise<unknown> {
+    const r = await this.cdpCall('Runtime.evaluate', {
+      expression,
+      returnByValue: true,
+      awaitPromise: false,
+      replMode: false,
+    });
+    if (r.error) throw new Error(`CDP error: ${r.error.message}`);
+    const ex = r.result?.exceptionDetails;
+    if (ex) {
+      throw new Error(`Eval threw: ${ex.exception?.description || ex.text}`);
+    }
+    return r.result?.result?.value;
+  }
+
+  /**
+   * Public escape hatch — every typed wrapper below delegates here.
+   * Two-phase: post via `__ennioDispatch`, then poll the result slot
+   * until the in-app worker writes a response or the timeout expires.
    */
   async send(type: string, payload: Record<string, unknown> = {}): Promise<EnnioResponse> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      // Best-effort transparent reconnect on cold/dropped socket. If the
-      // app is up but rebound after a JS reload, this picks the connection
-      // back up without forcing the runner to fail mid-flow.
       const ok = await this.reconnect(RECONNECT_TIMEOUT_MS);
-      if (!ok) throw new Error('Not connected to Ennio server');
+      if (!ok) throw new Error('Not connected to Hermes Inspector');
     }
 
-    const id = String(++this.messageId);
-    const request: EnnioRequest = { id, type, payload };
+    const token = `e${++this.tokenSeq}`;
+    const typeLit = JSON.stringify(type);
+    const payloadLit = JSON.stringify(JSON.stringify(payload));
+    const tokenLit = JSON.stringify(token);
 
-    return new Promise((resolve, reject) => {
-      // On `Connection closed` we reconnect and re-send; the recursive
-      // send installs its own fresh timeout, so the outer timeout below
-      // must be cleared first or it'll fire while the re-send is still
-      // in flight and produce a spurious "Request timeout".
-      const wrappedReject = async (e: Error) => {
-        const entry = this.pending.get(id);
-        if (entry?.timeoutHandle) clearTimeout(entry.timeoutHandle);
-        if (e.message === 'Connection closed') {
-          const ok = await this.reconnect(RECONNECT_TIMEOUT_MS);
-          if (ok) {
-            try {
-              const res = await this.send(type, payload);
-              resolve(res);
-              return;
-            } catch (e2) {
-              reject(e2 as Error);
-              return;
-            }
-          }
-        }
-        reject(e);
-      };
+    // Phase 1 — dispatch. Fast handlers return the JSON string
+    // directly (worker ran inline on the JS thread). Slow handlers
+    // (`waitForCommit`, `waitForIdle`) return `undefined` — they
+    // scheduled a background worker that will write the result into
+    // `globalThis.__ennioResults[token]` once the React event we're
+    // waiting on fires. CLI distinguishes by null/string.
+    const direct = await this.eval(`__ennioDispatch(${typeLit}, ${payloadLit}, ${tokenLit})`);
+    if (typeof direct === 'string') {
+      return JSON.parse(direct) as EnnioResponse;
+    }
 
-      const timeoutHandle = setTimeout(() => {
-        if (this.pending.has(id)) {
-          this.pending.delete(id);
-          reject(new Error(`Request timeout: ${type}`));
-        }
-      }, REQUEST_TIMEOUT_MS);
-
-      this.pending.set(id, { resolve, reject: wrappedReject, timeoutHandle });
-      this.ws!.send(JSON.stringify(request));
-    });
+    // Phase 2 — poll. Slot eventually holds a JSON string (Response
+    // serialised by Protocol.cpp).
+    const start = Date.now();
+    const pollExpr = `(()=>{const v=globalThis.__ennioResults&&globalThis.__ennioResults[${tokenLit}];if(v!==undefined){delete globalThis.__ennioResults[${tokenLit}];}return v===undefined?null:v;})()`;
+    while (Date.now() - start < REQUEST_TIMEOUT_MS) {
+      const value = await this.eval(pollExpr);
+      if (value != null) {
+        return JSON.parse(value as string) as EnnioResponse;
+      }
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+    try {
+      await this.eval(
+        `(()=>{if(globalThis.__ennioResults){delete globalThis.__ennioResults[${tokenLit}];}})()`,
+      );
+    } catch {
+      /* best effort */
+    }
+    throw new Error(`Request timeout: ${type}`);
   }
 
   // Element queries
@@ -297,12 +418,6 @@ export class EnnioClient {
     const response = await this.send('getText', { testID });
     if (response.data == null) return null;
     return typeof response.data === 'string' ? response.data : null;
-  }
-
-  async getElementInfo(testID: string): Promise<ExtendedElementInfo | null> {
-    const response = await this.send('getElementInfo', { testID });
-    if (!response.success || !response.data) return null;
-    return response.data as ExtendedElementInfo;
   }
 
   /**

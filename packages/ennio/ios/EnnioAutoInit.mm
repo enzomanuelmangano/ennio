@@ -28,9 +28,10 @@ static const int kEnnioDefaultPort = 9876;
 static BOOL _ennioInitialized = NO;
 
 // Distribution channel detection. Ennio is a dev / QA tool and must
-// refuse to start on App Store production or Enterprise builds — the
-// build-time `ENNIO_ENABLED` gate is necessary but not sufficient,
-// because a single CI misconfiguration could ship the pod.
+// refuse to start on App Store production or Enterprise builds. The
+// pod is already excluded from Release configurations at the
+// CocoaPods level, so this is a runtime backstop in case a custom
+// build setup links Ennio into a production binary anyway.
 typedef NS_ENUM(NSInteger, EnnioDistribution) {
     EnnioDistDev,
     EnnioDistAdHoc,
@@ -194,10 +195,10 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
     // Call original implementation
     [self ennio_start];
 
-    // Distribution gate. Even if the build-time gate slipped and Ennio
-    // is linked into an App Store / Enterprise binary, refuse to start
-    // the WS server, fiber walker, or banner. This is the runtime
-    // backstop to the `ENNIO_ENABLED=1` plugin gate.
+    // Distribution gate. Even if the CocoaPods `:configurations`
+    // gate slipped and Ennio is linked into an App Store / Enterprise
+    // binary, refuse to install `__ennioDispatch`, the commit hook,
+    // or the ribbon. Runtime backstop on top of the build-time gate.
     EnnioDistribution dist = ennioDetectDistribution();
     if (dist == EnnioDistAppStore || dist == EnnioDistEnterprise) {
         NSLog(@"[Ennio] REFUSING to start: %@ distribution detected. "
@@ -221,18 +222,23 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
 #ifdef ENNIO_HAVE_RCTINSTANCE
         if ([rctInstance isKindOfClass:[RCTInstance class]]) {
             __strong RCTInstance* strongInstance = (RCTInstance*)rctInstance;
-            // Hand a JS-thread executor to HybridEnnio. The WS-server
-            // thread will call this when it needs to invoke the React
-            // fiber walker on the JS thread.
+            // Background dispatch workers need to schedule the
+            // response-write back onto the JS thread (jsi::Runtime is
+            // not thread-safe). RCTInstance.callFunctionOnBufferedRuntimeExecutor
+            // is the only sanctioned scheduler that hands us a
+            // Runtime& on the JS thread; wrap it as a std::function
+            // and stash it via HybridEnnio for the worker thread to
+            // pick up.
             margelo::nitro::ennio::HybridEnnio::JSThreadExecutor exec =
                 [strongInstance](std::function<void(facebook::jsi::Runtime&)>&& fn) {
                     [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(fn)];
                 };
             margelo::nitro::ennio::HybridEnnio::setJSThreadExecutor(std::move(exec));
 
-            // Bootstrap (capture runtime, install fiber walker, start
-            // WS server) once the JS thread is ready. Same RCTInstance
-            // method delivers our C++ lambda onto the JS thread.
+            // Bootstrap (capture runtime, install commit signal +
+            // `__ennioDispatch` JSI host function) once the JS thread
+            // is ready. RCTInstance delivers our C++ lambda onto the
+            // JS thread.
             std::function<void(facebook::jsi::Runtime&)> boot =
                 [](facebook::jsi::Runtime& rt) {
                     NSString* m = [NSString stringWithFormat:@"%@/Library/_ennio_jsthread_fired.txt", NSHomeDirectory()];
@@ -251,15 +257,22 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
             // Loud, greppable announce. If this line ever shows up in
             // Console.app on a non-dev device, the build pipeline has
             // leaked Ennio into a build it shouldn't be in.
-            NSLog(@"[Ennio] WebSocket server listening on 127.0.0.1:%d (distribution: %@) — "
+            NSLog(@"[Ennio] __ennioDispatch host function installed (distribution: %@) — "
                   @"if you see this in production, your build pipeline is broken.",
-                  kEnnioDefaultPort, ennioDistributionName(dist));
+                  ennioDistributionName(dist));
 
-            // Show the top-right "E2E" ribbon. Tied to the same gate as
-            // the WS server: if Ennio is in this build, the ribbon
-            // shows; if Ennio isn't (ENNIO_ENABLED unset / =0 at
-            // prebuild), this whole file isn't compiled in.
-            [EnnioDebugBanner show];
+            // Show the top-right "E2E" ribbon — opt-in via the
+            // `ENNIORibbonEnabled` Info.plist key (written by
+            // `ennio-expo-plugin` when `showRibbon: true`). Default
+            // off so devs iterating on UI don't get an always-on
+            // overlay. Release builds don't compile this file at all
+            // (CocoaPods :configurations gate), so the check is only
+            // ever reached in Debug.
+            id ribbonFlag = [[NSBundle mainBundle].infoDictionary objectForKey:@"ENNIORibbonEnabled"];
+            BOOL showRibbon = [ribbonFlag isKindOfClass:[NSNumber class]] && [(NSNumber*)ribbonFlag boolValue];
+            if (showRibbon) {
+                [EnnioDebugBanner show];
+            }
         } else {
             NSLog(@"[Ennio] _instance is not an RCTInstance (got %@)", [rctInstance class]);
         }

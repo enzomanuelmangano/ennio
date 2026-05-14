@@ -19,7 +19,7 @@
 namespace margelo::nitro { class Dispatcher; }
 
 // Internal components
-#include "WebSocketServer.hpp"
+#include "Protocol.hpp"
 #include "TestIDRegistry.hpp"
 #include "ShadowTreeTraverser.hpp"
 #include "SelectorCriteria.hpp"
@@ -43,18 +43,9 @@ public:
     ~HybridEnnio() override = default;
 
     // ============================================
-    // Server Management
-    // ============================================
-    void startServer(double port) override;
-    void stopServer() override;
-    bool isServerRunning() override;
-
-    // ============================================
     // Element Queries
     // ============================================
-    std::variant<nitro::NullType, ElementInfo> findByTestID(const std::string& testID) override;
     bool exists(const std::string& testID) override;
-    std::variant<nitro::NullType, LayoutMetrics> getLayoutMetrics(const std::string& testID) override;
     bool isVisible(const std::string& testID) override;
     std::variant<nitro::NullType, std::string> getText(const std::string& testID) override;
 
@@ -88,32 +79,16 @@ public:
     // ============================================
     // Fast-mode Writes
     // ============================================
-    bool tap(const std::string& testID) override;
-    bool tapByLabel(const std::string& text) override;
-    bool doubleTap(const std::string& testID) override;
-    bool longPress(const std::string& testID, double durationMs) override;
-    bool typeText(const std::string& testID, const std::string& text) override;
-    bool clearText(const std::string& testID) override;
-    bool eraseText(const std::string& testID, double count) override;
-    bool pressKey(const std::string& testID, const std::string& keyName) override;
     bool scroll(const std::string& testID, ScrollDirection direction, double distance) override;
-    bool swipe(const std::string& testID, ScrollDirection direction, double distance) override;
     bool scrollTo(const std::string& scrollViewTestID, const std::string& elementTestID) override;
     bool swipeAtPoints(double x1, double y1, double x2, double y2, double durationMs) override;
     bool pressHardwareKey(double keyCode) override;
-    bool tapTab(double index) override;
     bool backGesture() override;
     bool hideKeyboard() override;
-    bool tapBySelector(const std::string& selectorJson) override;
-    bool doubleTapBySelector(const std::string& selectorJson) override;
-    bool longPressBySelector(const std::string& selectorJson, double durationMs) override;
-    bool typeTextBySelector(const std::string& selectorJson, const std::string& text) override;
-    bool clearTextBySelector(const std::string& selectorJson) override;
     bool tapAlertButton(const std::string& buttonText) override;
     bool dismissAlert() override;
     bool copyToClipboard(const std::string& text) override;
     bool pasteFromClipboard(const std::string& testID) override;
-    std::string getClipboardText() override;
 
     // ============================================
     // Initialization (called from JS)
@@ -134,27 +109,10 @@ public:
     bool isInitialized() const;
 
     /**
-     * Drive a synthetic onPress on the React fiber whose `testID`
-     * matches. Blocks the calling (WS-server) thread until the JS
-     * thread finishes the walk or the timeout (1500 ms) elapses.
-     */
-    static bool invokeOnPressFromCpp(const std::string& testID);
-
-    /**
-     * Walk every fiber root, find a fiber whose RawText / stateNode
-     * matches `text`, then walk the .return chain to invoke the
-     * surrounding Pressable / TouchableOpacity / RNGH BaseButton's
-     * onPress. Used by tap-by-text when the runner can't reach RN
-     * gesture recognisers via synthesised UITouches (pressto's
-     * PressableScale, RNGH BaseButton — synth UITouch never settles
-     * the tap recogniser, so the press handler never fires).
-     */
-    static bool invokeOnPressByTextFromCpp(const std::string& text);
-
-    /**
      * JS-thread executor — wraps `RCTInstance.callFunctionOnBufferedRuntimeExecutor:`
-     * (or any equivalent scheduler) so the WS-server thread can
-     * dispatch fiber-walks back onto JS. Stored once during bootstrap.
+     * (or any equivalent scheduler) so background dispatch worker
+     * threads can schedule result-writes back onto JS. Stored once
+     * during bootstrap by `EnnioAutoInit`.
      */
     using JSThreadExecutor = std::function<void(std::function<void(facebook::jsi::Runtime&)>&&)>;
     static void setJSThreadExecutor(JSThreadExecutor exec);
@@ -162,19 +120,14 @@ public:
     /**
      * Pure-native bootstrap. Called from `EnnioAutoInit`'s post-start
      * hook on the JS thread (after the runtime is initialised).
-     * Captures the runtime, evaluates the Fiber walker into globalThis,
-     * constructs a singleton HybridEnnio + starts the WebSocket server.
-     * Idempotent.
+     * Captures the runtime, evaluates the commit-signal walker, installs
+     * `__ennioDispatch` JSI host function so the external CLI can drive
+     * the runner via Hermes Inspector `Runtime.evaluate`. Idempotent.
      */
     static void nativeBootstrap(facebook::jsi::Runtime& runtime, int port);
 
 
 private:
-    // Server state
-    bool serverRunning_ = false;
-    int serverPort_ = 0;
-    std::unique_ptr<::ennio::WebSocketServer> webSocketServer_;
-
     // Shadow tree access
     std::weak_ptr<facebook::react::UIManager> uiManager_;
     facebook::react::SurfaceId surfaceId_ = 0;
@@ -198,11 +151,6 @@ private:
      * Handle incoming WebSocket commands
      */
     ::ennio::Response handleCommand(const ::ennio::Request& request);
-
-    /**
-     * Convert internal ElementInfo to Nitro struct
-     */
-    ElementInfo convertElementInfo(const ::ennio::ElementInfo& info) const;
 
     /**
      * Convert internal LayoutMetrics to Nitro struct

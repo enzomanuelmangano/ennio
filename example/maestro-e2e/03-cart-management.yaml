@@ -154,20 +154,15 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
-- scrollUntilVisible:
-    element:
-      id: 'featured-product-1'
-    direction: UP
-
-# Featured carousel is a horizontal ScrollView nested under the home
-# vertical ScrollView. Maestro's scrollUntilVisible LEFT can't always
-# pick the right scroller (it picks the outer one and finds nothing
-# horizontal there); a couple of explicit LEFT swipes on the carousel
-# reliably advance it to product-3.
+# Advance the featured carousel (a horizontal ScrollView nested under
+# the home page's vertical scrollview). Both Maestro and Ennio's
+# `scrollUntilVisible LEFT` pick the OUTER scroller on a page like
+# this and the inner carousel never moves. Use explicit percentage-
+# coordinate swipes anchored at the carousel's y-band (~55% screen
+# height) — pure Maestro spec, both runners execute identically.
 - swipe:
-    direction: LEFT
-- swipe:
-    direction: LEFT
+    start: 90%,55%
+    end: 10%,55%
 - tapOn:
     id: 'add-to-cart-featured-3'
 

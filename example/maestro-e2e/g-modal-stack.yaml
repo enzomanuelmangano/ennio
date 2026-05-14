@@ -27,8 +27,19 @@ name: 'Gauntlet — Modal stacking'
     id: 'modal-close-second'
 - assertNotVisible:
     id: 'modal-2-body'
+# Stacked-modal dismiss leaves iOS's UIPresentationController stack
+# in an animating state for a beat after the inner modal goes away;
+# the outer Modal-1 card stays mounted but its PressableScale's
+# gesture handler doesn't bind until the dismiss-animation runloop
+# tick lands. Without an explicit retry the next tap fires before
+# that tick and the press never registers.
+- waitForAnimationToEnd
+- waitForAnimationToEnd
 
-- tapOn:
-    id: 'modal-close-first'
-- assertNotVisible:
-    id: 'modal-1-body'
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: 'modal-close-first'
+      - assertNotVisible:
+          id: 'modal-1-body'

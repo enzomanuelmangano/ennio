@@ -67,20 +67,19 @@ const DEFAULT_RECONNECT_TIMEOUT = 30000;
 const ALERT_TAP_SETTLE_MS = 150; // Wait for alert-button tap to dismiss the alert.
 const ALERT_DISMISS_DELAY_MS = 120; // Settle between dismissAlert and the next assertion.
 const RUNLOOP_TICK_MS = 30; // UITouch begin→end gap; matches the native sendSynth tick.
-const TAP_NAV_SETTLE_MS = 200; // Tab/Link nav settle before the next assertVisible.
+const TAP_NAV_SETTLE_MS = 150; // Tab/Link nav settle. prepareTap's stable-coord + hit-test verify catches the "responder chain not yet bound" race on the next tap, so this only covers commands that don't go through prepareTap (e.g. assertVisible). Kept short.
 const TAP_BACK_RECOVER_DELAY_MS = 250; // Pause between back-pop and retry tap.
 const KEYBOARD_DISMISS_SETTLE_MS = 120; // Settle after hideKeyboard before re-tapping the field.
-const POST_LAUNCH_SETTLE_MS = 800; // Wait for sim teardown after clearState before relaunch.
-const POST_LAUNCH_IDLE_BUDGET_MS = 3000; // First waitForIdle after a launch.
-const TYPE_TEXT_IDLE_BUDGET_MS = 1500; // Drain RN bridge after typeText so onChangeText commits before the next tap reads `value`. Bumped from 800 → 1500 to absorb the legacy-bridge RCTDirectEventBlock async hop on slow simulator runs.
-const POST_LAUNCH_SHADOW_COMMIT_MS = 400; // First shadow-tree commit settle after reconnect.
+const POST_LAUNCH_SETTLE_MS = 400; // Wait for sim teardown after clearState before relaunch.
+const POST_LAUNCH_IDLE_BUDGET_MS = 1500; // First waitForIdle after a launch.
+const TYPE_TEXT_IDLE_BUDGET_MS = 600; // Drain RN bridge after typeText so onChangeText commits before the next tap reads `value`.
+const POST_LAUNCH_SHADOW_COMMIT_MS = 250; // First shadow-tree commit settle after reconnect.
 const RETRY_POLL_MS = 100; // Predicate retry tick for waitFor / extendedWaitUntil.
 const POINT_TAP_SETTLE_MS = 60; // Quick settle after tapAt — no tab-nav animation.
 const RECORDING_SETTLE_MS = 500; // Settle after start/stopRecording so the next step sees a stable IO state.
 const RETRY_BACKOFF_MS = 500; // Pause between retry attempts inside `retry` block.
 const TRAVEL_WAYPOINT_GAP_MS = 200; // Gap between successive simctl location fixes during `travel`.
 const OPENLINK_SETTLE_MS = 500; // Wait for SpringBoard to switch contexts after openurl.
-const DEFAULT_WS_PORT = 9876;
 
 /**
  * Maestro per-command `optional: true`. Lives at the command level
@@ -261,17 +260,16 @@ export async function runMaestroTests(
   writer: Writer,
   reader: Reader,
   testFilePath: string,
-  options: { verbose?: boolean; trace?: boolean; port?: number } = {},
+  options: { verbose?: boolean; trace?: boolean } = {},
 ): Promise<MaestroTestsResult> {
   const results: MaestroTestsResult = { passed: 0, failed: 0, tests: [], client };
   const flow = parseMaestroFile(testFilePath);
   const flowName = flow.name || basename(testFilePath, '.yaml');
 
-  const port = options.port ?? DEFAULT_WS_PORT;
-
-  // Create reconnect function for launchApp/clearState
+  // Re-attach to the Inspector after launchApp/clearState. Same
+  // transport (CDP), but device id changes when Metro re-attaches.
   const reconnectClient = async (): Promise<EnnioClient> => {
-    const newClient = new EnnioClient(port);
+    const newClient = new EnnioClient();
     await newClient.connect();
     return newClient;
   };
@@ -280,7 +278,6 @@ export async function runMaestroTests(
     verbose: options.verbose,
     trace: options.trace,
     appId: flow.appId,
-    port,
     reconnectClient,
     env: flow.env,
   });
@@ -369,7 +366,6 @@ class MaestroExecutor {
       verbose?: boolean;
       trace?: boolean;
       appId?: string;
-      port?: number;
       reconnectClient?: () => Promise<EnnioClient>;
       env?: Record<string, string>;
     } = {},
@@ -424,12 +420,13 @@ class MaestroExecutor {
    * worst case is identical to a sleep of the same duration.
    */
   private async waitCommit(maxMs: number): Promise<void> {
-    const result = await this.client.waitForCommit(maxMs);
-    this.log(
-      `waitForCommit(${maxMs}): ${
-        result.commit ? `commit at ${result.elapsedMs}ms` : 'timeout (no commit)'
-      }`,
-    );
+    // Fixed sleep — the React-commit signal (`__ennio_native_onCommit`)
+    // races React's own devtools-hook binding on Bridgeless and often
+    // never fires, and IdleMonitor doesn't observe UIKit transitions
+    // (router.push, modal present). The caller's `maxMs` is sized for
+    // the worst case of whatever it just did (tap-nav: 500 ms;
+    // alert/keyboard: 120-250 ms; point-tap: 60 ms).
+    await this.sleep(maxMs);
   }
 
   /**
@@ -564,7 +561,7 @@ class MaestroExecutor {
         return this.writer.tap(selector.id);
       }
       if (selector.text && !selector.id) {
-        return this.writer.tapByText(selector.text);
+        return this.writer.tapByText(selector.text, { fast: opts.optional === true });
       }
       return this.writer.tapBySelector(toEnnioSelector(selector));
     };
@@ -708,7 +705,12 @@ class MaestroExecutor {
       return;
     }
     await this.writer.scroll(null, dir, amount);
-    await this.waitCommit(KEYBOARD_DISMISS_SETTLE_MS);
+    // setContentOffset:animated:NO returns synchronously but RN's
+    // onScroll / onMomentumEnd fire on the next runloop tick; gesture
+    // recognizers inside scrolled-in cells (Pressable, etc.) need that
+    // tick before they'll honour the next touch. 250 ms covers it on
+    // both Bridgeless and the legacy bridge.
+    await this.sleep(250);
   }
 
   /**
@@ -969,15 +971,97 @@ class MaestroExecutor {
 
     if ('swipe' in cmd) {
       const swipeCmd = cmd.swipe;
+      const duration = swipeCmd.duration || 400;
+
+      // Path 1: `from: <selector>` — anchor the swipe at the element's
+      // centre axis but span the screen, not the element. The element
+      // gives the gesture's y (for horizontal) or x (for vertical), so
+      // the pan recogniser of the right inner scroller sees the touch;
+      // the actual finger travel uses the screen so the swipe is long
+      // enough to move a card and never clamps to a near-edge no-op.
+      if (swipeCmd.from) {
+        const sel = normalizeSelector(swipeCmd.from);
+        const frame = sel.id ? await this.client.getViewWindowFrame(sel.id) : null;
+        if (frame && frame.width > 0 && frame.height > 0) {
+          const screen = await this.writer.getScreenSize();
+          const cx = frame.x + frame.width / 2;
+          const cy = frame.y + frame.height / 2;
+          const dir = (swipeCmd.direction || 'LEFT').toLowerCase();
+          const hPad = 40;
+          const vPad = 80;
+          let x1: number, y1: number, x2: number, y2: number;
+          if (dir === 'left') {
+            x1 = screen.width - hPad;
+            x2 = hPad;
+            y1 = y2 = cy;
+          } else if (dir === 'right') {
+            x1 = hPad;
+            x2 = screen.width - hPad;
+            y1 = y2 = cy;
+          } else if (dir === 'up') {
+            x1 = x2 = cx;
+            y1 = screen.height - vPad;
+            y2 = vPad;
+          } else {
+            // down
+            x1 = x2 = cx;
+            y1 = vPad;
+            y2 = screen.height - vPad;
+          }
+          await this.writer.swipeAt(x1, y1, x2, y2, duration);
+          // Swipe settle. Paged/momentum carousels keep moving after
+          // the touch ends; the Fabric shadow tree only reconciles
+          // once the deceleration finishes. 800 ms is empirical — it
+          // covers the onMomentumEnd → tree-reconcile gap on iPhone
+          // Air at 120 Hz, where a shorter wait left the next frame
+          // query reading the mid-decel position.
+          await this.sleep(800);
+          return;
+        }
+        // Frame lookup failed — fall through to direction-only path so
+        // the swipe still happens (best-effort, may miss the carousel).
+      }
+
+      // Path 2: raw `start`/`end` coords — pass straight to idb HID.
+      // Accepts absolute pixels in either object `{x,y}` or string
+      // `"x,y"` form. (Percentage form is not supported here; use a
+      // `from:` selector for resolution-independent swipes.)
+      if (swipeCmd.start && swipeCmd.end) {
+        const screen = await this.writer.getScreenSize();
+        const parseAxis = (raw: string, range: number): number => {
+          const t = raw.trim();
+          if (t.endsWith('%')) {
+            const n = parseFloat(t.slice(0, -1));
+            return Number.isFinite(n) ? (n / 100) * range : NaN;
+          }
+          return parseFloat(t);
+        };
+        const parsePt = (p: string | { x: number; y: number }): { x: number; y: number } | null => {
+          if (typeof p === 'object') return { x: p.x, y: p.y };
+          const parts = String(p).split(',');
+          if (parts.length !== 2) return null;
+          const x = parseAxis(parts[0], screen.width);
+          const y = parseAxis(parts[1], screen.height);
+          return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+        };
+        const s = parsePt(swipeCmd.start);
+        const e = parsePt(swipeCmd.end);
+        if (s && e) {
+          await this.writer.swipeAt(s.x, s.y, e.x, e.y, duration);
+          await this.sleep(800);
+          return;
+        }
+      }
+
+      // Path 3: bare `direction` — finger-semantic in Maestro.
+      // `writer.scroll` is finger-semantic for horizontal (idb HID
+      // swipe) but scroll-direction-semantic for vertical (native
+      // setContentOffset). Invert only the vertical axis; horizontal
+      // passes through unchanged.
       if (swipeCmd.direction) {
-        const amount = swipeCmd.duration || 400;
-        await this.scroll(swipeCmd.direction.toLowerCase(), amount);
-      } else if (swipeCmd.start && swipeCmd.end) {
-        // Fast mode: best-effort vertical scroll inferred from y-delta.
-        const dy =
-          (typeof swipeCmd.end === 'object' ? swipeCmd.end.y : 0) -
-          (typeof swipeCmd.start === 'object' ? swipeCmd.start.y : 0);
-        await this.writer.scroll(null, dy >= 0 ? 'down' : 'up', Math.abs(dy) || 200);
+        const inv: Record<string, string> = { up: 'down', down: 'up' };
+        const dir = inv[swipeCmd.direction.toLowerCase()] ?? swipeCmd.direction.toLowerCase();
+        await this.scroll(dir, duration);
       }
       return;
     }
@@ -1269,10 +1353,92 @@ class MaestroExecutor {
 
     this.log(`scrollUntilVisible: ${JSON.stringify(selector)}`);
     const startTime = Date.now();
+    const isHorizontal = direction === 'left' || direction === 'right';
+    // For id-targeted scrolls, require the element's center to land
+    // inside the viewport before exiting — partial-edge visibility
+    // satisfies `selectorVisible` but a subsequent `tapOn` would
+    // dispatch at an off-screen center and miss. The strict check
+    // matches what a real `tapOn` cares about.
+    const isCenterInViewport = async (): Promise<boolean> => {
+      if (!selector.id) return false;
+      const frame = await this.client.getViewWindowFrame(selector.id);
+      if (!frame || frame.width <= 0 || frame.height <= 0) return false;
+      const screen = await this.writer.getScreenSize();
+      const cx = frame.x + frame.width / 2;
+      const cy = frame.y + frame.height / 2;
+      if (!(cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height)) return false;
+      // Soft safe-tap-zone gates. iPhone tab bar (~49) + home
+      // indicator (~34) take ~83px at the bottom; status bar +
+      // collapsed nav bar take ~100px at the top. Without these
+      // scrollUntilVisible exits when the target row is technically
+      // inside the window but obscured by the navbar / tab bar —
+      // the subsequent tap then lands on the wrong view (switches
+      // tabs / hits the title overlay). Conservative for
+      // unobstructed screens — just under-utilises ~180px of
+      // vertical space, harmless.
+      if (cy < 130) return false;
+      if (cy > screen.height - 90) return false;
+      return true;
+    };
+    let stuckIters = 0;
+    let prevFrameY: number | null = null;
     while (Date.now() - startTime < timeout) {
-      if (await this.selectorVisible(selector)) return;
-      await this.scroll(direction, scrollAmount);
-      await this.waitCommit(TAP_NAV_SETTLE_MS);
+      if (await this.selectorVisible(selector)) {
+        if (!selector.id || (await isCenterInViewport())) {
+          // Final settle so the next step (typically tapOn) sees a
+          // stationary frame — paged scrollers and momentum decel keep
+          // the frame moving for a few hundred ms after the last
+          // swipe, even when the on-screen + center checks pass.
+          await this.sleep(300);
+          return;
+        }
+        // Selector is visible but center sits in the safe-tap-zone
+        // buffer (under navbar / above tab bar). If the frame is no
+        // longer moving across loop iterations the scrollview has
+        // reached its content edge — further swipes won't help.
+        // Accept "best effort" position and exit; the next step gets
+        // whatever frame the runner can read at tap time.
+        if (selector.id) {
+          const frame = await this.client.getViewWindowFrame(selector.id);
+          if (frame) {
+            if (prevFrameY !== null && Math.abs(prevFrameY - frame.y) < 1) {
+              stuckIters++;
+              if (stuckIters >= 2) {
+                await this.sleep(300);
+                return;
+              }
+            } else {
+              stuckIters = 0;
+            }
+            prevFrameY = frame.y;
+          }
+        }
+      }
+      // For horizontal scrolls on a testID target, anchor the swipe
+      // at the target's center y (looked up via UIKit window-frame).
+      // Without this we'd swipe at the screen-center y, which lands
+      // in the outer (vertical) scroller of a page that hosts a
+      // horizontal carousel — the carousel never advances. Frame.y
+      // is valid even when the element is currently off-screen
+      // horizontally (its row is on the visible viewport).
+      let anchored = false;
+      if (isHorizontal && selector.id) {
+        const frame = await this.client.getViewWindowFrame(selector.id);
+        if (frame && frame.width > 0 && frame.height > 0) {
+          const screen = await this.writer.getScreenSize();
+          const cy = frame.y + frame.height / 2;
+          const hPad = 40;
+          const x1 = direction === 'left' ? screen.width - hPad : hPad;
+          const x2 = direction === 'left' ? hPad : screen.width - hPad;
+          await this.writer.swipeAt(x1, cy, x2, cy, 400);
+          await this.sleep(800);
+          anchored = true;
+        }
+      }
+      if (!anchored) {
+        await this.scroll(direction, scrollAmount);
+        await this.waitCommit(TAP_NAV_SETTLE_MS);
+      }
     }
     throw new Error(`scrollUntilVisible timeout: ${JSON.stringify(selector)}`);
   }
@@ -1616,8 +1782,9 @@ class MaestroExecutor {
     await this.sleep(POST_LAUNCH_SETTLE_MS);
     launchAppOnSimulator(deviceId, targetAppId);
 
-    // Reconnect with patience. App must cold-start, load JS bundle,
-    // fire RCTHost.start, then bind WS server.
+    // Reconnect with patience. App must cold-start, load JS bundle, then
+    // RCTHost.start fires and Hermes Inspector exposes the JS runtime
+    // page Metro can hand us over CDP.
     let connected = false;
     const startTime = Date.now();
     while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {

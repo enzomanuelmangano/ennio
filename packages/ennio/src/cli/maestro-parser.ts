@@ -69,6 +69,7 @@ export type MaestroCommand =
         direction?: string;
         start?: string | { x: number; y: number };
         end?: string | { x: number; y: number };
+        from?: MaestroSelector | string;
         duration?: number;
       };
     }

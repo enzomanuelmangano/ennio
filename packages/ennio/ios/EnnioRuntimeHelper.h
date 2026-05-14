@@ -96,6 +96,18 @@ public:
     bool tapAtScreenPoint(double x, double y);
 
     /**
+     * Prepare a tap by testID: stable-coord poll + auto-scroll
+     * fallback + UIMenu detection, all in a single JSI call.
+     * Replaces the CLI-side `layoutCenter` polling loop — saves
+     * ~5-10 CDP round trips per tap. Returns JSON object
+     * `{"x":..,"y":..,"isMenu":..}` on success, empty string on
+     * failure. CLI runs the actual tap via idb HID so RNGH-wrapped
+     * components (pressto's PressableScale, RNBetterTapGestureRecognizer)
+     * see real CoreSimulator touch events.
+     */
+    std::string prepareTap(const std::string& testID, double screenW, double screenH);
+
+    /**
      * Synthesise a pan gesture from (x1,y1) to (x2,y2) over `durationMs`.
      * Fast path when the start point hits a UIScrollView ancestor:
      * setContentOffset with the delta, no UITouch tax. Otherwise drives

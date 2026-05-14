@@ -61,12 +61,28 @@ function withUdid(args: string[]): string[] {
   return udid ? ['--udid', udid, ...args] : args;
 }
 
+let companionReady = false;
 export async function ensureCompanion(): Promise<void> {
+  if (companionReady) return;
   const udid = getUDID();
   if (!udid) return;
-  // Best-effort: connect (fast no-op if already connected).
+  // Best-effort: connect once per session. Per-call `idb connect`
+  // is a ~300 ms python spawn even when the companion is already
+  // running — that cost gets multiplied by every text-tap. The
+  // socket at `/tmp/idb/<UDID>_companion.sock` is created by
+  // companion startup and persists; if it exists, we're connected.
+  try {
+    const { existsSync } = await import('fs');
+    if (existsSync(`/tmp/idb/${udid}_companion.sock`)) {
+      companionReady = true;
+      return;
+    }
+  } catch {
+    /* fall through */
+  }
   try {
     await run(['connect', udid], 5_000);
+    companionReady = true;
   } catch {
     /* ignore — companion may already be up */
   }
@@ -97,6 +113,7 @@ export async function swipe(
       String(Math.round(y2)),
     ]),
   );
+  if (process.env.ENNIO_DEBUG_IDB) console.error(`[idb swipe] idb ${args.join(' ')}`);
   await run(args);
 }
 

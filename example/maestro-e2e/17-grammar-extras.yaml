@@ -35,10 +35,16 @@ onFlowStart:
 - assertVisible:
     id: 'home-screen'
 
-# Optional tap on a non-existent element — must not fail.
-- tapOn:
-    id: 'this-element-does-not-exist'
-    optional: true
+# Conditional tap on a non-existent element — must not fail.
+# Pure-Maestro equivalent of `tapOn { optional: true }`: a runFlow
+# guarded by `when { visible }` whose condition is false here.
+- runFlow:
+    when:
+      visible:
+        id: 'this-element-does-not-exist'
+    commands:
+      - tapOn:
+          id: 'this-element-does-not-exist'
 
 # dismissAlert / setAirplaneMode / travel are Ennio extensions that
 # Maestro 1.36 doesn't ship — skip them in this parity flow.

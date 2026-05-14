@@ -1,25 +1,24 @@
 /**
- * WS bootstrap: connect to in-app ennio. If the app isn't running,
- * auto-launch it on the booted simulator (mirrors maestro's `launchApp`
- * UX — user shouldn't have to launch the app by hand before invoking).
+ * CDP bootstrap: connect to the app's Hermes Inspector via Metro. If
+ * the app isn't running (or Metro hasn't picked it up yet), auto-launch
+ * on the booted simulator and poll the Inspector endpoint until the
+ * JS context appears.
  */
 
 import { EnnioClient } from '../client';
 import { getBootedSimulatorId, launchAppOnSimulator } from '../maestro-runner';
 
-export const DEFAULT_WS_PORT = 9876;
-// Initial connect probe — short, since "no listener" returns ECONNREFUSED
-// fast on a local socket. We retry-poll separately after auto-launch.
+// Initial connect probe — Inspector returns HTTP 200 (or refuses) fast
+// when Metro is up; longer than 2 s on a cold device is unusual.
 const CONNECT_PROBE_TIMEOUT_MS = 2_000;
-// Auto-launch poll cadence + total. RN bridge + Nitro WS bind takes
-// ~3-6 s on a fresh launch; longer on iOS 26 Sims (Metro bundle
-// download + JS init can stretch to 10-15 s on the first launch
-// after install).
+// Auto-launch poll cadence + total. RN runtime + Hermes Inspector page
+// registration takes ~3-6 s on a fresh launch, longer on iOS 26 sims
+// the first time after install.
 const LAUNCH_POLL_INTERVAL_MS = 500;
 const LAUNCH_TIMEOUT_DEFAULT_SEC = 30;
 
-export async function tryWebSocketConnection(port: number): Promise<EnnioClient | null> {
-  const client = new EnnioClient(port);
+export async function tryConnection(): Promise<EnnioClient | null> {
+  const client = new EnnioClient();
   try {
     await Promise.race([
       client.connect(),
@@ -34,10 +33,9 @@ export async function tryWebSocketConnection(port: number): Promise<EnnioClient 
 }
 
 export type BootstrapOptions = {
-  port: number;
-  /** App ID to auto-launch when WS is unreachable. */
+  /** App ID to auto-launch when Inspector is unreachable. */
   appId?: string;
-  /** Total seconds to wait for WS after auto-launch. */
+  /** Total seconds to wait for Inspector after auto-launch. */
   launchTimeoutSec?: number;
   /** Print status lines (default true). */
   verbose?: boolean;
@@ -48,8 +46,8 @@ export type BootstrapResult =
   | { ok: false; reason: string };
 
 export async function connectOrLaunch(opts: BootstrapOptions): Promise<BootstrapResult> {
-  const { port, appId, launchTimeoutSec = LAUNCH_TIMEOUT_DEFAULT_SEC, verbose = true } = opts;
-  let client = await tryWebSocketConnection(port);
+  const { appId, launchTimeoutSec = LAUNCH_TIMEOUT_DEFAULT_SEC, verbose = true } = opts;
+  let client = await tryConnection();
   if (client) return { ok: true, client, udid: getBootedSimulatorId(), autoLaunched: false };
 
   const udid = getBootedSimulatorId();
@@ -57,7 +55,7 @@ export async function connectOrLaunch(opts: BootstrapOptions): Promise<Bootstrap
     return {
       ok: false,
       reason:
-        `Could not connect to the in-app Ennio server on port ${port}.\n` +
+        `Could not connect to the Hermes Inspector at ${process.env.ENNIO_METRO_URL || 'http://localhost:8081'}.\n` +
         `No booted iOS simulator found. Boot one (xcrun simctl boot <UDID>) or set ENNIO_UDID.`,
     };
   }
@@ -65,7 +63,7 @@ export async function connectOrLaunch(opts: BootstrapOptions): Promise<Bootstrap
     return {
       ok: false,
       reason:
-        `Could not connect to the in-app Ennio server on port ${port}.\n` +
+        `Could not connect to the Hermes Inspector.\n` +
         `No appId available to auto-launch — pass --app=<bundleId> or include \`appId:\` in the YAML.`,
     };
   }
@@ -78,14 +76,14 @@ export async function connectOrLaunch(opts: BootstrapOptions): Promise<Bootstrap
   const deadline = Date.now() + launchTimeoutSec * 1000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, LAUNCH_POLL_INTERVAL_MS));
-    client = await tryWebSocketConnection(port);
+    client = await tryConnection();
     if (client) return { ok: true, client, udid, autoLaunched: true };
   }
   return {
     ok: false,
     reason:
-      `Could not connect to the in-app Ennio server on port ${port}.\n` +
-      `Tried auto-launching ${appId}; WebSocket never bound.\n` +
-      `Confirm the app has ennio wired and ENNIO_ENABLED=1 in pod install.`,
+      `Could not connect to the Hermes Inspector.\n` +
+      `Tried auto-launching ${appId}; Inspector never exposed a JS context.\n` +
+      `Confirm Metro is running (\`bun start\` or \`npx expo start\`) and the app is a Debug build with ennio-expo-plugin installed.`,
   };
 }

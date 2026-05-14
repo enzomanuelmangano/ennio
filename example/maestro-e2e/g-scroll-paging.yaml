@@ -14,7 +14,9 @@ name: 'Gauntlet — ScrollView paging'
     id: 'scroll-paging-screen'
 - assertVisible:
     id: 'scroll-page-0'
-- swipe:
+- scrollUntilVisible:
+    element:
+      id: 'scroll-page-1'
     direction: LEFT
 - assertVisible:
     id: 'scroll-page-1'
