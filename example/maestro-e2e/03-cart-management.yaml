@@ -154,13 +154,15 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
-# Scroll the featured carousel (a horizontal ScrollView nested under
-# the home page) until product-3's add-to-cart button is on screen.
-# Pure-Maestro: scrollUntilVisible with direction LEFT.
-- scrollUntilVisible:
-    element:
-      id: 'add-to-cart-featured-3'
-    direction: LEFT
+# Advance the featured carousel (a horizontal ScrollView nested under
+# the home page's vertical scrollview). Both Maestro and Ennio's
+# `scrollUntilVisible LEFT` pick the OUTER scroller on a page like
+# this and the inner carousel never moves. Use explicit percentage-
+# coordinate swipes anchored at the carousel's y-band (~55% screen
+# height) — pure Maestro spec, both runners execute identically.
+- swipe:
+    start: 90%,55%
+    end: 10%,55%
 - tapOn:
     id: 'add-to-cart-featured-3'
 

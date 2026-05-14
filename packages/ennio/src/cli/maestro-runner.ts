@@ -1027,12 +1027,21 @@ class MaestroExecutor {
       // `"x,y"` form. (Percentage form is not supported here; use a
       // `from:` selector for resolution-independent swipes.)
       if (swipeCmd.start && swipeCmd.end) {
+        const screen = await this.writer.getScreenSize();
+        const parseAxis = (raw: string, range: number): number => {
+          const t = raw.trim();
+          if (t.endsWith('%')) {
+            const n = parseFloat(t.slice(0, -1));
+            return Number.isFinite(n) ? (n / 100) * range : NaN;
+          }
+          return parseFloat(t);
+        };
         const parsePt = (p: string | { x: number; y: number }): { x: number; y: number } | null => {
           if (typeof p === 'object') return { x: p.x, y: p.y };
           const parts = String(p).split(',');
           if (parts.length !== 2) return null;
-          const x = parseFloat(parts[0]);
-          const y = parseFloat(parts[1]);
+          const x = parseAxis(parts[0], screen.width);
+          const y = parseAxis(parts[1], screen.height);
           return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
         };
         const s = parsePt(swipeCmd.start);
