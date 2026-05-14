@@ -562,6 +562,17 @@ export class NitroWriter implements Writer {
   ): Promise<boolean> {
     if (process.env.ENNIO_DEBUG_IDB)
       console.error(`[swipeAt] (${x1},${y1})→(${x2},${y2}) ${durationMs}ms`);
+    // Hot path: persistent HID daemon over the pre-warmed gRPC channel
+    // to idb_companion (~5 ms). Mirrors hidTap; avoids the ~250 ms
+    // `idb ui swipe` fork-per-call. Fall back to spawning `idb` if the
+    // daemon is unavailable, then to in-app UITouchPhaseMoved dispatch.
+    try {
+      await hid.swipe(x1, y1, x2, y2, durationMs);
+      return true;
+    } catch (e) {
+      if (process.env.ENNIO_DEBUG_IDB)
+        console.error(`[swipeAt] daemon failed: ${(e as Error).message}, fallback`);
+    }
     try {
       await idb.swipe(x1, y1, x2, y2, durationMs);
       return true;

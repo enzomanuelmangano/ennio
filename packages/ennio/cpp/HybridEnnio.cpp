@@ -308,7 +308,6 @@ bool HybridEnnio::waitForNextCommit(double maxMs) {
 using HandlerFn = std::function<void(HybridEnnio*, const ::ennio::Request&, ::ennio::Response&)>;
 
 static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
-    auto& helper = ::ennio::EnnioRuntimeHelper::getInstance;
     static const std::unordered_map<std::string, HandlerFn> handlers = {
         // ---- Read queries ----
         { "exists", [](HybridEnnio* self, const auto& req, auto& r) {

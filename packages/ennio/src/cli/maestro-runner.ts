@@ -1782,8 +1782,9 @@ class MaestroExecutor {
     await this.sleep(POST_LAUNCH_SETTLE_MS);
     launchAppOnSimulator(deviceId, targetAppId);
 
-    // Reconnect with patience. App must cold-start, load JS bundle,
-    // fire RCTHost.start, then bind WS server.
+    // Reconnect with patience. App must cold-start, load JS bundle, then
+    // RCTHost.start fires and Hermes Inspector exposes the JS runtime
+    // page Metro can hand us over CDP.
     let connected = false;
     const startTime = Date.now();
     while (!connected && Date.now() - startTime < DEFAULT_RECONNECT_TIMEOUT) {
