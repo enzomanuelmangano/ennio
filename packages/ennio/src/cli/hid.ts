@@ -126,6 +126,10 @@ class HidDaemon {
       /* daemon already gone */
     }
   }
+
+  isAlive(): boolean {
+    return !this.dead;
+  }
 }
 
 function registerExitHook() {
@@ -176,7 +180,7 @@ function getUDID(): string | null {
  * per call.
  */
 export async function getHidDaemon(): Promise<HidDaemon> {
-  if (cachedDaemon && !cachedDaemon['dead']) return cachedDaemon;
+  if (cachedDaemon && cachedDaemon.isAlive()) return cachedDaemon;
   const udid = getUDID();
   if (!udid) throw new Error('No booted simulator UDID');
   registerExitHook();

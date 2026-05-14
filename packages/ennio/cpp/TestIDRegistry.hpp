@@ -68,7 +68,11 @@ private:
     TestIDRegistry() = default;
 
     mutable std::mutex mutex_;
-    std::unordered_map<std::string, WeakShadowNodePtr> registry_;
+    // `mutable` so `findByTestID` (const) can lazily evict expired
+    // entries during lookup — without it, a long-running session
+    // accumulates dead weak_ptrs forever between `updateFromTree`
+    // sweeps.
+    mutable std::unordered_map<std::string, WeakShadowNodePtr> registry_;
 
     /**
      * Recursively traverse and register nodes with testIDs

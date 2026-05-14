@@ -124,7 +124,7 @@ public:
      * `__ennioDispatch` JSI host function so the external CLI can drive
      * the runner via Hermes Inspector `Runtime.evaluate`. Idempotent.
      */
-    static void nativeBootstrap(facebook::jsi::Runtime& runtime, int port);
+    static void nativeBootstrap(facebook::jsi::Runtime& runtime);
 
 
 private:
@@ -148,7 +148,9 @@ private:
     ShadowNodePtr findNode(const std::string& testID) const;
 
     /**
-     * Handle incoming WebSocket commands
+     * Run one request through the central command table. Same path is
+     * driven from JSI (`__ennioDispatch`) — the CLI hands us a Request
+     * over Hermes Inspector CDP and we hand back a Response.
      */
     ::ennio::Response handleCommand(const ::ennio::Request& request);
 

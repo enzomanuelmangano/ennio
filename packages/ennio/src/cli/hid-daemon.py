@@ -83,31 +83,46 @@ async def handle(client: Client, line: str) -> None:
     if not line:
         return
     parts = line.split()
+    if not parts:
+        return
     op = parts[0]
-    if op == "tap":
-        # tap <x> <y> <durationMs>
-        x = float(parts[1])
-        y = float(parts[2])
-        dur_ms = float(parts[3]) if len(parts) > 3 else 80.0
-        await client.tap(x=x, y=y, duration=dur_ms / 1000.0)
-        print("ok", flush=True)
-    elif op == "swipe":
-        # swipe <x1> <y1> <x2> <y2> <durationMs>
-        x1 = float(parts[1])
-        y1 = float(parts[2])
-        x2 = float(parts[3])
-        y2 = float(parts[4])
-        dur_ms = float(parts[5]) if len(parts) > 5 else 300.0
-        await client.swipe(
-            p_start=(x1, y1),
-            p_end=(x2, y2),
-            duration=dur_ms / 1000.0,
-        )
-        print("ok", flush=True)
-    elif op == "exit":
-        sys.exit(0)
-    else:
-        print(f"err unknown-op {op}", flush=True)
+    # Validate arg counts up front so a malformed line returns a clean
+    # "err …" instead of crashing the daemon with IndexError (which the
+    # Node parent only sees as an unexpected EOF).
+    try:
+        if op == "tap":
+            # tap <x> <y> [durationMs]
+            if len(parts) < 3:
+                print("err tap-needs-x-y", flush=True)
+                return
+            x = float(parts[1])
+            y = float(parts[2])
+            dur_ms = float(parts[3]) if len(parts) > 3 else 80.0
+            await client.tap(x=x, y=y, duration=dur_ms / 1000.0)
+            print("ok", flush=True)
+        elif op == "swipe":
+            # swipe <x1> <y1> <x2> <y2> [durationMs]
+            if len(parts) < 5:
+                print("err swipe-needs-x1-y1-x2-y2", flush=True)
+                return
+            x1 = float(parts[1])
+            y1 = float(parts[2])
+            x2 = float(parts[3])
+            y2 = float(parts[4])
+            dur_ms = float(parts[5]) if len(parts) > 5 else 300.0
+            await client.swipe(
+                p_start=(x1, y1),
+                p_end=(x2, y2),
+                duration=dur_ms / 1000.0,
+            )
+            print("ok", flush=True)
+        elif op == "exit":
+            sys.exit(0)
+        else:
+            print(f"err unknown-op {op}", flush=True)
+    except ValueError as e:
+        # float() on non-numeric arg.
+        print(f"err bad-arg {e}", flush=True)
 
 
 if __name__ == "__main__":

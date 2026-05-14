@@ -2,16 +2,16 @@
  * Writer abstraction
  *
  * Single backend: NitroWriter. Reads route through ennio's Fabric
- * shadow tree over WebSocket. Writes do too — every tap, type, swipe,
- * scroll, key-press lands in the user app's process via the Nitro
- * helper (UIControl.sendActions / synthesised UITouch /
- * UITextInput.insertText: / UIScrollView.setContentOffset). idb HID is
- * gone from this layer; the only out-of-process write left is
- * `idb describe-all`-driven OOP a11y, which lives elsewhere and isn't
- * referenced here.
+ * shadow tree via the JSI `__ennioDispatch` host function over Hermes
+ * Inspector CDP. Writes (tap/swipe) drive **real CoreSimulator touches**
+ * — the hot path goes through the persistent HID daemon (Python over a
+ * Unix socket → gRPC → idb_companion → CoreSimulator IOHID, ~5 ms per
+ * call). Cold fallback: spawn `idb ui tap` per call (~250 ms). Last
+ * resort: in-app synthetic UITouch dispatch via the Nitro helper.
  *
- * Per-write cost: ~1–2 ms in-process call, no gRPC tax, no
- * idb_companion queue. Cumulative: 30–50 % faster on tap-heavy flows.
+ * Text input + native gestures (key-press, scroll, sendActions) still
+ * land in the user app's process via the Nitro helper — there's no idb
+ * primitive for them.
  */
 
 import type { EnnioClient, Selector } from './client';
@@ -71,6 +71,13 @@ export interface Writer {
   swipeAt(x1: number, y1: number, x2: number, y2: number, durationMs: number): Promise<boolean>;
   /** Key window size in window-coord points (cached after first call). */
   getScreenSize(): Promise<{ width: number; height: number }>;
+  /**
+   * Drop the cached window size + surface offset. Call after any event
+   * that can rotate, resize, or remount the key window (orientation
+   * change, `launchApp`, `clearState`). Without this the next tap math
+   * uses stale dimensions and lands off-target.
+   */
+  invalidateViewportCache(): void;
   scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean>;
   back(): Promise<boolean>;
   hideKeyboard(): Promise<boolean>;
@@ -189,6 +196,11 @@ export class NitroWriter implements Writer {
     // Max viewport (~440×956) still falls inside the on-screen gate.
     this.screenSize = { width: 480, height: 1024 };
     return this.screenSize;
+  }
+
+  invalidateViewportCache(): void {
+    this.screenSize = null;
+    this.surfaceOffset = null;
   }
 
   private async scrollAuto(
