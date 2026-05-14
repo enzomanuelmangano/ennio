@@ -1297,6 +1297,18 @@ std::string EnnioRuntimeHelper::prepareTap(const std::string& testID, double scr
         std::this_thread::sleep_for(std::chrono::milliseconds(probeSleepMs));
     }
     if (!foundStable) {
+        // Hit-test never confirmed the testID's view as topmost.
+        // Could be:
+        //   (a) a pointerEvents="none" wrapper — the tap is expected
+        //       to fall through to whatever sits beneath (test
+        //       authors rely on this for "blocked" cases).
+        //   (b) the view is obscured by a tab bar / large title —
+        //       the tap would land on the obscuring view and fire
+        //       the wrong action.
+        // We can't distinguish (a) from (b) here, so fall through to
+        // the best-effort last-stable coord and let the CLI-side
+        // scrollUntilVisible safe-tap-zone buffer prevent (b) before
+        // a user-driven `tapOn` ever reaches this branch.
         if (!haveLast) return "";
         finalCx = lastCx;
         finalCy = lastCy;

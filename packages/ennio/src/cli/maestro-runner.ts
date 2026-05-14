@@ -1357,7 +1357,19 @@ class MaestroExecutor {
       const screen = await this.writer.getScreenSize();
       const cx = frame.x + frame.width / 2;
       const cy = frame.y + frame.height / 2;
-      return cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height;
+      if (!(cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height)) return false;
+      // Soft safe-tap-zone gates. iPhone tab bar (~49) + home
+      // indicator (~34) take ~83px at the bottom; status bar +
+      // collapsed nav bar take ~100px at the top. Without these
+      // scrollUntilVisible exits when the target row is technically
+      // inside the window but obscured by the navbar / tab bar —
+      // the subsequent tap then lands on the wrong view (switches
+      // tabs / hits the title overlay). Conservative for
+      // unobstructed screens — just under-utilises ~180px of
+      // vertical space, harmless.
+      if (cy < 130) return false;
+      if (cy > screen.height - 90) return false;
+      return true;
     };
     while (Date.now() - startTime < timeout) {
       if (await this.selectorVisible(selector)) {
