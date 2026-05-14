@@ -55,8 +55,9 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
     id: 'open-transparent-modal-btn'
 - assertVisible:
     id: 'transparent-modal-title'
-- tapOn:
-    id: 'transparent-modal-close-btn'
+- waitForAnimationToEnd
+- tapOn: 'Close'
+- waitForAnimationToEnd
 - assertNotVisible:
     id: 'transparent-modal-title'
 

@@ -28,14 +28,14 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 
 # hideKeyboard (bare string + object form). search-input lives above the
 # alert button. Scroll the playground ScrollView up to expose it.
-- scroll:
-    direction: UP
-- scroll:
-    direction: UP
-- scroll:
-    direction: UP
-- scroll:
-    direction: UP
+- swipe:
+    direction: DOWN
+- swipe:
+    direction: DOWN
+- swipe:
+    direction: DOWN
+- swipe:
+    direction: DOWN
 - tapOn:
     id: 'search-input'
 - inputText: 'test'
@@ -54,7 +54,7 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
 
 # swipe (scroll the playground)
 - swipe:
-    direction: UP
+    direction: DOWN
     duration: 300
 - swipe:
     direction: DOWN

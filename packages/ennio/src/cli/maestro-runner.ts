@@ -1344,10 +1344,57 @@ class MaestroExecutor {
 
     this.log(`scrollUntilVisible: ${JSON.stringify(selector)}`);
     const startTime = Date.now();
+    const isHorizontal = direction === 'left' || direction === 'right';
+    // For id-targeted scrolls, require the element's center to land
+    // inside the viewport before exiting — partial-edge visibility
+    // satisfies `selectorVisible` but a subsequent `tapOn` would
+    // dispatch at an off-screen center and miss. The strict check
+    // matches what a real `tapOn` cares about.
+    const isCenterInViewport = async (): Promise<boolean> => {
+      if (!selector.id) return false;
+      const frame = await this.client.getViewWindowFrame(selector.id);
+      if (!frame || frame.width <= 0 || frame.height <= 0) return false;
+      const screen = await this.writer.getScreenSize();
+      const cx = frame.x + frame.width / 2;
+      const cy = frame.y + frame.height / 2;
+      return cx >= 0 && cx <= screen.width && cy >= 0 && cy <= screen.height;
+    };
     while (Date.now() - startTime < timeout) {
-      if (await this.selectorVisible(selector)) return;
-      await this.scroll(direction, scrollAmount);
-      await this.waitCommit(TAP_NAV_SETTLE_MS);
+      if (await this.selectorVisible(selector)) {
+        if (!selector.id || (await isCenterInViewport())) {
+          // Final settle so the next step (typically tapOn) sees a
+          // stationary frame — paged scrollers and momentum decel keep
+          // the frame moving for a few hundred ms after the last
+          // swipe, even when the on-screen + center checks pass.
+          await this.sleep(300);
+          return;
+        }
+      }
+      // For horizontal scrolls on a testID target, anchor the swipe
+      // at the target's center y (looked up via UIKit window-frame).
+      // Without this we'd swipe at the screen-center y, which lands
+      // in the outer (vertical) scroller of a page that hosts a
+      // horizontal carousel — the carousel never advances. Frame.y
+      // is valid even when the element is currently off-screen
+      // horizontally (its row is on the visible viewport).
+      let anchored = false;
+      if (isHorizontal && selector.id) {
+        const frame = await this.client.getViewWindowFrame(selector.id);
+        if (frame && frame.width > 0 && frame.height > 0) {
+          const screen = await this.writer.getScreenSize();
+          const cy = frame.y + frame.height / 2;
+          const hPad = 40;
+          const x1 = direction === 'left' ? screen.width - hPad : hPad;
+          const x2 = direction === 'left' ? hPad : screen.width - hPad;
+          await this.writer.swipeAt(x1, cy, x2, cy, 400);
+          await this.sleep(800);
+          anchored = true;
+        }
+      }
+      if (!anchored) {
+        await this.scroll(direction, scrollAmount);
+        await this.waitCommit(TAP_NAV_SETTLE_MS);
+      }
     }
     throw new Error(`scrollUntilVisible timeout: ${JSON.stringify(selector)}`);
   }

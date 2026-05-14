@@ -271,10 +271,13 @@ tags:
 - tapOn:
     id: 'toggle-dark-mode'
 
-# Defensive: dismiss any stray alert (optional — no-op when absent).
-- tapOn:
-    text: 'OK'
-    optional: true
+# Defensive: dismiss any stray alert — no-op when absent.
+- runFlow:
+    when:
+      visible: 'OK'
+    commands:
+      - tapOn:
+          text: 'OK'
 
 # Navigate to other screens and verify dark mode
 - runFlow:

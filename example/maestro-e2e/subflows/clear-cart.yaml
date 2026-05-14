@@ -6,10 +6,17 @@ appId: com.ennio.example
 - runFlow:
     file: navigate-cart.yaml
 
-# Optional cleanup — clear-cart-btn only present when cart has items.
-- tapOn:
-    id: 'clear-cart-btn'
-    optional: true
-- tapOn:
-    text: 'Clear'
-    optional: true
+# Conditional cleanup — clear-cart-btn only present when cart has items.
+- runFlow:
+    when:
+      visible:
+        id: 'clear-cart-btn'
+    commands:
+      - tapOn:
+          id: 'clear-cart-btn'
+      - runFlow:
+          when:
+            visible: 'Clear'
+          commands:
+            - tapOn:
+                text: 'Clear'

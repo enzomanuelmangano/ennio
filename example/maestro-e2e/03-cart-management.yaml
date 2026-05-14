@@ -154,18 +154,12 @@ tags:
 - runFlow:
     file: subflows/navigate-home.yaml
 
+# Scroll the featured carousel (a horizontal ScrollView nested under
+# the home page) until product-3's add-to-cart button is on screen.
+# Pure-Maestro: scrollUntilVisible with direction LEFT.
 - scrollUntilVisible:
     element:
-      id: 'featured-product-1'
-    direction: UP
-
-# Featured carousel is a horizontal ScrollView nested under the home
-# vertical ScrollView. Maestro's scrollUntilVisible LEFT picks the
-# outer (vertical) scroller and finds nothing. Use `from:` to anchor
-# the swipe inside the carousel so idb HID hits the correct scroller.
-- swipe:
-    from:
-      id: 'featured-product-1'
+      id: 'add-to-cart-featured-3'
     direction: LEFT
 - tapOn:
     id: 'add-to-cart-featured-3'

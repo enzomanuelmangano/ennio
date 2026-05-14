@@ -3,9 +3,13 @@
 appId: com.ennio.example
 
 ---
-- tapOn:
-    text: '(tabs)'
-    optional: true
+# Conditional: dismiss a "(tabs)" overlay if it sneaks in.
+- runFlow:
+    when:
+      visible: '(tabs)'
+    commands:
+      - tapOn:
+          text: '(tabs)'
 - waitForAnimationToEnd
 
 - tapOn:
