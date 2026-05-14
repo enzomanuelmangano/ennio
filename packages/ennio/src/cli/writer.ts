@@ -268,7 +268,14 @@ export class NitroWriter implements Writer {
     // ~250 ms python startup we'd pay per call. Falls back to
     // spawning `idb` if the daemon is unavailable.
     try {
-      await this.hidTap(center.x, center.y, isMenu ? 100 : 80);
+      // 120 ms tap duration matches what an average human-finger tap
+      // looks like on the simulator's IOHID layer. Shorter durations
+      // (~80 ms) work for plain Pressable but Pressto's
+      // PressableScale uses a Reanimated worklet whose pressIn →
+      // pressOut state machine wants more time to register; the
+      // delta is visible specifically on RN's `<Modal/>`-presented
+      // buttons where the dismiss never fires on the short tap.
+      await this.hidTap(center.x, center.y, isMenu ? 150 : 120);
     } catch {
       return false;
     }

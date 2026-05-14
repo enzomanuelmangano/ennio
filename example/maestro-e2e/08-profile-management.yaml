@@ -128,14 +128,17 @@ tags:
 # TEST: Navigate to orders from profile
 # ============================================
 
-# menu-orders sits at the top of the list; after scrolling DOWN to
-# reach menu-logout we now scroll DOWN-the-content (finger drags
-# down) to reveal it again. Maestro spec: `direction: DOWN` on swipe
-# = finger down = expose content above.
+# menu-orders sits at the top of the list. The flow scrolled DOWN
+# previously to assert menu-logout (end of list), so we now need
+# Maestro's `direction: UP` (finger drags up, content moves up —
+# wait, no: Maestro's direction parameter means "scroll content in
+# this direction along the page". DOWN advances forward through the
+# list, UP scrolls back to the top.) → use UP to return to where
+# menu-orders is visible.
 - scrollUntilVisible:
     element:
       id: 'menu-orders'
-    direction: DOWN
+    direction: UP
 
 - tapOn:
     id: 'menu-orders'

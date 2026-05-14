@@ -1380,6 +1380,8 @@ class MaestroExecutor {
       if (cy > screen.height - 90) return false;
       return true;
     };
+    let stuckIters = 0;
+    let prevFrameY: number | null = null;
     while (Date.now() - startTime < timeout) {
       if (await this.selectorVisible(selector)) {
         if (!selector.id || (await isCenterInViewport())) {
@@ -1389,6 +1391,27 @@ class MaestroExecutor {
           // swipe, even when the on-screen + center checks pass.
           await this.sleep(300);
           return;
+        }
+        // Selector is visible but center sits in the safe-tap-zone
+        // buffer (under navbar / above tab bar). If the frame is no
+        // longer moving across loop iterations the scrollview has
+        // reached its content edge — further swipes won't help.
+        // Accept "best effort" position and exit; the next step gets
+        // whatever frame the runner can read at tap time.
+        if (selector.id) {
+          const frame = await this.client.getViewWindowFrame(selector.id);
+          if (frame) {
+            if (prevFrameY !== null && Math.abs(prevFrameY - frame.y) < 1) {
+              stuckIters++;
+              if (stuckIters >= 2) {
+                await this.sleep(300);
+                return;
+              }
+            } else {
+              stuckIters = 0;
+            }
+            prevFrameY = frame.y;
+          }
         }
       }
       // For horizontal scrolls on a testID target, anchor the swipe

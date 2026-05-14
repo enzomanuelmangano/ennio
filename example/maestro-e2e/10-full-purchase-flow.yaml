@@ -307,23 +307,29 @@ tags:
 # PHASE 13: Quick Reorder Flow
 # ============================================
 
-# Add another product quickly from home. featured-1 is the first card
-# in the horizontal carousel and always fully on-screen; featured-2's
-# add-to-cart button sits below the right edge.
+# Add another product quickly. We go via the Products grid (not the
+# home featured carousel) — after the long auth + checkout sequence
+# this flow re-enters, the home screen retains a stale React fiber
+# instance and `add-to-cart-featured-1`'s testID resolves to that
+# stale view's frame (which sits at window y≈10 — under the status
+# bar). Tapping the grid item is unambiguous; same product, same
+# add-to-cart outcome.
 - runFlow:
-    file: subflows/navigate-home.yaml
+    file: subflows/navigate-products.yaml
 - waitForAnimationToEnd
 
-# Wait for the featured carousel to fully render — the carousel uses
-# a horizontal ScrollView whose first paint can leave the inner
-# add-to-cart Pressable laid out at (0,0) for a frame before the
-# real layout pass lands. Without this gate the next tap reads the
-# stale frame and dispatches under the status bar.
-- waitFor:
-    id: 'featured-product-1'
+# Phase 3 left the Sports category filter active. Reset to All so
+# add-to-cart-1 (Wireless Headphones / Electronics) is visible in
+# the grid.
+- tapOn:
+    id: 'filter-category-all'
+
+- extendedWaitUntil:
+    visible:
+      id: 'add-to-cart-1'
     timeout: 10000
 - tapOn:
-    id: 'add-to-cart-featured-1'
+    id: 'add-to-cart-1'
 
 # Verify cart updated
 - runFlow:
