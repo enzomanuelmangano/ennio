@@ -34,19 +34,23 @@
   "bin": {
     "ennio": "./dist/cli.js"
   },
-  "description": "Maestro-compatible E2E test runner for React Native iOS. Direct JSI fiber-walk invokes onPress synchronously.",
+  "description": "Maestro-compatible E2E test runner for React Native iOS. Drives the app over Hermes Inspector (CDP) and actuates real CoreSimulator touches via a persistent idb HID daemon.",
   "files": [
     "lib/",
     "dist/",
     "src/Ennio.nitro.ts",
     "src/index.ts",
+    "src/cli/hid-daemon.py",
     "cpp/",
     "android/",
-    "ios/",
+    "ios/*.h",
+    "ios/*.mm",
     "nitrogen/generated/",
     "nitro.json",
     "EnnioCore.podspec",
-    "react-native.config.js"
+    "react-native.config.js",
+    "LICENSE",
+    "README.md"
   ],
   "keywords": [
     "react-native",

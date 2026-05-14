@@ -1,8 +1,10 @@
 /**
  * Maestro YAML Runner
  *
- * Executes Maestro YAML test files using Ennio's WebSocket client.
- * Full Maestro command parity with built-in flakiness handling.
+ * Executes Maestro YAML test files. Talks to the app over Hermes
+ * Inspector CDP (via `client.ts`) and actuates touches via the
+ * persistent HID daemon (via `writer.ts`). Full Maestro command parity
+ * with built-in flakiness handling.
  */
 
 import { EnnioClient } from './client';
@@ -80,6 +82,7 @@ const RECORDING_SETTLE_MS = 500; // Settle after start/stopRecording so the next
 const RETRY_BACKOFF_MS = 500; // Pause between retry attempts inside `retry` block.
 const TRAVEL_WAYPOINT_GAP_MS = 200; // Gap between successive simctl location fixes during `travel`.
 const OPENLINK_SETTLE_MS = 500; // Wait for SpringBoard to switch contexts after openurl.
+const SWIPE_SETTLE_MS = 800; // Post-swipe settle. Covers onMomentumEnd → tree-reconcile gap on 120 Hz devices, where a shorter wait left the next frame query reading the mid-decel position.
 
 /**
  * Maestro per-command `optional: true`. Lives at the command level
@@ -1009,13 +1012,7 @@ class MaestroExecutor {
             y2 = screen.height - vPad;
           }
           await this.writer.swipeAt(x1, y1, x2, y2, duration);
-          // Swipe settle. Paged/momentum carousels keep moving after
-          // the touch ends; the Fabric shadow tree only reconciles
-          // once the deceleration finishes. 800 ms is empirical — it
-          // covers the onMomentumEnd → tree-reconcile gap on iPhone
-          // Air at 120 Hz, where a shorter wait left the next frame
-          // query reading the mid-decel position.
-          await this.sleep(800);
+          await this.sleep(SWIPE_SETTLE_MS);
           return;
         }
         // Frame lookup failed — fall through to direction-only path so
@@ -1048,7 +1045,7 @@ class MaestroExecutor {
         const e = parsePt(swipeCmd.end);
         if (s && e) {
           await this.writer.swipeAt(s.x, s.y, e.x, e.y, duration);
-          await this.sleep(800);
+          await this.sleep(SWIPE_SETTLE_MS);
           return;
         }
       }
@@ -1431,7 +1428,7 @@ class MaestroExecutor {
           const x1 = direction === 'left' ? screen.width - hPad : hPad;
           const x2 = direction === 'left' ? hPad : screen.width - hPad;
           await this.writer.swipeAt(x1, cy, x2, cy, 400);
-          await this.sleep(800);
+          await this.sleep(SWIPE_SETTLE_MS);
           anchored = true;
         }
       }
@@ -1746,6 +1743,10 @@ class MaestroExecutor {
       }
     }
     if (!connected) throw new Error('clearState: Failed to reconnect to app after restart');
+    // Fresh process = fresh key window. Drop the writer's cached window
+    // size + surface offset so the next tap math doesn't use values from
+    // the previous app instance.
+    this.writer.invalidateViewportCache();
     try {
       await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS);
     } catch {
@@ -1796,6 +1797,8 @@ class MaestroExecutor {
       }
     }
     if (!connected) throw new Error('launchApp: Failed to reconnect to app after restart');
+    // Fresh process — see comment in handleClearState.
+    this.writer.invalidateViewportCache();
 
     // Wait for first shadow tree commit so the next assertVisible has
     // something to query.

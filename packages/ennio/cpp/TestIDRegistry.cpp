@@ -32,11 +32,12 @@ TestIDRegistry::ShadowNodePtr TestIDRegistry::findByTestID(const std::string& te
         return nullptr;
     }
 
-    // Try to lock the weak pointer
     auto node = it->second.lock();
     if (!node) {
-        // Entry is stale, but we can't modify in const method
-        // The caller should trigger a tree update
+        // Expired entry. Evict so it doesn't pile up across renders
+        // between `updateFromTree` sweeps (`registry_` is mutable so
+        // const-correctness holds for callers).
+        registry_.erase(it);
         return nullptr;
     }
 

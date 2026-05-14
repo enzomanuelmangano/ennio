@@ -300,10 +300,9 @@ bool HybridEnnio::waitForNextCommit(double maxMs) {
 // ============================================
 //
 // Each handler is `(self, request, response)` — parse args, call the
-// instance method, fill the response. Map lookup is O(1). Reached
-// either from the legacy in-app WS server (removed) or — in v2 — from
+// instance method, fill the response. Map lookup is O(1). Reached from
 // the JSI `__ennioDispatch` host function the CLI calls via Hermes
-// Inspector. Same dispatch table, two transports.
+// Inspector CDP.
 
 using HandlerFn = std::function<void(HybridEnnio*, const ::ennio::Request&, ::ennio::Response&)>;
 
@@ -983,7 +982,7 @@ void HybridEnnio::setJSThreadExecutor(HybridEnnio::JSThreadExecutor exec) {
     g_jsExecutor = std::move(exec);
 }
 
-void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
+void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime) {
     {
         std::lock_guard<std::mutex> lock(g_jsContextMutex);
         if (g_jsRuntime == nullptr) {
@@ -1048,7 +1047,6 @@ void HybridEnnio::nativeBootstrap(facebook::jsi::Runtime& runtime, int port) {
         }
         instance = g_instance;
     }
-    (void)port;  // No longer used — transport is CDP via Hermes Inspector.
 
     // Seed the JS-side result bucket. External CLI posts work via
     // `__ennioDispatch(type, payloadJson, token)` and polls

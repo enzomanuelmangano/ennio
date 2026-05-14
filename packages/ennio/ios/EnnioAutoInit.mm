@@ -22,8 +22,6 @@
 #define ENNIO_HAVE_RCTINSTANCE 1
 #endif
 
-static const int kEnnioDefaultPort = 9876;
-
 // Flag to track if Ennio has been initialized
 static BOOL _ennioInitialized = NO;
 
@@ -212,10 +210,10 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
     // Pure-native bootstrap: pull RCTInstance from RCTHost's `_instance`
     // ivar, ask it to run a block on the JS thread once the runtime is
     // ready. Inside that block we have a `jsi::Runtime&` — capture it,
-    // install the fiber walker, construct HybridEnnio, start the WS
-    // server. After this, the user's app never has to import
-    // `ennio`; the package autolinks via Pod and bootstraps
-    // entirely from native.
+    // install the commit-signal walker + the `__ennioDispatch` JSI host
+    // function. After this, the user's app never has to import `ennio`;
+    // the package autolinks via Pod and bootstraps entirely from native,
+    // and the CLI drives it over Hermes Inspector CDP.
     Ivar instanceIvar = class_getInstanceVariable([self class], "_instance");
     if (instanceIvar) {
         id rctInstance = object_getIvar(self, instanceIvar);
@@ -243,7 +241,7 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
                 [](facebook::jsi::Runtime& rt) {
                     NSString* m = [NSString stringWithFormat:@"%@/Library/_ennio_jsthread_fired.txt", NSHomeDirectory()];
                     [@"jsthread" writeToFile:m atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                    margelo::nitro::ennio::HybridEnnio::nativeBootstrap(rt, kEnnioDefaultPort);
+                    margelo::nitro::ennio::HybridEnnio::nativeBootstrap(rt);
                     NSString* m2 = [NSString stringWithFormat:@"%@/Library/_ennio_bootstrap_returned.txt", NSHomeDirectory()];
                     [@"returned" writeToFile:m2 atomically:YES encoding:NSUTF8StringEncoding error:nil];
                 };
@@ -251,7 +249,7 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
             NSLog(@"[Ennio] Scheduled nativeBootstrap on JS thread");
             // Diagnostic marker: confirms ennio_start ran AND nativeBootstrap was scheduled.
             NSString* mark2 = [NSString stringWithFormat:@"%@/Library/_ennio_bootstrap_scheduled.txt", NSHomeDirectory()];
-            [[NSString stringWithFormat:@"port=%d dist=%@", kEnnioDefaultPort, ennioDistributionName(dist)]
+            [[NSString stringWithFormat:@"dist=%@", ennioDistributionName(dist)]
                 writeToFile:mark2 atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
             // Loud, greppable announce. If this line ever shows up in
