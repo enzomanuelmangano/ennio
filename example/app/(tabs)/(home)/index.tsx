@@ -35,13 +35,17 @@ function FeaturedProduct({
     }
   };
 
+  // Outer card is a View, not a Pressable — nested Pressables on iOS
+  // make the inner add button compete with the outer card's gesture
+  // recognizer (a real-finger tap on the small + button can register
+  // on the parent and navigate to detail instead of adding to cart).
+  // We expose a separate Pressable image for "open detail" so the
+  // testIDs still resolve to distinct, non-overlapping hit zones.
   return (
-    <Pressable
-      style={styles.featuredCard}
-      onPress={() => router.push(`/product/${product.id}`)}
-      testID={`featured-product-${product.id}`}
-    >
-      <Image source={{ uri: product.image }} style={styles.featuredImage} />
+    <View style={styles.featuredCard} testID={`featured-product-${product.id}`}>
+      <Pressable onPress={() => router.push(`/product/${product.id}`)}>
+        <Image source={{ uri: product.image }} style={styles.featuredImage} />
+      </Pressable>
       <View style={styles.featuredContent}>
         <Text style={styles.featuredCategory}>{product.category.toUpperCase()}</Text>
         <Text style={styles.featuredTitle} numberOfLines={1}>
@@ -59,7 +63,7 @@ function FeaturedProduct({
           </Pressable>
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
