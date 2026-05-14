@@ -400,18 +400,40 @@ export class NitroWriter implements Writer {
     return true;
   }
   async typeText(testID: string | null, text: string): Promise<boolean> {
-    // If a testID is provided, focus it first via real HID tap so the
-    // field becomes first responder. Then dispatch the text via idb
-    // typeText — real keystrokes on the system keyboard, same as
-    // Maestro/XCUITest. Per-char latency is higher than Nitro's
-    // insertText but onChangeText fires per character and validators
-    // get the chance to filter / format input the way a real user
-    // would experience it.
+    // Focus the target first (real HID tap → first-responder). Then
+    // dispatch the text either via idb's keyboard injection (real
+    // keystrokes, fires onChangeText per char, validators see input
+    // as a user would) or via pasteboard (whole-string commit, no
+    // per-key fidelity, but reliable for any character).
+    //
+    // idb's `ui text` drives the simulator's IOHID layer with US-
+    // layout assumptions; characters that need the Shift modifier
+    // (`@`, `?`, `&`, etc.) come out wrong on layouts where those
+    // glyphs sit elsewhere. Detect those and switch to the
+    // pasteboard path so RHF/zod/etc see the actual text we asked
+    // for. Plain ASCII letters/digits/space/`.,_-` stay on the
+    // keyboard path so per-char validators still fire.
     if (testID) {
       const c = await this.layoutCenter({ id: testID });
       if (!c) return false;
       await this.hidTap(c.x, c.y, 50);
       await this.client.waitForCommit(200);
+    }
+    const keyboardSafe = /^[a-zA-Z0-9 .,_\-+/=:;]*$/.test(text);
+    if (!keyboardSafe) {
+      // Pasteboard path: drop the string onto the system pasteboard
+      // then ask native to read it back and dispatch via insertText:
+      // on the testID-bearing input. insertText: doesn't depend on
+      // keyboard layout, so `@`, `?`, etc. land as themselves.
+      // Requires a testID for the destination — without one, we
+      // can't address an input. Fall through to the idb path in
+      // that case (best-effort).
+      if (testID) {
+        await this.setClipboard(text);
+        await this.send('pasteFromClipboard', { testID });
+        await new Promise((r) => setTimeout(r, 100));
+        return true;
+      }
     }
     await idb.ensureCompanion();
     await idb.typeText(text);
