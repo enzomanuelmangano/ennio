@@ -1,7 +1,7 @@
-# ennio-expo-plugin
+# @reactiive/ennio-expo-plugin
 
 > [!WARNING]
-> **Experimental.** Companion to [`ennio`](https://www.npmjs.com/package/ennio).
+> **Experimental.** Companion to [`@reactiive/ennio`](https://www.npmjs.com/package/@reactiive/ennio).
 > APIs and behavior may change without notice.
 
 Expo config plugin that links the Ennio native runtime into your iOS
@@ -18,14 +18,14 @@ The plugin:
 ## Install
 
 ```bash
-npm install ennio ennio-expo-plugin react-native-nitro-modules
+npm install @reactiive/ennio @reactiive/ennio-expo-plugin react-native-nitro-modules
 ```
 
 Then register in `app.json`:
 
 ```json
 {
-  "plugins": ["expo-router", "ennio-expo-plugin"]
+  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
 }
 ```
 
@@ -35,7 +35,7 @@ Optional config:
 {
   "plugins": [
     [
-      "ennio-expo-plugin",
+      "@reactiive/ennio-expo-plugin",
       {
         "configurations": ["Debug"],
         "showRibbon": false
@@ -49,7 +49,7 @@ Rebuild after configuring: `npx expo prebuild --clean && npx expo run:ios`.
 
 ## Docs
 
-See [ennio's README](https://github.com/enzomanuelmangano/ennio#readme)
+See [`@reactiive/ennio`'s README](https://github.com/enzomanuelmangano/ennio#readme)
 for architecture notes, the security model, and example flows.
 
 ## License

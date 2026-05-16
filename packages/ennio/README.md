@@ -14,7 +14,7 @@ UITouch that half-fires recognizers — the gesture goes through the same
 path a finger would.
 
 ```bash
-npm install ennio ennio-expo-plugin react-native-nitro-modules
+npm install @reactiive/ennio @reactiive/ennio-expo-plugin react-native-nitro-modules
 npx ennio test e2e/01-auth-flow.yaml      # one flow
 npx ennio test e2e/                       # every *.yaml in the directory
 ```
@@ -28,13 +28,13 @@ npx ennio test e2e/                       # every *.yaml in the directory
 
 ## Setup
 
-The accompanying [`ennio-expo-plugin`](https://www.npmjs.com/package/ennio-expo-plugin)
+The accompanying [`@reactiive/ennio-expo-plugin`](https://www.npmjs.com/package/@reactiive/ennio-expo-plugin)
 links the native runtime into **Debug builds only** via CocoaPods
 `:configurations`. Add it to `app.json`:
 
 ```json
 {
-  "plugins": ["expo-router", "ennio-expo-plugin"]
+  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
 }
 ```
 
