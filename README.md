@@ -32,8 +32,14 @@ ennio test e2e/                       # every *.yaml in the directory
 ## Getting started
 
 Requires an Expo app on RN ≥ 0.81 (New Architecture, Fabric), iOS 17+
-simulator, Xcode 16+, Node 18+, and `idb_companion`
-(`brew install facebook/fb/idb-companion`).
+simulator, Xcode 16+, Node 18+, and Facebook's `idb` toolchain (both
+the gRPC `idb_companion` server and the Python client used by Ennio's
+HID daemon):
+
+```bash
+brew install facebook/fb/idb-companion
+pip3 install fb-idb
+```
 
 **1. Install**
 

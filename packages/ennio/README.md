@@ -24,7 +24,13 @@ npx ennio test e2e/                       # every *.yaml in the directory
 - Expo app on React Native ≥ 0.81 (New Architecture, Fabric)
 - iOS 17+ simulator
 - Xcode 16+, Node 18+
-- `idb_companion` (`brew install facebook/fb/idb-companion`)
+- Facebook's `idb` toolchain — gRPC server + Python client (the
+  HID daemon imports the `idb` python package):
+
+  ```bash
+  brew install facebook/fb/idb-companion
+  pip3 install fb-idb
+  ```
 
 ## Setup
 
