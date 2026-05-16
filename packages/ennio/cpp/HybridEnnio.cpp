@@ -535,7 +535,6 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             r.success = self->pasteFromClipboard(::ennio::json::parseString(req.payload, "testID"));
         }},
     };
-    (void)helper;  // suppress unused-capture-style warnings on some compilers.
     return handlers;
 }
 
