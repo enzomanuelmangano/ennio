@@ -1,6 +1,6 @@
 {
   "name": "@reactiive/ennio-expo-plugin",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "Expo config plugin for Ennio E2E testing — links the native runtime into Debug builds only via CocoaPods :configurations.",
   "main": "src/index.js",
   "files": [
