@@ -179,38 +179,7 @@ Two channels, separate jobs:
 
 ## How taps work
 
-For `tapOn: { id: 'submit' }`:
-
-```
-CLI ── Runtime.evaluate("__ennioDispatch('prepareTap',{testID,screenW,screenH},token)")
-                                   │
-                                   ▼
-                          Hermes runtime (app)
-                                   │
-                          JSI host function — non-blocking dispatch
-                                   │
-                          worker → callFunctionOnBufferedRuntimeExecutor:
-                                   │  ↓ on JS thread
-                          Walk Fabric shadow tree, match testID,
-                          read UIView window-frame, on-screen check,
-                          auto-scroll to make visible if needed,
-                          hit-test the center → {x, y, isMenu}
-                                   │
-                          Write result into __ennioResult[token]
-                                   ▼
-CLI ── poll Runtime.evaluate(__ennioResult[token]) ── (x, y, isMenu)
-                                   │
-                                   ▼
-CLI ── HID daemon (Unix socket) ── gRPC ── idb_companion ── HID
-                                                              │
-                                                              ▼
-                                            CoreSimulator delivers
-                                            real UITouch at (x, y)
-                                                              │
-                                                              ▼
-                                            UIControl / RNGH / Pressable
-                                            recognizers fire normally
-```
+https://github.com/user-attachments/assets/42c38084-551f-41c0-90c3-02e62c13e617
 
 One CDP round trip for discovery, one HID delivery for the touch. Why
 not invoke `onPress` directly via JSI (the old design)? Two reasons:
@@ -355,21 +324,6 @@ nm -gU build/Build/Products/Release-iphoneos/YourApp.app/YourApp \
 - **Bridgeless / Fabric only.** Old-architecture RN is not supported;
   the shadow-tree traverser and the React-commit hook assume the new
   arch.
-
-## Repo layout
-
-```
-packages/
-  ennio/              @reactiive/ennio              — in-app native runtime
-                                                     (C++/ObjC++ + Nitro spec)
-                                                     AND the `ennio` CLI
-                                                     binary (esbuild-bundled,
-                                                     ships in same package).
-  ennio-expo-plugin/  @reactiive/ennio-expo-plugin  — Podfile gate
-                                                     (`:configurations => ['Debug']`).
-example/                                 — Sample app + maestro-e2e/ flows
-                                           (regression suite).
-```
 
 ## License
 
