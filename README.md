@@ -290,25 +290,6 @@ The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
 - Native alerts: `tapAlertButton`, `dismissAlert`. `assertVisible: text:`
   also matches alert titles + button labels.
 
-### Ennio-specific extension: `swipe { from: }`
-
-Maestro's `swipe direction: LEFT` swipes at the screen center, which
-misses nested horizontal scrollers (e.g. a featured carousel under a
-vertical page). Ennio adds a `from:` field that anchors the swipe at a
-target element's center axis:
-
-```yaml
-- swipe:
-    from:
-      id: 'featured-product-1'
-    direction: LEFT
-```
-
-The CLI queries the element's window frame, anchors the swipe at its
-center y (for horizontal) or x (for vertical), and spans the screen so
-the gesture is long enough to clear a carousel page. idb HID delivers
-the swipe so RCTScrollView's pan recogniser sees real touches.
-
 ## Build gating
 
 `@reactiive/ennio-expo-plugin` writes a single `pod 'EnnioCore'` line
