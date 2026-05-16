@@ -12,8 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "ennio": "*",
-    "ennio-expo-plugin": "*",
+    "@reactiive/ennio": "*",
+    "@reactiive/ennio-expo-plugin": "*",
     "@expo/metro-runtime": "~55.0.10",
     "@gorhom/bottom-sheet": "^5.2.13",
     "@hookform/resolvers": "^5.2.2",
