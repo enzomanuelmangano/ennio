@@ -44,8 +44,12 @@ pip3 install fb-idb
 **1. Install**
 
 ```bash
-npm install @reactiive/ennio @reactiive/ennio-expo-plugin react-native-nitro-modules
+bun add @reactiive/ennio react-native-nitro-modules
+bun add -d @reactiive/ennio-expo-plugin
 ```
+
+(Or use the equivalent `npm install` / `yarn add` — `ennio-expo-plugin`
+is a build-time config plugin, so it belongs in `devDependencies`.)
 
 **2. Register the plugin** — add `"@reactiive/ennio-expo-plugin"` to `app.json`:
 

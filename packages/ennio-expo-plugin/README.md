@@ -18,8 +18,12 @@ The plugin:
 ## Install
 
 ```bash
-npm install @reactiive/ennio @reactiive/ennio-expo-plugin react-native-nitro-modules
+bun add @reactiive/ennio react-native-nitro-modules
+bun add -d @reactiive/ennio-expo-plugin
 ```
+
+(Or use the equivalent `npm install` / `yarn add` — this package is a
+build-time config plugin, so it belongs in `devDependencies`.)
 
 Then register in `app.json`:
 
