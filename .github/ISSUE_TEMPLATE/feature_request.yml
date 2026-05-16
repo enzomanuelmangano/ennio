@@ -1,0 +1,55 @@
+name: Feature request
+description: Propose a new Maestro command, CLI flag, plugin option, or capability.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for new functionality. For bugs or behavior changes in
+        existing features, use the **Bug report** template instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can you not do today? Why does it matter?
+      placeholder: "I cannot test X because Ennio does not support Y…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it look? YAML, CLI, or plugin shape.
+      render: yaml
+      placeholder: |
+        - newCommand:
+            arg: value
+    validations:
+      required: true
+
+  - type: textarea
+    id: maestro-parity
+    attributes:
+      label: Maestro parity
+      description: |
+        Is this command part of Maestro's grammar? Link the Maestro docs
+        page if so. Ennio favors keeping parity over inventing new syntax.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you have already tried.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I have read the README and confirmed the feature is not already supported.
+          required: true

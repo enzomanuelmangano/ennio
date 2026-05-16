@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/enzomanuelmangano/ennio/discussions
+    about: Ask questions, share setup gotchas, or discuss flow patterns.
+  - name: Security vulnerability
+    url: https://github.com/enzomanuelmangano/ennio/blob/main/SECURITY.md
+    about: Do not open a public issue. Follow the disclosure process in SECURITY.md.

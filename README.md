@@ -374,3 +374,10 @@ example/                                 — Sample app + maestro-e2e/ flows
 ## License
 
 MIT.
+
+## Trademarks
+
+Maestro is a trademark of mobile.dev. Ennio is an independent
+project, not affiliated with mobile.dev. References to "Maestro"
+describe only the YAML flow format that Ennio consumes; no Maestro
+source code is bundled or redistributed.
