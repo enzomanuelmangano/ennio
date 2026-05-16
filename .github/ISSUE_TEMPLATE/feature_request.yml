@@ -1,7 +1,7 @@
 name: Feature request
 description: Propose a new Maestro command, CLI flag, plugin option, or capability.
-title: "feat: "
-labels: ["enhancement"]
+title: 'feat: '
+labels: ['enhancement']
 body:
   - type: markdown
     attributes:
@@ -14,7 +14,7 @@ body:
     attributes:
       label: Problem
       description: What can you not do today? Why does it matter?
-      placeholder: "I cannot test X because Ennio does not support Y…"
+      placeholder: 'I cannot test X because Ennio does not support Y…'
     validations:
       required: true
 

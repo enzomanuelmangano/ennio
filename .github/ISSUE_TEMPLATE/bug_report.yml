@@ -1,7 +1,7 @@
 name: Bug report
 description: Something is broken in the CLI, runtime, or expo plugin.
-title: "bug: "
-labels: ["bug"]
+title: 'bug: '
+labels: ['bug']
 body:
   - type: markdown
     attributes:
@@ -17,7 +17,7 @@ body:
     attributes:
       label: Summary
       description: One or two sentences. What happened, what did you expect?
-      placeholder: "`tapOn` fails on element X with error Y, but it should…"
+      placeholder: '`tapOn` fails on element X with error Y, but it should…'
     validations:
       required: true
 
@@ -53,7 +53,7 @@ body:
     attributes:
       label: Ennio version
       description: Output of `npx ennio version`.
-      placeholder: "0.x.y"
+      placeholder: '0.x.y'
     validations:
       required: true
 
@@ -61,7 +61,7 @@ body:
     id: rn-expo
     attributes:
       label: React Native + Expo SDK version
-      placeholder: "RN 0.81.x, Expo SDK 54"
+      placeholder: 'RN 0.81.x, Expo SDK 54'
     validations:
       required: true
 
@@ -70,7 +70,7 @@ body:
     attributes:
       label: Simulator
       description: Output of `xcrun simctl list devices booted`.
-      placeholder: "iPhone 17 Pro (iOS 18.2)"
+      placeholder: 'iPhone 17 Pro (iOS 18.2)'
     validations:
       required: true
 
@@ -78,7 +78,7 @@ body:
     id: xcode-node
     attributes:
       label: Xcode + Node version
-      placeholder: "Xcode 16.2, Node 20.x"
+      placeholder: 'Xcode 16.2, Node 20.x'
     validations:
       required: true
 

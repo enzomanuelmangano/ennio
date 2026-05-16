@@ -43,6 +43,7 @@ A read-only architectural overview lives in the root `README.md`
      ```
 
 2. **Clone + install**:
+
    ```bash
    git clone https://github.com/enzomanuelmangano/ennio.git
    cd ennio
@@ -51,6 +52,7 @@ A read-only architectural overview lives in the root `README.md`
 
 3. **Build the example app once** (links the local packages into a
    real Debug build):
+
    ```bash
    cd example
    bunx expo prebuild --clean
@@ -152,7 +154,7 @@ the CLI launches as a Node process.
 - **One logical change per commit.** Multi-purpose commits make
   bisects painful. A PR with 5 small commits beats a PR with 1 big
   commit.
-- **Commit messages explain *why***. The diff shows *what*. Past
+- **Commit messages explain _why_**. The diff shows _what_. Past
   commits in `git log --oneline` set the tone.
 
 ### Before opening a PR

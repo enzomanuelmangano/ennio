@@ -7,13 +7,13 @@ are seeing.
 
 ## Where to ask
 
-| You want to…                                       | Use                                                                                                |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Report a reproducible bug                          | [GitHub Issues](https://github.com/enzomanuelmangano/ennio/issues) — pick the **Bug report** template |
-| Request a Maestro command / CLI feature            | [GitHub Issues](https://github.com/enzomanuelmangano/ennio/issues) — pick the **Feature request** template |
-| Ask a usage question or share a setup gotcha       | [GitHub Discussions](https://github.com/enzomanuelmangano/ennio/discussions) (if enabled) or a new issue tagged `question` |
-| Report a security vulnerability                    | See [SECURITY.md](SECURITY.md) — email, do not open a public issue                                 |
-| Report a Code of Conduct violation                 | See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)                                                       |
+| You want to…                                 | Use                                                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Report a reproducible bug                    | [GitHub Issues](https://github.com/enzomanuelmangano/ennio/issues) — pick the **Bug report** template                      |
+| Request a Maestro command / CLI feature      | [GitHub Issues](https://github.com/enzomanuelmangano/ennio/issues) — pick the **Feature request** template                 |
+| Ask a usage question or share a setup gotcha | [GitHub Discussions](https://github.com/enzomanuelmangano/ennio/discussions) (if enabled) or a new issue tagged `question` |
+| Report a security vulnerability              | See [SECURITY.md](SECURITY.md) — email, do not open a public issue                                                         |
+| Report a Code of Conduct violation           | See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)                                                                               |
 
 ## Before opening an issue
 
