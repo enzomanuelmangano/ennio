@@ -29,6 +29,8 @@ ennio test e2e/01-auth-flow.yaml      # one flow
 ennio test e2e/                       # every *.yaml in the directory
 ```
 
+https://github.com/user-attachments/assets/0a6ab3f6-e04f-4756-a728-98f29bef08c8
+
 ## Getting started
 
 Requires an Expo app on RN ≥ 0.81 (New Architecture, Fabric), iOS 17+
