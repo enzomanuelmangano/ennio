@@ -25,11 +25,11 @@ half-fires recognizers. JSI handles the read side too: shadow-tree
 existence, visibility, text, layout, alert introspection.
 
 ```
-ennio test e2e/01-auth-flow.yaml      # one flow
-ennio test e2e/                       # every *.yaml in the directory
+npx ennio test e2e/01-auth-flow.yaml      # one flow
+npx ennio test e2e/                       # every *.yaml in the directory
 ```
 
-https://github.com/user-attachments/assets/0a6ab3f6-e04f-4756-a728-98f29bef08c8
+https://github.com/user-attachments/assets/97a32505-e4d2-4661-8ed6-7915c0ced1f8
 
 ## Getting started
 
