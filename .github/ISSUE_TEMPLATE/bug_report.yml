@@ -1,0 +1,109 @@
+name: Bug report
+description: Something is broken in the CLI, runtime, or expo plugin.
+title: 'bug: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in as much as
+        you can — the more reproducible the report, the faster the fix.
+
+        For security issues, **do not file here** — see
+        [SECURITY.md](https://github.com/enzomanuelmangano/ennio/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences. What happened, what did you expect?
+      placeholder: '`tapOn` fails on element X with error Y, but it should…'
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-yaml
+    attributes:
+      label: Minimal repro YAML
+      description: Smallest flow that reproduces the issue. Use a fenced code block.
+      render: yaml
+      placeholder: |
+        appId: com.your.app
+        ---
+        - launchApp:
+            clearState: true
+        - tapOn:
+            id: 'broken-button'
+    validations:
+      required: true
+
+  - type: textarea
+    id: verbose-output
+    attributes:
+      label: Verbose CLI output
+      description: |
+        Output of `npx ennio test --verbose <flow>.yaml`. Last ~50 lines is
+        usually enough.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: ennio-version
+    attributes:
+      label: Ennio version
+      description: Output of `npx ennio version`.
+      placeholder: '0.x.y'
+    validations:
+      required: true
+
+  - type: input
+    id: rn-expo
+    attributes:
+      label: React Native + Expo SDK version
+      placeholder: 'RN 0.81.x, Expo SDK 54'
+    validations:
+      required: true
+
+  - type: input
+    id: simulator
+    attributes:
+      label: Simulator
+      description: Output of `xcrun simctl list devices booted`.
+      placeholder: 'iPhone 17 Pro (iOS 18.2)'
+    validations:
+      required: true
+
+  - type: input
+    id: xcode-node
+    attributes:
+      label: Xcode + Node version
+      placeholder: 'Xcode 16.2, Node 20.x'
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Failure screenshot
+      description: |
+        Drag in the image from `/tmp/ennio-shots/<flow>-fail.png` if the
+        flow produced one. Optional but extremely helpful.
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Workarounds you have tried, related issues, hunches.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I am on the latest `@reactiive/ennio` and `@reactiive/ennio-expo-plugin`.
+          required: true
+        - label: My app is on RN ≥ 0.81 with the New Architecture (Fabric) enabled.
+          required: true
