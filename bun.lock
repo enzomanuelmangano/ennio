@@ -34,9 +34,8 @@
         "@react-native-community/slider": "5.1.2",
         "@react-native-menu/menu": "1.2.2",
         "@react-native-picker/picker": "2.11.4",
+        "@reactiive/ennio": "*",
         "@shopify/flash-list": "2.0.2",
-        "ennio": "*",
-        "ennio-expo-plugin": "*",
         "expo": "^55.0.19",
         "expo-blur": "~55.0.14",
         "expo-constants": "~55.0.15",
@@ -64,14 +63,15 @@
       },
       "devDependencies": {
         "@babel/core": "^7.24.0",
+        "@reactiive/ennio-expo-plugin": "*",
         "@types/react": "~19.2.10",
         "expo-color-space-plugin": "^0.1.0",
         "typescript": "~5.9.2",
       },
     },
     "packages/ennio": {
-      "name": "ennio",
-      "version": "0.0.1",
+      "name": "@reactiive/ennio",
+      "version": "0.0.2",
       "bin": {
         "ennio": "./dist/cli.js",
       },
@@ -95,7 +95,7 @@
       },
     },
     "packages/ennio-expo-plugin": {
-      "name": "ennio-expo-plugin",
+      "name": "@reactiive/ennio-expo-plugin",
       "version": "0.0.1",
       "dependencies": {
         "@expo/config-plugins": "^9.0.0",
@@ -598,6 +598,10 @@
 
     "@react-navigation/routers": ["@react-navigation/routers@7.5.3", "", { "dependencies": { "nanoid": "^3.3.11" } }, "sha512-1tJHg4KKRJuQ1/EvJxatrMef3NZXEPzwUIUZ3n1yJ2t7Q97siwRtbynRpQG9/69ebbtiZ8W3ScOZF/OmhvM4Rg=="],
 
+    "@reactiive/ennio": ["@reactiive/ennio@workspace:packages/ennio"],
+
+    "@reactiive/ennio-expo-plugin": ["@reactiive/ennio-expo-plugin@workspace:packages/ennio-expo-plugin"],
+
     "@rtsao/scc": ["@rtsao/scc@1.1.0", "", {}, "sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g=="],
 
     "@shopify/flash-list": ["@shopify/flash-list@2.0.2", "", { "dependencies": { "tslib": "2.8.1" }, "peerDependencies": { "@babel/runtime": "*", "react": "*", "react-native": "*" } }, "sha512-zhlrhA9eiuEzja4wxVvotgXHtqd3qsYbXkQ3rsBfOgbFA9BVeErpDE/yEwtlIviRGEqpuFj/oU5owD6ByaNX+w=="],
@@ -962,11 +966,7 @@
 
     "encodeurl": ["encodeurl@2.0.0", "", {}, "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg=="],
 
-    "ennio": ["ennio@workspace:packages/ennio"],
-
     "ennio-example": ["ennio-example@workspace:example"],
-
-    "ennio-expo-plugin": ["ennio-expo-plugin@workspace:packages/ennio-expo-plugin"],
 
     "env-editor": ["env-editor@0.4.2", "", {}, "sha512-ObFo8v4rQJAE59M69QzwloxPZtd33TpYEIjtKD1rrFDcM1Gd7IkDxEBU+HriziN6HSHQnBJi8Dmy+JWkav5HKA=="],
 

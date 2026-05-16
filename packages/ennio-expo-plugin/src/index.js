@@ -22,7 +22,7 @@ const path = require('path');
  *   - enabled         boolean   Skip the plugin entirely when false.
  *
  * Example:
- *   { "plugins": [["ennio-expo-plugin", {
+ *   { "plugins": [["@reactiive/ennio-expo-plugin", {
  *       "configurations": ["Debug", "Staging"],
  *       "showRibbon": true
  *     }]] }
@@ -50,11 +50,13 @@ function withEnnioPodfile(config, configurations) {
   # CocoaPods compiles + links EnnioCore strictly for the listed
   # Xcode build configurations; Release archives never see it.
   # candidate_paths covers standard layout, monorepo (1 level up),
-  # and bun-workspace hoisted layouts (2 levels up).
+  # and bun-workspace hoisted layouts (2 levels up). The package ships
+  # under the @reactiive scope, so its on-disk path is
+  # node_modules/@reactiive/ennio.
   candidate_paths = [
-    File.join(__dir__, '..', 'node_modules', 'ennio'),
-    File.join(__dir__, '..', '..', 'node_modules', 'ennio'),
-    File.join(__dir__, '..', '..', '..', 'node_modules', 'ennio'),
+    File.join(__dir__, '..', 'node_modules', '@reactiive', 'ennio'),
+    File.join(__dir__, '..', '..', 'node_modules', '@reactiive', 'ennio'),
+    File.join(__dir__, '..', '..', '..', 'node_modules', '@reactiive', 'ennio'),
   ]
   ennio_path = candidate_paths.find { |p| File.exist?(p) }
   pod 'EnnioCore', :path => ennio_path, :configurations => [${configList}] if ennio_path

@@ -32,20 +32,30 @@ ennio test e2e/                       # every *.yaml in the directory
 ## Getting started
 
 Requires an Expo app on RN ≥ 0.81 (New Architecture, Fabric), iOS 17+
-simulator, Xcode 16+, Node 18+, and `idb_companion`
-(`brew install facebook/fb/idb-companion`).
+simulator, Xcode 16+, Node 18+, and Facebook's `idb` toolchain (both
+the gRPC `idb_companion` server and the Python client used by Ennio's
+HID daemon):
+
+```bash
+brew install facebook/fb/idb-companion
+pip3 install fb-idb
+```
 
 **1. Install**
 
 ```bash
-npm install ennio ennio-expo-plugin react-native-nitro-modules
+bun add @reactiive/ennio react-native-nitro-modules
+bun add -d @reactiive/ennio-expo-plugin
 ```
 
-**2. Register the plugin** — add `"ennio-expo-plugin"` to `app.json`:
+(Or use the equivalent `npm install` / `yarn add` — `ennio-expo-plugin`
+is a build-time config plugin, so it belongs in `devDependencies`.)
+
+**2. Register the plugin** — add `"@reactiive/ennio-expo-plugin"` to `app.json`:
 
 ```json
 {
-  "plugins": ["expo-router", "ennio-expo-plugin"]
+  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
 }
 ```
 
@@ -299,8 +309,8 @@ the swipe so RCTScrollView's pan recogniser sees real touches.
 
 ## Build gating
 
-`ennio-expo-plugin` writes a single `pod 'EnnioCore'` line into the
-generated `Podfile`, tagged with `:configurations => ['Debug']`.
+`@reactiive/ennio-expo-plugin` writes a single `pod 'EnnioCore'` line
+into the generated `Podfile`, tagged with `:configurations => ['Debug']`.
 CocoaPods compiles + links the pod **only** for the listed Xcode
 build configurations:
 
@@ -312,8 +322,8 @@ build configurations:
 
 No env var. No prebuild discipline. Release archives can't carry
 Ennio even if someone tries — CocoaPods literally skips the source.
-**Safe to keep `ennio-expo-plugin` in `app.json` for production-
-shipping apps.**
+**Safe to keep `@reactiive/ennio-expo-plugin` in `app.json` for
+production-shipping apps.**
 
 Plugin options (all optional):
 
@@ -321,7 +331,7 @@ Plugin options (all optional):
 {
   "plugins": [
     [
-      "ennio-expo-plugin",
+      "@reactiive/ennio-expo-plugin",
       {
         "configurations": ["Debug", "Staging"],
         "showRibbon": true,
@@ -354,7 +364,7 @@ nm -gU build/Build/Products/Release-iphoneos/YourApp.app/YourApp \
 - **Android not yet supported.** Some scaffolding exists in the source
   tree (CMake, Gradle, nitrogen Android codegen) but no runtime: no
   `+load`-equivalent bootstrap, no JNI hook, no JS-thread executor.
-  The plugin is iOS-only — adding `ennio-expo-plugin` to an
+  The plugin is iOS-only — adding `@reactiive/ennio-expo-plugin` to an
   Android-only build is a no-op.
 - **Requires Metro.** With no Metro running, there is no Hermes
   Inspector to connect to. The CLI errors out immediately. Tests can't
@@ -367,12 +377,13 @@ nm -gU build/Build/Products/Release-iphoneos/YourApp.app/YourApp \
 
 ```
 packages/
-  ennio/              ennio              — in-app native runtime (C++/ObjC++
-                                           + Nitro spec) AND the `ennio` CLI
-                                           binary (esbuild-bundled, ships in
-                                           same package).
-  ennio-expo-plugin/  ennio-expo-plugin  — Podfile gate
-                                           (`:configurations => ['Debug']`).
+  ennio/              @reactiive/ennio              — in-app native runtime
+                                                     (C++/ObjC++ + Nitro spec)
+                                                     AND the `ennio` CLI
+                                                     binary (esbuild-bundled,
+                                                     ships in same package).
+  ennio-expo-plugin/  @reactiive/ennio-expo-plugin  — Podfile gate
+                                                     (`:configurations => ['Debug']`).
 example/                                 — Sample app + maestro-e2e/ flows
                                            (regression suite).
 ```

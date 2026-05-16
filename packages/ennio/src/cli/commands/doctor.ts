@@ -53,7 +53,7 @@ export async function runDoctorCommand(_positional: string[], _flags: Flags): Pr
     ok: !!client,
     detail: client
       ? 'connected'
-      : 'no JS context — launch a Debug build, confirm Metro is running, confirm ennio-expo-plugin was applied at last prebuild',
+      : 'no JS context — launch a Debug build, confirm Metro is running, confirm @reactiive/ennio-expo-plugin was applied at last prebuild',
   });
   if (client) client.disconnect();
 

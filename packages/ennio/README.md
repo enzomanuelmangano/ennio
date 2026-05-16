@@ -14,27 +14,38 @@ UITouch that half-fires recognizers — the gesture goes through the same
 path a finger would.
 
 ```bash
-npm install ennio ennio-expo-plugin react-native-nitro-modules
-npx ennio test e2e/01-auth-flow.yaml      # one flow
-npx ennio test e2e/                       # every *.yaml in the directory
+bun add @reactiive/ennio react-native-nitro-modules
+bun add -d @reactiive/ennio-expo-plugin
+
+bunx ennio test e2e/01-auth-flow.yaml      # one flow
+bunx ennio test e2e/                       # every *.yaml in the directory
 ```
+
+(Or use the equivalent `npm install` / `yarn add` — `ennio-expo-plugin`
+is a build-time config plugin, so it belongs in `devDependencies`.)
 
 ## Requirements
 
 - Expo app on React Native ≥ 0.81 (New Architecture, Fabric)
 - iOS 17+ simulator
 - Xcode 16+, Node 18+
-- `idb_companion` (`brew install facebook/fb/idb-companion`)
+- Facebook's `idb` toolchain — gRPC server + Python client (the
+  HID daemon imports the `idb` python package):
+
+  ```bash
+  brew install facebook/fb/idb-companion
+  pip3 install fb-idb
+  ```
 
 ## Setup
 
-The accompanying [`ennio-expo-plugin`](https://www.npmjs.com/package/ennio-expo-plugin)
+The accompanying [`@reactiive/ennio-expo-plugin`](https://www.npmjs.com/package/@reactiive/ennio-expo-plugin)
 links the native runtime into **Debug builds only** via CocoaPods
 `:configurations`. Add it to `app.json`:
 
 ```json
 {
-  "plugins": ["expo-router", "ennio-expo-plugin"]
+  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
 }
 ```
 
