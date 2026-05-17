@@ -1,0 +1,35 @@
+appId: com.ennio.example
+name: 'Gauntlet — RefreshControl pull-to-refresh'
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Gauntlet'
+- scrollUntilVisible:
+    element:
+      id: 'g-refresh-control'
+    direction: DOWN
+- tapOn:
+    id: 'g-refresh-control'
+- assertVisible:
+    id: 'refresh-control-screen'
+- assertVisible:
+    text: 'Refreshed: 0'
+
+# Pull-down: two consecutive HID swipes. The first warms the
+# UIScrollView pan recognizer (single swipe alone is flaky on iOS 26
+# simulator HID — touch begin/end timing doesn't always cross
+# RefreshControl's trigger threshold). Second swipe pulls the
+# spinner past trigger. Explicit start/end uses idb HID (real
+# touches the pan recogniser sees) instead of setContentOffset.
+- swipe:
+    start: '50%,25%'
+    end: '50%,90%'
+    duration: 500
+- swipe:
+    start: '50%,25%'
+    end: '50%,90%'
+    duration: 500
+
+# onRefresh has 600ms simulated delay; wait then assert.
+- assertVisible:
+    text: 'Refreshed: 1'
