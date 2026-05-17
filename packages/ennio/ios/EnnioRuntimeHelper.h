@@ -251,6 +251,40 @@ public:
      * most one picker is normally visible.
      */
     bool selectPickerValueByLabel(const std::string& label);
+    /**
+     * Programmatic UISearchBar text entry. RNScreens binds a
+     * UISearchBar to Stack.Screen.headerSearchBarOptions; the bar is
+     * native UIKit, not a React-managed view, so testID lookups
+     * can't reach its inner UITextField. idb HID keystrokes don't
+     * always deliver to the bar's field on iOS 26 simulator either.
+     * Walks every visible UISearchBar, assigns `searchBar.text` and
+     * fires `searchBar:textDidChange:` on the delegate so RNScreens
+     * emits onChangeText. Pass empty string to clear.
+     */
+    bool setSearchBarText(const std::string& text);
+    /**
+     * Append `text` to the currently-focused UISearchBar (if any).
+     * Falls back to the first visible UISearchBar when none is the
+     * first responder. Used by inputText so successive calls build up
+     * the query naturally instead of overwriting.
+     */
+    bool appendSearchBarText(const std::string& text);
+    /**
+     * Delete trailing `count` characters from the focused (or first
+     * visible) UISearchBar. Used by eraseText / clearText. Pass a
+     * very large count (e.g. INT_MAX) to clear the field entirely.
+     */
+    bool eraseSearchBarText(int count);
+    /**
+     * Focus the search bar whose placeholder matches `placeholder`
+     * (case-insensitive). RNScreens-managed UISearchBar isn't in the
+     * React view tree so testID lookups + accessibility-label HID
+     * taps miss it. Calls becomeFirstResponder on the embedded text
+     * field so subsequent inputText fires textDidChange correctly.
+     * When `placeholder` is empty, focuses the first visible search
+     * bar.
+     */
+    bool focusSearchBar(const std::string& placeholder);
 
 private:
     EnnioRuntimeHelper() = default;

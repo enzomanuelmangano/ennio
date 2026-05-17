@@ -2510,6 +2510,159 @@ bool EnnioRuntimeHelper::selectPickerValueByLabel(const std::string& label) {
     return ok;
 }
 
+// Collect every text field that powers a search bar UI. iOS 26
+// replaced UIKit's UISearchBar with a SwiftUI
+// `InlineSearchBarViewRepresentation` wrapper, so a UISearchBar
+// class walk returns 0 hits even though the bar is visible on
+// screen. The inner private class `UISearchBarTextField` (a
+// UITextField subclass) survives the migration and is what the
+// SwiftUI host shows. Walking for that class — plus an
+// in-tree UISearchBar fallback for older iOS / collapsed-mode UI —
+// covers both worlds. `out` receives UITextField instances; the
+// caller drives text via .text + UIControlEventEditingChanged.
+static void collectSearchBarTextFieldsIn(UIView* root, NSMutableArray<UITextField*>* out) {
+    if (!root || root.hidden) return;
+    NSString* cls = NSStringFromClass([root class]);
+    if ([root isKindOfClass:[UITextField class]] &&
+        ([cls isEqualToString:@"UISearchBarTextField"] || [cls containsString:@"SearchBar"])) {
+        [out addObject:(UITextField*)root];
+        return;
+    }
+    if ([root isKindOfClass:[UISearchBar class]]) {
+        UITextField* tf = [(UISearchBar*)root valueForKey:@"searchField"];
+        if (tf) [out addObject:tf];
+        return;
+    }
+    for (UIView* sub in root.subviews) collectSearchBarTextFieldsIn(sub, out);
+}
+
+// Walks every visible search-bar text field across connected
+// windows. Covers iOS 26 SwiftUI-hosted bars (UISearchBarTextField
+// directly under a SwiftUI host) and legacy UISearchBar bars.
+static NSArray<UITextField*>* allSearchBarTextFields() {
+    NSMutableArray<UITextField*>* fields = [NSMutableArray array];
+    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+            collectSearchBarTextFieldsIn(win, fields);
+        }
+    }
+    return fields;
+}
+
+// Return the search-bar text field that is the current first
+// responder, or nil if none. Reading isFirstResponder on the
+// field directly is correct — it IS the focused responder when
+// the search bar is active.
+static UITextField* focusedSearchBarTextField() {
+    for (UITextField* tf in allSearchBarTextFields()) {
+        if (tf.isFirstResponder) return tf;
+    }
+    return nil;
+}
+
+static UITextField* firstSearchBarTextField() {
+    return allSearchBarTextFields().firstObject;
+}
+
+// Fire the events needed for both the SwiftUI search-bar host AND
+// the legacy UISearchBarDelegate path to observe the new value.
+// iOS 26 SwiftUI hosts observe UIControlEventEditingChanged on the
+// underlying text field; UISearchBar bridges through the same
+// notification to its delegate's searchBar:textDidChange:. So a
+// single editingChanged dispatch covers both.
+static void notifySearchTextChanged(UITextField* tf) {
+    if (!tf) return;
+    [tf sendActionsForControlEvents:UIControlEventEditingChanged];
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:UITextFieldTextDidChangeNotification
+                      object:tf];
+}
+
+bool EnnioRuntimeHelper::setSearchBarText(const std::string& text) {
+    NSString* str = [NSString stringWithUTF8String:text.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UITextField* tf = focusedSearchBarTextField() ?: firstSearchBarTextField();
+        if (!tf) return;
+        tf.text = str;
+        notifySearchTextChanged(tf);
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::appendSearchBarText(const std::string& text) {
+    NSString* str = [NSString stringWithUTF8String:text.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        // Prefer the focused search field; fall back to the first
+        // visible one so iOS 26's SwiftUI host (which sometimes
+        // refuses becomeFirstResponder via UIKit) still routes the
+        // input correctly when focusSearchBar was called just
+        // before this.
+        UITextField* tf = focusedSearchBarTextField() ?: firstSearchBarTextField();
+        if (!tf) return;
+        tf.text = [(tf.text ?: @"") stringByAppendingString:str];
+        notifySearchTextChanged(tf);
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::focusSearchBar(const std::string& placeholder) {
+    // `placeholder` is informational only on iOS 26 — the SwiftUI
+    // host's UISearchBarTextField has placeholder="" even when the
+    // visible bar shows "Search fruit". When no placeholder match
+    // is found, fall back to the first visible field (at most one
+    // search bar is normally on screen). Returns success when a
+    // field exists at all, even if becomeFirstResponder is
+    // refused — iOS 26's PlatformViewRepresentable host swallows
+    // some responder calls but the subsequent
+    // appendSearchBarText / eraseSearchBarText paths use
+    // firstSearchBarTextField fallback, so the flow still routes
+    // input correctly.
+    NSString* needle = [NSString stringWithUTF8String:placeholder.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        NSArray<UITextField*>* fields = allSearchBarTextFields();
+        UITextField* target = nil;
+        if (needle.length > 0) {
+            for (UITextField* tf in fields) {
+                if (tf.placeholder &&
+                    [tf.placeholder rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    target = tf;
+                    break;
+                }
+            }
+        }
+        if (!target) target = fields.firstObject;
+        if (!target) return;
+        [target becomeFirstResponder];  // best-effort; SwiftUI host may refuse
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+bool EnnioRuntimeHelper::eraseSearchBarText(int count) {
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UITextField* tf = focusedSearchBarTextField() ?: firstSearchBarTextField();
+        if (!tf) return;
+        NSString* cur = tf.text ?: @"";
+        NSInteger keep = (NSInteger)cur.length - (NSInteger)count;
+        if (keep < 0) keep = 0;
+        tf.text = [cur substringToIndex:(NSUInteger)keep];
+        notifySearchTextChanged(tf);
+        ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
 } // namespace ennio
 
 // Objective-C helper for setting the surface presenter

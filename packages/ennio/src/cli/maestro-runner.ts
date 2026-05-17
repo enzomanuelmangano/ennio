@@ -651,6 +651,24 @@ class MaestroExecutor {
         }
       }
     }
+    // Text-only selectors: try native UISearchBar focus. The RNScreens
+    // UISearchBar isn't in the React view tree — placeholder text
+    // matches don't resolve via the shadow-tree text walk and the
+    // HID fallback enters a slow back-stack-pop retry loop (~19 s on
+    // iOS 26 sim). focusSearchBar returns true only when a visible
+    // search bar's placeholder matches; otherwise we fall through.
+    if (selector.text && !selector.id) {
+      const sb = await this.client.send('focusSearchBar', {
+        placeholder: selector.text,
+      });
+      if (sb?.success === true) {
+        this.log(`tap: ${JSON.stringify(selector)} via search bar focus`);
+        this.lastTappedSelector = selector;
+        await this.waitCommit(TAP_NAV_SETTLE_MS);
+        return;
+      }
+    }
+
     // Text-only selectors: try native UIPickerView wheel selection.
     // HID swipes against a UIPickerView spinner are flaky on iOS 26
     // simulator (touch begin/end timing doesn't always cross the pan
@@ -1089,6 +1107,18 @@ class MaestroExecutor {
     if ('inputText' in cmd) {
       const text = cmd.inputText;
       this.log(`inputText: "${text}"`);
+      // Native UISearchBar fast-path: RNScreens headerSearchBarOptions
+      // wraps a UISearchBar that idb HID can't reach reliably on iOS 26
+      // simulator. When a search bar is the current first responder,
+      // append directly via the bar's delegate textDidChange so React
+      // state mirrors the input. No-op when no bar is focused — falls
+      // through to the regular HID typeText path.
+      const sbar = await this.client.send('appendSearchBarText', { text });
+      if (sbar?.success === true) {
+        this.log(`inputText: via UISearchBar delegate`);
+        await this.waitCommit(TAP_BACK_RECOVER_DELAY_MS);
+        return;
+      }
       await this.typeText(text);
       return;
     }
@@ -1323,6 +1353,13 @@ class MaestroExecutor {
       const eraseCmd = cmd.eraseText;
       const chars = typeof eraseCmd === 'number' ? eraseCmd : eraseCmd.characters || 50;
       this.log(`eraseText: ${chars} characters`);
+      // Native UISearchBar fast-path — matches the inputText routing.
+      const sbar = await this.client.send('eraseSearchBarText', { count: String(chars) });
+      if (sbar?.success === true) {
+        this.log(`eraseText: via UISearchBar delegate`);
+        await this.waitCommit(TAP_BACK_RECOVER_DELAY_MS);
+        return;
+      }
       await this.writer.eraseText(this.lastTappedSelector?.id ?? null, chars);
       return;
     }

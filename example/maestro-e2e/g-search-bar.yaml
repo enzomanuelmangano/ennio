@@ -1,0 +1,34 @@
+appId: com.ennio.example
+name: 'Gauntlet — Native search bar'
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Gauntlet'
+- scrollUntilVisible:
+    element:
+      id: 'g-search-bar'
+    direction: DOWN
+- tapOn:
+    id: 'g-search-bar'
+- assertVisible:
+    id: 'search-bar-screen'
+- assertVisible:
+    text: 'Query: EMPTY'
+
+# UISearchBar field — RNScreens binds it to a native
+# UISearchController. tapOn placeholder focuses the field, then
+# inputText drives the keyboard. iOS 26 places the search bar at
+# the bottom of the screen on first activation.
+- tapOn: 'Search fruit'
+- inputText: 'Cherry'
+- assertVisible:
+    text: 'Query: Cherry'
+
+# Clear via backspace + retype.
+- eraseText: 6
+- assertVisible:
+    text: 'Query: EMPTY'
+
+- inputText: 'B'
+- assertVisible:
+    text: 'Query: B'
