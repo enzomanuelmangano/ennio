@@ -411,10 +411,20 @@ class MaestroExecutor {
   }
 
   private logStart = Date.now();
+  private logPrev = Date.now();
   private log(msg: string): void {
     if (this.verbose) {
-      const ms = Date.now() - this.logStart;
-      console.log(`    [+${ms}ms] ${msg}`);
+      const now = Date.now();
+      const ms = now - this.logStart;
+      const delta = now - this.logPrev;
+      this.logPrev = now;
+      // `+NNNms` = cumulative wall clock from runner start.
+      // `ΔNNNms` = time since previous log line — surfaces per-step
+      // cost without grepping. Padded so the columns align in a
+      // verbose dump for visual scanning.
+      const cum = `+${ms}ms`.padStart(8);
+      const d = `Δ${delta}ms`.padStart(7);
+      console.log(`    [${cum} ${d}] ${msg}`);
     }
   }
 
