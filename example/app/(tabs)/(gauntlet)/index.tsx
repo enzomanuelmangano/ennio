@@ -24,6 +24,7 @@ const PATTERNS: { id: string; label: string; route: string }[] = [
   { id: 'g-form', label: 'Form validation', route: '/gauntlet/form' },
   { id: 'g-modal-stack', label: 'Modal stacking', route: '/gauntlet/modal-stack' },
   { id: 'g-deep-link', label: 'Deep link target', route: '/gauntlet/deep-link' },
+  { id: 'g-nav-header', label: 'Native header items', route: '/gauntlet/nav-header' },
   { id: 'g-playground', label: 'Playground sandbox', route: '/gauntlet/playground' },
 ];
 
