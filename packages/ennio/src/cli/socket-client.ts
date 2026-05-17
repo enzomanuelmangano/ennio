@@ -38,7 +38,7 @@ export class EnnioSocketClient {
    * sockaddr_un.sun_path is 104 bytes on macOS and the sandbox path
    * exceeds that limit.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   async connect(bundleId: string, _udid?: string): Promise<boolean> {
     if (this.socket && !this.socket.destroyed) return true;
     if (this.connecting) return this.connecting;
@@ -48,7 +48,6 @@ export class EnnioSocketClient {
     return this.connecting;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async doConnect(_bundleId: string): Promise<boolean> {
     this.socketPath = `/tmp/ennio-control.sock`;
     return new Promise<boolean>((resolve) => {
