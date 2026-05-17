@@ -160,7 +160,17 @@ interface CdpResponse {
 // thread state. Sending them via CDP would queue behind whatever React
 // work is in flight on the JS thread; the socket bypasses that queue
 // entirely. Everything else stays on CDP.
-const SOCKET_FAST_OPS = new Set<string>(['tapTabByName', 'isAlertPresent', 'ping']);
+const SOCKET_FAST_OPS = new Set<string>([
+  'tapTabByName',
+  'isAlertPresent',
+  // `writer.layoutCenter` polls getViewWindowFrame up to 30 times
+  // per id-tap, plus an occasional scrollTo when the element is
+  // off-screen. Routing both through the socket bypasses the
+  // JS-thread queue that previously paced each iteration.
+  'getViewWindowFrame',
+  'scrollTo',
+  'ping',
+]);
 
 export class EnnioClient {
   private ws: WebSocket | null = null;

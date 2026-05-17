@@ -32,6 +32,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <pthread.h>
+#include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -79,6 +80,27 @@ static Response dispatchRequest(const Request& req) {
         const bool present = EnnioRuntimeHelper::getInstance().isAlertPresent();
         r.success = true;
         r.data = present ? "true" : "false";
+    } else if (req.type == "getViewWindowFrame") {
+        // Hot-loop op: `writer.layoutCenter` polls this up to 30 times
+        // per id-based tap, checking for a stable frame. Going via CDP
+        // queues every poll on the JS thread; routing here drops each
+        // poll from ~30-200 ms (JS-queue contention) to ~3 ms (socket
+        // round-trip + UIKit query). UIKit `convertRect:toView:nil` is
+        // safe off the JS thread.
+        auto frame = EnnioRuntimeHelper::getInstance().getViewWindowFrame(
+            json::parseString(req.payload, "testID"));
+        std::ostringstream oss;
+        oss << "{\"x\":" << std::get<0>(frame) << ",\"y\":" << std::get<1>(frame)
+            << ",\"width\":" << std::get<2>(frame) << ",\"height\":" << std::get<3>(frame) << "}";
+        r.data = oss.str();
+        r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+    } else if (req.type == "scrollTo") {
+        // Walks up to the enclosing UIScrollView and sets contentOffset
+        // to bring the element into view. Pure UIKit on main thread —
+        // no JS state needed.
+        r.success = EnnioRuntimeHelper::getInstance().scrollTo(
+            json::parseString(req.payload, "scrollViewTestID"),
+            json::parseString(req.payload, "elementTestID"));
     } else if (req.type == "ping") {
         r.success = true;
         r.data = "\"pong\"";
