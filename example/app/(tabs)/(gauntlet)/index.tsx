@@ -35,6 +35,8 @@ const PATTERNS: { id: string; label: string; route: string }[] = [
     label: 'Native search bar (UISearchController)',
     route: '/gauntlet/search-bar',
   },
+  { id: 'g-segmented', label: 'Native segmented control', route: '/gauntlet/segmented' },
+  { id: 'g-datepicker', label: 'Native UIDatePicker spinner', route: '/gauntlet/datepicker' },
   { id: 'g-playground', label: 'Playground sandbox', route: '/gauntlet/playground' },
 ];
 

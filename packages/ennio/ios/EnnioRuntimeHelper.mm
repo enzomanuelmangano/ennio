@@ -2447,14 +2447,17 @@ static NSString* firstLabelTextIn(UIView* root) {
 }
 
 // Collect every visible UIPickerView across connected windows into
-// `out` (depth-first). Caller seeds with a UIWindow whose root is
-// already known to be in the hierarchy, so we don't need a
-// `window == nil` guard (which would itself reject UIWindow* roots).
+// `out` (depth-first). UIDatePicker on iOS hosts a UIPickerView as
+// a private subview in spinner mode, so we recurse past it rather
+// than treating UIDatePicker itself as terminal.
 static void collectPickerViewsIn(UIView* root, NSMutableArray<UIPickerView*>* out) {
     if (!root || root.hidden) return;
     if ([root isKindOfClass:[UIPickerView class]]) {
         [out addObject:(UIPickerView*)root];
-        return;
+        // Don't return — a UIPickerView's subviews don't contain
+        // another nested picker on stock iOS, but recursing is
+        // cheap and future-proofs against subclasses that wrap a
+        // sibling picker.
     }
     for (UIView* sub in root.subviews) collectPickerViewsIn(sub, out);
 }
@@ -2476,32 +2479,31 @@ bool EnnioRuntimeHelper::selectPickerValueByLabel(const std::string& label) {
             id<UIPickerViewDelegate> dg = pv.delegate;
             if (!ds) continue;
 
-            // Single-component picker covers the
-            // @react-native-picker/picker common case. Multi-component
-            // (e.g. UIDatePicker date+hour+min) needs a separate
-            // component-aware op.
-            NSInteger rowCount = [ds pickerView:pv numberOfRowsInComponent:0];
-            for (NSInteger row = 0; row < rowCount; row++) {
-                NSString* title = nil;
-                if ([dg respondsToSelector:@selector(pickerView:titleForRow:forComponent:)]) {
-                    title = [dg pickerView:pv titleForRow:row forComponent:0];
-                } else if ([dg respondsToSelector:@selector(pickerView:attributedTitleForRow:forComponent:)]) {
-                    title = [[dg pickerView:pv attributedTitleForRow:row forComponent:0] string];
-                } else if ([dg respondsToSelector:@selector(pickerView:viewForRow:forComponent:reusingView:)]) {
-                    UIView* rowView = [dg pickerView:pv viewForRow:row forComponent:0 reusingView:nil];
-                    title = firstLabelTextIn(rowView);
-                }
-                if (title && [title compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-                    [pv selectRow:row inComponent:0 animated:NO];
-                    // Programmatic selectRow doesn't fire didSelectRow on
-                    // the delegate; the RNCPicker bridge listens to
-                    // didSelectRow to emit onValueChange, so call it
-                    // explicitly.
-                    if ([dg respondsToSelector:@selector(pickerView:didSelectRow:inComponent:)]) {
-                        [dg pickerView:pv didSelectRow:row inComponent:0];
+            // Iterate every component so a multi-wheel picker (e.g.
+            // UIDatePicker's month/day/year) can be targeted by a
+            // unique row label without knowing which component it
+            // belongs to.
+            NSInteger componentCount = [ds numberOfComponentsInPickerView:pv];
+            for (NSInteger component = 0; component < componentCount; component++) {
+                NSInteger rowCount = [ds pickerView:pv numberOfRowsInComponent:component];
+                for (NSInteger row = 0; row < rowCount; row++) {
+                    NSString* title = nil;
+                    if ([dg respondsToSelector:@selector(pickerView:titleForRow:forComponent:)]) {
+                        title = [dg pickerView:pv titleForRow:row forComponent:component];
+                    } else if ([dg respondsToSelector:@selector(pickerView:attributedTitleForRow:forComponent:)]) {
+                        title = [[dg pickerView:pv attributedTitleForRow:row forComponent:component] string];
+                    } else if ([dg respondsToSelector:@selector(pickerView:viewForRow:forComponent:reusingView:)]) {
+                        UIView* rowView = [dg pickerView:pv viewForRow:row forComponent:component reusingView:nil];
+                        title = firstLabelTextIn(rowView);
                     }
-                    ok = true;
-                    return;
+                    if (title && [title compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                        [pv selectRow:row inComponent:component animated:NO];
+                        if ([dg respondsToSelector:@selector(pickerView:didSelectRow:inComponent:)]) {
+                            [dg pickerView:pv didSelectRow:row inComponent:component];
+                        }
+                        ok = true;
+                        return;
+                    }
                 }
             }
         }
@@ -2658,6 +2660,48 @@ bool EnnioRuntimeHelper::eraseSearchBarText(int count) {
         tf.text = [cur substringToIndex:(NSUInteger)keep];
         notifySearchTextChanged(tf);
         ok = true;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
+// Collect every visible UISegmentedControl across connected windows.
+static void collectSegmentedIn(UIView* root, NSMutableArray<UISegmentedControl*>* out) {
+    if (!root || root.hidden) return;
+    if ([root isKindOfClass:[UISegmentedControl class]]) {
+        [out addObject:(UISegmentedControl*)root];
+        return;
+    }
+    for (UIView* sub in root.subviews) collectSegmentedIn(sub, out);
+}
+
+bool EnnioRuntimeHelper::selectSegmentByLabel(const std::string& label) {
+    NSString* needle = [NSString stringWithUTF8String:label.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        NSMutableArray<UISegmentedControl*>* controls = [NSMutableArray array];
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+                collectSegmentedIn(win, controls);
+            }
+        }
+        for (UISegmentedControl* sc in controls) {
+            for (NSUInteger i = 0; i < sc.numberOfSegments; i++) {
+                NSString* title = [sc titleForSegmentAtIndex:i];
+                if (title && [title compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                    sc.selectedSegmentIndex = (NSInteger)i;
+                    // RNCSegmentedControl bridges onChange via
+                    // UIControlEventValueChanged on the underlying
+                    // UISegmentedControl; setSelectedSegmentIndex
+                    // alone doesn't fire that event so dispatch
+                    // explicitly.
+                    [sc sendActionsForControlEvents:UIControlEventValueChanged];
+                    ok = true;
+                    return;
+                }
+            }
+        }
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return ok;

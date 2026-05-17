@@ -127,6 +127,12 @@ static Response dispatchRequest(const Request& req) {
         int count = 0;
         try { count = std::stoi(countStr); } catch (...) { count = 0; }
         r.success = EnnioRuntimeHelper::getInstance().eraseSearchBarText(count);
+    } else if (req.type == "selectSegmentByLabel") {
+        // UISegmentedControl segment selection by visible label.
+        // Sidesteps the slow text-tap retry loop that the shadow-tree
+        // walk hits on RNCSegmentedControl labels.
+        r.success = EnnioRuntimeHelper::getInstance().selectSegmentByLabel(
+            json::parseString(req.payload, "label"));
     } else if (req.type == "selectPickerValueByLabel") {
         // Wheel-style UIPickerView selection. HID swipes against the
         // spinner are flaky (touch begin/end timing inconsistent on

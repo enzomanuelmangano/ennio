@@ -1,0 +1,28 @@
+appId: com.ennio.example
+name: 'Gauntlet — Segmented control'
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Gauntlet'
+- scrollUntilVisible:
+    element:
+      id: 'g-segmented'
+    direction: DOWN
+- tapOn:
+    id: 'g-segmented'
+- assertVisible:
+    id: 'segmented-screen'
+- assertVisible:
+    text: 'Selected: Day'
+
+- tapOn: 'Week'
+- assertVisible:
+    text: 'Selected: Week'
+
+- tapOn: 'Month'
+- assertVisible:
+    text: 'Selected: Month'
+
+- tapOn: 'Day'
+- assertVisible:
+    text: 'Selected: Day'
