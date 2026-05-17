@@ -453,7 +453,8 @@ class MaestroExecutor {
     if (msg.startsWith('tap: point')) return 'point tap';
     if (msg.startsWith('tapOn: ') && /"id"/.test(msg)) return 'tapOn (auto-scroll + setup)';
     if (msg.startsWith('tapOn: ') && /text/.test(msg)) return 'tapOn (text)';
-    if (msg.startsWith('assertVisible') || msg.startsWith('assertNotVisible')) return 'assertVisible';
+    if (msg.startsWith('assertVisible') || msg.startsWith('assertNotVisible'))
+      return 'assertVisible';
     if (msg.startsWith('scrollUntilVisible')) return 'scrollUntilVisible';
     if (msg.startsWith('scroll') || msg.startsWith('swipe')) return 'scroll/swipe';
     if (msg.startsWith('runFlow')) return 'runFlow';
@@ -480,7 +481,9 @@ class MaestroExecutor {
       .sort((a, b) => b.total - a.total);
     console.log('');
     console.log('  ── Profile (verbose) ─────────────────────────');
-    console.log(`    ${'bucket'.padEnd(34)} ${'count'.padStart(5)}  ${'total'.padStart(8)}  ${'avg'.padStart(6)}   pct`);
+    console.log(
+      `    ${'bucket'.padEnd(34)} ${'count'.padStart(5)}  ${'total'.padStart(8)}  ${'avg'.padStart(6)}   pct`,
+    );
     for (const r of rows) {
       const pct = total > 0 ? ((r.total / total) * 100).toFixed(1) : '0.0';
       const avg = r.count > 0 ? Math.round(r.total / r.count) : 0;
