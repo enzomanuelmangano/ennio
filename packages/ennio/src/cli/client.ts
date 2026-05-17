@@ -170,6 +170,10 @@ const SOCKET_FAST_OPS = new Set<string>([
   'getViewWindowFrame',
   'scrollTo',
   'selectPickerValueByLabel',
+  'setSearchBarText',
+  'appendSearchBarText',
+  'eraseSearchBarText',
+  'focusSearchBar',
   'ping',
 ]);
 

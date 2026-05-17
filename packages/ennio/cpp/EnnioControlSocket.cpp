@@ -101,6 +101,32 @@ static Response dispatchRequest(const Request& req) {
         r.success = EnnioRuntimeHelper::getInstance().scrollTo(
             json::parseString(req.payload, "scrollViewTestID"),
             json::parseString(req.payload, "elementTestID"));
+    } else if (req.type == "setSearchBarText") {
+        // RNScreens' UISearchBar (headerSearchBarOptions) is native
+        // UIKit, not a React-managed view. testID can't reach its
+        // inner UITextField and idb HID keystrokes don't reliably
+        // deliver on iOS 26 simulator. Assigns .text and fires
+        // textDidChange on the delegate so onChangeText fires.
+        r.success = EnnioRuntimeHelper::getInstance().setSearchBarText(
+            json::parseString(req.payload, "text"));
+    } else if (req.type == "focusSearchBar") {
+        // RNScreens UISearchBar isn't in the React view tree —
+        // testID lookups + accessibility-text HID taps miss the
+        // placeholder. Calls becomeFirstResponder on the bar's text
+        // field so later inputText routes via appendSearchBarText.
+        r.success = EnnioRuntimeHelper::getInstance().focusSearchBar(
+            json::parseString(req.payload, "placeholder"));
+    } else if (req.type == "appendSearchBarText") {
+        // inputText semantics — append to current search bar text.
+        r.success = EnnioRuntimeHelper::getInstance().appendSearchBarText(
+            json::parseString(req.payload, "text"));
+    } else if (req.type == "eraseSearchBarText") {
+        // eraseText / clearText semantics on UISearchBar. Pass a
+        // very large count (e.g. INT_MAX from the CLI) to clear.
+        std::string countStr = json::parseString(req.payload, "count");
+        int count = 0;
+        try { count = std::stoi(countStr); } catch (...) { count = 0; }
+        r.success = EnnioRuntimeHelper::getInstance().eraseSearchBarText(count);
     } else if (req.type == "selectPickerValueByLabel") {
         // Wheel-style UIPickerView selection. HID swipes against the
         // spinner are flaky (touch begin/end timing inconsistent on

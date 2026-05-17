@@ -30,6 +30,11 @@ const PATTERNS: { id: string; label: string; route: string }[] = [
     label: 'RefreshControl pull-to-refresh',
     route: '/gauntlet/refresh-control',
   },
+  {
+    id: 'g-search-bar',
+    label: 'Native search bar (UISearchController)',
+    route: '/gauntlet/search-bar',
+  },
   { id: 'g-playground', label: 'Playground sandbox', route: '/gauntlet/playground' },
 ];
 
