@@ -269,11 +269,27 @@ export async function runMaestroTests(
   const flow = parseMaestroFile(testFilePath);
   const flowName = flow.name || basename(testFilePath, '.yaml');
 
+  // Initial socket attach. Bootstrap connected CDP; the socket is opened
+  // here so the first tab tap of the first flow doesn't pay the CDP
+  // queue. If it fails (older Ennio build with no socket server, or
+  // sim/path resolution issue), CDP is the fallback for every dispatch.
+  if (flow.appId) {
+    await client.ensureSocketConnected(flow.appId, process.env.ENNIO_UDID);
+  }
+
   // Re-attach to the Inspector after launchApp/clearState. Same
   // transport (CDP), but device id changes when Metro re-attaches.
+  // Also re-opens the Unix-domain control socket against the fresh
+  // app process — its tmp dir path changes per launch.
   const reconnectClient = async (): Promise<EnnioClient> => {
     const newClient = new EnnioClient();
     await newClient.connect();
+    if (flow.appId) {
+      // Best-effort. Socket discovery shells out to simctl; if it
+      // fails (no booted sim, app not yet installed, etc.), CDP is
+      // the fallback for every dispatch.
+      await newClient.ensureSocketConnected(flow.appId, process.env.ENNIO_UDID);
+    }
     return newClient;
   };
 
@@ -530,7 +546,27 @@ class MaestroExecutor {
       await this.waitCommit(POINT_TAP_SETTLE_MS);
       return;
     }
-    // Text-only selectors: try alert button tap first. Polls long enough
+    // Text-only selectors: tab-bar fast path FIRST. tapTabByName runs
+    // via the Unix-domain control socket — ~5 ms, bypasses CDP / JS
+    // thread. If the text matches a tab name, this short-circuits the
+    // ~2 s alert-poll below entirely. Tab swaps account for ~44% of
+    // a typical flow's wall clock, so this is the biggest single win.
+    //
+    // Falls through to the alert-poll + tryOnce loop when the text
+    // isn't a tab name (regular button labels, alert buttons, etc.).
+    if (selector.text && !selector.id) {
+      const r = await this.client.send('tapTabByName', { name: selector.text });
+      if (r?.success === true) {
+        this.log(`tap: ${JSON.stringify(selector)} via ${this.writer.describe('tap')}`);
+        this.lastTappedSelector = selector;
+        // Minimal post-tap settle — prepareTap on the next tap polls
+        // its own stable-coord + hit-test verify, absorbing the
+        // destination-tab first-commit gap.
+        await new Promise((r) => setTimeout(r, 100));
+        return;
+      }
+    }
+    // Text-only selectors: try alert button tap. Polls long enough
     // (2s) for Alert.alert's presentation animation to finish — the
     // dialog typically appears 300-1500ms after the triggering tap.
     // Optional taps cap at 200ms — we don't want to wait for an alert
@@ -1743,6 +1779,11 @@ class MaestroExecutor {
       }
     }
     if (!connected) throw new Error('clearState: Failed to reconnect to app after restart');
+    // Fresh client = fresh WebSocket + fresh control socket. Writer +
+    // reader still hold the OLD client reference from construction;
+    // hand them the new one so dispatch routes via the live transports.
+    this.writer.setClient(this.client);
+    this.reader.setClient(this.client);
     // Fresh process = fresh key window. Drop the writer's cached window
     // size + surface offset so the next tap math doesn't use values from
     // the previous app instance.
@@ -1797,6 +1838,10 @@ class MaestroExecutor {
       }
     }
     if (!connected) throw new Error('launchApp: Failed to reconnect to app after restart');
+    // Hot-swap writer + reader onto the new client. See handleClearState
+    // for the same dance — the old client's transports are dead.
+    this.writer.setClient(this.client);
+    this.reader.setClient(this.client);
     // Fresh process — see comment in handleClearState.
     this.writer.invalidateViewportCache();
 
