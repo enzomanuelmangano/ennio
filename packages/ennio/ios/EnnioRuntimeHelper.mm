@@ -2430,6 +2430,86 @@ std::string EnnioRuntimeHelper::getClipboardText() {
     return result;
 }
 
+// First UILabel.text in the subtree of `root`, depth-first. Used to
+// extract row labels when a UIPickerViewDelegate only provides
+// `viewForRow:forComponent:reusingView:` (custom row cells).
+static NSString* firstLabelTextIn(UIView* root) {
+    if (!root) return nil;
+    if ([root isKindOfClass:[UILabel class]]) {
+        NSString* t = ((UILabel*)root).text;
+        if (t.length) return t;
+    }
+    for (UIView* sub in root.subviews) {
+        NSString* hit = firstLabelTextIn(sub);
+        if (hit) return hit;
+    }
+    return nil;
+}
+
+// Collect every visible UIPickerView across connected windows into
+// `out` (depth-first). Caller seeds with a UIWindow whose root is
+// already known to be in the hierarchy, so we don't need a
+// `window == nil` guard (which would itself reject UIWindow* roots).
+static void collectPickerViewsIn(UIView* root, NSMutableArray<UIPickerView*>* out) {
+    if (!root || root.hidden) return;
+    if ([root isKindOfClass:[UIPickerView class]]) {
+        [out addObject:(UIPickerView*)root];
+        return;
+    }
+    for (UIView* sub in root.subviews) collectPickerViewsIn(sub, out);
+}
+
+bool EnnioRuntimeHelper::selectPickerValueByLabel(const std::string& label) {
+    NSString* needle = [NSString stringWithUTF8String:label.c_str()];
+    __block bool ok = false;
+
+    void (^block)(void) = ^{
+        NSMutableArray<UIPickerView*>* pickers = [NSMutableArray array];
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in [((UIWindowScene*)scene).windows reverseObjectEnumerator]) {
+                collectPickerViewsIn(win, pickers);
+            }
+        }
+        for (UIPickerView* pv in pickers) {
+            id<UIPickerViewDataSource> ds = pv.dataSource;
+            id<UIPickerViewDelegate> dg = pv.delegate;
+            if (!ds) continue;
+
+            // Single-component picker covers the
+            // @react-native-picker/picker common case. Multi-component
+            // (e.g. UIDatePicker date+hour+min) needs a separate
+            // component-aware op.
+            NSInteger rowCount = [ds pickerView:pv numberOfRowsInComponent:0];
+            for (NSInteger row = 0; row < rowCount; row++) {
+                NSString* title = nil;
+                if ([dg respondsToSelector:@selector(pickerView:titleForRow:forComponent:)]) {
+                    title = [dg pickerView:pv titleForRow:row forComponent:0];
+                } else if ([dg respondsToSelector:@selector(pickerView:attributedTitleForRow:forComponent:)]) {
+                    title = [[dg pickerView:pv attributedTitleForRow:row forComponent:0] string];
+                } else if ([dg respondsToSelector:@selector(pickerView:viewForRow:forComponent:reusingView:)]) {
+                    UIView* rowView = [dg pickerView:pv viewForRow:row forComponent:0 reusingView:nil];
+                    title = firstLabelTextIn(rowView);
+                }
+                if (title && [title compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                    [pv selectRow:row inComponent:0 animated:NO];
+                    // Programmatic selectRow doesn't fire didSelectRow on
+                    // the delegate; the RNCPicker bridge listens to
+                    // didSelectRow to emit onValueChange, so call it
+                    // explicitly.
+                    if ([dg respondsToSelector:@selector(pickerView:didSelectRow:inComponent:)]) {
+                        [dg pickerView:pv didSelectRow:row inComponent:0];
+                    }
+                    ok = true;
+                    return;
+                }
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
+}
+
 } // namespace ennio
 
 // Objective-C helper for setting the surface presenter
