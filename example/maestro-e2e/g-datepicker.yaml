@@ -1,0 +1,30 @@
+appId: com.ennio.example
+name: 'Gauntlet — Date picker'
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Gauntlet'
+- scrollUntilVisible:
+    element:
+      id: 'g-datepicker'
+    direction: DOWN
+- tapOn:
+    id: 'g-datepicker'
+- assertVisible:
+    id: 'datepicker-screen'
+- assertVisible:
+    text: 'Date: 2026-01-15'
+
+# UIDatePicker spinner mode is a multi-component UIPickerView
+# (month + day + year). Each visible row label is unique
+# (e.g. "February", "16", "2027") so selectPickerValueByLabel
+# can target a single component at a time. v1 selectPickerValueByLabel
+# walks every component — for this gauntlet we pick a month change
+# whose name is unambiguous.
+- tapOn: 'February'
+- assertVisible:
+    text: 'Date: 2026-02-15'
+
+- tapOn: 'March'
+- assertVisible:
+    text: 'Date: 2026-03-15'

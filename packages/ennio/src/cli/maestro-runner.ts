@@ -669,6 +669,25 @@ class MaestroExecutor {
       }
     }
 
+    // Text-only selectors: try native UISegmentedControl segment
+    // selection. Maestro-style `tapOn: 'Week'` against an
+    // RNCSegmentedControl segment hits a slow back-stack-pop retry
+    // loop in the HID path (~14 s per tap on iOS 26 sim) because the
+    // segment titles aren't reliably reachable via the shadow-tree
+    // text walk. Drive the UISegmentedControl directly via
+    // setSelectedSegmentIndex + UIControlEventValueChanged.
+    if (selector.text && !selector.id) {
+      const seg = await this.client.send('selectSegmentByLabel', {
+        label: selector.text,
+      });
+      if (seg?.success === true) {
+        this.log(`tap: ${JSON.stringify(selector)} via segmented control`);
+        this.lastTappedSelector = selector;
+        await this.waitCommit(TAP_NAV_SETTLE_MS);
+        return;
+      }
+    }
+
     // Text-only selectors: try native UIPickerView wheel selection.
     // HID swipes against a UIPickerView spinner are flaky on iOS 26
     // simulator (touch begin/end timing doesn't always cross the pan

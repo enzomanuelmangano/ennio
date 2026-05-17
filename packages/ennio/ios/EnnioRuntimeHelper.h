@@ -285,6 +285,15 @@ public:
      * bar.
      */
     bool focusSearchBar(const std::string& placeholder);
+    /**
+     * Programmatic UISegmentedControl selection. Walks every
+     * visible UISegmentedControl, matches a segment by title
+     * (case-insensitive), calls setSelectedSegmentIndex and fires
+     * UIControlEventValueChanged so the RN bridge (RNCSegmentedControl)
+     * emits onChange. Returns false when no matching segment is on
+     * screen.
+     */
+    bool selectSegmentByLabel(const std::string& label);
 
 private:
     EnnioRuntimeHelper() = default;

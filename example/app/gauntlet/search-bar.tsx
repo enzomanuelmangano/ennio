@@ -23,9 +23,7 @@ const ALL = [
 
 export default function SearchBarScreen() {
   const [query, setQuery] = useState('');
-  const filtered = query
-    ? ALL.filter((s) => s.toLowerCase().includes(query.toLowerCase()))
-    : ALL;
+  const filtered = query ? ALL.filter((s) => s.toLowerCase().includes(query.toLowerCase())) : ALL;
 
   return (
     <>
