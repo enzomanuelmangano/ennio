@@ -160,7 +160,7 @@ interface CdpResponse {
 // thread state. Sending them via CDP would queue behind whatever React
 // work is in flight on the JS thread; the socket bypasses that queue
 // entirely. Everything else stays on CDP.
-const SOCKET_FAST_OPS = new Set<string>(['tapTabByName', 'ping']);
+const SOCKET_FAST_OPS = new Set<string>(['tapTabByName', 'isAlertPresent', 'ping']);
 
 export class EnnioClient {
   private ws: WebSocket | null = null;

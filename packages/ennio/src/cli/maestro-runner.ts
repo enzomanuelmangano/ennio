@@ -555,15 +555,23 @@ class MaestroExecutor {
     // Falls through to the alert-poll + tryOnce loop when the text
     // isn't a tab name (regular button labels, alert buttons, etc.).
     if (selector.text && !selector.id) {
-      const r = await this.client.send('tapTabByName', { name: selector.text });
-      if (r?.success === true) {
-        this.log(`tap: ${JSON.stringify(selector)} via ${this.writer.describe('tap')}`);
-        this.lastTappedSelector = selector;
-        // Minimal post-tap settle — prepareTap on the next tap polls
-        // its own stable-coord + hit-test verify, absorbing the
-        // destination-tab first-commit gap.
-        await new Promise((r) => setTimeout(r, 100));
-        return;
+      // Guard: skip the fast-path when an alert is presented. Otherwise
+      // tapping a tab whose name collides with an alert button text
+      // would swap tabs behind the still-presented alert — the test
+      // would silently target the wrong screen. isAlertPresent itself
+      // routes via the socket (~3 ms) so the guard is cheap.
+      const alertUp = await this.reader.isAlertPresent();
+      if (!alertUp) {
+        const r = await this.client.send('tapTabByName', { name: selector.text });
+        if (r?.success === true) {
+          this.log(`tap: ${JSON.stringify(selector)} via ${this.writer.describe('tap')}`);
+          this.lastTappedSelector = selector;
+          // Minimal post-tap settle — prepareTap on the next tap polls
+          // its own stable-coord + hit-test verify, absorbing the
+          // destination-tab first-commit gap.
+          await new Promise((r) => setTimeout(r, 100));
+          return;
+        }
       }
     }
     // Text-only selectors: try alert button tap. Polls long enough
