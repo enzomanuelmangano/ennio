@@ -350,6 +350,11 @@ export async function runMaestroTests(
     }
   }
 
+  // Surface the per-bucket timing breakdown in --verbose mode so the
+  // operator can see which op-types dominated this flow without
+  // grepping through the per-step log. Cheap — runs once per flow.
+  executor.printProfileSummary();
+
   // Return potentially updated client (may have been replaced by launchApp/clearState)
   results.client = executor.getClient();
   return results;
@@ -412,6 +417,12 @@ class MaestroExecutor {
 
   private logStart = Date.now();
   private logPrev = Date.now();
+  // Per-step timing breadcrumbs. Each verbose log line gets its delta
+  // recorded here, then `printProfileSummary` buckets them by op-type
+  // at flow end so the operator sees "tab tap: 6× = 21 ms, id tap: 14×
+  // = 3287 ms" without grepping. Always collected when verbose is on.
+  private profileEvents: { msg: string; delta: number }[] = [];
+
   private log(msg: string): void {
     if (this.verbose) {
       const now = Date.now();
@@ -425,7 +436,60 @@ class MaestroExecutor {
       const cum = `+${ms}ms`.padStart(8);
       const d = `Δ${delta}ms`.padStart(7);
       console.log(`    [${cum} ${d}] ${msg}`);
+      this.profileEvents.push({ msg, delta });
     }
+  }
+
+  /**
+   * Classify a log message into a coarse op-type bucket. Regex-based
+   * so call sites don't have to change. New categories should mirror
+   * what an operator naturally groups when reading the verbose dump.
+   */
+  private bucketFor(msg: string): string {
+    if (msg.startsWith('launchApp')) return 'launchApp';
+    if (msg.startsWith('tap: ') && /text/.test(msg) && /Cart|Products|Home|Profile/.test(msg))
+      return 'tab tap (text)';
+    if (msg.startsWith('tap: ') && /"id"/.test(msg)) return 'id tap';
+    if (msg.startsWith('tap: point')) return 'point tap';
+    if (msg.startsWith('tapOn: ') && /"id"/.test(msg)) return 'tapOn (auto-scroll + setup)';
+    if (msg.startsWith('tapOn: ') && /text/.test(msg)) return 'tapOn (text)';
+    if (msg.startsWith('assertVisible') || msg.startsWith('assertNotVisible')) return 'assertVisible';
+    if (msg.startsWith('scrollUntilVisible')) return 'scrollUntilVisible';
+    if (msg.startsWith('scroll') || msg.startsWith('swipe')) return 'scroll/swipe';
+    if (msg.startsWith('runFlow')) return 'runFlow';
+    if (msg.startsWith('(tapping alert button')) return 'alert tap';
+    if (msg.startsWith('hideKeyboard')) return 'hideKeyboard';
+    if (msg.startsWith('inputText') || msg.startsWith('typeText')) return 'typeText';
+    return 'other';
+  }
+
+  printProfileSummary(): void {
+    if (!this.verbose || this.profileEvents.length === 0) return;
+    const buckets = new Map<string, { total: number; count: number }>();
+    let total = 0;
+    for (const e of this.profileEvents) {
+      total += e.delta;
+      const b = this.bucketFor(e.msg);
+      const cur = buckets.get(b) ?? { total: 0, count: 0 };
+      cur.total += e.delta;
+      cur.count += 1;
+      buckets.set(b, cur);
+    }
+    const rows = Array.from(buckets.entries())
+      .map(([name, { total: t, count }]) => ({ name, total: t, count }))
+      .sort((a, b) => b.total - a.total);
+    console.log('');
+    console.log('  ── Profile (verbose) ─────────────────────────');
+    console.log(`    ${'bucket'.padEnd(34)} ${'count'.padStart(5)}  ${'total'.padStart(8)}  ${'avg'.padStart(6)}   pct`);
+    for (const r of rows) {
+      const pct = total > 0 ? ((r.total / total) * 100).toFixed(1) : '0.0';
+      const avg = r.count > 0 ? Math.round(r.total / r.count) : 0;
+      console.log(
+        `    ${r.name.padEnd(34)} ${String(r.count).padStart(5)}  ${`${r.total}ms`.padStart(8)}  ${`${avg}ms`.padStart(6)}  ${pct.padStart(4)}%`,
+      );
+    }
+    console.log(`    ${'TOTAL'.padEnd(34)} ${' '.padStart(5)}  ${`${total}ms`.padStart(8)}`);
+    console.log('  ──────────────────────────────────────────────');
   }
 
   /**
