@@ -14,6 +14,12 @@ import { Socket, createConnection } from 'node:net';
 
 import type { EnnioResponse } from './client';
 
+// Per-request deadline. Covers the native `dispatchSyncMainWithTimeout`
+// 5s ceiling plus margin. A stalled native dispatch (deadlock on main
+// thread, runaway UIKit work) used to hang the CLI forever; with this,
+// the send() rejects and EnnioClient.send() falls back to CDP.
+const REQUEST_TIMEOUT_MS = 6_000;
+
 interface PendingRequest {
   resolve(r: EnnioResponse): void;
   reject(e: Error): void;
@@ -118,16 +124,29 @@ export class EnnioSocketClient {
         type,
         ...payload,
       }) + '\n';
-    const p = new Promise<EnnioResponse>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+    return new Promise<EnnioResponse>((resolve, reject) => {
+      const timer: NodeJS.Timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`socket request timeout: ${type}`));
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
       this.socket!.write(line, (err) => {
         if (err) {
+          clearTimeout(timer);
           this.pending.delete(id);
           reject(err);
         }
       });
     });
-    return p;
   }
 
   isConnected(): boolean {

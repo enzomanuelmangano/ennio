@@ -73,6 +73,12 @@ static Response dispatchRequest(const Request& req) {
     if (req.type == "tapTabByName") {
         r.success = EnnioRuntimeHelper::getInstance().tapTabByName(
             json::parseString(req.payload, "name"));
+    } else if (req.type == "isAlertPresent") {
+        // Pure UIKit query — walks UIWindowScene roots looking for a
+        // presented UIAlertController. Safe off the JS thread.
+        const bool present = EnnioRuntimeHelper::getInstance().isAlertPresent();
+        r.success = true;
+        r.data = present ? "true" : "false";
     } else if (req.type == "ping") {
         r.success = true;
         r.data = "\"pong\"";
