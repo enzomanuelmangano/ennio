@@ -12,6 +12,9 @@ lib/
 dist/
 *.tsbuildinfo
 
+drivers
+reports
+
 # Nitro generated
 packages/nitro/nitrogen/generated/
 
