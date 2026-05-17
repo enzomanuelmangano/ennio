@@ -24,11 +24,7 @@ export default function RefreshControlScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
-        <RefreshControl
-          testID="refresh-control"
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-        />
+        <RefreshControl testID="refresh-control" refreshing={refreshing} onRefresh={onRefresh} />
       }
     >
       <Text style={styles.title}>Pull-to-refresh</Text>

@@ -101,6 +101,14 @@ static Response dispatchRequest(const Request& req) {
         r.success = EnnioRuntimeHelper::getInstance().scrollTo(
             json::parseString(req.payload, "scrollViewTestID"),
             json::parseString(req.payload, "elementTestID"));
+    } else if (req.type == "selectPickerValueByLabel") {
+        // Wheel-style UIPickerView selection. HID swipes against the
+        // spinner are flaky (touch begin/end timing inconsistent on
+        // iOS 26 simulator); this op walks every visible UIPickerView,
+        // matches a row by label, and fires the delegate's
+        // didSelectRow so RNCPicker emits onValueChange.
+        r.success = EnnioRuntimeHelper::getInstance().selectPickerValueByLabel(
+            json::parseString(req.payload, "label"));
     } else if (req.type == "ping") {
         r.success = true;
         r.data = "\"pong\"";

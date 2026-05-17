@@ -16,3 +16,23 @@ name: 'Gauntlet — Picker'
     text: 'Selected: apple'
 - assertVisible:
     id: 'picker-control'
+
+# UIPickerView wheel selection via Ennio's selectPickerValueByLabel
+# fast-path: tapOn-by-text auto-routes to the native picker delegate
+# when a UIPickerView is visible (HID-swipe-on-wheel is flaky on
+# iOS 26 simulator). selectRow + didSelectRow fires onValueChange
+# deterministically.
+- tapOn:
+    text: 'Banana'
+- assertVisible:
+    text: 'Selected: banana'
+
+- tapOn:
+    text: 'Cherry'
+- assertVisible:
+    text: 'Selected: cherry'
+
+- tapOn:
+    text: 'Apple'
+- assertVisible:
+    text: 'Selected: apple'

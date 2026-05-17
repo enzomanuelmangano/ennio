@@ -169,6 +169,7 @@ const SOCKET_FAST_OPS = new Set<string>([
   // JS-thread queue that previously paced each iteration.
   'getViewWindowFrame',
   'scrollTo',
+  'selectPickerValueByLabel',
   'ping',
 ]);
 

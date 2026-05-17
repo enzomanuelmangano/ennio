@@ -236,6 +236,21 @@ public:
     bool copyToClipboard(const std::string& text);
     bool pasteFromClipboard(const std::string& testID);
     std::string getClipboardText();
+    /**
+     * Programmatic UIPickerView wheel selection. HID swipes against
+     * the picker's spinner are flaky on the iOS 26 simulator — the
+     * touch-begin/end timing doesn't always cross the pan recogniser
+     * threshold and the wheel snaps back. Walks every visible
+     * UIPickerView, asks its dataSource for row count, uses the
+     * delegate's `pickerView:titleForRow:forComponent:` (or a
+     * `viewForRow:` UILabel.text leaf walk) to match `label`
+     * case-insensitively. Calls `selectRow:inComponent:animated:`
+     * then fires `pickerView:didSelectRow:inComponent:` on the
+     * delegate so the @react-native-picker/picker bridge emits
+     * onValueChange. Caller need not know the picker's testID — at
+     * most one picker is normally visible.
+     */
+    bool selectPickerValueByLabel(const std::string& label);
 
 private:
     EnnioRuntimeHelper() = default;

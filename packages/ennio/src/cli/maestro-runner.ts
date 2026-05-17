@@ -651,6 +651,27 @@ class MaestroExecutor {
         }
       }
     }
+    // Text-only selectors: try native UIPickerView wheel selection.
+    // HID swipes against a UIPickerView spinner are flaky on iOS 26
+    // simulator (touch begin/end timing doesn't always cross the pan
+    // recogniser threshold and the wheel snaps back). When a picker
+    // is visible and the requested text matches a row label, drive
+    // the wheel via [picker selectRow:] + delegate didSelectRow so
+    // RNCPicker emits onValueChange deterministically. Cheap UIKit
+    // walk (~3 ms) — runs before the 2s alert poll so picker taps
+    // don't pay alert-poll latency. No-op when no picker on screen.
+    if (selector.text && !selector.id) {
+      const r = await this.client.send('selectPickerValueByLabel', {
+        label: selector.text,
+      });
+      if (r?.success === true) {
+        this.log(`tap: ${JSON.stringify(selector)} via picker selectRow`);
+        this.lastTappedSelector = selector;
+        await this.waitCommit(TAP_NAV_SETTLE_MS);
+        return;
+      }
+    }
+
     // Text-only selectors: try alert button tap. Polls long enough
     // (2s) for Alert.alert's presentation animation to finish — the
     // dialog typically appears 300-1500ms after the triggering tap.
