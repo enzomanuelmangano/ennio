@@ -463,8 +463,17 @@ export class NitroWriter implements Writer {
         return true;
       }
     }
-    await idb.ensureCompanion();
-    await idb.typeText(text);
+    // Send the whole string in ONE persistent-daemon round trip. The
+    // old path spawned a fresh `idb ui text` subprocess per call
+    // (~160 ms tax even for short text); the daemon reuses the warm
+    // gRPC channel and finishes in ~50 ms regardless of length.
+    // Falls back to `idb ui text` subprocess if the daemon errored.
+    try {
+      await hid.typeText(text);
+    } catch {
+      await idb.ensureCompanion();
+      await idb.typeText(text);
+    }
     await new Promise((r) => setTimeout(r, 100));
     return true;
   }
@@ -476,9 +485,16 @@ export class NitroWriter implements Writer {
     if (!c) return false;
     await this.hidTap(c.x, c.y, 50);
     await this.client.waitForCommit(200);
-    // Erase up to 100 chars — large enough for typical form fields.
-    for (let i = 0; i < 100; i++) {
-      await idb.pressKey(42);
+    // Erase up to 100 chars in ONE batched daemon call. The old per-
+    // key subprocess loop took ~16 s for 100 backspaces (subprocess
+    // spawn dominated); `keyRepeat` sends the whole sequence as a
+    // single gRPC call → ~50 ms regardless of count.
+    try {
+      await hid.pressKeyRepeat(42, 100);
+    } catch {
+      for (let i = 0; i < 100; i++) {
+        await idb.pressKey(42);
+      }
     }
     await new Promise((r) => setTimeout(r, 100));
     return true;
@@ -492,9 +508,15 @@ export class NitroWriter implements Writer {
       await this.hidTap(c.x, c.y, 50);
       await this.client.waitForCommit(200);
     }
-    await idb.ensureCompanion();
-    for (let i = 0; i < count; i++) {
-      await idb.pressKey(42);
+    // Batched daemon path replaces the N-spawn fan-out that used to
+    // dominate text-input flows. See `clearText` above.
+    try {
+      await hid.pressKeyRepeat(42, count);
+    } catch {
+      await idb.ensureCompanion();
+      for (let i = 0; i < count; i++) {
+        await idb.pressKey(42);
+      }
     }
     await new Promise((r) => setTimeout(r, 100));
     return true;
@@ -511,8 +533,15 @@ export class NitroWriter implements Writer {
     };
     const code = map[keyName.toLowerCase()];
     if (code === undefined) return false;
-    await idb.ensureCompanion();
-    await idb.pressKey(code);
+    // Persistent daemon path — saves the ~150 ms `idb` subprocess
+    // spawn that a single keypress used to pay. Falls back to the
+    // subprocess on daemon failure.
+    try {
+      await hid.pressKey(code);
+    } catch {
+      await idb.ensureCompanion();
+      await idb.pressKey(code);
+    }
     await this.client.waitForCommit(200);
     return true;
   }

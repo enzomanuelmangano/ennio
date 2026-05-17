@@ -117,6 +117,26 @@ class HidDaemon {
     return this.send(`swipe ${x1} ${y1} ${x2} ${y2} ${durationMs}`);
   }
 
+  key(keyCode: number): Promise<void> {
+    return this.send(`key ${keyCode}`);
+  }
+
+  // Bulk key repeat in ONE gRPC call. Saves the ~160 ms per-call
+  // subprocess spawn cost that `eraseText(50)` / `clearText(100)`
+  // used to pay 50–100× — the whole sequence now lands in ~50 ms.
+  keyRepeat(keyCode: number, count: number): Promise<void> {
+    if (count <= 0) return Promise.resolve();
+    return this.send(`keyrep ${keyCode} ${count}`);
+  }
+
+  // Send arbitrary text via idb's `text` (USB HID layer). Encodes the
+  // string as JSON on the wire so it can contain spaces / unicode /
+  // control chars without breaking the line-delimited protocol.
+  text(text: string): Promise<void> {
+    if (!text) return Promise.resolve();
+    return this.send(`text ${JSON.stringify(text)}`);
+  }
+
   close(): void {
     if (this.dead) return;
     try {
@@ -204,6 +224,21 @@ export async function swipe(
 ): Promise<void> {
   const d = await getHidDaemon();
   await d.swipe(x1, y1, x2, y2, durationMs);
+}
+
+export async function pressKey(keyCode: number): Promise<void> {
+  const d = await getHidDaemon();
+  await d.key(keyCode);
+}
+
+export async function pressKeyRepeat(keyCode: number, count: number): Promise<void> {
+  const d = await getHidDaemon();
+  await d.keyRepeat(keyCode, count);
+}
+
+export async function typeText(text: string): Promise<void> {
+  const d = await getHidDaemon();
+  await d.text(text);
 }
 
 export async function ensureCompanion(): Promise<void> {

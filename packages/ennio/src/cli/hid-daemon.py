@@ -13,9 +13,18 @@ Wire protocol (line-delimited, both directions):
 
   IN   tap <x> <y> <durationMs>
   IN   swipe <x1> <y1> <x2> <y2> <durationMs>
+  IN   key <keycode>
+  IN   keyrep <keycode> <count>            — N copies, one gRPC call
+  IN   text <json-encoded-string>          — JSON string handles spaces / unicode
   IN   exit
   OUT  ok                  — command completed
   OUT  err <message>       — command failed; daemon stays alive
+
+Why batch a `keyrep` op? `eraseText: 50 characters` used to fan out
+50 separate `idb ui key 42` subprocess invocations (~160 ms each =
+8 s of pure spawn overhead). `keyrep` sends the whole sequence in
+one `client.key_sequence` gRPC call — ~50 ms total regardless of
+count.
 
 The daemon discovers the companion socket from `IDB_COMPANION` env
 var or `/tmp/idb/<UDID>_companion.sock` if the parent passes a UDID
@@ -24,6 +33,7 @@ it alive for the whole `ennio test` session.
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -115,6 +125,41 @@ async def handle(client: Client, line: str) -> None:
                 p_end=(x2, y2),
                 duration=dur_ms / 1000.0,
             )
+            print("ok", flush=True)
+        elif op == "key":
+            # key <keycode>  — single USB HID key down+up.
+            if len(parts) < 2:
+                print("err key-needs-keycode", flush=True)
+                return
+            await client.key(keycode=int(parts[1]))
+            print("ok", flush=True)
+        elif op == "keyrep":
+            # keyrep <keycode> <count>  — N repeated keys in ONE
+            # gRPC call. Replaces the eraseText/clearText fan-out
+            # of N separate `idb ui key` subprocess spawns
+            # (~160 ms each); the whole sequence now lands in ~50 ms.
+            if len(parts) < 3:
+                print("err keyrep-needs-code-count", flush=True)
+                return
+            code = int(parts[1])
+            count = max(0, int(parts[2]))
+            if count > 0:
+                await client.key_sequence(key_sequence=[code] * count)
+            print("ok", flush=True)
+        elif op == "text":
+            # text <json-encoded-string>  — JSON string so the
+            # payload can carry spaces, unicode, etc. line-safely.
+            payload = line[len("text "):].strip() if len(line) > len("text ") else ""
+            try:
+                text = json.loads(payload)
+            except Exception as e:
+                print(f"err bad-json-text {e}", flush=True)
+                return
+            if not isinstance(text, str):
+                print("err text-not-string", flush=True)
+                return
+            if text:
+                await client.text(text=text)
             print("ok", flush=True)
         elif op == "exit":
             sys.exit(0)
