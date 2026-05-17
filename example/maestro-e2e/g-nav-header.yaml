@@ -1,0 +1,53 @@
+appId: com.ennio.example
+name: 'Gauntlet — Native header items'
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Gauntlet'
+- scrollUntilVisible:
+    element:
+      id: 'g-nav-header'
+    direction: DOWN
+- tapOn:
+    id: 'g-nav-header'
+- assertVisible:
+    id: 'nav-header-screen'
+
+# headerRight — first item
+- tapOn:
+    id: 'header-edit-btn'
+- assertVisible:
+    id: 'header-last'
+- assertVisible:
+    text: 'Last: edit'
+
+# headerRight — second item (multi-item group)
+- tapOn:
+    id: 'header-save-btn'
+- assertVisible:
+    text: 'Last: save'
+
+# headerLeft
+- tapOn:
+    id: 'header-cancel-btn'
+- assertVisible:
+    text: 'Last: cancel'
+
+# In-body programmatic back — exits screen
+- tapOn:
+    id: 'header-go-back-btn'
+- assertVisible:
+    id: 'gauntlet-screen'
+
+# Re-enter and validate iOS-native back chevron
+- scrollUntilVisible:
+    element:
+      id: 'g-nav-header'
+    direction: DOWN
+- tapOn:
+    id: 'g-nav-header'
+- assertVisible:
+    id: 'nav-header-screen'
+- back
+- assertVisible:
+    id: 'gauntlet-screen'
