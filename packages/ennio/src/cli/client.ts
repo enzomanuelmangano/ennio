@@ -391,7 +391,9 @@ export class EnnioClient {
         }
       }
     } else if (SOCKET_FAST_OPS.has(type) && process.env.ENNIO_DEBUG_SOCKET) {
-      process.stderr.write(`[socket] ${type} NOT routed (connected=${this.socketClient?.isConnected()})\n`);
+      process.stderr.write(
+        `[socket] ${type} NOT routed (connected=${this.socketClient?.isConnected()})\n`,
+      );
     }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       const ok = await this.reconnect(RECONNECT_TIMEOUT_MS);
