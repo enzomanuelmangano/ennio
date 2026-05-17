@@ -78,6 +78,7 @@ export interface Writer {
    * uses stale dimensions and lands off-target.
    */
   invalidateViewportCache(): void;
+  setClient(client: EnnioClient): void;
   scrollTo(scrollViewTestID: string, elementTestID: string): Promise<boolean>;
   back(): Promise<boolean>;
   hideKeyboard(): Promise<boolean>;
@@ -201,6 +202,14 @@ export class NitroWriter implements Writer {
   invalidateViewportCache(): void {
     this.screenSize = null;
     this.surfaceOffset = null;
+  }
+
+  // Hot-swap the underlying client after a launchApp/clearState rebind.
+  // The old client's WebSocket + control socket are torn down by the
+  // runner; without this swap, every send() would target the dead
+  // transports and either throw or stall.
+  setClient(client: EnnioClient): void {
+    this.client = client;
   }
 
   private async scrollAuto(

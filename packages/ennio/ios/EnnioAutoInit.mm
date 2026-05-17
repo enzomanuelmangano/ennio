@@ -16,6 +16,7 @@
 #include <jsi/jsi.h>
 #include <functional>
 #include "../cpp/HybridEnnio.hpp"
+#include "../cpp/EnnioControlSocket.h"
 
 #if __has_include(<ReactCommon/RCTInstance.h>)
 #import <ReactCommon/RCTInstance.h>
@@ -112,6 +113,11 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
     // sometimes drops app debug lines on device), the file proves +load ran.
     NSString* mark = [NSString stringWithFormat:@"%@/Library/_ennio_load_fired.txt", NSHomeDirectory()];
     [@"loaded" writeToFile:mark atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    // Start the Unix-domain control socket before any JS work runs.
+    // Independent of Hermes Inspector — exists to bypass the JS-thread
+    // queue for pure UIKit handlers (see EnnioControlSocket.cpp).
+    ennio::EnnioControlSocket::start();
 
     // Try to swizzle RCTHost's start method
     Class hostClass = NSClassFromString(@"RCTHost");

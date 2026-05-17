@@ -24,10 +24,16 @@ export interface Reader {
   getAlertButtons(): Promise<string[]>;
   /** Text content for `testID`, or null if not found / not text. */
   getText(testID: string): Promise<string | null>;
+  /** Hot-swap the underlying client after a launchApp/clearState rebind. */
+  setClient(client: EnnioClient): void;
 }
 
 export class NitroReader implements Reader {
   constructor(private client: EnnioClient) {}
+
+  setClient(client: EnnioClient): void {
+    this.client = client;
+  }
 
   existsById(testID: string) {
     return this.client.exists(testID);

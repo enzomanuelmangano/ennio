@@ -25,6 +25,7 @@
 
 import WebSocket from 'ws';
 import { selectorToJson } from './selector';
+import { EnnioSocketClient } from './socket-client';
 
 const METRO_BASE = process.env.ENNIO_METRO_URL || 'http://localhost:8081';
 // Per-request hard cap. Long enough for an asset-heavy assertVisible
@@ -154,6 +155,13 @@ interface CdpResponse {
   error?: { message: string };
 }
 
+// Handlers safe to route through the Unix-domain control socket. These
+// touch only UIKit (main thread) or thread-safe Fabric reads — no JS
+// thread state. Sending them via CDP would queue behind whatever React
+// work is in flight on the JS thread; the socket bypasses that queue
+// entirely. Everything else stays on CDP.
+const SOCKET_FAST_OPS = new Set<string>(['tapTabByName', 'ping']);
+
 export class EnnioClient {
   private ws: WebSocket | null = null;
   private pending = new Map<
@@ -163,6 +171,7 @@ export class EnnioClient {
   private rpcId = 0;
   private tokenSeq = 0;
   private debuggerUrl: string | null = null;
+  private socketClient: EnnioSocketClient | null = null;
 
   /**
    * Discover Metro Inspector pages, pick the JS context. Bridgeless
@@ -257,6 +266,7 @@ export class EnnioClient {
       this.ws.close();
       this.ws = null;
     }
+    this.disconnectSocket();
   }
 
   async reconnect(maxWaitMs: number = RECONNECT_TIMEOUT_MS): Promise<boolean> {
@@ -332,7 +342,57 @@ export class EnnioClient {
    * Two-phase: post via `__ennioDispatch`, then poll the result slot
    * until the in-app worker writes a response or the timeout expires.
    */
+  /**
+   * Discover + connect the Unix-domain control socket for this app.
+   * Idempotent. Safe to call after every launchApp / clearState — the
+   * underlying client retries discovery and re-opens the socket against
+   * the new app process.
+   */
+  async ensureSocketConnected(bundleId: string, udid?: string): Promise<boolean> {
+    if (!this.socketClient) this.socketClient = new EnnioSocketClient();
+    const ok = await this.socketClient.connect(bundleId, udid);
+    if (process.env.ENNIO_DEBUG_SOCKET) {
+      process.stderr.write(`[socket] ensureSocketConnected(${bundleId}) -> ${ok}\n`);
+    }
+    return ok;
+  }
+
+  /**
+   * Tear down the socket alongside the CDP WebSocket. Called from
+   * `disconnect()` so launchApp / clearState restart cleanly.
+   */
+  private disconnectSocket(): void {
+    if (this.socketClient) {
+      this.socketClient.close();
+      this.socketClient = null;
+    }
+  }
+
   async send(type: string, payload: Record<string, unknown> = {}): Promise<EnnioResponse> {
+    // Fast path: route handlers that don't need the JS thread through
+    // the Unix-domain socket. Skips CDP entirely → not blocked by
+    // ongoing React work on the JS thread.
+    if (SOCKET_FAST_OPS.has(type) && this.socketClient?.isConnected()) {
+      if (process.env.ENNIO_DEBUG_SOCKET) {
+        process.stderr.write(`[socket] route ${type}\n`);
+      }
+      try {
+        const t0 = Date.now();
+        const r = await this.socketClient.send(type, payload);
+        if (process.env.ENNIO_DEBUG_SOCKET) {
+          process.stderr.write(`[socket] ${type} done in ${Date.now() - t0}ms\n`);
+        }
+        return r;
+      } catch {
+        // Socket dropped mid-flight (app crashed, etc.) — fall through
+        // to CDP. The next ensureSocketConnected() will try to re-attach.
+        if (process.env.ENNIO_DEBUG_SOCKET) {
+          process.stderr.write(`[socket] ${type} threw, falling back to CDP\n`);
+        }
+      }
+    } else if (SOCKET_FAST_OPS.has(type) && process.env.ENNIO_DEBUG_SOCKET) {
+      process.stderr.write(`[socket] ${type} NOT routed (connected=${this.socketClient?.isConnected()})\n`);
+    }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       const ok = await this.reconnect(RECONNECT_TIMEOUT_MS);
       if (!ok) throw new Error('Not connected to Hermes Inspector');
