@@ -7,7 +7,7 @@
  * with built-in flakiness handling.
  */
 
-import { EnnioClient } from './client';
+import { EnnioClient, METRO_BASE } from './client';
 import type { Writer } from './writer';
 import type { Reader } from './reader';
 import { basename } from 'path';
@@ -67,9 +67,8 @@ const DEFAULT_RECONNECT_TIMEOUT = 30000;
 // magic numbers the audit flagged inside executeCommand — naming them
 // here makes intent explicit and the values tune-able from one place.
 const ALERT_TAP_SETTLE_MS = 150; // Wait for alert-button tap to dismiss the alert.
-const ALERT_DISMISS_DELAY_MS = 120; // Settle between dismissAlert and the next assertion.
 const RUNLOOP_TICK_MS = 30; // UITouch begin→end gap; matches the native sendSynth tick.
-const TAP_NAV_SETTLE_MS = 150; // Tab/Link nav settle. prepareTap's stable-coord + hit-test verify catches the "responder chain not yet bound" race on the next tap, so this only covers commands that don't go through prepareTap (e.g. assertVisible). Kept short.
+const TAP_NAV_SETTLE_MS = 100; // Cap for waitCommit after a tap. waitCommit returns early on the next React onCommitFiberRoot — typical app commit fires within 2 RAF frames (~32 ms at 60 Hz), so 200 ms is well past the happy path. For taps that legitimately cause no React work (UIKit-only transition, focused-already field, RC banner dismiss point-tap) we pay the cap; the next step's own visibility wait keeps things correct.
 const TAP_BACK_RECOVER_DELAY_MS = 250; // Pause between back-pop and retry tap.
 const KEYBOARD_DISMISS_SETTLE_MS = 120; // Settle after hideKeyboard before re-tapping the field.
 const POST_LAUNCH_SETTLE_MS = 400; // Wait for sim teardown after clearState before relaunch.
@@ -194,6 +193,91 @@ export function launchAppOnSimulator(deviceId: string, appId: string): void {
 }
 
 /**
+ * Open the app via expo-dev-client's deep-link scheme so the bundle
+ * loads directly instead of stopping at the "DEVELOPMENT SERVERS"
+ * picker. Mandatory for Debug builds that ship expo-dev-client —
+ * a plain `simctl launch` of those apps lands on the picker UI with
+ * no JS context, so Ennio's CDP reconnect loop times out. The
+ * bundlerUrl is the user's running Metro URL (e.g.
+ * `http://192.168.1.12:8081`). Caller is responsible for
+ * url-encoding embedded characters.
+ *
+ * Simulator-only — devicectl doesn't expose the same deep-link
+ * shortcut and physical-device dev-client flows pre-cache the URL
+ * via QR-scan anyway.
+ */
+export function deepLinkExpoDevClient(deviceId: string, scheme: string, bundlerUrl: string): void {
+  if (getTargetType(deviceId) !== 'simulator') return;
+  const encoded = encodeURIComponent(bundlerUrl);
+  const url = `${scheme}://expo-development-client/?url=${encoded}`;
+  execSync(`xcrun simctl openurl ${deviceId} ${shellQuote(url)}`, {
+    encoding: 'utf-8',
+    stdio: 'pipe',
+  });
+}
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Inspect the installed app's Info.plist for a CFBundleURLScheme that
+ * starts with `exp+`. Presence of such a scheme is the canonical
+ * marker that the app embeds `expo-dev-client` (the
+ * `withExpoDevClient` config plugin adds exactly one `exp+<scheme>`
+ * entry alongside the app's own scheme).
+ *
+ * Returns the matched scheme (e.g. `exp+habits`) so the caller can
+ * deep-link via `<scheme>://expo-development-client/?url=<metro>`
+ * without making the YAML carry a hardcoded `devClientScheme`.
+ * Returns null when the app isn't installed, has no Info.plist, or
+ * doesn't ship a dev-client URL scheme (Release / standalone Expo
+ * Go-style builds).
+ *
+ * Simulator-only — devicectl doesn't surface the same container
+ * lookup and physical-device dev-client flows aren't supported by
+ * the deep-link auto-path.
+ */
+export function detectExpoDevClientScheme(deviceId: string, appId: string): string | null {
+  if (getTargetType(deviceId) !== 'simulator') return null;
+  let appDir: string;
+  try {
+    appDir = execSync(`xcrun simctl get_app_container ${deviceId} ${appId} app`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    // App not installed → no plist to read.
+    return null;
+  }
+  if (!appDir) return null;
+  let raw: string;
+  try {
+    raw = execSync(`plutil -extract CFBundleURLTypes json -o - "${appDir}/Info.plist"`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  for (const entry of parsed) {
+    const schemes = (entry as { CFBundleURLSchemes?: unknown })?.CFBundleURLSchemes;
+    if (!Array.isArray(schemes)) continue;
+    for (const s of schemes) {
+      if (typeof s === 'string' && s.startsWith('exp+')) return s;
+    }
+  }
+  return null;
+}
+
+/**
  * Throw a consistent error when a command is sim-only and the active
  * target is a physical device. iOS doesn't expose simctl-equivalents for
  * status_bar / location / privacy / keychain on real hardware — instead
@@ -302,6 +386,12 @@ export async function runMaestroTests(
   });
 
   const start = Date.now();
+  // Silence RN dev-mode `console.error` / `console.warn` + LogBox so
+  // noisy SDKs (RevenueCat sandbox failures, Sentry stub warnings,
+  // expo-dev-client info logs) can't pop the full-screen LogBox
+  // overlay on top of the app and block taps. Originals are saved on
+  // `globalThis.__ennio_originals`; restored in the finally block.
+  await client.suppressDevNoise();
   try {
     // onFlowStart — run setup hooks before main commands. Failures here
     // are fatal: the flow's invariants haven't been established, so the
@@ -347,6 +437,14 @@ export async function runMaestroTests(
       } catch (e) {
         console.log(`  (onFlowComplete failed: ${(e as Error).message})`);
       }
+    }
+    // Best-effort: hand console.error / console.warn back to the host.
+    // Always runs, even on flow failure, so post-mortem REPLs or a
+    // subsequent flow on the same app see real logs again.
+    try {
+      await executor.getClient().restoreDevNoise();
+    } catch {
+      /* noop */
     }
   }
 
@@ -510,19 +608,26 @@ class MaestroExecutor {
   }
 
   /**
-   * Wake the moment React fires onCommitFiberRoot, capped at maxMs.
-   * Replaces blind sleep settles after React-driven mutations (taps,
-   * navigations, keyboard dismissals). The cap is the safety floor —
-   * worst case is identical to a sleep of the same duration.
+   * Wake on the next React `onCommitFiberRoot`, capped at `maxMs`.
+   * Routes through `client.waitForCommit` → JSI host fn
+   * `__ennio_native_onCommit` installed by `client.connect` (wraps the
+   * devtools-global-hook AFTER `Runtime.enable`).
+   *
+   * The cap is the safety floor for steps that trigger no React work
+   * (UIKit-only transition, idle pause) — they wait the full cap.
+   *
+   * Gesture-attach race on freshly mounted Pressables is handled at
+   * the tap site (`writer.tapByText` verifies a commit fires post-tap
+   * and retries when it doesn't), not here — adding a blanket
+   * post-commit idle drain costs every tap one stability window even
+   * when no race exists.
    */
   private async waitCommit(maxMs: number): Promise<void> {
-    // Fixed sleep — the React-commit signal (`__ennio_native_onCommit`)
-    // races React's own devtools-hook binding on Bridgeless and often
-    // never fires, and IdleMonitor doesn't observe UIKit transitions
-    // (router.push, modal present). The caller's `maxMs` is sized for
-    // the worst case of whatever it just did (tap-nav: 500 ms;
-    // alert/keyboard: 120-250 ms; point-tap: 60 ms).
-    await this.sleep(maxMs);
+    try {
+      await this.client.waitForCommit(maxMs);
+    } catch {
+      /* tolerate — bridge dead */
+    }
   }
 
   /**
@@ -559,7 +664,16 @@ class MaestroExecutor {
       }
     }
     if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-      return this.reader.existsById(ennioSelector.id as string);
+      const id = ennioSelector.id as string;
+      const inTree = await this.reader.existsById(id);
+      if (inTree) return true;
+      // NativeTabs fallback: UITabBarItems aren't in Fabric's shadow
+      // tree — react-native-screens sets the testID on
+      // `UITabBarItem.accessibilityIdentifier` instead. Ask the
+      // in-app helper to walk the UITabBarController and match by
+      // accessibilityIdentifier / title. No convention assumed about
+      // id shape; any id can in principle be a tab id.
+      return this.client.findTabByName(id);
     }
     return this.reader.existsBySelector(ennioSelector);
   }
@@ -576,7 +690,13 @@ class MaestroExecutor {
       }
     }
     if (ennioSelector.id && Object.keys(ennioSelector).length === 1) {
-      return this.reader.isVisibleById(ennioSelector.id as string);
+      const id = ennioSelector.id as string;
+      const inTree = await this.reader.isVisibleById(id);
+      if (inTree) return true;
+      // Same NativeTabs fallback as selectorExists — a UITabBarItem
+      // that's part of an on-screen tab bar is "visible" by any
+      // reasonable user-facing definition.
+      return this.client.findTabByName(id);
     }
     return this.reader.isVisibleBySelector(ennioSelector);
   }
@@ -595,15 +715,13 @@ class MaestroExecutor {
           this.log(`(tapping alert button: "${buttonText}")`);
           await this.writer.tapAlertButton(buttonText);
           await this.waitCommit(ALERT_TAP_SETTLE_MS);
-          // Drain any queued / re-presented alerts. A synthesized
-          // touch can occasionally double-fire the trigger handler,
-          // queueing a second alert behind the first one. Dismiss in
-          // a tight loop until the stack clears or we hit the cap.
-          for (let i = 0; i < 8; i++) {
-            if (!(await this.client.isAlertPresent())) return true;
-            await this.writer.dismissAlert();
-            await this.waitCommit(ALERT_DISMISS_DELAY_MS);
-          }
+          // No drain loop here: two-stage flows like
+          // Alert.alert(…onPress: () => Alert.alert(…)) legitimately
+          // re-present another alert from the JS handler, and a
+          // generic dismiss would kill that second alert before the
+          // test could assertVisible it. The next command in the
+          // flow either taps a button on the new alert (re-entering
+          // this function) or assertVisibles it — both safe paths.
           return true;
         }
       }
@@ -612,7 +730,37 @@ class MaestroExecutor {
     return false;
   }
 
+  /**
+   * If RN's LogBox overlay is on screen, tap its "Dismiss" button to
+   * clear it. LogBox shows on `console.error` in `__DEV__` and covers
+   * the full screen with a stack-trace view — every subsequent
+   * id/text/point tap lands on the LogBox chrome instead of the
+   * actual app UI. The overlay isn't a UIAlertController so
+   * isAlertPresent doesn't catch it; it's a regular React tree with
+   * "Dismiss" and "Minimize" buttons. Dismissed in a loop because
+   * RN queues multiple errors (LogBox shows "Log N of M"), each
+   * "Dismiss" tap pops one and re-shows the previous one if any.
+   */
+  private async dismissLogBoxIfPresent(): Promise<boolean> {
+    let dismissed = false;
+    for (let i = 0; i < 12; i++) {
+      const hasDismiss = await this.reader.existsBySelector({ text: 'Dismiss' });
+      const hasMinimize = await this.reader.existsBySelector({ text: 'Minimize' });
+      if (!hasDismiss || !hasMinimize) break;
+      this.log('(auto-dismissing LogBox)');
+      const ok = await this.writer.tapByText('Dismiss', { fast: true });
+      if (!ok) break;
+      dismissed = true;
+      await this.waitCommit(TAP_NAV_SETTLE_MS);
+    }
+    return dismissed;
+  }
+
   private async tap(selector: MaestroSelector, opts: { optional?: boolean } = {}): Promise<void> {
+    // RN LogBox overlay auto-dismiss. Cheap shadow-tree text check — a
+    // single round-trip on a clean screen.
+    await this.dismissLogBoxIfPresent();
+
     // Point selector — Maestro `tapOn: { point: "X%,Y%" }`. Resolve to a
     // normalised window coordinate and dispatch directly via the writer.
     if (selector.point) {
@@ -709,14 +857,17 @@ class MaestroExecutor {
       }
     }
 
-    // Text-only selectors: try alert button tap. Polls long enough
-    // (2s) for Alert.alert's presentation animation to finish — the
-    // dialog typically appears 300-1500ms after the triggering tap.
-    // Optional taps cap at 200ms — we don't want to wait for an alert
-    // that the test never expected to be present.
+    // Text-only selectors: try alert button tap. Single fast probe —
+    // `isAlertPresent` is a socket round-trip (~3 ms), so checking
+    // once is cheap. The previous design polled for up to 2 s to
+    // catch alerts presented 300-1500 ms after a triggering tap,
+    // but that hedge cost every non-alert text tap a full 2 s wait
+    // even when nothing was ever going to pop. Flows that DO depend
+    // on a delayed alert can prefix the tap with
+    // `extendedWaitUntil: { visible: "Alert title", timeout: 2000 }`
+    // — explicit, opt-in, and only pays the wait when needed.
     if (selector.text && !selector.id) {
-      const alertPoll = opts.optional ? 200 : 2000;
-      const ok = await this.tryTapAlertButton(selector.text, alertPoll);
+      const ok = await this.tryTapAlertButton(selector.text, 50);
       if (ok) return;
     }
 
@@ -740,10 +891,38 @@ class MaestroExecutor {
 
     const tryOnce = async (): Promise<boolean> => {
       if (selector.id && !selector.text && Object.keys(toEnnioSelector(selector)).length === 1) {
-        return this.writer.tap(selector.id);
+        // UITabBar fast-path BEFORE writer.tap. Reason: `writer.tap`
+        // calls `prepareTap` which polls Fabric for the testID over
+        // ~2 s and only returns false on timeout. For tab ids that
+        // live on UITabBarItem.accessibilityIdentifier (not in
+        // Fabric) this is always a 2 s waste followed by the same
+        // fallback we'd do anyway. A `findTabByName` probe is a
+        // single socket round-trip (~3 ms): cheap miss when the id
+        // isn't a tab, immediate success when it is.
+        const isTab = await this.client.findTabByName(selector.id);
+        if (isTab) {
+          const r = await this.client.send('tapTabByName', { name: selector.id });
+          if (r?.success === true) return true;
+        }
+        const ok = await this.writer.tap(selector.id);
+        if (ok) return true;
+        const r = await this.client.send('tapTabByName', { name: selector.id });
+        if (r?.success === true) return true;
+        return false;
       }
       if (selector.text && !selector.id) {
-        return this.writer.tapByText(selector.text, { fast: opts.optional === true });
+        // Maestro semantics for `optional: true` is "swallow the failure
+        // if no match found" — NOT "skip the slow fallback tiers". Keep
+        // the full cascade (incl. tier-5 maestro/WDA hierarchy) so
+        // SpringBoard-level alerts (notification-permission prompt,
+        // location prompt, etc.) reachable via `tapOn: "Allow"` /
+        // `"Consenti"` etc. without callers having to drop to
+        // coordinate-based fallback taps. Cost on a missed optional tap
+        // is the full ~10 s cascade — pay it on miss, free on hit.
+        // `fast: true` remains available internally (e.g. LogBox
+        // dismiss probe) where the caller genuinely wants to bail
+        // quickly.
+        return this.writer.tapByText(selector.text);
       }
       return this.writer.tapBySelector(toEnnioSelector(selector));
     };
@@ -941,9 +1120,34 @@ class MaestroExecutor {
       this.currentFlowPath = subflowPath;
 
       const subflow = parseMaestroFile(subflowPath);
-      await this.executeCommands(subflow.commands);
 
-      this.currentFlowPath = savedPath;
+      // Merge subflow's own `env:` block into the JS context for the
+      // duration of the subflow. Maestro semantics: a subflow can declare
+      // its own env that scopes to its body, falling back to (and
+      // overriding) the parent's env. We snapshot the previous values so
+      // we can restore them when the subflow exits — this keeps the
+      // parent flow's interpolation intact after the subflow returns.
+      const subflowEnv = subflow.env;
+      const envSnapshot: Record<string, unknown> = {};
+      const envKeys: string[] = [];
+      if (subflowEnv) {
+        for (const [key, value] of Object.entries(subflowEnv)) {
+          envSnapshot[key] = (this.jsContext as Record<string, unknown>)[key];
+          envKeys.push(key);
+          (this.jsContext as Record<string, unknown>)[key] = value;
+        }
+      }
+
+      try {
+        await this.executeCommands(subflow.commands);
+      } finally {
+        // Restore parent's env values so the subflow's scope doesn't
+        // leak. Keys that didn't exist before become `undefined` again.
+        for (const key of envKeys) {
+          (this.jsContext as Record<string, unknown>)[key] = envSnapshot[key];
+        }
+        this.currentFlowPath = savedPath;
+      }
     }
   }
 
@@ -1099,11 +1303,33 @@ class MaestroExecutor {
 
       // Standard single selector
       const { timeout: _, anyOf: __, ...selector } = assertCmd;
-      await this.waitFor(
-        () => this.selectorVisible(selector),
-        timeout,
-        `Element not visible: ${JSON.stringify(selector)}`,
-      );
+      try {
+        await this.waitFor(
+          () => this.selectorVisible(selector),
+          timeout,
+          `Element not visible: ${JSON.stringify(selector)}`,
+        );
+      } catch (e) {
+        // iOS 26 sheet/screen-transition first-touch race: a tapByText
+        // landed on a wrapper whose hit-test was eaten by the sheet's
+        // pan recogniser at the moment the new screen mounted, so the
+        // navigation/onPress side effect never fired and the asserted
+        // post-tap element never appeared. Detect by the lastTappedSelector
+        // still being visible (the screen hasn't changed) and re-fire
+        // the tap once. The second tap fires on a settled UIKit
+        // hierarchy and the navigation completes.
+        if (this.lastTappedSelector && (await this.selectorVisible(this.lastTappedSelector))) {
+          this.log(`assertVisible recover: retapping ${JSON.stringify(this.lastTappedSelector)}`);
+          await this.tap(this.lastTappedSelector);
+          await this.waitFor(
+            () => this.selectorVisible(selector),
+            timeout,
+            `Element not visible: ${JSON.stringify(selector)}`,
+          );
+        } else {
+          throw e;
+        }
+      }
       return;
     }
 
@@ -1114,11 +1340,33 @@ class MaestroExecutor {
       const raw = cmd.assertNotVisible as MaestroSelector | string;
       const normalized = normalizeSelector(raw) as MaestroSelector & { timeout?: number };
       const { timeout = DEFAULT_TIMEOUT, ...selector } = normalized;
-      await this.waitFor(
-        () => this.selectorVisible(selector).then((v) => !v),
-        timeout,
-        `Element still visible: ${JSON.stringify(selector)}`,
-      );
+      try {
+        await this.waitFor(
+          () => this.selectorVisible(selector).then((v) => !v),
+          timeout,
+          `Element still visible: ${JSON.stringify(selector)}`,
+        );
+      } catch (e) {
+        // Same recovery as assertVisible: the most common cause of an
+        // element staying visible past `timeout` is the last tap landing
+        // on a wrapper view whose dismiss didn't propagate (iOS 26
+        // first-touch race on a transparentModal/sheet). The dismiss
+        // selector itself is still on-screen — re-fire the tap once on
+        // the settled UIKit hierarchy.
+        if (this.lastTappedSelector && (await this.selectorVisible(this.lastTappedSelector))) {
+          this.log(
+            `assertNotVisible recover: retapping ${JSON.stringify(this.lastTappedSelector)}`,
+          );
+          await this.tap(this.lastTappedSelector);
+          await this.waitFor(
+            () => this.selectorVisible(selector).then((v) => !v),
+            timeout,
+            `Element still visible: ${JSON.stringify(selector)}`,
+          );
+        } else {
+          throw e;
+        }
+      }
       return;
     }
 
@@ -1137,6 +1385,41 @@ class MaestroExecutor {
         this.log(`inputText: via UISearchBar delegate`);
         await this.waitCommit(TAP_BACK_RECOVER_DELAY_MS);
         return;
+      }
+      // Layout-independent text-entry fast-path. The idb HID `text`
+      // op sends US scan codes that the iOS simulator re-encodes
+      // through its active keyboard locale — Italian / German /
+      // French sims turn '-' into '\'' and '@' into '"', garbling
+      // email and password fields. The system pasteboard + UIKit's
+      // canonical `paste:` responder action goes through the same
+      // textField:shouldChangeCharactersInRange: + editingChanged
+      // hooks as the user tapping "Paste" in the long-press menu —
+      // real UIKit text insertion, but immune to keyboard layout.
+      // No-op when nothing accepts paste (no focused responder),
+      // falls through to the HID path.
+      const paste = await this.client.send('pasteIntoFocusedField', { text });
+      if (paste?.success === true) {
+        this.log(`inputText: via UIKit paste:`);
+        await this.waitCommit(TAP_BACK_RECOVER_DELAY_MS);
+        return;
+      }
+      // No focused responder — the prior tap landed on a wrapper
+      // view, not a UITextField. Happens on iOS 26 sheets where the
+      // sheet's pan recogniser races ahead of the inner input's
+      // hit-test acceptance for the first tap after presentation:
+      // `pollStableLabelFrame` returns a stable frame for an outer
+      // Pressable that happens to satisfy the label search, the tap
+      // lands on the wrapper, no field focuses. Re-tap the last
+      // selector once (sheet is settled by now) and retry paste
+      // before falling back to layout-fragile HID typing.
+      if (this.lastTappedSelector) {
+        await this.tap(this.lastTappedSelector);
+        const retry = await this.client.send('pasteIntoFocusedField', { text });
+        if (retry?.success === true) {
+          this.log(`inputText: via UIKit paste (after re-tap):`);
+          await this.waitCommit(TAP_BACK_RECOVER_DELAY_MS);
+          return;
+        }
       }
       await this.typeText(text);
       return;
@@ -1911,13 +2194,39 @@ class MaestroExecutor {
     }
   }
 
-  private async handleClearState(clearCmd: true | { appId?: string }): Promise<void> {
+  private async handleClearState(
+    clearCmd: true | { appId?: string; bundlerUrl?: string; devClientScheme?: string },
+  ): Promise<void> {
     const targetAppId = (typeof clearCmd === 'object' && clearCmd.appId) || this.appId;
     if (!targetAppId) throw new Error('clearState: No appId specified in command or flow metadata');
     const deviceId = getBootedSimulatorId();
     if (!deviceId) throw new Error('clearState: No booted iOS target found');
+    // Resolve dev-client deep-link config. Explicit YAML > env > Info.plist
+    // auto-detection. Auto-detection covers the common case where the
+    // app embeds expo-dev-client — the bundlerUrl falls back to the
+    // Metro URL Ennio is already talking to (default
+    // http://localhost:8081 on the sim).
+    const detectedScheme =
+      typeof clearCmd === 'object' && clearCmd.devClientScheme
+        ? null
+        : detectExpoDevClientScheme(deviceId, targetAppId);
+    const bundlerUrl =
+      (typeof clearCmd === 'object' && clearCmd.bundlerUrl) ||
+      process.env.ENNIO_BUNDLER_URL ||
+      (detectedScheme ? METRO_BASE : undefined);
+    const devClientScheme =
+      (typeof clearCmd === 'object' && clearCmd.devClientScheme) ||
+      process.env.ENNIO_DEV_CLIENT_SCHEME ||
+      detectedScheme ||
+      undefined;
 
-    this.log(`clearState: ${targetAppId}`);
+    this.log(
+      `clearState: ${targetAppId}${
+        bundlerUrl && devClientScheme
+          ? ` (devClient ${detectedScheme ? 'auto' : 'opt-in'} → ${bundlerUrl})`
+          : ''
+      }`,
+    );
     // In-process sandbox wipe via WS while the app is still running.
     // Works identically on Sim + device (no host filesystem access).
     try {
@@ -1928,7 +2237,12 @@ class MaestroExecutor {
     this.client.disconnect();
     terminateApp(deviceId, targetAppId);
     await this.sleep(POST_LAUNCH_SETTLE_MS);
-    launchAppOnSimulator(deviceId, targetAppId);
+    // Dev-client deep-link path — see handleLaunchApp for rationale.
+    if (bundlerUrl && devClientScheme) {
+      deepLinkExpoDevClient(deviceId, devClientScheme, bundlerUrl);
+    } else {
+      launchAppOnSimulator(deviceId, targetAppId);
+    }
 
     let connected = false;
     const startTime = Date.now();
@@ -1950,6 +2264,10 @@ class MaestroExecutor {
     // size + surface offset so the next tap math doesn't use values from
     // the previous app instance.
     this.writer.invalidateViewportCache();
+    // Fresh JS context — re-inject the console / LogBox suppressor so
+    // RC sandbox errors etc. don't pop the dev overlay over the new
+    // app process. Originals saved on the new context's globalThis.
+    await this.client.suppressDevNoise();
     try {
       await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS);
     } catch {
@@ -1959,15 +2277,38 @@ class MaestroExecutor {
   }
 
   private async handleLaunchApp(
-    launchCmd: true | { clearState?: boolean; appId?: string },
+    launchCmd:
+      | true
+      | { clearState?: boolean; appId?: string; bundlerUrl?: string; devClientScheme?: string },
   ): Promise<void> {
     const shouldClearState = typeof launchCmd === 'object' && launchCmd.clearState === true;
     const targetAppId = (typeof launchCmd === 'object' && launchCmd.appId) || this.appId;
     if (!targetAppId) throw new Error('launchApp: No appId specified in command or flow metadata');
     const deviceId = getBootedSimulatorId();
     if (!deviceId) throw new Error('launchApp: No booted iOS simulator found');
+    // Same explicit-then-auto resolution as handleClearState. See the
+    // comment block there for the full rationale.
+    const detectedScheme =
+      typeof launchCmd === 'object' && launchCmd.devClientScheme
+        ? null
+        : detectExpoDevClientScheme(deviceId, targetAppId);
+    const bundlerUrl =
+      (typeof launchCmd === 'object' && launchCmd.bundlerUrl) ||
+      process.env.ENNIO_BUNDLER_URL ||
+      (detectedScheme ? METRO_BASE : undefined);
+    const devClientScheme =
+      (typeof launchCmd === 'object' && launchCmd.devClientScheme) ||
+      process.env.ENNIO_DEV_CLIENT_SCHEME ||
+      detectedScheme ||
+      undefined;
 
-    this.log(`launchApp: ${targetAppId}${shouldClearState ? ' (clearState)' : ''}`);
+    this.log(
+      `launchApp: ${targetAppId}${shouldClearState ? ' (clearState)' : ''}${
+        bundlerUrl && devClientScheme
+          ? ` (devClient ${detectedScheme ? 'auto' : 'opt-in'} → ${bundlerUrl})`
+          : ''
+      }`,
+    );
     if (shouldClearState) {
       // In-process sandbox wipe via WS before disconnect — works on
       // Sim + device with no host filesystem access.
@@ -1984,7 +2325,19 @@ class MaestroExecutor {
     // before relaunch. Skipping this on iOS 26 sim can produce a Hermes
     // BCProvider SIGSEGV when the new process races the prior teardown.
     await this.sleep(POST_LAUNCH_SETTLE_MS);
-    launchAppOnSimulator(deviceId, targetAppId);
+    // Dev-client launch: a bare `simctl launch` of a Debug build that
+    // ships expo-dev-client lands on the "DEVELOPMENT SERVERS" picker
+    // screen — native UIKit, no JS context, Hermes inspector unreachable.
+    // The reconnect loop below would time out. When the app's Info.plist
+    // carries an `exp+<scheme>` URL type (or the YAML sets bundlerUrl /
+    // devClientScheme explicitly), deep-link past the picker via that
+    // scheme so the JS bundle loads directly. Falls back to a plain
+    // launch for Release builds (no dev-client URL type).
+    if (bundlerUrl && devClientScheme) {
+      deepLinkExpoDevClient(deviceId, devClientScheme, bundlerUrl);
+    } else {
+      launchAppOnSimulator(deviceId, targetAppId);
+    }
 
     // Reconnect with patience. App must cold-start, load JS bundle, then
     // RCTHost.start fires and Hermes Inspector exposes the JS runtime
@@ -2006,6 +2359,9 @@ class MaestroExecutor {
     this.reader.setClient(this.client);
     // Fresh process — see comment in handleClearState.
     this.writer.invalidateViewportCache();
+    // Same dev-noise suppression dance as handleClearState — new JS
+    // context = fresh console + freshly-installed LogBox.
+    await this.client.suppressDevNoise();
 
     // Wait for first shadow tree commit so the next assertVisible has
     // something to query.

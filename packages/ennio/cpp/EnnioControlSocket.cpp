@@ -74,6 +74,34 @@ static Response dispatchRequest(const Request& req) {
     if (req.type == "tapTabByName") {
         r.success = EnnioRuntimeHelper::getInstance().tapTabByName(
             json::parseString(req.payload, "name"));
+    } else if (req.type == "getAlertButtonFrame") {
+        // Rendered UIAlertController button center, window-relative.
+        // CLI uses this to drive a real HID tap when the handler-
+        // invocation paths can't safely fire a re-presenting onPress
+        // (e.g. two-stage Alert.alert chains on iOS 18).
+        auto frame = EnnioRuntimeHelper::getInstance().getAlertButtonFrame(
+            json::parseString(req.payload, "buttonText"));
+        std::ostringstream oss;
+        oss << "{\"x\":" << std::get<0>(frame) << ",\"y\":" << std::get<1>(frame)
+            << ",\"width\":" << std::get<2>(frame) << ",\"height\":" << std::get<3>(frame) << "}";
+        r.data = oss.str();
+        r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
+    } else if (req.type == "describeWindowTopology") {
+        // Debug helper — returns JSON describing every scene's window
+        // tree (VC classes, frames, tabBar items + frames). Lets the
+        // CLI side reason about why a tap target isn't visually
+        // present even though Ennio's queries can resolve it.
+        r.success = true;
+        r.data = EnnioRuntimeHelper::getInstance().describeWindowTopology();
+    } else if (req.type == "findTabByName") {
+        // Existence query for tab-* testIDs in NativeTabs setups where
+        // expo-router drops the testID prop. Lets the CLI satisfy
+        // assertVisible / extendedWaitUntil against a tab whose
+        // UITabBarItem has empty title + no accessibilityIdentifier.
+        const bool present = EnnioRuntimeHelper::getInstance().findTabByName(
+            json::parseString(req.payload, "name"));
+        r.success = true;
+        r.data = present ? "true" : "false";
     } else if (req.type == "isAlertPresent") {
         // Pure UIKit query — walks UIWindowScene roots looking for a
         // presented UIAlertController. Safe off the JS thread.
@@ -127,6 +155,16 @@ static Response dispatchRequest(const Request& req) {
         int count = 0;
         try { count = std::stoi(countStr); } catch (...) { count = 0; }
         r.success = EnnioRuntimeHelper::getInstance().eraseSearchBarText(count);
+    } else if (req.type == "pasteIntoFocusedField") {
+        // Layout-independent text input on locale-mismatched sims.
+        // Sets the system pasteboard and dispatches the canonical
+        // UIKit `paste:` action via the responder chain — same code
+        // path as the user tapping "Paste" in the long-press edit
+        // menu. Lets `inputText` route punctuation correctly when
+        // idb's HID `text` would mistranslate scan codes through the
+        // sim's iOS keyboard layout.
+        r.success = EnnioRuntimeHelper::getInstance().pasteIntoFocusedField(
+            json::parseString(req.payload, "text"));
     } else if (req.type == "selectSegmentByLabel") {
         // UISegmentedControl segment selection by visible label.
         // Sidesteps the slow text-tap retry loop that the shadow-tree

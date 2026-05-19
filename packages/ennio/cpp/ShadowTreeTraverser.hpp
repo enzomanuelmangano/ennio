@@ -112,6 +112,18 @@ public:
      */
     static std::optional<std::string> getTestID(const facebook::react::ShadowNode& node);
 
+    /**
+     * Accumulated origin offset from `root` down to `target`, summing each
+     * ancestor's frame.origin. Used to translate a node's local frame
+     * (what `getElementInfo` records as `screenX/screenY`) into a real
+     * surface-relative coordinate. Returns {0,0} if `target` isn't a
+     * descendant of `root`.
+     */
+    static std::pair<float, float> getAbsoluteOffset(
+        ShadowNodePtr root,
+        ShadowNodePtr target
+    );
+
 private:
     /**
      * Internal traversal helper with depth tracking

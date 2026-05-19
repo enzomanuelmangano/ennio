@@ -11,6 +11,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <sstream>
 #include <thread>
@@ -933,25 +934,83 @@ static UIViewController* topMostViewControllerForKeyWindow() {
     return nil;
 }
 
-// Pull a UIAlertAction's stored handler block via KVC. Apple keeps the
-// handler private but the ivar name is stable across iOS versions.
-// After invoking the handler, dismiss via the presenting controller —
-// `[alert dismiss...]` only dismisses anything alert presented (which
-// is nothing for a leaf alert), it doesn't dismiss alert itself.
-static void invokeAlertAction(UIAlertController* alert, UIAlertAction* action) {
-    @try {
-        id handler = [action valueForKey:@"handler"];
-        if (handler) {
-            void (^block)(UIAlertAction*) = (void (^)(UIAlertAction*))handler;
-            block(action);
+// Walk the UIAlertController's view subtree and find the rendered
+// button (UIControl or accessibility-tagged label) whose title text
+// matches `target`. iOS lays each action out as a private
+// `_UIAlertControllerActionView` containing a UILabel; the label's
+// text or the action view's accessibilityLabel carries the title.
+static UIView* findAlertButtonView(UIView* root, NSString* target) {
+    if (!root || root.hidden || root.alpha < 0.01) return nil;
+    NSString* axLabel = root.accessibilityLabel;
+    if (axLabel.length > 0 && [axLabel isEqualToString:target]) return root;
+    if ([root isKindOfClass:[UILabel class]]) {
+        NSString* t = ((UILabel*)root).text;
+        if (t.length > 0 && [t isEqualToString:target]) {
+            // Walk up to find an enclosing UIControl or
+            // accessibility-tagged action container.
+            for (UIView* v = root; v != nil; v = v.superview) {
+                if ([v isKindOfClass:[UIControl class]]) return v;
+                if (v.accessibilityTraits & UIAccessibilityTraitButton) return v;
+            }
+            return root;
         }
-    } @catch (NSException* e) {
-        NSLog(@"[Ennio] invokeAlertAction: KVC handler lookup failed: %@", e.reason);
     }
-    // Try presenter, then alert's own dismiss as a fallback (some iOS
-    // versions wire the alert's window so [alert dismiss] does the
-    // right thing).
+    for (UIView* sub in root.subviews) {
+        UIView* hit = findAlertButtonView(sub, target);
+        if (hit) return hit;
+    }
+    return nil;
+}
+
+// Invoke a UIAlertController action's JS-side handler. iOS handles
+// the alert dismissal + handler dispatch atomically when we go
+// through the accessibility path — same hook XCUI uses for alert
+// taps. Critical for two-stage flows like
+// Alert.alert(...).onPress(Alert.alert(...)): firing the handler
+// manually then dismissing leaves a race window where the second
+// alert's presentViewController fires while the first is still
+// being dismissed, and iOS sometimes silently drops the second
+// presentation.
+//
+// Cascade:
+//   1. accessibilityActivate on the rendered action view — iOS
+//      dispatches the action's stored block natively, then
+//      animates the dismiss in one transaction so any
+//      handler-initiated re-present queues cleanly behind it.
+//   2. KVC `handler` / `_handler` (iOS 17 and earlier Paper) plus
+//      manual dismiss — only when no rendered action view matches.
+//   3. Last resort: dismiss without handler invocation.
+static void invokeAlertAction(UIAlertController* alert, UIAlertAction* action) {
+    // 1. Native accessibility path (preferred — atomic on iOS 18).
+    UIView* buttonView = findAlertButtonView(alert.view, action.title);
+    if (buttonView && [buttonView accessibilityActivate]) {
+        return;
+    }
+    // 2. KVC fallback for older iOS.
+    bool handlerFired = false;
+    for (NSString* key in @[@"handler", @"_handler"]) {
+        if (handlerFired) break;
+        @try {
+            id handler = [action valueForKey:key];
+            if (handler) {
+                void (^block)(UIAlertAction*) = (void (^)(UIAlertAction*))handler;
+                block(action);
+                handlerFired = true;
+            }
+        } @catch (NSException*) {
+            /* keep cascading */
+        }
+    }
     UIViewController* presenter = alert.presentingViewController;
+    if (handlerFired) {
+        if (presenter) {
+            [presenter dismissViewControllerAnimated:NO completion:nil];
+        } else {
+            [alert dismissViewControllerAnimated:NO completion:nil];
+        }
+        return;
+    }
+    NSLog(@"[Ennio] invokeAlertAction: no handler path fired for action '%@' — dismissing alert only", action.title);
     if (presenter) {
         [presenter dismissViewControllerAnimated:NO completion:nil];
     } else {
@@ -1030,15 +1089,35 @@ EnnioRuntimeHelper::getViewWindowFrame(const std::string& testID) {
 }
 
 std::pair<double, double> EnnioRuntimeHelper::getSurfaceOffset() {
+    // Screen-absolute origin of the topmost React surface.
+    //
+    // Caller translates Fabric shadow-tree coords (surface-relative) into
+    // screen coords for hidTap. The active surface = the React-mounted
+    // view inside the *frontmost* presented view controller, which on
+    // iOS 18 was always the key window's rootVC but on iOS 26 may be a
+    // sheet's UISheetPresentationController presented over it.
+    //
+    // Walk: keyWindow → rootViewController → presentedViewController
+    // chain to the leaf, then take that VC's view frame on screen. That
+    // matches how RN mounts the Fabric surface for a formSheet route.
     __block double ox = 0, oy = 0;
     void (^block)(void) = ^{
         UIWindow* window = findKeyWindow();
         if (!window) return;
-        UIView* root = window.rootViewController.view;
+        UIViewController* vc = window.rootViewController;
+        // Descend into the modal stack — `presentedViewController` chains
+        // toward whatever's currently on top.
+        while (vc.presentedViewController) {
+            vc = vc.presentedViewController;
+        }
+        UIView* root = vc.view;
         if (!root) return;
-        CGRect inWindow = [root convertRect:root.bounds toView:window];
-        ox = inWindow.origin.x;
-        oy = inWindow.origin.y;
+        // view→window→screen. The double-convert handles both the view's
+        // offset inside its window AND the window's offset on screen.
+        CGRect inWindow = [root convertRect:root.bounds toView:nil];
+        CGRect onScreen = [window convertRect:inWindow toWindow:nil];
+        ox = onScreen.origin.x;
+        oy = onScreen.origin.y;
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return {ox, oy};
@@ -1540,18 +1619,36 @@ static BOOL labelMatchesText(NSString* label, NSString* needle) {
     return leftOk && rightOk;
 }
 
-// Hit-test at the candidate's centre and confirm it (or a descendant) is
-// the topmost view. A Stack-pushed screen leaves the predecessor's
-// UIViews in the tree but covers them — without this guard the label
-// finder taps a hidden tab bar.
+// Hit-test at the candidate's centre and confirm it sits on the active
+// responder chain at that point. A Stack-pushed screen leaves the
+// predecessor's UIViews in the tree but covers them — without this guard
+// the label finder taps a hidden tab bar.
+//
+// Two acceptance modes:
+//   1. topMost is `view` or a descendant — the candidate IS the leaf hit.
+//   2. topMost is an ancestor of `view` — common RN shape: `<Text>` has
+//      userInteractionEnabled=NO and carries the accessibilityLabel, so a
+//      tap at the text's centre is captured by the wrapping Pressable /
+//      RCTView. The responder chain still routes the touch through that
+//      ancestor's gesture handler, so this IS hittable. Without this
+//      branch every Text-inside-Pressable failed tier 2 → fell through
+//      to tier 4/5 → 15+ s per text-based tap.
 static BOOL viewIsHittableAtCenter(UIView* view) {
     UIWindow* win = view.window;
     if (!win) return YES;
     CGRect inWindow = [view convertRect:view.bounds toView:win];
     CGPoint centre = CGPointMake(CGRectGetMidX(inWindow), CGRectGetMidY(inWindow));
     UIView* topMost = [win hitTest:centre withEvent:nil];
+    if (!topMost) return NO;
+    // 1. Walk up from topMost — accept if we hit `view` (target or ancestor of touch).
     for (UIView* cursor = topMost; cursor; cursor = cursor.superview) {
         if (cursor == view) return YES;
+    }
+    // 2. Walk up from `view` — accept if we hit `topMost` (target is a
+    //    descendant of the hit-tested leaf, which captures the touch via
+    //    its responder chain anyway).
+    for (UIView* cursor = view; cursor; cursor = cursor.superview) {
+        if (cursor == topMost) return YES;
     }
     return NO;
 }
@@ -1559,16 +1656,106 @@ static BOOL viewIsHittableAtCenter(UIView* view) {
 // Smallest hittable view whose accessibility label matches `text`.
 // Caller iterates root windows; this recurses into one tree.
 // accessibilityElementsHidden filter: same a11y-tree predicate as
+// True if the view (or any ancestor) is wired up to receive taps —
+// UIControl subclass, button/link a11y trait, OR a UIView with one or
+// more attached gesture recognizers. RN's Pressable / RNGH-driven
+// Pressables (pressto's PressableScale) don't set
+// UIAccessibilityTraitButton; their handler lives on a RNGH-attached
+// gesture recognizer on the wrapping RCTViewComponentView. Used by
+// findLabelMatch to disambiguate a label like "Create account"
+// appearing both as a screen header (plain Text, no gesture) AND as
+// the submit button (Pressable, gesture attached on parent) — without
+// this preference, the smallest-area heuristic picks the header, the
+// tap is a no-op, and the form never submits.
+static BOOL viewActsAsButton(UIView* v) {
+    // Bounded walk: the view itself + up to 3 ancestors. Walking the
+    // full chain was poisoned by sheet-level pan recognizers — every
+    // text inside a UIScrollView / formSheet ended up "actionable"
+    // because the sheet's drag-to-dismiss gesture lives on a common
+    // ancestor, so a header label and the submit button below it
+    // both ranked as buttons. Real button wrappers (UIControl,
+    // RNGestureHandlerButton, RCTViewComponentView with onPress)
+    // attach the recognizer within 1–2 hops of the text leaf;
+    // anything further out is a navigation-level gesture.
+    int budget = 4;
+    for (UIView* cur = v; cur != nil && budget > 0; cur = cur.superview, budget--) {
+        if ([cur isKindOfClass:[UIControl class]]) return YES;
+        UIAccessibilityTraits t = cur.accessibilityTraits;
+        if (t & UIAccessibilityTraitButton) return YES;
+        if (t & UIAccessibilityTraitLink) return YES;
+        if (cur.gestureRecognizers.count > 0) return YES;
+    }
+    return NO;
+}
+
 // findViewByTestID — keeps text-based finders from latching onto labels
 // inside inactive stack frames / inactive tabs.
+//
+// Match priority:
+//   1. accessibilityLabel matching `text`
+//   2. UITextField.placeholder matching `text` (RN's
+//      <TextInput placeholder="..."> does not always set
+//      accessibilityLabel — particularly when the field is empty,
+//      react-hook-form-controlled, or rendered inside a Controller)
+//
+// Ranking when multiple views match: prefer views that act as a
+// button (UIControl subclass OR carry UIAccessibilityTraitButton /
+// UIAccessibilityTraitLink). Among views in the same tier, pick the
+// smaller bounding rect — that's the leaf control rather than the
+// outer screen wrapper.
+// Specificity of a label match. Lower = more specific (better):
+//   0 — UITextField.placeholder exactly equals `text` (the canonical
+//       "tap this field" signal: only TextInput exposes placeholder,
+//       and an exact placeholder match is unambiguous).
+//   1 — accessibilityLabel exactly equals `text` (an isolated label
+//       leaf — typical for a single-purpose UILabel / RCTTextView).
+//   2 — label contains `text` as a substring (aggregated parent that
+//       carries the concatenated labels of several children — RN sets
+//       this on a Pressable wrapping a form with multiple TextInputs,
+//       so the wrapper carries "Welcome back, Email, Password, ..."
+//       and a CONTAINS match for "Email" hits the wrapper, not the
+//       inner UITextField).
+// CONTAINS is the noisiest tier and the wrapper's centre lands in the
+// gap between fields → routing the tap to a more-specific match
+// (placeholder or exact label) is what makes `tapOn: "Email"` actually
+// focus the Email TextInput rather than tapping dead space.
+static int labelMatchSpecificity(UIView* view, NSString* text) {
+    if ([view isKindOfClass:[UITextField class]]) {
+        NSString* ph = ((UITextField*)view).placeholder;
+        if (ph && [ph isEqualToString:text]) return 0;
+    }
+    NSString* axLabel = view.accessibilityLabel;
+    if (axLabel && [axLabel isEqualToString:text]) return 1;
+    return 2;
+}
+
 static UIView* findLabelMatch(UIView* root, NSString* text, UIView* best) {
     if (!root || root.hidden || root.alpha < 0.01) return best;
     if (root.accessibilityElementsHidden) return best;
-    if (labelMatchesText(root.accessibilityLabel, text) && viewIsHittableAtCenter(root) &&
-        isViewInActiveVCChain(root)) {
+    NSString* axLabel = root.accessibilityLabel;
+    NSString* placeholder = nil;
+    if ([root isKindOfClass:[UITextField class]]) {
+        placeholder = ((UITextField*)root).placeholder;
+    }
+    BOOL matched = labelMatchesText(axLabel, text) || labelMatchesText(placeholder, text);
+    if (matched && viewIsHittableAtCenter(root) && isViewInActiveVCChain(root)) {
+        BOOL rootButton = viewActsAsButton(root);
+        BOOL bestButton = best ? viewActsAsButton(best) : NO;
+        int rootSpec = labelMatchSpecificity(root, text);
+        int bestSpec = best ? labelMatchSpecificity(best, text) : INT_MAX;
         CGFloat rootArea = root.bounds.size.width * root.bounds.size.height;
         CGFloat bestArea = best ? best.bounds.size.width * best.bounds.size.height : CGFLOAT_MAX;
-        if (rootArea < bestArea) best = root;
+        BOOL replace = NO;
+        if (!best) replace = YES;
+        // Specificity outranks the button/area heuristic. The
+        // aggregator-Pressable carries UIAccessibilityTraitButton too,
+        // so a same-tier area compare picks it over the
+        // UITextField (whose bounds happen to be wider than the inner
+        // placeholder UILabel) and the tap lands off-field.
+        else if (rootSpec < bestSpec) replace = YES;
+        else if (rootSpec == bestSpec && rootButton && !bestButton) replace = YES;
+        else if (rootSpec == bestSpec && rootButton == bestButton && rootArea < bestArea) replace = YES;
+        if (replace) best = root;
     }
     for (UIView* sub in root.subviews) {
         best = findLabelMatch(sub, text, best);
@@ -1589,7 +1776,7 @@ EnnioRuntimeHelper::getViewWindowFrameByLabel(const std::string& text) {
             }
         }
         if (!hit || !hit.window) return;
-        CGRect inWindow = [hit convertRect:hit.bounds toView:hit.window];
+        CGRect inWindow = [hit convertRect:hit.bounds toView:nil];
         rx = inWindow.origin.x;
         ry = inWindow.origin.y;
         rw = inWindow.size.width;
@@ -1597,6 +1784,107 @@ EnnioRuntimeHelper::getViewWindowFrameByLabel(const std::string& text) {
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return {rx, ry, rw, rh};
+}
+
+// Pick the frontmost interactable UIWindow: highest windowLevel,
+// not hidden, has a foregroundActive scene, has a non-zero alpha. UIAlert
+// presentations bump their window above UIWindowLevelNormal, so the
+// "frontmost" check naturally routes the hit-test through the alert
+// when one is up.
+static UIWindow* frontmostInteractableWindow(void) {
+    UIWindow* best = nil;
+    for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        if (scene.activationState != UISceneActivationStateForegroundActive
+            && scene.activationState != UISceneActivationStateForegroundInactive) continue;
+        for (UIWindow* w in ((UIWindowScene*)scene).windows) {
+            if (w.hidden || w.alpha < 0.01) continue;
+            if (!best || w.windowLevel > best.windowLevel) best = w;
+        }
+    }
+    return best;
+}
+
+// Check ONE view for the matching label across the standard set of
+// UIKit text-bearing properties (accessibilityLabel, UILabel.text,
+// UITextField.placeholder/text, UITextView.text).
+static BOOL viewCarriesLabel(UIView* v, NSString* needle) {
+    if (!v) return NO;
+    if (labelMatchesText(v.accessibilityLabel, needle)) return YES;
+    if ([v isKindOfClass:[UILabel class]]) {
+        if (labelMatchesText(((UILabel*)v).text, needle)) return YES;
+    }
+    if ([v isKindOfClass:[UITextField class]]) {
+        UITextField* tf = (UITextField*)v;
+        if (labelMatchesText(tf.placeholder, needle)) return YES;
+        if (labelMatchesText(tf.text, needle)) return YES;
+    }
+    if ([v isKindOfClass:[UITextView class]]) {
+        UITextView* tv = (UITextView*)v;
+        if (labelMatchesText(tv.text, needle)) return YES;
+    }
+    return NO;
+}
+
+// Bounded DFS through `view`'s subtree looking for any descendant
+// carrying `needle`. `budget` is total nodes visited — caps recursion
+// for a screen-root with thousands of descendants. Used to detect the
+// "RN Text inside Pressable" shape: hit-test at the text's centre
+// returns the Pressable wrapper (Text has userInteractionEnabled=NO);
+// the label-carrying RCTTextView is one hop DOWN from the leaf, not up.
+static BOOL subtreeCarriesLabel(UIView* view, NSString* needle, int* budget) {
+    if (!view || *budget <= 0) return NO;
+    (*budget)--;
+    if (viewCarriesLabel(view, needle)) return YES;
+    for (UIView* sub in view.subviews) {
+        if (subtreeCarriesLabel(sub, needle, budget)) return YES;
+    }
+    return NO;
+}
+
+// Search the hit-chain (view + ancestors, up to `budget` hops) AND a
+// bounded descendant DFS for any view whose accessibilityLabel /
+// UILabel.text / UITextField.placeholder / UITextField.text /
+// UITextView.text carries `needle` as a whole-word CONTAINS match.
+// budget on ancestor walk bounded so a pan-recogniser on a scrollview
+// root doesn't spuriously match every text inside; descendant DFS
+// gets its own node budget so a Pressable→RCTView→Text three-deep
+// shape resolves without scanning the entire screen.
+static BOOL hitChainCarriesLabel(UIView* leaf, NSString* needle, int budget) {
+    for (UIView* cur = leaf; cur != nil && budget > 0; cur = cur.superview, budget--) {
+        if (viewCarriesLabel(cur, needle)) return YES;
+    }
+    // Descendant DFS from the leaf — catches RN Text wrapped in a
+    // userInteractionEnabled=NO wrapper, where hit-test surfaces the
+    // wrapper and the labelled view lives one level down. Node budget
+    // of 32 covers Pressable→RCTView→Text plus icon/styling siblings
+    // without descending into a full screen subtree.
+    int descBudget = 32;
+    return subtreeCarriesLabel(leaf, needle, &descBudget);
+}
+
+EnnioRuntimeHelper::HitVerifyResult
+EnnioRuntimeHelper::hitTestVerify(double x, double y, const std::string& expectedText) {
+    NSString* needle = [NSString stringWithUTF8String:expectedText.c_str()];
+    __block HitVerifyResult result = {false, false, false};
+    void (^block)(void) = ^{
+        UIWindow* win = frontmostInteractableWindow();
+        if (!win) return;
+        UIView* hit = [win hitTest:CGPointMake(x, y) withEvent:nil];
+        if (!hit) return;
+        result.hittable = true;
+        // Match within hit-chain (up to 5 hops — leaf + 4 ancestors). RN
+        // commonly nests a Text label inside a RCTViewComponentView inside
+        // a GestureHandlerButton; the label is 1-2 hops up from the leaf.
+        result.matched = hitChainCarriesLabel(hit, needle, 5) ? true : false;
+        // Actionable within the same hit chain. viewActsAsButton already
+        // walks 4 ancestors looking for UIControl / gesture recogniser /
+        // button|link a11y trait — reuse so behaviour stays in sync with
+        // findLabelMatch's button-tier preference.
+        result.actionable = viewActsAsButton(hit) ? true : false;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return result;
 }
 
 bool EnnioRuntimeHelper::tapByLabel(const std::string& text) {
@@ -1976,17 +2264,63 @@ bool EnnioRuntimeHelper::scrollTo(const std::string& scrollViewTestID, const std
 // the weak capture happened before assignment — if the block ran via a
 // dispatched continuation before the assignment was observable on the
 // executing thread, `findWeak` was nil and the recursion no-op'd.
-static UITabBarController* findTabBarController(UIViewController* vc) {
-    if (!vc) return nil;
-    if ([vc isKindOfClass:[UITabBarController class]]) return (UITabBarController*)vc;
-    for (UIViewController* child in vc.childViewControllers) {
-        UITabBarController* found = findTabBarController(child);
-        if (found) return found;
+//
+// Collects ALL UITabBarControllers in the VC tree, not just the first.
+// expo-dev-client builds embed a SwiftUI `UIKitTabBarController` (the
+// dev-menu Home/Updates/Settings bar) alongside the React app's
+// `RNSTabBarController`. Stopping at the first match would lock the
+// caller onto the dev-menu bar — its "Settings" item would even
+// false-positive a `findTabByName("settings")` query.
+static void collectTabBarControllers(UIViewController* vc, NSMutableArray<UITabBarController*>* out) {
+    if (!vc) return;
+    if ([vc isKindOfClass:[UITabBarController class]]) [out addObject:(UITabBarController*)vc];
+    for (UIViewController* child in vc.childViewControllers) collectTabBarControllers(child, out);
+    if (vc.presentedViewController) collectTabBarControllers(vc.presentedViewController, out);
+}
+
+static NSArray<UITabBarController*>* findAllTabBarControllers(UIViewController* root) {
+    NSMutableArray<UITabBarController*>* out = [NSMutableArray array];
+    collectTabBarControllers(root, out);
+    return out;
+}
+
+// Shared matcher: does `needle` identify `vc` as a tab? Tries title
+// then `tabBarItem.accessibilityIdentifier`. The second is the
+// canonical testID surface — react-native-screens sets it from its
+// `tabBarItemTestID` prop (RNSTabBarController.mm#updateTabBarA11y).
+// Case-insensitive throughout; Maestro selectors are case-loose.
+static BOOL tabMatchesNeedle(UIViewController* vc, NSString* needle) {
+    if (!vc || needle.length == 0) return NO;
+    NSString* title = vc.tabBarItem.title.length > 0 ? vc.tabBarItem.title : vc.title;
+    if (title.length > 0 &&
+        [title compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+        return YES;
     }
-    if (vc.presentedViewController) {
-        return findTabBarController(vc.presentedViewController);
+    NSString* axId = vc.tabBarItem.accessibilityIdentifier;
+    if (axId.length > 0 &&
+        [axId compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+        return YES;
     }
-    return nil;
+    return NO;
+}
+
+bool EnnioRuntimeHelper::findTabByName(const std::string& name) {
+    NSString* needle = [NSString stringWithUTF8String:name.c_str()];
+    __block bool found = false;
+    void (^block)(void) = ^{
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow* win in ((UIWindowScene*)scene).windows) {
+                for (UITabBarController* tab in findAllTabBarControllers(win.rootViewController)) {
+                    for (UIViewController* vc in tab.viewControllers) {
+                        if (tabMatchesNeedle(vc, needle)) { found = true; return; }
+                    }
+                }
+            }
+        }
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return found;
 }
 
 bool EnnioRuntimeHelper::tapTabByName(const std::string& name) {
@@ -1996,26 +2330,44 @@ bool EnnioRuntimeHelper::tapTabByName(const std::string& name) {
         for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow* win in ((UIWindowScene*)scene).windows) {
-                UITabBarController* tab = findTabBarController(win.rootViewController);
-                if (!tab) continue;
+                for (UITabBarController* tab in findAllTabBarControllers(win.rootViewController)) {
                 NSUInteger idx = 0;
                 for (UIViewController* vc in tab.viewControllers) {
-                    NSString* title = vc.tabBarItem.title.length > 0 ? vc.tabBarItem.title : vc.title;
-                    if (title && [title compare:needle options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                    if (tabMatchesNeedle(vc, needle)) {
                         // expo-router top-level routes (e.g. /product/[id],
                         // /orders, /checkout) push over the tab bar via the
                         // root Stack. A tab tap while one of those is on
                         // top would only swap tabs *behind* the pushed VC —
-                        // visually nothing changes. Walk up the parent
-                        // chain and pop any nav stack that has more than
-                        // its root so the tab controller becomes visible.
+                        // visually nothing changes. For each ancestor
+                        // UINavigationController, pop only the VCs sitting
+                        // ABOVE the one that contains our tab controller.
+                        // popToRoot here would pop past it too, dismissing
+                        // routes like /sign-in that sit BELOW the (tabs)
+                        // entry in the root Stack — that turned every
+                        // post-auth tab tap into a silent logout because
+                        // the root stack was [sign-in, (tabs)] after
+                        // `router.replace('/(tabs)/...')`.
+                        UIViewController* descendant = tab;
                         UIViewController* ancestor = tab.parentViewController;
                         while (ancestor) {
                             if ([ancestor isKindOfClass:[UINavigationController class]]) {
                                 UINavigationController* nav = (UINavigationController*)ancestor;
-                                if (nav.viewControllers.count > 1) {
-                                    [nav popToRootViewControllerAnimated:NO];
+                                // Find the VC in nav.viewControllers that
+                                // contains (or is) our descendant. Pop to
+                                // it — drops only the VCs above it.
+                                UIViewController* anchor = nil;
+                                for (UIViewController* candidate in nav.viewControllers) {
+                                    UIViewController* cur = descendant;
+                                    while (cur) {
+                                        if (cur == candidate) { anchor = candidate; break; }
+                                        cur = cur.parentViewController;
+                                    }
+                                    if (anchor) break;
                                 }
+                                if (anchor && nav.topViewController != anchor) {
+                                    [nav popToViewController:anchor animated:NO];
+                                }
+                                descendant = nav;
                             }
                             ancestor = ancestor.parentViewController;
                         }
@@ -2042,6 +2394,7 @@ bool EnnioRuntimeHelper::tapTabByName(const std::string& name) {
                     }
                     idx++;
                 }
+                }
             }
         }
     };
@@ -2055,7 +2408,12 @@ bool EnnioRuntimeHelper::tapTab(int index) {
         for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow* win in ((UIWindowScene*)scene).windows) {
-                UITabBarController* tab = findTabBarController(win.rootViewController);
+                // Prefer the LAST controller in the tree — RNS sits below
+                // (or after) the dev-launcher's SwiftUI tab bar in the
+                // hierarchy. Picking the deepest match matches the React
+                // app's intent for an index-based tap.
+                NSArray<UITabBarController*>* all = findAllTabBarControllers(win.rootViewController);
+                UITabBarController* tab = all.lastObject;
                 if (tab && index >= 0 && index < (int)tab.viewControllers.count) {
                     UIViewController* vc = tab.viewControllers[index];
                     if ([tab.delegate respondsToSelector:@selector(tabBarController:shouldSelectViewController:)]) {
@@ -2073,6 +2431,91 @@ bool EnnioRuntimeHelper::tapTab(int index) {
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return ok;
+}
+
+// Recursive VC describer for `describeWindowTopology`. JSON-quotes a
+// short class name + view frame, recursing into children and
+// presented controllers. Tab bar controllers report their items
+// (title / accessibilityIdentifier) and the tabBar's window-relative
+// frame so the caller can tell whether the bar is offscreen.
+static NSString* describeVCRecursive(UIViewController* vc, NSInteger depth) {
+    if (!vc || depth > 20) return @"\"\"";
+    NSMutableString* out = [NSMutableString string];
+    [out appendString:@"{"];
+    [out appendFormat:@"\"class\":\"%@\"", NSStringFromClass([vc class])];
+    CGRect f = vc.viewIfLoaded ? vc.viewIfLoaded.frame : CGRectZero;
+    [out appendFormat:@",\"frame\":[%.1f,%.1f,%.1f,%.1f]", f.origin.x, f.origin.y, f.size.width, f.size.height];
+    [out appendFormat:@",\"loaded\":%@", vc.isViewLoaded ? @"true" : @"false"];
+    if (vc.title) [out appendFormat:@",\"title\":\"%@\"", vc.title];
+    if ([vc isKindOfClass:[UITabBarController class]]) {
+        UITabBarController* tc = (UITabBarController*)vc;
+        CGRect tf = tc.tabBar ? [tc.tabBar.window convertRect:tc.tabBar.bounds fromView:tc.tabBar] : CGRectZero;
+        [out appendFormat:@",\"tabBar\":{\"frame\":[%.1f,%.1f,%.1f,%.1f],\"hidden\":%@,\"alpha\":%.2f}",
+            tf.origin.x, tf.origin.y, tf.size.width, tf.size.height,
+            tc.tabBar.hidden ? @"true" : @"false", tc.tabBar.alpha];
+        [out appendFormat:@",\"selectedIndex\":%lu", (unsigned long)tc.selectedIndex];
+        [out appendString:@",\"items\":["];
+        NSUInteger n = 0;
+        for (UIViewController* child in tc.viewControllers) {
+            if (n > 0) [out appendString:@","];
+            UITabBarItem* item = child.tabBarItem;
+            [out appendFormat:@"{\"title\":\"%@\",\"axId\":\"%@\",\"axLabel\":\"%@\"}",
+                item.title ?: @"", item.accessibilityIdentifier ?: @"", item.accessibilityLabel ?: @""];
+            n++;
+        }
+        [out appendString:@"]"];
+    }
+    if (vc.childViewControllers.count > 0) {
+        [out appendString:@",\"children\":["];
+        NSUInteger n = 0;
+        for (UIViewController* child in vc.childViewControllers) {
+            if (n > 0) [out appendString:@","];
+            [out appendString:describeVCRecursive(child, depth + 1)];
+            n++;
+        }
+        [out appendString:@"]"];
+    }
+    if (vc.presentedViewController) {
+        [out appendString:@",\"presented\":"];
+        [out appendString:describeVCRecursive(vc.presentedViewController, depth + 1)];
+    }
+    [out appendString:@"}"];
+    return out;
+}
+
+std::string EnnioRuntimeHelper::describeWindowTopology() {
+    __block NSString* result = @"[]";
+    void (^block)(void) = ^{
+        NSMutableString* out = [NSMutableString string];
+        [out appendString:@"["];
+        NSUInteger sceneIdx = 0;
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            if (sceneIdx > 0) [out appendString:@","];
+            [out appendFormat:@"{\"scene\":\"%@\",\"state\":%ld,\"windows\":[",
+                NSStringFromClass([scene class]), (long)scene.activationState];
+            NSUInteger winIdx = 0;
+            for (UIWindow* win in ((UIWindowScene*)scene).windows) {
+                if (winIdx > 0) [out appendString:@","];
+                CGRect wf = win.frame;
+                [out appendFormat:@"{\"class\":\"%@\",\"frame\":[%.1f,%.1f,%.1f,%.1f],\"key\":%@,\"hidden\":%@,\"level\":%.1f,\"root\":",
+                    NSStringFromClass([win class]),
+                    wf.origin.x, wf.origin.y, wf.size.width, wf.size.height,
+                    win.isKeyWindow ? @"true" : @"false",
+                    win.hidden ? @"true" : @"false",
+                    win.windowLevel];
+                [out appendString:describeVCRecursive(win.rootViewController, 0)];
+                [out appendString:@"}"];
+                winIdx++;
+            }
+            [out appendString:@"]}"];
+            sceneIdx++;
+        }
+        [out appendString:@"]"];
+        result = [out copy];
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return std::string([result UTF8String]);
 }
 
 // DFS the VC hierarchy looking for the deepest UINavigationController
@@ -2365,6 +2808,25 @@ bool EnnioRuntimeHelper::hideKeyboard() {
     };
     if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
     return ok;
+}
+
+std::tuple<double, double, double, double>
+EnnioRuntimeHelper::getAlertButtonFrame(const std::string& buttonText) {
+    NSString* title = [NSString stringWithUTF8String:buttonText.c_str()];
+    __block double x = 0, y = 0, w = 0, h = 0;
+    void (^block)(void) = ^{
+        UIAlertController* alert = findPresentedAlertController();
+        if (!alert) return;
+        UIView* buttonView = findAlertButtonView(alert.view, title);
+        if (!buttonView || !buttonView.window) return;
+        CGRect rect = [buttonView.window convertRect:buttonView.bounds fromView:buttonView];
+        x = rect.origin.x;
+        y = rect.origin.y;
+        w = rect.size.width;
+        h = rect.size.height;
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return std::make_tuple(x, y, w, h);
 }
 
 bool EnnioRuntimeHelper::tapAlertButton(const std::string& buttonText) {
@@ -2673,6 +3135,25 @@ static void collectSegmentedIn(UIView* root, NSMutableArray<UISegmentedControl*>
         return;
     }
     for (UIView* sub in root.subviews) collectSegmentedIn(sub, out);
+}
+
+bool EnnioRuntimeHelper::pasteIntoFocusedField(const std::string& text) {
+    NSString* str = [NSString stringWithUTF8String:text.c_str()];
+    __block bool ok = false;
+    void (^block)(void) = ^{
+        UIPasteboard.generalPasteboard.string = str;
+        // Dispatch UIKit's standard paste: action. UIApplication
+        // resolves the action through the responder chain — the
+        // focused UITextField (or text view) receives `paste:` on
+        // itself, which is the documented entry point UIKit calls
+        // when the long-press "Paste" menu item is tapped. Same code
+        // path, same delegate callbacks (textField:shouldChange...,
+        // editingChanged) — no responder-state shortcut.
+        SEL paste = @selector(paste:);
+        ok = [UIApplication.sharedApplication sendAction:paste to:nil from:nil forEvent:nil];
+    };
+    if ([NSThread isMainThread]) block(); else dispatchSyncMainWithTimeout(block);
+    return ok;
 }
 
 bool EnnioRuntimeHelper::selectSegmentByLabel(const std::string& label) {

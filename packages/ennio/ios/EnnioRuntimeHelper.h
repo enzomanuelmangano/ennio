@@ -167,6 +167,40 @@ public:
      */
     std::tuple<double, double, double, double> getViewWindowFrameByLabel(const std::string& text);
     /**
+     * Hit-test verification — the source-of-truth gate before any text-cascade
+     * HID tap. Asks UIKit "what view would receive a touch at this point?" on
+     * the frontmost interactable UIWindow, then checks whether the resolved
+     * view (or any ancestor within a small budget) (a) carries `expectedText`
+     * as accessibilityLabel / UILabel.text / UITextField.placeholder|text and
+     * (b) is actionable (UIControl, gesture recogniser attached, or button/
+     * link a11y trait).
+     *
+     * This single check kills entire bug classes:
+     *   - Stale-screen matches: a mounted but-covered TextInput on a pushed-
+     *     under screen returns valid fiber coords; UIKit hit-test routes the
+     *     touch to the modal on top instead, so the verifier reports
+     *     `hittable=true, matched=false`. Caller skips it.
+     *   - Portal / RN <Modal> occlusion: same mechanism — hit-test returns
+     *     the portal host, not the underlying view.
+     *   - Gesture-attach race: freshly mounted Pressable shows
+     *     `matched=true, actionable=false`. Caller waits one commit cycle
+     *     and re-verifies — no blind retry, no per-tap latency tax on the
+     *     happy path.
+     *
+     * Returns {hittable, actionable, matched}:
+     *   hittable  : non-nil topmost view at (x,y)
+     *   matched   : hit chain (view + up to 4 ancestors) carries
+     *               `expectedText` as a recognised label/text/placeholder
+     *   actionable: hit chain has UIControl / gestureRecognizers / button|
+     *               link a11y trait
+     */
+    struct HitVerifyResult {
+        bool hittable;
+        bool actionable;
+        bool matched;
+    };
+    HitVerifyResult hitTestVerify(double x, double y, const std::string& expectedText);
+    /**
      * True if the testID's UIView (or any ancestor) is a UIButton with
      * `menu` set + `showsMenuAsPrimaryAction` (zeego DropdownMenu,
      * react-native-ios-context-menu). Such triggers cannot be opened by
@@ -195,12 +229,35 @@ public:
     bool tapTab(int index);
     /**
      * Find a UITabBarController in any window scene and select the tab
-     * whose viewController's title (or tabBarItem.title) matches `name`
-     * case-insensitively. Used when NativeTabs renders bar items via
-     * SwiftUI / UIKit hosts that don't surface their UIView subtree to
-     * accessibility-label walks. Returns false if no matching tab.
+     * whose `tabBarItem.title` (or `vc.title` fallback) — or
+     * `tabBarItem.accessibilityIdentifier` — matches `name`
+     * case-insensitively. Returns false if no matching tab.
+     *
+     * The accessibilityIdentifier branch is the testID path:
+     * react-native-screens sets `UITabBarItem.accessibilityIdentifier`
+     * from its `tabBarItemTestID` prop. Apps using NativeTabs via
+     * expo-router must forward `testID` on `<NativeTabs.Trigger>` to
+     * `tabBarItemTestID` for this to resolve — see the
+     * `expo-router-nativetabs-testid.patch` shipped with ennio-expo-plugin.
      */
     bool tapTabByName(const std::string& name);
+    /**
+     * Existence query for `tapTabByName` matching — does any tab in
+     * any window's UITabBarController match `name`? Used by the CLI
+     * to fulfil `assertVisible` / `extendedWaitUntil` against tab
+     * testIDs without performing the tap.
+     */
+    bool findTabByName(const std::string& name);
+    /**
+     * Debug: dump UIKit window/viewController/tabBar topology as a
+     * JSON string. Lists every UIScene, its key window, the rootVC
+     * chain (class + view frame + tabBarController state), each
+     * UITabBarController's items (title / accessibilityIdentifier /
+     * tabBar.frame), and any presentedViewController stack. Used
+     * when an E2E flow lands on a state where Ennio's queries don't
+     * line up with what the user sees on screen.
+     */
+    std::string describeWindowTopology();
     /**
      * One-shot tap-readiness query. Returns the window-coord frame for
      * `testID` only after iOS is in a state where the next touch will
@@ -232,6 +289,20 @@ public:
     bool backGesture();
     bool hideKeyboard();
     bool tapAlertButton(const std::string& buttonText);
+    /**
+     * Window-relative center of the rendered UIAlertController button
+     * whose visible title equals `buttonText`. Returns (0,0,0,0) if
+     * no alert is presented or the title doesn't match. Used by the
+     * CLI to drive a real idb HID tap when handler-invocation paths
+     * (accessibilityActivate, KVC `handler` ivar) silently fail to
+     * fire the JS-side onPress — e.g. two-stage Alert.alert flows on
+     * iOS 18 + new-arch RN, where the second Alert.alert from
+     * inside an onPress queues behind a manual dismiss and gets
+     * dropped. Going through the HID layer makes iOS dispatch the
+     * action handler natively, in the same transaction as the
+     * dismiss, so the re-present from JS lands cleanly.
+     */
+    std::tuple<double, double, double, double> getAlertButtonFrame(const std::string& buttonText);
     bool dismissAlert();
     bool copyToClipboard(const std::string& text);
     bool pasteFromClipboard(const std::string& testID);
@@ -285,6 +356,29 @@ public:
      * bar.
      */
     bool focusSearchBar(const std::string& placeholder);
+    /**
+     * Set the system pasteboard to `text` and dispatch the standard
+     * UIKit `paste:` responder action to the current first responder.
+     * This is the same code path UIKit uses when the user taps
+     * "Paste" in the long-press edit menu or presses ⌘V — UIKit
+     * resolves the action through the responder chain, the focused
+     * UITextField calls `paste:` on itself, reads the pasteboard,
+     * and inserts the value via the documented
+     * UITextInputDelegate.insertText: / textField:
+     * shouldChangeCharactersInRange:replacementString: flow.
+     *
+     * Used by inputText as a layout-independent text-entry path on
+     * simulators whose iOS keyboard locale doesn't match the host:
+     * idb's HID `text` op sends US scan codes which an Italian /
+     * German / French sim re-encodes ('-' → '\'', '@' → '"'),
+     * garbling email and password fields. The paste action sidesteps
+     * the hardware-keyboard layer entirely while still going through
+     * UIKit's real text-insertion plumbing.
+     *
+     * Returns false when no responder accepts the paste action
+     * (no focused field or field rejects paste via canPerformAction:).
+     */
+    bool pasteIntoFocusedField(const std::string& text);
     /**
      * Programmatic UISegmentedControl selection. Walks every
      * visible UISegmentedControl, matches a segment by title

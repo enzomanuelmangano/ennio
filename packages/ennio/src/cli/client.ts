@@ -27,7 +27,7 @@ import WebSocket from 'ws';
 import { selectorToJson } from './selector';
 import { EnnioSocketClient } from './socket-client';
 
-const METRO_BASE = process.env.ENNIO_METRO_URL || 'http://localhost:8081';
+export const METRO_BASE = process.env.ENNIO_METRO_URL || 'http://localhost:8081';
 // Per-request hard cap. Long enough for an asset-heavy assertVisible
 // after a launchApp; short enough that a hung Inspector eval doesn't
 // deadlock the runner.
@@ -162,6 +162,7 @@ interface CdpResponse {
 // entirely. Everything else stays on CDP.
 const SOCKET_FAST_OPS = new Set<string>([
   'tapTabByName',
+  'findTabByName',
   'isAlertPresent',
   // `writer.layoutCenter` polls getViewWindowFrame up to 30 times
   // per id-tap, plus an occasional scrollTo when the element is
@@ -175,6 +176,7 @@ const SOCKET_FAST_OPS = new Set<string>([
   'appendSearchBarText',
   'eraseSearchBarText',
   'focusSearchBar',
+  'pasteIntoFocusedField',
   'ping',
 ]);
 
@@ -351,6 +353,86 @@ export class EnnioClient {
       throw new Error(`Eval threw: ${ex.exception?.description || ex.text}`);
     }
     return r.result?.result?.value;
+  }
+
+  /**
+   * Silence RN dev-mode noise that interferes with E2E flows:
+   *   - replaces `console.error` / `console.warn` with no-ops (saving
+   *     originals on `globalThis.__ennio_originals` for restore)
+   *   - walks the Metro module registry to find RN's `LogBox` module
+   *     and calls `ignoreAllLogs()` + `uninstall()` on it, which both
+   *     clears any errors already queued for display and detaches the
+   *     console wrappers LogBox installs on top of ours.
+   * Idempotent — safe to call on every reconnect.
+   *
+   * Why both: LogBox monkey-patches `console.error` at app start, so a
+   * naive `console.error = noop` reassignment leaves LogBox's wrapper
+   * intact and errors keep reaching the overlay. Uninstall + override
+   * together drop both paths.
+   */
+  async suppressDevNoise(): Promise<void> {
+    // Resolve LogBox via Metro's named require, NOT a numeric walk over
+    // module IDs. The old walk (`for i in 0..8000: r(i)`) eagerly
+    // evaluates every registered module looking for one that exposes
+    // `LogBox`. Side effect: it module-loads
+    // `Libraries/Core/SegmentFetcher/NativeSegmentFetcher.js`, whose
+    // top-level body runs `TurboModuleRegistry.getEnforcing('SegmentFetcher')`
+    // and throws because no native impl is linked under New Arch. The
+    // throw IS caught by the loop's try, but ExceptionsManager has
+    // already queued the error → LogBox renders a red box before the
+    // walk reaches LogBox itself. Named require evaluates only the
+    // `react-native` index module, which exports LogBox as a getter
+    // proxy — LogBox's own body is loaded without touching unrelated
+    // TurboModule specs.
+    const expr = `(() => {
+      const g = globalThis;
+      if (!g.__ennio_originals) {
+        g.__ennio_originals = {
+          error: console.error,
+          warn: console.warn,
+        };
+        console.error = function() {};
+        console.warn = function() {};
+      }
+      try {
+        var LogBox = null;
+        if (typeof require === 'function') {
+          try { LogBox = require('react-native').LogBox; } catch (e) {}
+        }
+        if (LogBox && typeof LogBox.ignoreAllLogs === 'function') {
+          try { LogBox.ignoreAllLogs(); } catch (e) {}
+          try { LogBox.uninstall && LogBox.uninstall(); } catch (e) {}
+        }
+      } catch (e) {}
+      return true;
+    })()`;
+    try {
+      await this.eval(expr);
+    } catch {
+      /* best effort */
+    }
+  }
+
+  /**
+   * Restore the original `console.error` / `console.warn` saved by
+   * `suppressDevNoise`. Called at flow end so post-flow REPL sessions
+   * or interactive debugging see real errors again.
+   */
+  async restoreDevNoise(): Promise<void> {
+    const expr = `(() => {
+      const g = globalThis;
+      if (g.__ennio_originals) {
+        try { console.error = g.__ennio_originals.error; } catch (e) {}
+        try { console.warn = g.__ennio_originals.warn; } catch (e) {}
+        delete g.__ennio_originals;
+      }
+      return true;
+    })()`;
+    try {
+      await this.eval(expr);
+    } catch {
+      /* best effort */
+    }
   }
 
   /**
@@ -551,6 +633,19 @@ export class EnnioClient {
   // Alert handling (read-only)
   async isAlertPresent(): Promise<boolean> {
     const response = await this.send('isAlertPresent', {});
+    return response.data === true;
+  }
+
+  /**
+   * Existence query for NativeTabs tab items by name. Mirrors the same
+   * matching rules as `tapTabByName` — caller can use this to satisfy
+   * `assertVisible` / `extendedWaitUntil` against a tab whose React
+   * shadow node was never rendered (e.g. expo-router's
+   * `<NativeTabs.Trigger testID>` is silently dropped, so the testID
+   * isn't in Fabric's tree at all).
+   */
+  async findTabByName(name: string): Promise<boolean> {
+    const response = await this.send('findTabByName', { name });
     return response.data === true;
   }
 

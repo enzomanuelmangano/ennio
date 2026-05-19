@@ -5,8 +5,13 @@
  * JS context appears.
  */
 
-import { EnnioClient } from '../client';
-import { getBootedSimulatorId, launchAppOnSimulator } from '../maestro-runner';
+import { EnnioClient, METRO_BASE } from '../client';
+import {
+  deepLinkExpoDevClient,
+  detectExpoDevClientScheme,
+  getBootedSimulatorId,
+  launchAppOnSimulator,
+} from '../maestro-runner';
 
 // Initial connect probe — Inspector returns HTTP 200 (or refuses) fast
 // when Metro is up; longer than 2 s on a cold device is unusual.
@@ -67,9 +72,25 @@ export async function connectOrLaunch(opts: BootstrapOptions): Promise<Bootstrap
         `No appId available to auto-launch — pass --app=<bundleId> or include \`appId:\` in the YAML.`,
     };
   }
-  if (verbose) console.log(`(App not running — launching ${appId} on ${udid.slice(0, 8)}…)`);
+  // Auto-detect expo-dev-client. A plain `simctl launch` of a dev-client
+  // build lands on the "DEVELOPMENT SERVERS" picker (no JS context) and
+  // the Inspector poll below would just time out. Deep-link past the
+  // picker via `<scheme>://expo-development-client/?url=<metro>` so the
+  // bundle loads directly.
+  const devClientScheme = detectExpoDevClientScheme(udid, appId);
+  if (verbose) {
+    console.log(
+      `(App not running — launching ${appId} on ${udid.slice(0, 8)}${
+        devClientScheme ? ` via ${devClientScheme} → ${METRO_BASE}` : ''
+      }…)`,
+    );
+  }
   try {
-    launchAppOnSimulator(udid, appId);
+    if (devClientScheme) {
+      deepLinkExpoDevClient(udid, devClientScheme, METRO_BASE);
+    } else {
+      launchAppOnSimulator(udid, appId);
+    }
   } catch (e) {
     return { ok: false, reason: `Failed to launch ${appId}: ${(e as Error).message}` };
   }

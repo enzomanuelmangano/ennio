@@ -490,6 +490,18 @@ static const std::unordered_map<std::string, HandlerFn>& commandHandlers() {
             r.data = oss.str();
             r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
         }},
+        { "hitTestVerify", [](HybridEnnio*, const auto& req, auto& r) {
+            double x = ::ennio::json::parseDouble(req.payload, "x");
+            double y = ::ennio::json::parseDouble(req.payload, "y");
+            auto res = ::ennio::EnnioRuntimeHelper::getInstance().hitTestVerify(
+                x, y, ::ennio::json::parseString(req.payload, "text"));
+            std::ostringstream oss;
+            oss << "{\"hittable\":" << (res.hittable ? "true" : "false")
+                << ",\"actionable\":" << (res.actionable ? "true" : "false")
+                << ",\"matched\":" << (res.matched ? "true" : "false") << "}";
+            r.data = oss.str();
+            r.success = true;
+        }},
         { "getViewWindowFrame", [](HybridEnnio*, const auto& req, auto& r) {
             // Window-relative UIView frame for a testID. Bypasses Fabric's
             // surface-relative layout — already accounts for ScrollView
@@ -667,11 +679,21 @@ std::variant<nitro::NullType, ExtendedElementInfo> HybridEnnio::findBySelector(c
             if (helper.isInA11yTree(*testID)) { chosen = node; break; }
         }
         if (!chosen) {
-            // No a11y-visible testID match. If any node lacks a testID,
-            // fall back to the first shadow-tree match (preserves current
-            // behavior for text-only / trait-only queries).
-            for (const auto& node : nodes) {
-                if (!::ennio::ShadowTreeTraverser::getTestID(*node)) { chosen = node; break; }
+            // No a11y-visible testID match. Fall back to a shadow-tree-
+            // only match (text/trait-only queries hit this).
+            //
+            // Walk matches in REVERSE DFS order: pushed screens (native-
+            // stack, modals) mount AFTER their predecessors, so a fresher
+            // screen's nodes appear LATER in the tree. Picking the last
+            // match keeps the cascade landing on the frontmost screen
+            // when a stale predecessor still has a TextInput with the
+            // same placeholder. Sign-up modal pushed over sign-in: both
+            // host a `<TextInput placeholder="Email" />`; the first-match
+            // policy returned sign-in's (covered, untappable), so the
+            // resulting tap landed on whatever sign-up rendered at that
+            // screen position — typically the wrong field.
+            for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+                if (!::ennio::ShadowTreeTraverser::getTestID(**it)) { chosen = *it; break; }
             }
         }
         if (!chosen) {

@@ -19,6 +19,16 @@ function isMaestroFile(filePath: string): boolean {
   return filePath.endsWith('.yaml') || filePath.endsWith('.yml');
 }
 
+// Maestro convention: filenames starting with `_` are subflows meant to
+// be invoked via `runFlow: { file: _name.yaml }` from a parent, not
+// directly. They typically rely on `${VAR}` references inherited from
+// the parent's env block; running them standalone leaves the JS context
+// empty and `${TEST_EMAIL}` gets typed as a literal. Skip them when
+// expanding a directory.
+function isSubflowFile(filePath: string): boolean {
+  return basename(filePath).startsWith('_');
+}
+
 async function expandFiles(patterns: string[]): Promise<string[]> {
   const files: string[] = [];
   for (const pattern of patterns) {
@@ -27,10 +37,12 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
       const yamlMatches = await glob(join(pattern, '**/*.yaml'));
       files.push(
         ...yamlMatches
-          .filter((f) => isMaestroFile(f) && !f.includes('/subflows/'))
+          .filter((f) => isMaestroFile(f) && !f.includes('/subflows/') && !isSubflowFile(f))
           .map((f) => resolve(f)),
       );
     } else {
+      // Explicit path / glob — honour the user's request verbatim
+      // (allow targeting a `_subflow.yaml` directly when testing it).
       const matches = await glob(pattern);
       files.push(
         ...matches

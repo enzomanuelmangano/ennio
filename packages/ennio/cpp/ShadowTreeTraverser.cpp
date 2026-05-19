@@ -1,5 +1,6 @@
 #include "ShadowTreeTraverser.hpp"
 
+#include <cmath>
 #include <react/renderer/components/view/ViewProps.h>
 #include <react/renderer/components/text/RawTextProps.h>
 #include <react/renderer/components/textinput/TextInputProps.h>
@@ -41,7 +42,10 @@ std::optional<ElementInfo> ShadowTreeTraverser::getElementInfo(ShadowNodePtr nod
         return std::nullopt;
     }
 
-    ElementInfo info;
+    // Explicit zero-init: ElementInfo::Layout has plain `float` members
+    // with no in-class initialisers, so omitting this leaves uninit
+    // stack garbage in any field the sanity check below rejects.
+    ElementInfo info = {};
 
     // Get testID
     auto testID = getTestID(*node);
@@ -66,16 +70,38 @@ std::optional<ElementInfo> ShadowTreeTraverser::getElementInfo(ShadowNodePtr nod
         info.accessible = viewProps->accessible;
     }
 
-    // Get layout metrics
+    // Get layout metrics. Sanity-check the values before copying: Yoga
+    // returns sentinel `YGUndefined` (NaN-ish or FLT_MAX-ish) for nodes
+    // that haven't been laid out yet. A freshly mounted Text inside an
+    // animated AddHabitCard read mid-stagger has frame values like
+    // (80, 1.3364e+27, 1.4013e-45, 1.3364e+27); without this guard, those
+    // leak into screenX/screenY, then into writer.layoutCenter, then
+    // into an HID tap at (96, 2e27) — completely off-screen, fires no
+    // gesture, breaks the cascade.
     auto layoutable = dynamic_cast<const facebook::react::LayoutableShadowNode*>(node.get());
     if (layoutable) {
         auto metrics = layoutable->getLayoutMetrics();
-        info.layout.x = metrics.frame.origin.x;
-        info.layout.y = metrics.frame.origin.y;
-        info.layout.width = metrics.frame.size.width;
-        info.layout.height = metrics.frame.size.height;
-        info.layout.screenX = metrics.frame.origin.x;
-        info.layout.screenY = metrics.frame.origin.y;
+        // Reject subnormal Yoga sentinels (1.4e-45 etc) too — `isfinite`
+        // alone treats them as valid, but real RN frame values never go
+        // below 1e-3 pt.
+        auto ok = [](float v) {
+            if (!std::isfinite(v)) return false;
+            float a = std::fabs(v);
+            if (a > 1e6f) return false;
+            return a == 0.0f || a >= 1e-3f;
+        };
+        if (ok(metrics.frame.origin.x) && ok(metrics.frame.origin.y)
+            && ok(metrics.frame.size.width) && ok(metrics.frame.size.height)) {
+            info.layout.x = metrics.frame.origin.x;
+            info.layout.y = metrics.frame.origin.y;
+            info.layout.width = metrics.frame.size.width;
+            info.layout.height = metrics.frame.size.height;
+            info.layout.screenX = metrics.frame.origin.x;
+            info.layout.screenY = metrics.frame.origin.y;
+        }
+        // else: leave zero-initialised. Caller's `width > 0 && height > 0`
+        // check (already in layoutCenter / isVisibleBySelector) will treat
+        // the node as un-laid-out and skip it.
     }
 
     return info;
@@ -290,16 +316,63 @@ std::pair<float, float> ShadowTreeTraverser::calculateAccumulatedOffset(
     float offsetX = 0;
     float offsetY = 0;
 
+    // Same Yoga-sentinel guard as `getElementInfo`: any ancestor with a
+    // non-finite or absurdly large frame.origin would otherwise poison the
+    // sum and emit tap coordinates like (96, 2e27). A freshly mounted
+    // Reanimated animated card mid-stagger surfaces those values on its
+    // parent View even when the target node itself is laid out. Skip
+    // those contributions — the accumulated offset for an un-laid-out
+    // subtree is meaningless; caller's `width > 0 && height > 0` check on
+    // the resolved layout will reject the node before any tap.
+    // Tighten lower bound: Yoga's "undefined" sentinel sometimes
+    // leaks through as a subnormal like 1.4e-45 — `std::isfinite`
+    // returns true for it, `fabs < 1e6` accepts it. Real RN frame
+    // values are never subnormal; reject anything below 1e-3.
+    auto ok = [](float v) {
+        if (!std::isfinite(v)) return false;
+        float a = std::fabs(v);
+        if (a > 1e6f) return false;
+        return a == 0.0f || a >= 1e-3f;
+    };
     for (const auto* node : path) {
         auto layoutable = dynamic_cast<const facebook::react::LayoutableShadowNode*>(node);
-        if (layoutable) {
-            auto metrics = layoutable->getLayoutMetrics();
+        if (!layoutable) continue;
+        auto metrics = layoutable->getLayoutMetrics();
+        if (ok(metrics.frame.origin.x) && ok(metrics.frame.origin.y)) {
             offsetX += metrics.frame.origin.x;
             offsetY += metrics.frame.origin.y;
         }
     }
 
     return {offsetX, offsetY};
+}
+
+namespace {
+    bool buildPathToNode(
+        ShadowTreeTraverser::ShadowNodePtr root,
+        ShadowTreeTraverser::ShadowNodePtr target,
+        std::vector<const facebook::react::ShadowNode*>& path
+    ) {
+        if (!root || !target) return false;
+        if (root.get() == target.get()) return true;
+        path.push_back(root.get());
+        for (const auto& child : root->getChildren()) {
+            if (buildPathToNode(child, target, path)) return true;
+        }
+        path.pop_back();
+        return false;
+    }
+}
+
+std::pair<float, float> ShadowTreeTraverser::getAbsoluteOffset(
+    ShadowNodePtr root,
+    ShadowNodePtr target
+) {
+    std::vector<const facebook::react::ShadowNode*> path;
+    if (!buildPathToNode(root, target, path)) {
+        return {0.0f, 0.0f};
+    }
+    return calculateAccumulatedOffset(path);
 }
 
 } // namespace ennio
