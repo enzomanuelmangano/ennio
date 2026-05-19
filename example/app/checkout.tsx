@@ -6,9 +6,8 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
-import { KeyboardAwareScrollView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { KeyboardAwareScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { PressableScale } from 'pressto';
 import { useRouter, Stack } from 'expo-router';
 import { useCartStore, useSettingsStore } from '../store';
@@ -447,28 +446,24 @@ export default function CheckoutScreen() {
           headerTintColor: darkMode ? '#ffffff' : '#000000',
         }}
       />
-      <KeyboardAvoidingView
-        style={[styles.container, darkMode && styles.containerDark]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        <View style={styles.flex1} testID="checkout-screen">
-          {renderStepIndicator()}
+      <View style={[styles.container, darkMode && styles.containerDark]} testID="checkout-screen">
+        {renderStepIndicator()}
 
-          <KeyboardAwareScrollView
-            style={styles.content}
-            contentContainerStyle={styles.contentContainer}
-            keyboardShouldPersistTaps="handled"
-            // Keep the focused field plus the next 1-2 rows above the
-            // keyboard so an E2E `tapOn` for the following field lands
-            // on a visible target instead of the keyboard window.
-            bottomOffset={180}
-          >
-            {currentStep === 'shipping' && renderShippingForm()}
-            {currentStep === 'payment' && renderPaymentForm()}
-            {currentStep === 'review' && renderReview()}
-          </KeyboardAwareScrollView>
+        <KeyboardAwareScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          // Keep the focused field plus the next 1-2 rows above the
+          // keyboard so an E2E `tapOn` for the following field lands
+          // on a visible target instead of the keyboard window.
+          bottomOffset={180}
+        >
+          {currentStep === 'shipping' && renderShippingForm()}
+          {currentStep === 'payment' && renderPaymentForm()}
+          {currentStep === 'review' && renderReview()}
+        </KeyboardAwareScrollView>
 
+        <KeyboardStickyView>
           <View style={[styles.footer, darkMode && styles.footerDark]}>
             {currentStep !== 'shipping' && (
               <PressableScale
@@ -498,8 +493,8 @@ export default function CheckoutScreen() {
               )}
             </PressableScale>
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardStickyView>
+      </View>
     </>
   );
 }

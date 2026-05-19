@@ -1,4 +1,4 @@
-import { Text, TouchableOpacity, StyleSheet, Pressable } from 'react-native';
+import { Text, TouchableOpacity, StyleSheet, Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 
 export default function SheetTransparent() {
@@ -8,7 +8,7 @@ export default function SheetTransparent() {
       style={styles.backdrop}
       onPress={() => router.back()}
     >
-      <Pressable testID="transparent-modal-card" onPress={() => {}} style={styles.card}>
+      <View testID="transparent-modal-card" style={styles.card}>
         <Text testID="transparent-modal-title" style={styles.title}>
           transparentModal
         </Text>
@@ -20,7 +20,7 @@ export default function SheetTransparent() {
         >
           <Text style={styles.btnText}>Close</Text>
         </TouchableOpacity>
-      </Pressable>
+      </View>
     </Pressable>
   );
 }
