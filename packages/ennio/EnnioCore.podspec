@@ -36,7 +36,10 @@ Pod::Spec.new do |s|
       '"$(PODS_ROOT)/Headers/Public/React-Core"',
       '"$(PODS_ROOT)/Headers/Public/React-Fabric"',
       '"$(PODS_ROOT)/Headers/Private/React-Fabric"',
+      '"$(PODS_ROOT)/Headers/Public/React-FabricComponents"',
+      '"$(PODS_ROOT)/Headers/Private/React-FabricComponents"',
       '"$(PODS_ROOT)/Headers/Public/React-Core-prebuilt/React_Fabric"',
+      '"$(PODS_ROOT)/Headers/Public/React-Core-prebuilt/React_FabricComponents"',
       '"$(PODS_ROOT)/Headers/Public/React-RuntimeApple"',
       '"$(PODS_ROOT)/Headers/Public/React-Core-prebuilt/React_RuntimeApple"',
     ].join(' ')
@@ -47,8 +50,14 @@ Pod::Spec.new do |s|
     'OTHER_LDFLAGS' => '-ObjC'
   }
 
-  # Core React Native dependencies - others handled by install_modules_dependencies
+  # Core React Native dependencies - others handled by install_modules_dependencies.
+  # React-FabricComponents was split out of React-Fabric in RN 0.78+; it owns
+  # the TextInput shadow-tree headers (TextInputProps.h, etc.) we pull in via
+  # `<react/renderer/components/textinput/...>`. Without an explicit dependency,
+  # `buildReactNativeFromSource: true` + `useFrameworks: :static` builds don't
+  # surface those headers — the prebuilt xcframework reroute hides the gap.
   s.dependency 'React-Core'
+  s.dependency 'React-FabricComponents'
 
   s.frameworks = 'Security'
 
