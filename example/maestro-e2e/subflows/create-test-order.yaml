@@ -61,6 +61,10 @@ appId: com.ennio.example
     id: 'next-btn'
 
 # Step 2: payment
+- assertVisible:
+    id: 'payment-form'
+- waitForAnimationToEnd:
+    timeout: 2000
 - tapOn:
     id: 'payment-card-number'
 - inputText: '4111111111111111'
@@ -85,6 +89,8 @@ appId: com.ennio.example
     id: 'next-btn'
 
 # Step 3: review + place order
+- assertVisible:
+    id: 'order-review'
 - assertVisible:
     id: 'place-order-btn'
 - tapOn:

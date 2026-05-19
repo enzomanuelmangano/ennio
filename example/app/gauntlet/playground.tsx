@@ -8,9 +8,9 @@ import {
   Alert,
   ActivityIndicator,
   StyleSheet,
-  ScrollView,
   useColorScheme,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { router } from 'expo-router';
 import { useSettingsStore } from '../../store';
 
@@ -51,11 +51,12 @@ export default function Playground() {
   };
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
+      bottomOffset={120}
       testID="playground-scroll"
     >
       {/* Counter — exercises getText, assertVisible: text */}
@@ -201,7 +202,7 @@ export default function Playground() {
           styles={styles}
         />
       </Section>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 
