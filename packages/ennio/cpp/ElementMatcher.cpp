@@ -143,6 +143,17 @@ std::optional<ExtendedElementInfo> ElementMatcher::getExtendedElementInfo(
     info.enabled = baseInfo->enabled;
     info.layout = baseInfo->layout;
 
+    // getElementInfo records screenX/screenY = local frame origin (it has
+    // no parent context). Translate that into a real surface-relative
+    // coordinate by summing every ancestor's frame.origin. Without this,
+    // text-only / trait-only selector matches return the inner shadow
+    // node's offset within its immediate parent, and the CLI tap lands
+    // on (16, 70) instead of (193, 950) on a Pressable sitting at the
+    // bottom of the screen.
+    auto [absX, absY] = ShadowTreeTraverser::getAbsoluteOffset(root, node);
+    info.layout.screenX = info.layout.x + absX;
+    info.layout.screenY = info.layout.y + absY;
+
     // Extract additional state props
     extractStateProps(node, info.checked, info.focused, info.selected);
 

@@ -126,17 +126,33 @@ export class NitroWriter implements Writer {
    * speak gRPC to idb_companion.
    */
   private async hidTap(x: number, y: number, durationMs: number): Promise<void> {
+    // Clamp short durations to a no-delay tap. iOS 26 sheet
+    // presentations (expo-router transparentModal, UISheet) attach a
+    // pan recogniser whose "could-be-a-pan" claim fires within ~30 ms
+    // of touch-down — a 50 ms held tap gets routed into the pan path
+    // and never reaches the underlying UITextField's becomeFirstResponder,
+    // so tapping a TextInput inside a sheet silently fails to focus.
+    // Anything ≤ 50 ms is a regular tap (UIKit's tap-count recogniser
+    // does not require a held duration); only pass through longer
+    // values, which callers use intentionally for long-press / context
+    // menu presentations.
+    const effective = durationMs <= 50 ? 0 : durationMs;
+    if (process.env.ENNIO_BYPASS_HID_DAEMON) {
+      await idb.ensureCompanion();
+      await idb.tap(x, y, effective);
+      return;
+    }
     try {
-      await hid.tap(x, y, durationMs);
+      await hid.tap(x, y, effective);
       if (process.env.ENNIO_DEBUG_IDB)
-        console.error(`[hidTap] daemon ok (${x},${y},${durationMs}ms)`);
+        console.error(`[hidTap] daemon ok (${x},${y},${effective}ms)`);
       return;
     } catch (e) {
       if (process.env.ENNIO_DEBUG_IDB)
         console.error(`[hidTap] daemon FAILED, fallback: ${(e as Error).message}`);
     }
     await idb.ensureCompanion();
-    await idb.tap(x, y, durationMs);
+    await idb.tap(x, y, effective);
   }
 
   /**
@@ -162,6 +178,139 @@ export class NitroWriter implements Writer {
   ): Promise<boolean> {
     const r = await this.send('swipeAtPoints', { x1, y1, x2, y2, durationMs });
     return r?.success === true;
+  }
+
+  /**
+   * Poll `getViewWindowFrameByLabel` until the matched frame is stable
+   * across two consecutive reads (within 2 px), with a hard cap.
+   *
+   * The signal that drives the loop IS layout state — we leave when the
+   * UIKit layout stops moving, not when a timer expires. The cap is a
+   * safety floor: if the target never appears or never settles (animated
+   * marquee, infinite loader), the caller falls through to the next
+   * cascade tier instead of hanging.
+   */
+  private async pollStableLabelFrame(
+    text: string,
+    maxMs: number,
+  ): Promise<{ cx: number; cy: number } | null> {
+    // Don't early-return on a missing/zero-size match — Reanimated
+    // `entering` animations (e.g. FadeInUp.delay(430).duration(350))
+    // hold the view at opacity=0 for the delay window, so UIKit
+    // hit-test rejects it and `getViewWindowFrameByLabel` returns
+    // (0,0,0,0) for ~430 ms after mount. Keep polling until the view
+    // becomes hittable and its frame stabilises.
+    const start = Date.now();
+    let lastCx: number | null = null;
+    let lastCy: number | null = null;
+    while (Date.now() - start < maxMs) {
+      const r = await this.send('getViewWindowFrameByLabel', { text });
+      const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
+      if (data && data.width > 0 && data.height > 0) {
+        const cx = data.x + data.width / 2;
+        const cy = data.y + data.height / 2;
+        if (lastCx !== null && Math.abs(cx - lastCx) < 2 && Math.abs(cy - lastCy!) < 2) {
+          return { cx, cy };
+        }
+        lastCx = cx;
+        lastCy = cy;
+      }
+      await new Promise((res) => setTimeout(res, 30));
+    }
+    return lastCx !== null ? { cx: lastCx, cy: lastCy! } : null;
+  }
+
+  /**
+   * Same stable-frame poll, but for shadow-tree text matches. Returns
+   * the surface-relative tap center, or null if no match settles.
+   */
+  private async pollStableFiberCenter(
+    text: string,
+    maxMs: number,
+  ): Promise<{ x: number; y: number } | null> {
+    // Don't early-return on a null layout — Reanimated `entering`
+    // animations on the matched node surface sentinel Yoga frames until
+    // the animation settles (e.g. FadeInUp delay=430+duration=350 → no
+    // valid frame for ~800 ms after mount). Sanity check zeroes the
+    // garbage out → layoutCenter returns null → cascade used to fall
+    // through to slow idb-OOP / maestro hierarchy tiers (5–15 s).
+    // Keep polling until the frame stabilises across two reads.
+    const start = Date.now();
+    let last: { x: number; y: number } | null = null;
+    while (Date.now() - start < maxMs) {
+      const c = await this.layoutCenter({ text });
+      if (c) {
+        if (last !== null && Math.abs(c.x - last.x) < 2 && Math.abs(c.y - last.y) < 2) {
+          return c;
+        }
+        last = c;
+      }
+      await new Promise((res) => setTimeout(res, 30));
+    }
+    return last;
+  }
+
+  /**
+   * Probe `hitTestVerify` at (x, y) for the expected text.
+   */
+  private async probeHit(
+    x: number,
+    y: number,
+    text: string,
+  ): Promise<{ hittable: boolean; matched: boolean; actionable: boolean }> {
+    const r = await this.send('hitTestVerify', { x, y, text });
+    const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
+    return {
+      hittable: !!data?.hittable,
+      matched: !!data?.matched,
+      actionable: !!data?.actionable,
+    };
+  }
+
+  /**
+   * UIKit hit-test gate for shadow-tree resolved coords (tier 3+).
+   *
+   * Three states the caller branches on:
+   *   matched && actionable → tap immediately. Ground truth confirms the
+   *     candidate is hittable and wired.
+   *   matched && !actionable → gesture handler not yet attached (RNGH /
+   *     pressto useEffect hasn't fired). Wait for the next React commit
+   *     and retry the verify, bounded by `gestureSettleMs`.
+   *   !matched → candidate is occluded (modal on top, sibling overlay)
+   *     or stale (mounted under-screen). Return failure; the caller
+   *     falls through to the next cascade tier rather than tapping the
+   *     wrong thing.
+   *
+   * Tier 2 (UIKit label scan) callers should NOT use this — the scan
+   * already filters by `viewIsHittableAtCenter` + `isViewInActiveVCChain`
+   * so the match check here is redundant. Use `awaitActionable` +
+   * direct `hidTap` instead; that avoids the scan→verify race where a
+   * Reanimated entering stand-in briefly sits at the coord with no
+   * label and trips a spurious `occluded`.
+   */
+  private async verifyAndTap(
+    x: number,
+    y: number,
+    text: string,
+    gestureSettleMs: number = 600,
+  ): Promise<'tapped' | 'occluded' | 'unactionable'> {
+    let v = await this.probeHit(x, y, text);
+    if (!v.matched) return 'occluded';
+    if (v.actionable) {
+      await this.hidTap(x, y, 50);
+      return 'tapped';
+    }
+    const start = Date.now();
+    while (Date.now() - start < gestureSettleMs) {
+      await this.client.waitForCommit(120);
+      v = await this.probeHit(x, y, text);
+      if (!v.matched) return 'occluded';
+      if (v.actionable) {
+        await this.hidTap(x, y, 50);
+        return 'tapped';
+      }
+    }
+    return 'unactionable';
   }
 
   private async getSurfaceOffset(): Promise<{ x: number; y: number }> {
@@ -306,7 +455,18 @@ export class NitroWriter implements Writer {
     return true;
   }
   async tapAt(x: number, y: number): Promise<boolean> {
-    return this.tapAtPoint(x, y);
+    // Caller passes 0-1 ratios resolved against the screen, not the
+    // React surface — `tapOn: { point: "50%,30%" }` is screen-relative
+    // (Maestro semantics). Do NOT add surfaceOffset here: when a sheet
+    // is presented (expo-router transparentModal / formSheet), the
+    // surface view's origin in window is (0, sheetTop), and adding
+    // that offset would push a percentage tap below its intended row
+    // by the sheet's top inset.
+    const screen = await this.getScreenSize();
+    const px = Math.round(x * screen.width);
+    const py = Math.round(y * screen.height);
+    await this.hidTap(px, py, 50);
+    return true;
   }
   /**
    * Resolve a selector to its window-coord centre via Fabric. Returns
@@ -428,41 +588,35 @@ export class NitroWriter implements Writer {
     return true;
   }
   async typeText(testID: string | null, text: string): Promise<boolean> {
-    // Focus the target first (real HID tap → first-responder). Then
-    // dispatch the text either via idb's keyboard injection (real
-    // keystrokes, fires onChangeText per char, validators see input
-    // as a user would) or via pasteboard (whole-string commit, no
-    // per-key fidelity, but reliable for any character).
-    //
-    // idb's `ui text` drives the simulator's IOHID layer with US-
-    // layout assumptions; characters that need the Shift modifier
-    // (`@`, `?`, `&`, etc.) come out wrong on layouts where those
-    // glyphs sit elsewhere. Detect those and switch to the
-    // pasteboard path so RHF/zod/etc see the actual text we asked
-    // for. Plain ASCII letters/digits/space/`.,_-` stay on the
-    // keyboard path so per-char validators still fire.
+    // testID-bound path: paste directly onto the resolved input via
+    // pasteFromClipboard, which goes through
+    // textField:shouldChangeCharactersInRange: regardless of first-
+    // responder state. This avoids the iOS 26 RNS first-touch race
+    // where a tap during a stack-push animation lands on the
+    // RNSScreenStackView overlay instead of the real input, leaving
+    // the field unfocused so subsequent HID keystrokes are lost.
+    // Per-char onChangeText validators still see the change (paste
+    // dispatches a single insertText), so masked-input formatters
+    // (phone, expiry, etc.) still run. Keyboard-layout independent.
     if (testID) {
-      const c = await this.layoutCenter({ id: testID });
-      if (!c) return false;
-      await this.hidTap(c.x, c.y, 50);
-      await this.client.waitForCommit(200);
-    }
-    const keyboardSafe = /^[a-zA-Z0-9 .,_\-+/=:;]*$/.test(text);
-    if (!keyboardSafe) {
-      // Pasteboard path: drop the string onto the system pasteboard
-      // then ask native to read it back and dispatch via insertText:
-      // on the testID-bearing input. insertText: doesn't depend on
-      // keyboard layout, so `@`, `?`, etc. land as themselves.
-      // Requires a testID for the destination — without one, we
-      // can't address an input. Fall through to the idb path in
-      // that case (best-effort).
-      if (testID) {
-        await this.setClipboard(text);
-        await this.send('pasteFromClipboard', { testID });
-        await new Promise((r) => setTimeout(r, 100));
+      await this.setClipboard(text);
+      const r = await this.send('pasteFromClipboard', { testID });
+      if (r?.success === true) {
+        await new Promise((res) => setTimeout(res, 100));
         return true;
       }
+      // Native paste couldn't resolve the testID — fall through to
+      // HID typing as a best-effort. Focus first so keystrokes land.
+      const c = await this.layoutCenter({ id: testID });
+      if (c) {
+        await this.hidTap(c.x, c.y, 50);
+        await this.client.waitForCommit(200);
+      }
     }
+    // No-testID path (`inputText` with no preceding `tapOn`): rely on
+    // the currently focused responder. idb HID is keyboard-layout
+    // dependent, so `@`/`?`/`&` etc. come out wrong on non-US sims;
+    // callers that need symbols should tap a specific testID first.
     // Send the whole string in ONE persistent-daemon round trip. The
     // old path spawned a fresh `idb ui text` subprocess per call
     // (~160 ms tax even for short text); the daemon reuses the warm
@@ -658,10 +812,33 @@ export class NitroWriter implements Writer {
     await this.tapAtPoint(c.x, c.y);
     return true;
   }
-  async longPressBySelector(selector: Selector, _durationMs: number): Promise<boolean> {
+  async longPressBySelector(selector: Selector, durationMs: number): Promise<boolean> {
+    // Mirror tapByText's cascade for text-based selectors so a long-press
+    // on RN-rendered Pressable cards (Habits-tab HabitCard, etc.) resolves
+    // via the UIKit AX-label scan before falling to the shadow-tree
+    // walker. The fiber tree's frame is sentinel for cards mid-entering
+    // animation; AX-label scan reads from the laid-out UIView tree
+    // directly.
+    if (selector.text && !selector.id) {
+      // selector.text is a TextMatcher `{ pattern, mode }`, not a raw
+      // string — unwrap pattern for the AX-label scan.
+      const pattern =
+        typeof selector.text === 'string' ? selector.text : (selector.text as any).pattern;
+      if (typeof pattern === 'string' && pattern.length > 0) {
+        await idb.ensureCompanion();
+        const labelHit = await this.pollStableLabelFrame(pattern, 1200);
+        if (labelHit) {
+          await this.hidTap(labelHit.cx, labelHit.cy, durationMs || 600);
+          await new Promise((r) => setTimeout(r, 100));
+          return true;
+        }
+      }
+    }
     const c = await this.layoutCenter(selector);
     if (!c) return false;
-    return this.tapAtPoint(c.x, c.y);
+    await this.hidTap(c.x, c.y, durationMs || 600);
+    await new Promise((r) => setTimeout(r, 100));
+    return true;
   }
   async typeTextBySelector(selector: Selector, text: string): Promise<boolean> {
     // Resolve to a testID when possible; lets Nitro's typeText do its
@@ -708,25 +885,51 @@ export class NitroWriter implements Writer {
       await new Promise((r) => setTimeout(r, 100));
       return true;
     }
-    // 2) Accessibility-label query inside the app's UIView tree (incl.
-    //    UITabBarButton labels — expo-router NativeTabs route through
-    //    UIKit hosts that surface their tab title as the AX label).
-    const r = await this.send('getViewWindowFrameByLabel', { text });
-    const data = typeof r?.data === 'string' ? JSON.parse(r.data) : r?.data;
-    if (data && data.width > 0 && data.height > 0) {
-      const cx = data.x + data.width / 2;
-      const cy = data.y + data.height / 2;
-      await this.hidTap(cx, cy, 50);
-      await new Promise((r) => setTimeout(r, 100));
+    // 2) Accessibility-label query inside the app's UIView tree.
+    //    Resolves the matched view's window-relative frame, then defers
+    //    the firing decision to `verifyAndTap` — UIKit hit-test is the
+    //    ground truth for "what receives this touch", so we never have
+    //    to guess about occlusion, stale screens, or active surface.
+    //    Stable-frame poll handles mid-animation matches (modal slide,
+    //    keyboard-driven layout shift); two-consecutive-reads-equal is
+    //    a real layout signal, not a fixed sleep.
+    // 1200 ms covers Reanimated entering (FadeInUp.delay(430)+duration(350)
+    // ≈ 780 ms held at opacity=0) plus first-commit settle. UIKit hit-test
+    // rejects views with alpha<0.01, so this poll has to outlive the
+    // entering delay — bailing early forces tier 3, then tier 4/5 (15+ s).
+    const labelHit = await this.pollStableLabelFrame(text, 1200);
+    if (labelHit) {
+      // findLabelMatch already filtered through viewIsHittableAtCenter
+      // + isViewInActiveVCChain on the main thread when reading the
+      // label frame; pollStableLabelFrame's "two consecutive frames
+      // within 2 px" criterion fires once layout has settled, which
+      // implies the post-commit useEffect (where RNGH / pressto attach
+      // their gesture recognizers) has already run. Tap directly.
+      await this.hidTap(labelHit.cx, labelHit.cy, 50);
+      await this.client.waitForCommit(150);
       return true;
     }
     // 3) Fiber-text walk — for elements whose label is JSX text but
     //    whose accessibilityLabel isn't set on the host view.
-    const c = await this.layoutCenter({ text });
-    if (c) {
-      await this.hidTap(c.x, c.y, 50);
-      await new Promise((r) => setTimeout(r, 100));
-      return true;
+    //    Same UIKit-truth verification before the HID tap, plus a
+    //    one-cycle commit-driven retry when the resolved view is the
+    //    right target but its recogniser is still attaching (RNGH /
+    //    pressto useEffect race).
+    // 1000 ms cap. Tier 2's pollStableLabelFrame already covers
+    // Reanimated entering (≈ 780 ms opacity-0 window). Tier 3 only
+    // fires when AX label scan didn't match — fiber walker hits
+    // labelled-Text-only elements (no AX trait). Frame is usually
+    // valid within 1-2 commits after mount.
+    const stable = await this.pollStableFiberCenter(text, 1000);
+    if (stable) {
+      const outcome = await this.verifyAndTap(stable.x, stable.y, text);
+      if (outcome === 'tapped') {
+        await this.client.waitForCommit(150);
+        return true;
+      }
+      // Last-resort: fiber match found nothing UIKit-hittable here. The
+      // candidate may live under a screen that's mounted-but-covered.
+      // Drop to tier 4/5.
     }
     // Tiers 4-5 are expensive (~3 s idb describe-all + ~10-20 s
     // maestro hierarchy/WDA). Skip them for `optional` taps where the
