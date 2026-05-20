@@ -60,9 +60,6 @@ jobs:
           brew install facebook/fb/idb-companion
           pip3 install fb-idb
 
-      - name: Install ccache
-        run: brew install ccache
-
       # -------------------------------------------------------------
       # JS deps (root workspace).
       # -------------------------------------------------------------
@@ -214,25 +211,8 @@ jobs:
           path: ~/Library/Developer/Xcode/DerivedData
           key: dd-${{ runner.os }}-${{ steps.fp.outputs.key }}-${{ hashFiles('example/app/**', 'example/components/**', 'example/store/**') }}
 
-      - name: Configure ccache
-        run: |
-          mkdir -p ~/.ccache
-          echo "max_size = 5G" > ~/.ccache/ccache.conf
-          echo "compiler_check = content" >> ~/.ccache/ccache.conf
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ccache-${{ runner.os }}-${{ steps.fp.outputs.key }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ steps.fp.outputs.key }}-
-            ccache-${{ runner.os }}-
-
       - name: Build example app (iOS sim, Debug)
         working-directory: example/ios
-        env:
-          CC: ccache clang
-          CXX: ccache clang++
         run: |
           xcodebuild \
             -workspace EnnioExample.xcworkspace \
