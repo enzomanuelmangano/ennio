@@ -229,20 +229,20 @@ jobs:
             ~/.cocoapods/repos
           key: ${{ steps.ios-cache.outputs.cache-primary-key }}
 
-      - name: Cache DerivedData (restore)
+      # Cache the built .app bundle directly. Smaller than DerivedData
+      # (~200MB vs multi-GB), faster to restore, and unambiguous about
+      # what we want: a sim-ready binary the install step can grab.
+      # Cache key tracks anything that can change the binary: example
+      # JS source + the @expo/fingerprint of the project state.
+      - name: Cache built .app (restore)
         uses: actions/cache/restore@v4
-        id: dd-cache
+        id: app-cache
         with:
-          path: ~/Library/Developer/Xcode/DerivedData
-          key: dd-${{ runner.os }}-${{ steps.fp.outputs.key }}-${{ hashFiles('example/app/**', 'example/components/**', 'example/store/**') }}
+          path: /tmp/ennio-app-cache
+          key: appbin-${{ runner.os }}-${{ steps.fp.outputs.key }}-${{ hashFiles('example/app/**', 'example/components/**', 'example/store/**') }}
 
-      # Skip xcodebuild entirely when DerivedData cache hits. The cache
-      # was saved right after a successful build, so the .app bundle
-      # inside it is known-good. Without this gate, xcodebuild sees
-      # source mtimes (set to `now` by actions/checkout) newer than
-      # the cached output and does a full ~13min rebuild.
       - name: Build example app (iOS sim, Debug)
-        if: steps.dd-cache.outputs.cache-hit != 'true'
+        if: steps.app-cache.outputs.cache-hit != 'true'
         working-directory: example/ios
         run: |
           xcodebuild \
@@ -252,15 +252,20 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             COMPILER_INDEX_STORE_ENABLE=NO \
             build
+          # Copy the freshly-built .app to a stable, cacheable path
+          # so the cache action doesn't have to guess hashed
+          # DerivedData subdirs.
+          APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*Debug-iphonesimulator/EnnioExample.app' -type d | head -n1)
+          test -n "$APP" || { echo "EnnioExample.app not found after build"; exit 1; }
+          mkdir -p /tmp/ennio-app-cache
+          rsync -a --delete "$APP/" /tmp/ennio-app-cache/EnnioExample.app/
 
-      # Save DerivedData after the build succeeds so suite failures
-      # don't cost us the compile output next time.
-      - name: Cache DerivedData (save)
-        if: always() && steps.dd-cache.outputs.cache-hit != 'true'
+      - name: Cache built .app (save)
+        if: always() && steps.app-cache.outputs.cache-hit != 'true' && hashFiles('/tmp/ennio-app-cache/EnnioExample.app/**') != ''
         uses: actions/cache/save@v4
         with:
-          path: ~/Library/Developer/Xcode/DerivedData
-          key: ${{ steps.dd-cache.outputs.cache-primary-key }}
+          path: /tmp/ennio-app-cache
+          key: ${{ steps.app-cache.outputs.cache-primary-key }}
 
       # -------------------------------------------------------------
       # Boot sim + install example.
@@ -277,8 +282,8 @@ jobs:
 
       - name: Install example app
         run: |
-          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*Debug-iphonesimulator/EnnioExample.app' -type d | head -n1)
-          test -n "$APP" || { echo "EnnioExample.app not found"; exit 1; }
+          APP=/tmp/ennio-app-cache/EnnioExample.app
+          test -d "$APP" || { echo "Cached .app missing at $APP"; exit 1; }
           xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP"
 
       # -------------------------------------------------------------
