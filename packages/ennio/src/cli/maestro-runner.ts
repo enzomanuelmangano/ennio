@@ -2221,6 +2221,37 @@ class MaestroExecutor {
       detectedScheme ||
       undefined;
 
+    // Fast path: if the app registered `__ennioReset` via
+    // `registerEnnioReset(fn)`, run that in-process. No simctl spawn,
+    // no Hermes context recycle, no Inspector reconnect. Typically
+    // ~150-500ms vs ~5-6s for the hard relaunch below. Falls back
+    // automatically when no callback is registered or the callback
+    // throws — guarantees we never get stuck in a half-reset state.
+    try {
+      const ok = await this.client.tryInvokeReset();
+      if (ok) {
+        this.log(
+          `clearState: ${targetAppId}${
+            bundlerUrl && devClientScheme
+              ? ` (devClient ${detectedScheme ? 'auto' : 'opt-in'} → ${bundlerUrl})`
+              : ''
+          } [hook]`,
+        );
+        this.writer.invalidateViewportCache();
+        try {
+          await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS);
+        } catch {
+          /* tolerate */
+        }
+        this.log('clearState: App reset via registered hook');
+        return;
+      }
+    } catch (err) {
+      this.log(
+        `clearState: hook failed (${(err as Error).message}); falling back to hard relaunch`,
+      );
+    }
+
     this.log(
       `clearState: ${targetAppId}${
         bundlerUrl && devClientScheme
@@ -2318,9 +2349,28 @@ class MaestroExecutor {
           : ''
       }`,
     );
+    // Fast path mirrors handleClearState: try the registered reset
+    // hook before tearing the process down. Only applies when
+    // clearState was requested AND the app exposed __ennioReset.
     if (shouldClearState) {
-      // In-process sandbox wipe via WS before disconnect — works on
-      // Sim + device with no host filesystem access.
+      try {
+        const ok = await this.client.tryInvokeReset();
+        if (ok) {
+          this.log(`launchApp: ${targetAppId} (clearState) [hook]`);
+          this.writer.invalidateViewportCache();
+          try {
+            await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS);
+          } catch {
+            /* tolerate */
+          }
+          this.log('launchApp: Reset via registered hook');
+          return;
+        }
+      } catch (err) {
+        this.log(
+          `launchApp: hook failed (${(err as Error).message}); falling back to hard relaunch`,
+        );
+      }
       try {
         await this.client.clearAppData();
       } catch {

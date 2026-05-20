@@ -204,7 +204,12 @@ jobs:
             example/ios
             ~/Library/Caches/CocoaPods
             ~/.cocoapods/repos
-          key: ios-prebuild-${{ runner.os }}-${{ steps.fp.outputs.key }}
+          # Native-only inputs. JS source edits don't change the iOS
+          # prebuild output, so we deliberately drop @expo/fingerprint
+          # (which hashes the whole project including JS source) and
+          # use only the files that actually affect prebuild + pod
+          # install. Stable across JS-only PRs.
+          key: ios-prebuild-${{ runner.os }}-${{ hashFiles('example/package.json', 'example/app.json', 'packages/ennio-expo-plugin/src/**', 'packages/ennio-expo-plugin/package.json', 'bun.lock') }}
           restore-keys: ios-prebuild-${{ runner.os }}-
 
       - name: Prebuild (cache miss)
@@ -239,7 +244,12 @@ jobs:
         id: app-cache
         with:
           path: /tmp/ennio-app-cache
-          key: appbin-${{ runner.os }}-${{ steps.fp.outputs.key }}-${{ hashFiles('example/app/**', 'example/components/**', 'example/store/**') }}
+          # Debug `.app` does NOT bake the JS bundle — Metro serves it
+          # at runtime. So a JS-only edit produces a binary-identical
+          # `.app`. Key on native-only inputs (same as ios-prebuild
+          # above) so JS-only PRs reuse the cached binary.
+          key: appbin-${{ runner.os }}-${{ hashFiles('example/package.json', 'example/app.json', 'packages/ennio-expo-plugin/src/**', 'packages/ennio-expo-plugin/package.json', 'bun.lock') }}
+          restore-keys: appbin-${{ runner.os }}-
 
       - name: Build example app (iOS sim, Debug)
         if: steps.app-cache.outputs.cache-hit != 'true'
@@ -261,7 +271,11 @@ jobs:
           rsync -a --delete "$APP/" /tmp/ennio-app-cache/EnnioExample.app/
 
       - name: Cache built .app (save)
-        if: always() && steps.app-cache.outputs.cache-hit != 'true' && hashFiles('/tmp/ennio-app-cache/EnnioExample.app/**') != ''
+        # `hashFiles` only evaluates GITHUB_WORKSPACE-relative paths,
+        # so we can't use it to gate on /tmp/. The Build step above
+        # already errored if the .app wasn't copied; reaching this
+        # step means /tmp/ennio-app-cache/ is populated.
+        if: always() && steps.app-cache.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
         with:
           path: /tmp/ennio-app-cache

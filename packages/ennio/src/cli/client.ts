@@ -340,11 +340,11 @@ export class EnnioClient {
    * `exceptionDetails` (eval threw inside the runtime — usually a
    * caller bug worth surfacing loudly).
    */
-  private async eval(expression: string): Promise<unknown> {
+  private async eval(expression: string, opts?: { awaitPromise?: boolean }): Promise<unknown> {
     const r = await this.cdpCall('Runtime.evaluate', {
       expression,
       returnByValue: true,
-      awaitPromise: false,
+      awaitPromise: opts?.awaitPromise === true,
       replMode: false,
     });
     if (r.error) throw new Error(`CDP error: ${r.error.message}`);
@@ -572,6 +572,56 @@ export class EnnioClient {
   async clearAppData(): Promise<boolean> {
     const response = await this.send('clearAppData', {});
     return response?.success === true;
+  }
+
+  /**
+   * If the app registered a reset callback via
+   * `registerEnnioReset(fn)`, run it in-process and return true.
+   * Returns false when no callback is present (caller falls back to
+   * the hard-relaunch clearState path). The callback is awaited so
+   * async resets (AsyncStorage.clear etc.) complete before we return.
+   *
+   * Errors thrown inside the registered fn are surfaced — the caller
+   * should treat them as fast-path failure and fall back to the slow
+   * path rather than continue against possibly-stale state.
+   */
+  async tryInvokeReset(): Promise<boolean> {
+    // Hermes's CDP impl does NOT honor `awaitPromise: true` — calling
+    // an async function via Runtime.evaluate returns the raw promise
+    // object (`{_h, _i, _j, _k}`), never the resolved value. Work
+    // around by firing the hook fire-and-forget and polling a status
+    // flag the hook sets on completion.
+    const kicked = await this.eval(
+      `(function() {
+        if (typeof globalThis.__ennioReset !== 'function') return false;
+        globalThis.__ennioResetStatus = 'running';
+        try {
+          var p = globalThis.__ennioReset();
+          if (p && typeof p.then === 'function') {
+            p.then(function() { globalThis.__ennioResetStatus = 'done'; })
+             .catch(function(e) {
+               globalThis.__ennioResetStatus = 'error:' + (e && e.message ? e.message : String(e));
+             });
+          } else {
+            globalThis.__ennioResetStatus = 'done';
+          }
+        } catch (e) {
+          globalThis.__ennioResetStatus = 'error:' + (e && e.message ? e.message : String(e));
+        }
+        return true;
+      })()`,
+    );
+    if (kicked !== true) return false;
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      const status = await this.eval(`globalThis.__ennioResetStatus`);
+      if (status === 'done') return true;
+      if (typeof status === 'string' && status.indexOf('error:') === 0) {
+        throw new Error(status.slice('error:'.length));
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error('reset hook timed out (>8s)');
   }
 
   async getText(testID: string): Promise<string | null> {

@@ -63,6 +63,46 @@ export function isNativeModuleAvailable(): boolean {
   return getEnnioModule() !== null;
 }
 
+/**
+ * Register an app-side reset callback used by ennio's `clearState` fast
+ * path. When set, the CLI runs this function in-process between flows
+ * instead of doing a full `simctl terminate` + `simctl launch` cycle.
+ *
+ * The function is responsible for bringing the app back to its
+ * canonical "fresh launch" state in whatever way fits the app:
+ *   - Zustand: `store.setState(store.getInitialState?.() ?? initial)`
+ *   - Redux: dispatch a reset action
+ *   - AsyncStorage: `AsyncStorage.clear()`
+ *   - Navigation: pop / reset stack to root
+ *
+ * Why this matters:
+ *   ennio's default `clearState` path destroys the JS context (process
+ *   restart or `RCTReloadCommand`) — guaranteed clean state at the cost
+ *   of ~5-6s per reset (process spawn + Hermes bundle re-execute +
+ *   Inspector reconnect). A registered reset runs in the SAME JS
+ *   context with no reload, no reconnect — typically ~150-500ms.
+ *
+ * Opt-in: ennio detects whether the callback was registered at runtime
+ * (`globalThis.__ennioReset`). Apps that don't register one fall back
+ * to the existing slow-path clearState. Same YAML syntax in both cases.
+ *
+ * Example:
+ *   import { registerEnnioReset } from '@reactiive/ennio';
+ *   import AsyncStorage from '@react-native-async-storage/async-storage';
+ *   import { useCartStore, useUserStore } from './store';
+ *   import { router } from 'expo-router';
+ *
+ *   registerEnnioReset(async () => {
+ *     useCartStore.setState(useCartStore.getInitialState());
+ *     useUserStore.setState(useUserStore.getInitialState());
+ *     await AsyncStorage.clear();
+ *     router.replace('/');
+ *   });
+ */
+export function registerEnnioReset(fn: () => void | Promise<void>): void {
+  (globalThis as unknown as { __ennioReset?: () => void | Promise<void> }).__ennioReset = fn;
+}
+
 // No JS-side bootstrap. `ennio` autolinks via Pod, and the iOS
 // `EnnioAutoInit` swizzle installs the JSI dispatch surface (commit
 // signal + `__ennioDispatch` host function) natively, on the JS
