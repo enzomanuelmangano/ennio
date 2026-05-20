@@ -121,6 +121,12 @@ jobs:
           mkdir -p /tmp/scratch
           cd /tmp/scratch
           npx --yes create-expo-app . --template blank-typescript --no-install
+          # Pin Expo SDK to match the example's. create-expo-app defaults
+          # to the latest SDK, whose expo-modules-core ABI does not match
+          # RN 0.83. Mismatch surfaces as `no member 'CallInvoker' in
+          # namespace 'facebook::react'` during the Pods compile.
+          EXPO_SDK=$(jq -r '.dependencies.expo' "$GITHUB_WORKSPACE/example/package.json")
+          npm pkg set "dependencies.expo=$EXPO_SDK"
           npm pkg set "dependencies.react-native=$RN_VERSION"
           npm pkg set "dependencies.react-native-nitro-modules=^0.35.5"
           npm pkg set "dependencies.@reactiive/ennio=file:$GITHUB_WORKSPACE/packages/ennio"
