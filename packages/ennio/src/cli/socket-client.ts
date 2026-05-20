@@ -1,27 +1,38 @@
-// Unix-domain socket transport.
+// Unix-domain socket transport — the primary CLI <-> in-app dylib
+// channel for the v2 architecture.
 //
-// Parallel to the CDP/Hermes Inspector channel. Used for commands whose
-// work happens entirely on the main thread (UIKit) or in thread-safe
-// Fabric reads — anything where queueing on the JS thread is pure
-// overhead. See `cpp/EnnioControlSocket.cpp` for the server side.
+// Wire format: line-delimited JSON. One request per line, one response
+// per line, with numeric/string id correlation.
 //
-// Wire format: newline-delimited JSON, one request per line, response
-// returned on the next line. Single persistent connection per CLI run.
-// Sequential dispatch — no pipelining yet because the server services
-// one client connection at a time.
+// Request:   {"id":"r1","op":"find_by_testid","args":{"testID":"foo"}}
+// Response:  {"id":"r1","ok":true,"data":{"x":...,"y":...,"w":...,"h":...}}
+// Error:     {"id":"r1","ok":false,"err":"testID not found: foo"}
+//
+// Socket path is the fixed host-shared "/tmp/ennio-control.sock" because
+// (a) the iOS simulator process and the host CLI share `/tmp`, and
+// (b) sockaddr_un.sun_path is 104 bytes on macOS — the app sandbox
+// path exceeds that limit.
+//
+// Single persistent connection per CLI run. Requests pipelined; the
+// dylib services them sequentially per connection on a worker thread.
 
 import { Socket, createConnection } from 'node:net';
 
-import type { EnnioResponse } from './client';
+// Per-request deadline. Long enough for a slow UIView walk on a busy
+// device; short enough that a hung handler doesn't deadlock the runner.
+const REQUEST_TIMEOUT_MS = 10_000;
 
-// Per-request deadline. Covers the native `dispatchSyncMainWithTimeout`
-// 5s ceiling plus margin. A stalled native dispatch (deadlock on main
-// thread, runaway UIKit work) used to hang the CLI forever; with this,
-// the send() rejects and EnnioClient.send() falls back to CDP.
-const REQUEST_TIMEOUT_MS = 6_000;
+const SOCKET_PATH = '/tmp/ennio-control.sock';
+
+export interface EnnioSocketResponse {
+  id: string;
+  ok: boolean;
+  data?: unknown;
+  err?: string;
+}
 
 interface PendingRequest {
-  resolve(r: EnnioResponse): void;
+  resolve(r: EnnioSocketResponse): void;
   reject(e: Error): void;
 }
 
@@ -30,34 +41,25 @@ export class EnnioSocketClient {
   private buf = '';
   private pending = new Map<string, PendingRequest>();
   private idSeq = 0;
-  private socketPath: string | null = null;
   private connecting: Promise<boolean> | null = null;
 
   /**
-   * Discover + connect. Idempotent. Returns true if connected, false if
-   * the socket isn't reachable (caller should fall back to CDP).
-   *
-   * Path convention matches `EnnioControlSocket::computeSocketPath()`:
-   * `/tmp/ennio-<bundleId>.sock` on the host. The simulator shares
-   * `/tmp` with the host filesystem, so the same path is reachable from
-   * both sides. We use `/tmp` rather than the app sandbox tmp because
-   * sockaddr_un.sun_path is 104 bytes on macOS and the sandbox path
-   * exceeds that limit.
+   * Open the Unix-socket connection. Idempotent. Returns true on success,
+   * false if the dylib hasn't started its listener yet (caller can
+   * retry after waiting for the app to launch).
    */
-
-  async connect(bundleId: string, _udid?: string): Promise<boolean> {
+  async connect(): Promise<boolean> {
     if (this.socket && !this.socket.destroyed) return true;
     if (this.connecting) return this.connecting;
-    this.connecting = this.doConnect(bundleId).finally(() => {
+    this.connecting = this.doConnect().finally(() => {
       this.connecting = null;
     });
     return this.connecting;
   }
 
-  private async doConnect(_bundleId: string): Promise<boolean> {
-    this.socketPath = `/tmp/ennio-control.sock`;
+  private async doConnect(): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      const s = createConnection(this.socketPath!);
+      const s = createConnection(SOCKET_PATH);
       const onError = () => {
         s.destroy();
         resolve(false);
@@ -74,6 +76,20 @@ export class EnnioSocketClient {
     });
   }
 
+  /**
+   * Poll-style connect — wait up to `maxWaitMs` for the dylib listener
+   * to come up. Used immediately after launching the app, when the
+   * socket file may not exist yet.
+   */
+  async connectWithRetry(maxWaitMs = 10_000): Promise<boolean> {
+    const deadline = Date.now() + maxWaitMs;
+    while (Date.now() < deadline) {
+      if (await this.connect()) return true;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return false;
+  }
+
   private onData(chunk: Buffer): void {
     this.buf += chunk.toString('utf8');
     let nl;
@@ -82,7 +98,7 @@ export class EnnioSocketClient {
       this.buf = this.buf.slice(nl + 1);
       if (!line) continue;
       try {
-        const resp = JSON.parse(line) as EnnioResponse;
+        const resp = JSON.parse(line) as EnnioSocketResponse;
         const p = this.pending.get(resp.id);
         if (p) {
           this.pending.delete(resp.id);
@@ -107,27 +123,19 @@ export class EnnioSocketClient {
   }
 
   /**
-   * Send a request, await response. Throws if not connected.
+   * Dispatch one op. Throws if disconnected. Resolves to the typed
+   * response (data depends on op).
    */
-  async send(type: string, payload: Record<string, unknown> = {}): Promise<EnnioResponse> {
+  async call(op: string, args: Record<string, unknown> = {}): Promise<EnnioSocketResponse> {
     if (!this.socket || this.socket.destroyed) {
-      throw new Error('socket not connected');
+      throw new Error('ennio socket not connected');
     }
-    const id = `s${++this.idSeq}`;
-    // Wire envelope: same keys the CDP path uses. Server reads each via
-    // json::parseString, so a flat object works — fields inlined at top
-    // level keep `parseString(payload, "name")` happy without a real
-    // JSON parser on the C++ side.
-    const line =
-      JSON.stringify({
-        id,
-        type,
-        ...payload,
-      }) + '\n';
-    return new Promise<EnnioResponse>((resolve, reject) => {
+    const id = `r${++this.idSeq}`;
+    const line = JSON.stringify({ id, op, args }) + '\n';
+    return new Promise<EnnioSocketResponse>((resolve, reject) => {
       const timer: NodeJS.Timeout = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`socket request timeout: ${type}`));
+        reject(new Error(`socket request timeout: ${op}`));
       }, REQUEST_TIMEOUT_MS);
       this.pending.set(id, {
         resolve: (r) => {
