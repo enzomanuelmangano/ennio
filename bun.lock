@@ -36,7 +36,6 @@
         "@react-native-menu/menu": "1.2.2",
         "@react-native-picker/picker": "2.11.4",
         "@react-native-segmented-control/segmented-control": "^2.5.7",
-        "@reactiive/ennio": "*",
         "@shopify/flash-list": "2.0.2",
         "expo": "^55.0.19",
         "expo-blur": "~55.0.14",
@@ -73,7 +72,7 @@
     },
     "packages/ennio": {
       "name": "@reactiive/ennio",
-      "version": "0.0.3",
+      "version": "0.0.5",
       "bin": {
         "ennio": "./dist/cli.js",
       },
