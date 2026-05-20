@@ -64,26 +64,67 @@ static UIView *_Nullable walkByID(UIView *root, NSString *testID) {
     return nil;
 }
 
+// Whether the view (or a near ancestor) is interactive — UIControl,
+// UIButton, has a tap recognizer, or is an accessibility button trait.
+// Used to break ties when multiple views match the same text: a tab
+// bar item beats a header label.
+static BOOL isInteractive(UIView *v) {
+    if (!v) return NO;
+    UIView *cur = v;
+    for (int hop = 0; hop < 4 && cur; hop++, cur = cur.superview) {
+        if (cur.userInteractionEnabled) {
+            if ([cur isKindOfClass:UIControl.class]) return YES;
+            if ([cur isKindOfClass:UIButton.class]) return YES;
+            for (UIGestureRecognizer *g in cur.gestureRecognizers) {
+                if (g.isEnabled) return YES;
+            }
+            UIAccessibilityTraits t = cur.accessibilityTraits;
+            if ((t & UIAccessibilityTraitButton) || (t & UIAccessibilityTraitLink)) return YES;
+            // RNGH wraps every Pressable in a view class that ends in
+            // "GestureHandlerButton" — it accepts taps but doesn't
+            // subclass UIControl. Detect by class name suffix.
+            NSString *cls = NSStringFromClass([cur class]);
+            if ([cls hasSuffix:@"GestureHandlerButton"]) return YES;
+            if ([cls hasSuffix:@"RCTSinglelineTextInputView"]) return YES;
+            if ([cls hasSuffix:@"RCTMultilineTextInputView"]) return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL viewMatchesText(UIView *v, NSString *text) {
+    if ([v.accessibilityLabel isEqualToString:text]) return YES;
+    if ([v.accessibilityValue isEqualToString:text]) return YES;
+    if ([v isKindOfClass:UILabel.class]) {
+        UILabel *lbl = (UILabel *)v;
+        if ([lbl.text isEqualToString:text]) return YES;
+    }
+    if ([v isKindOfClass:UIButton.class]) {
+        UIButton *btn = (UIButton *)v;
+        NSString *title = [btn titleForState:UIControlStateNormal];
+        if ([title isEqualToString:text]) return YES;
+    }
+    return NO;
+}
+
+// Collect every matching view (preorder DFS). Used to pick the best
+// candidate — interactive views beat plain text labels.
+static void collectByText(UIView *root, NSString *text, NSMutableArray<UIView *> *out) {
+    if (!root) return;
+    if (viewMatchesText(root, text)) [out addObject:root];
+    for (UIView *sub in root.subviews) collectByText(sub, text, out);
+}
+
 static UIView *_Nullable walkByText(UIView *root, NSString *text) {
     if (!root) return nil;
-    if ([root.accessibilityLabel isEqualToString:text]) return root;
-    if ([root.accessibilityValue isEqualToString:text]) return root;
-    // Also match UILabel.text directly — some custom UIView subclasses
-    // don't propagate a label's text to accessibilityLabel.
-    if ([root isKindOfClass:UILabel.class]) {
-        UILabel *lbl = (UILabel *)root;
-        if ([lbl.text isEqualToString:text]) return root;
+    NSMutableArray<UIView *> *matches = [NSMutableArray new];
+    collectByText(root, text, matches);
+    // Prefer interactive matches (tab bar items, buttons) over plain
+    // labels (screen titles, headers).
+    for (UIView *v in matches) {
+        if (isInteractive(v)) return v;
     }
-    if ([root isKindOfClass:UIButton.class]) {
-        UIButton *btn = (UIButton *)root;
-        NSString *title = [btn titleForState:UIControlStateNormal];
-        if ([title isEqualToString:text]) return root;
-    }
-    for (UIView *sub in root.subviews) {
-        UIView *match = walkByText(sub, text);
-        if (match) return match;
-    }
-    return nil;
+    return matches.firstObject;
 }
 
 // Walk every UIWindow of every UIWindowScene — modal sheets and alerts
