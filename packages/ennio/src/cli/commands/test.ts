@@ -54,6 +54,11 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
 
   if (positional.length === 0) {
     console.error('Usage: ennio test <flow.yaml | dir | glob> [options]');
+    console.error('');
+    console.error('Auto-detection:');
+    console.error('  - booted iOS simulator (or auto-boots one)');
+    console.error('  - libennio.dylib from /tmp/ennio-build/ or <pkg>/prebuilt/');
+    console.error('Overrides: ENNIO_UDID, ENNIO_DYLIB_PATH');
     return 1;
   }
 

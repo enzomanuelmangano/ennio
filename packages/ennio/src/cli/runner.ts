@@ -37,7 +37,7 @@ import {
 } from './maestro-parser';
 import { EnnioSocketClient } from './socket-client';
 import { tap as hidTap, swipe as hidSwipe, typeText as hidType } from './hid';
-import { getAppContainer, getTargetUdid, terminateApp } from './sim';
+import { ensureBootedSim, findDylib, getAppContainer, terminateApp } from './sim';
 
 // Default implicit-wait on visibility predicates. Maestro's default is
 // 5s. We use 10s because on iOS 26 sim, a tile-tap-driven screen
@@ -83,9 +83,11 @@ export async function runFlow(
   flow: MaestroFlow,
   options: { udid?: string; dylibPath?: string; verbose?: boolean } = {},
 ): Promise<RunResult> {
-  const udid = options.udid || getTargetUdid();
+  const udid = options.udid || ensureBootedSim();
   if (!udid) {
-    throw new Error('No booted iOS simulator found. Boot one or set ENNIO_UDID.');
+    throw new Error(
+      'No iOS simulator available. Install one via Xcode or set ENNIO_UDID.',
+    );
   }
   if (!flow.appId) {
     throw new Error(`Flow ${flow.filePath} is missing top-level appId`);
@@ -94,15 +96,17 @@ export async function runFlow(
   const client = new EnnioSocketClient();
   if (!(await client.connect())) {
     // Socket not up — app isn't running with libennio injected. Auto-
-    // launch with the dylib so users don't need a pre-step. Requires
-    // ENNIO_DYLIB_PATH (or --dylib) so we know which dylib to inject.
-    const dylib = options.dylibPath;
+    // launch with the dylib so users don't need a pre-step. Auto-locate
+    // the dylib from common install paths; ENNIO_DYLIB_PATH or
+    // options.dylibPath wins if set.
+    const dylib = options.dylibPath || findDylib();
     if (!dylib) {
       throw new Error(
-        'libennio socket at /tmp/ennio-control.sock is not reachable. ' +
-          'Set ENNIO_DYLIB_PATH=<path-to-libennio.dylib> so the CLI can ' +
-          'auto-launch the app with DYLD injection, or launch it yourself ' +
-          'with SIMCTL_CHILD_DYLD_INSERT_LIBRARIES set.',
+        'Could not find libennio.dylib. Looked in:\n' +
+          '  - $ENNIO_DYLIB_PATH (unset)\n' +
+          '  - /tmp/ennio-build/libennio.dylib\n' +
+          "  - <package>/prebuilt/libennio.dylib\n" +
+          'Build the dylib (see ARCHITECTURE.md) or set ENNIO_DYLIB_PATH.',
       );
     }
     try {
@@ -310,9 +314,7 @@ async function runCommand(ctx: RunContext, rawCmd: MaestroCommand): Promise<void
         // moving-touch point. Wait for the scrollview to settle before
         // returning so the next tapOn has stable coords.
         await sleep(600);
-        await ctx.client
-          .call('wait_commit', { maxMs: 2000, stableMs: 300 })
-          .catch(() => undefined);
+        await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 300 }).catch(() => undefined);
         return;
       }
       // Centre swipe in the requested direction. Shorter swipe distance
@@ -631,7 +633,13 @@ async function clearStateAndRelaunch(ctx: RunContext): Promise<void> {
   terminateApp(ctx.udid, ctx.bundleId);
   await sleep(300);
   if (!ctx.dylibPath) {
-    throw new Error('clearState requires --dylib (or ENNIO_DYLIB_PATH) to relaunch with injection');
+    const auto = findDylib();
+    if (!auto) {
+      throw new Error(
+        'clearState relaunch requires libennio.dylib — none found in default paths. Set ENNIO_DYLIB_PATH.',
+      );
+    }
+    ctx.dylibPath = auto;
   }
   execFileSync(
     'xcrun',

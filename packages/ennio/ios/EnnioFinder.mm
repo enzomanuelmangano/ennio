@@ -92,9 +92,45 @@ static BOOL isInteractive(UIView *v) {
     return NO;
 }
 
+// Try to read a view's visible text via any reasonable mechanism. RN's
+// RCTText (rendered <Text> component) is a plain UIView subclass — not
+// a UILabel — and exposes its content via `.attributedText` or `.text`.
+// Use KVC with @try so missing keys don't crash; covers RCTText,
+// RCTBaseText, RCTParagraphComponentView (Fabric), RCTTextView, and
+// any other custom view that defines a `text` property.
+static NSString *_Nullable readAnyText(UIView *v) {
+    @try {
+        id raw = [v valueForKey:@"text"];
+        if ([raw isKindOfClass:NSString.class]) return (NSString *)raw;
+        if ([raw isKindOfClass:NSAttributedString.class]) return [(NSAttributedString *)raw string];
+    } @catch (...) {
+    }
+    @try {
+        id raw = [v valueForKey:@"attributedText"];
+        if ([raw isKindOfClass:NSString.class]) return (NSString *)raw;
+        if ([raw isKindOfClass:NSAttributedString.class]) return [(NSAttributedString *)raw string];
+    } @catch (...) {
+    }
+    return nil;
+}
+
+// Maestro semantics: `tapOn: text: 'X'` matches any view whose visible
+// or accessible text CONTAINS X. Exact-equals fails when the
+// surrounding text is decorated — e.g. `accessibilityLabel = "Cart"`
+// becomes "Cart, tab, 3 of 5" for UITabBarItem children on iOS, and
+// React Native sometimes attaches role/state suffixes.
+//
+// Match priority:
+//   1. exact equality on accessibilityLabel / value / UILabel.text /
+//      UIButton.title — preferred when there is a clean match
+//   2. substring `containsString:` on the same fields — caught by the
+//      collectByText caller via this same predicate
+//   3. KVC text fallback for RCTText and friends (RN <Text> view)
 static BOOL viewMatchesText(UIView *v, NSString *text) {
-    if ([v.accessibilityLabel isEqualToString:text]) return YES;
-    if ([v.accessibilityValue isEqualToString:text]) return YES;
+    NSString *aLabel = v.accessibilityLabel;
+    NSString *aValue = v.accessibilityValue;
+    if ([aLabel isEqualToString:text]) return YES;
+    if ([aValue isEqualToString:text]) return YES;
     if ([v isKindOfClass:UILabel.class]) {
         UILabel *lbl = (UILabel *)v;
         if ([lbl.text isEqualToString:text]) return YES;
@@ -104,6 +140,21 @@ static BOOL viewMatchesText(UIView *v, NSString *text) {
         NSString *title = [btn titleForState:UIControlStateNormal];
         if ([title isEqualToString:text]) return YES;
     }
+    NSString *anyText = readAnyText(v);
+    if ([anyText isEqualToString:text]) return YES;
+    // Substring fallback (Maestro default semantics).
+    if (aLabel.length && [aLabel containsString:text]) return YES;
+    if (aValue.length && [aValue containsString:text]) return YES;
+    if ([v isKindOfClass:UILabel.class]) {
+        UILabel *lbl = (UILabel *)v;
+        if (lbl.text.length && [lbl.text containsString:text]) return YES;
+    }
+    if ([v isKindOfClass:UIButton.class]) {
+        UIButton *btn = (UIButton *)v;
+        NSString *title = [btn titleForState:UIControlStateNormal];
+        if (title.length && [title containsString:text]) return YES;
+    }
+    if (anyText.length && [anyText containsString:text]) return YES;
     return NO;
 }
 
@@ -115,15 +166,40 @@ static void collectByText(UIView *root, NSString *text, NSMutableArray<UIView *>
     for (UIView *sub in root.subviews) collectByText(sub, text, out);
 }
 
+// Coarse on-screen check used by walkByText to skip transient/hidden
+// view-tree clones (UINavigationBar pre-renders 2 copies of every
+// title during transitions; only one is actually on screen).
+static BOOL viewIsLikelyOnScreen(UIView *v) {
+    if (!v) return NO;
+    if (!v.window) return NO;
+    if (v.hidden) return NO;
+    if (v.alpha < 0.05) return NO;
+    for (UIView *p = v.superview; p; p = p.superview) {
+        if (p.hidden) return NO;
+        if (p.alpha < 0.05) return NO;
+    }
+    CGRect winRect = [v.window convertRect:v.bounds fromView:v];
+    if (winRect.size.width <= 0 || winRect.size.height <= 0) return NO;
+    return !CGRectIsEmpty(CGRectIntersection(winRect, v.window.bounds));
+}
+
 static UIView *_Nullable walkByText(UIView *root, NSString *text) {
     if (!root) return nil;
     NSMutableArray<UIView *> *matches = [NSMutableArray new];
     collectByText(root, text, matches);
-    // Prefer interactive matches (tab bar items, buttons) over plain
-    // labels (screen titles, headers).
+    // First pass: prefer matches that are both ON SCREEN and interactive
+    // (tab buttons, controls). Filters out off-screen transition clones
+    // and screen-header labels at the same time.
     for (UIView *v in matches) {
-        if (isInteractive(v)) return v;
+        if (viewIsLikelyOnScreen(v) && isInteractive(v)) return v;
     }
+    // Second pass: any on-screen match (e.g. a header label).
+    for (UIView *v in matches) {
+        if (viewIsLikelyOnScreen(v)) return v;
+    }
+    // Final fallback: even if off-screen, return SOMETHING so the
+    // caller can decide; isOnScreen at the find_by_text handler will
+    // reject if it doesn't pass.
     return matches.firstObject;
 }
 

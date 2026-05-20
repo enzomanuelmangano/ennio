@@ -353,6 +353,44 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         });
         return std::string("{\"cleared\":") + (ok ? "true" : "false") + "}";
     });
+
+    // Debug-only: dump every view in the key window that has any text
+    // hook (accessibilityLabel / value, or KVC-readable `text`). Used
+    // to diagnose "element not found" issues when the view tree shape
+    // isn't what we expect.
+    EnnioControlSocket::registerHandler("dump_views", [](const std::string &) -> std::string {
+        NSMutableArray<NSString *> *out = [NSMutableArray new];
+        onMainVoid([&]() {
+            UIWindow *win = [EnnioBootstrap keyWindow];
+            if (!win) return;
+            // Iterative DFS — easier than self-referential blocks from
+            // inside a C++ lambda.
+            NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:win];
+            while (stack.count) {
+                UIView *v = stack.lastObject;
+                [stack removeLastObject];
+                NSString *cls = NSStringFromClass([v class]);
+                NSString *al = v.accessibilityLabel ?: @"";
+                NSString *av = v.accessibilityValue ?: @"";
+                NSString *t = @"";
+                @try {
+                    id raw = [v valueForKey:@"text"];
+                    if ([raw isKindOfClass:NSString.class]) t = (NSString *)raw;
+                    else if ([raw isKindOfClass:NSAttributedString.class])
+                        t = [(NSAttributedString *)raw string];
+                } @catch (...) {
+                }
+                if (al.length || av.length || t.length) {
+                    [out addObject:[NSString stringWithFormat:@"%@ | aL=%@ | aV=%@ | t=%@",
+                                                              cls, al, av, t]];
+                }
+                for (UIView *sub in v.subviews.reverseObjectEnumerator) [stack addObject:sub];
+            }
+        });
+        NSData *json = [NSJSONSerialization dataWithJSONObject:out options:0 error:nil];
+        NSString *s = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+        return std::string(s.UTF8String);
+    });
 }
 
 @end
