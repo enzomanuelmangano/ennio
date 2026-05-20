@@ -23,19 +23,21 @@ export function tap(udid: string, x: number, y: number): void {
   // idb accepts ints only. Round to nearest pixel — UIKit hit-test is
   // tolerant of ~1pt offsets.
   //
-  // Default --duration 0.1s. Without an explicit duration, idb's tap
+  // Default --duration 0.15s. Without an explicit duration, idb's tap
   // is essentially instantaneous — touchDown and touchUp at the same
   // mach_absolute_time. React Native Gesture Handler's BaseButton +
   // PressableScale + RNGH's TapGestureRecognizer all need a measurable
-  // gap between begin/end to advance their state machine. 0.1s reliably
-  // crosses the threshold without making sequential taps feel slow.
+  // gap between begin/end to advance their state machine. 0.1s passes
+  // most controls but iOS-26 sim list-item Pressables (FlashList rows,
+  // gauntlet tiles) reject the tap; 0.15s clears them consistently
+  // without making sequential taps feel slow.
   idb([
     'ui',
     'tap',
     '--udid',
     udid,
     '--duration',
-    '0.1',
+    '0.15',
     String(Math.round(x)),
     String(Math.round(y)),
   ]);

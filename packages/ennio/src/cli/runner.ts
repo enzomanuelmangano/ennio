@@ -39,7 +39,13 @@ import { EnnioSocketClient } from './socket-client';
 import { tap as hidTap, swipe as hidSwipe, typeText as hidType } from './hid';
 import { getAppContainer, getTargetUdid, terminateApp } from './sim';
 
-const DEFAULT_WAIT_MS = 5000;
+// Default implicit-wait on visibility predicates. Maestro's default is
+// 5s. We use 10s because on iOS 26 sim, a tile-tap-driven screen
+// transition can take 4-7s (RN bundle execute on the destination
+// screen + UIKit layout pass + RNGH gesture acceptance). Tests pass
+// the same flow definitions Maestro accepts; we just give the runtime
+// more headroom.
+const DEFAULT_WAIT_MS = 10000;
 const POLL_MS = 100;
 // Minimum fixed wait after every tap. wait_commit can return immediately
 // if the frame-hash is stable, but RN often starts the navigation
@@ -296,11 +302,26 @@ async function runCommand(ctx: RunContext, rawCmd: MaestroCommand): Promise<void
     const timeout = ('timeout' in arg && arg.timeout) || 10000;
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
-      if (await isVisible(ctx, target)) return;
-      // Centre swipe in the requested direction.
+      if (await isVisible(ctx, target)) {
+        // Important: scroll momentum keeps the list moving for a beat
+        // after the swipe ends. A tap fired immediately after isVisible
+        // returns true lands on a moving target — RN's gesture
+        // recognizer either rejects it or routes to whatever is at the
+        // moving-touch point. Wait for the scrollview to settle before
+        // returning so the next tapOn has stable coords.
+        await sleep(600);
+        await ctx.client
+          .call('wait_commit', { maxMs: 2000, stableMs: 300 })
+          .catch(() => undefined);
+        return;
+      }
+      // Centre swipe in the requested direction. Shorter swipe distance
+      // (250 vs 400) so we don't overshoot a tile that's just out of
+      // viewport — overshoot puts the target back off-screen on the
+      // other side and the next isVisible miss loops forever.
       const cx = 195;
       const cy = 422;
-      const dist = 400;
+      const dist = 250;
       let x1 = cx,
         y1 = cy,
         x2 = cx,
@@ -319,7 +340,7 @@ async function runCommand(ctx: RunContext, rawCmd: MaestroCommand): Promise<void
         x2 = cx + dist / 2;
       }
       hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-      await sleep(350);
+      await sleep(500);
     }
     throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
   }
