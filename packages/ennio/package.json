@@ -1,29 +1,26 @@
 {
   "name": "@reactiive/ennio",
-  "version": "0.0.5",
+  "version": "0.1.0-rc.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/enzomanuelmangano/ennio.git",
     "directory": "packages/ennio"
   },
   "main": "lib/index.js",
+  "dependencies": {
+    "glob": "^10.0.0",
+    "js-yaml": "^4.1.0"
+  },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
-    "@types/ws": "^8.5.0",
     "esbuild": "^0.21.0",
-    "glob": "^10.0.0",
-    "js-yaml": "^4.1.0",
-    "nitrogen": "^0.35.5",
-    "react-native-nitro-modules": "^0.35.5",
-    "typescript": "^5.4.0",
-    "ws": "^8.18.0"
+    "typescript": "^5.4.0"
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": "*",
-    "react-native-nitro-modules": ">=0.18.0"
+    "react-native": "*"
   },
   "exports": {
     ".": {
@@ -34,45 +31,34 @@
   "bin": {
     "ennio": "./dist/cli.js"
   },
-  "description": "Maestro-compatible E2E test runner for React Native iOS. Drives the app over Hermes Inspector (CDP) and actuates real CoreSimulator touches via a persistent idb HID daemon.",
+  "description": "Maestro-compatible E2E test runner for React Native iOS. In-process ObjC dylib + Unix-socket protocol, no XCTest, no CDP.",
   "files": [
     "lib/",
     "dist/",
-    "src/Ennio.nitro.ts",
     "src/index.ts",
-    "src/cli/hid-daemon.py",
     "cpp/",
-    "android/",
     "ios/*.h",
     "ios/*.mm",
-    "nitrogen/generated/",
-    "nitro.json",
+    "ios/*.m",
     "EnnioCore.podspec",
     "react-native.config.js",
     "LICENSE",
     "README.md",
+    "ARCHITECTURE.md",
     "prebuilt/",
     "scripts/build-shim.sh",
     "scripts/build-dylib.sh",
     "scripts/regen-manifest.sh",
     "native-shim/"
   ],
-  "keywords": [
-    "react-native",
-    "e2e",
-    "testing",
-    "fabric",
-    "nitro",
-    "maestro",
-    "ios"
-  ],
+  "keywords": ["react-native", "e2e", "testing", "maestro", "ios"],
   "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "build:lib": "tsc",
-    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --external:fsevents --external:bufferutil --external:utf-8-validate",
+    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --external:fsevents",
     "build": "npm run build:lib && npm run build:cli && chmod +x dist/cli.js",
     "clean": "rm -rf lib dist",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",

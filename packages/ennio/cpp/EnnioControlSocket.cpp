@@ -1,312 +1,332 @@
 // EnnioControlSocket.cpp
 //
-// Unix domain socket transport that bypasses Hermes Inspector / CDP for
-// pure UIKit operations. Sole reason for existing: CDP `Runtime.evaluate`
-// queues on the JS thread, so any handler — even one that touches no JS
-// state — waits for whatever React work is in flight. Tab swaps on iOS 26
-// expose this: native UIKit cost is ~8 ms but CDP wait is ~2 s after a
-// destination-tab first-render kicks off on the JS thread.
+// Listener thread + accept loop + per-connection thread + per-line
+// dispatch. Wire format is intentionally trivial: each request is a
+// single JSON object on its own line, each response is a single JSON
+// object on its own line. No length prefix, no framing tricks.
 //
-// The socket lives in the app sandbox tmp dir at a stable filename so
-// the CLI can discover it via `simctl get_app_container ... data`. Wire
-// format = newline-delimited JSON. Server reuses the request/response
-// shapes from `Protocol.hpp` so commands here look identical to CDP
-// dispatch. Only a whitelisted subset of handlers is wired — anything
-// that needs JS thread state (`waitForCommit`, `evalScript`, shadow-tree
-// mutations) stays CDP-only.
+// Why one-thread-per-connection: in practice there's exactly one CLI
+// connected at a time. The accept thread spawns a worker for each
+// connection so the listener keeps responding to subsequent connects
+// without head-of-line blocking. Workers exit when the peer closes.
 //
-// Pure C++ on purpose — uses POSIX sockets + `getenv("TMPDIR")` so the
-// file compiles outside an ObjC++ TU. The whitelisted handlers call into
-// `EnnioRuntimeHelper` which is the ObjC++ wrapper around UIKit; that
-// indirection keeps the socket server portable and lets it be built into
-// the `cpp/` source group of the pod.
+// We deliberately do NOT pull in a JSON library here. The wire format
+// is fixed-shape and small. A minimal hand-rolled parser handles
+// `{"id":N,"op":"...","args":{...}}` good enough for the protocol. The
+// handler receives the raw `args` substring; ObjC++ code parses it
+// using NSJSONSerialization where richer access is needed.
 
 #include "EnnioControlSocket.h"
 
-#include "EnnioRuntimeHelper.h"
-#include "Protocol.hpp"
-
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <pthread.h>
-#include <sstream>
+#include <map>
+#include <mutex>
 #include <string>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/un.h>
+#include <thread>
 #include <unistd.h>
 
 namespace ennio {
 
 std::atomic<bool> EnnioControlSocket::g_started{false};
 
-static std::string g_socketPath;
+static std::mutex g_handlersMutex;
+static std::map<std::string, EnnioHandler> g_handlers;
 
-static std::string computeSocketPath() {
-    // sockaddr_un.sun_path is 104 bytes on macOS. The simulator app's
-    // sandbox $TMPDIR is ~140 chars (`.../Containers/Data/Application/
-    // <UUID>/tmp/`), too long for bind(). Use the host's `/tmp` — the
-    // simulator process is just a macOS process so /tmp is shared with
-    // the host, and the CLI runs on the host too.
-    //
-    // Single fixed name: one test run drives one app at a time. If you
-    // ever run multiple Ennio test runs concurrently they'll fight for
-    // this socket — same constraint as today's Hermes Inspector port.
-    return "/tmp/ennio-control.sock";
-}
+static const char *kSocketPath = "/tmp/ennio-control.sock";
 
 std::string EnnioControlSocket::socketPath() {
-    if (g_socketPath.empty()) g_socketPath = computeSocketPath();
-    return g_socketPath;
+    return kSocketPath;
 }
 
-// Handle one request. Single big switch keeps the wire surface explicit
-// and audit-able. Adding a new handler is a deliberate act — no
-// auto-registration.
-static Response dispatchRequest(const Request& req) {
-    Response r;
-    r.id = req.id;
-    r.success = false;
+void EnnioControlSocket::registerHandler(const std::string &op, EnnioHandler handler) {
+    std::lock_guard<std::mutex> lock(g_handlersMutex);
+    g_handlers[op] = std::move(handler);
+}
 
-    if (req.type == "tapTabByName") {
-        r.success = EnnioRuntimeHelper::getInstance().tapTabByName(
-            json::parseString(req.payload, "name"));
-    } else if (req.type == "getAlertButtonFrame") {
-        // Rendered UIAlertController button center, window-relative.
-        // CLI uses this to drive a real HID tap when the handler-
-        // invocation paths can't safely fire a re-presenting onPress
-        // (e.g. two-stage Alert.alert chains on iOS 18).
-        auto frame = EnnioRuntimeHelper::getInstance().getAlertButtonFrame(
-            json::parseString(req.payload, "buttonText"));
-        std::ostringstream oss;
-        oss << "{\"x\":" << std::get<0>(frame) << ",\"y\":" << std::get<1>(frame)
-            << ",\"width\":" << std::get<2>(frame) << ",\"height\":" << std::get<3>(frame) << "}";
-        r.data = oss.str();
-        r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
-    } else if (req.type == "describeWindowTopology") {
-        // Debug helper — returns JSON describing every scene's window
-        // tree (VC classes, frames, tabBar items + frames). Lets the
-        // CLI side reason about why a tap target isn't visually
-        // present even though Ennio's queries can resolve it.
-        r.success = true;
-        r.data = EnnioRuntimeHelper::getInstance().describeWindowTopology();
-    } else if (req.type == "findTabByName") {
-        // Existence query for tab-* testIDs in NativeTabs setups where
-        // expo-router drops the testID prop. Lets the CLI satisfy
-        // assertVisible / extendedWaitUntil against a tab whose
-        // UITabBarItem has empty title + no accessibilityIdentifier.
-        const bool present = EnnioRuntimeHelper::getInstance().findTabByName(
-            json::parseString(req.payload, "name"));
-        r.success = true;
-        r.data = present ? "true" : "false";
-    } else if (req.type == "isAlertPresent") {
-        // Pure UIKit query — walks UIWindowScene roots looking for a
-        // presented UIAlertController. Safe off the JS thread.
-        const bool present = EnnioRuntimeHelper::getInstance().isAlertPresent();
-        r.success = true;
-        r.data = present ? "true" : "false";
-    } else if (req.type == "getViewWindowFrame") {
-        // Hot-loop op: `writer.layoutCenter` polls this up to 30 times
-        // per id-based tap, checking for a stable frame. Going via CDP
-        // queues every poll on the JS thread; routing here drops each
-        // poll from ~30-200 ms (JS-queue contention) to ~3 ms (socket
-        // round-trip + UIKit query). UIKit `convertRect:toView:nil` is
-        // safe off the JS thread.
-        auto frame = EnnioRuntimeHelper::getInstance().getViewWindowFrame(
-            json::parseString(req.payload, "testID"));
-        std::ostringstream oss;
-        oss << "{\"x\":" << std::get<0>(frame) << ",\"y\":" << std::get<1>(frame)
-            << ",\"width\":" << std::get<2>(frame) << ",\"height\":" << std::get<3>(frame) << "}";
-        r.data = oss.str();
-        r.success = std::get<2>(frame) > 0 && std::get<3>(frame) > 0;
-    } else if (req.type == "scrollTo") {
-        // Walks up to the enclosing UIScrollView and sets contentOffset
-        // to bring the element into view. Pure UIKit on main thread —
-        // no JS state needed.
-        r.success = EnnioRuntimeHelper::getInstance().scrollTo(
-            json::parseString(req.payload, "scrollViewTestID"),
-            json::parseString(req.payload, "elementTestID"));
-    } else if (req.type == "setSearchBarText") {
-        // RNScreens' UISearchBar (headerSearchBarOptions) is native
-        // UIKit, not a React-managed view. testID can't reach its
-        // inner UITextField and idb HID keystrokes don't reliably
-        // deliver on iOS 26 simulator. Assigns .text and fires
-        // textDidChange on the delegate so onChangeText fires.
-        r.success = EnnioRuntimeHelper::getInstance().setSearchBarText(
-            json::parseString(req.payload, "text"));
-    } else if (req.type == "focusSearchBar") {
-        // RNScreens UISearchBar isn't in the React view tree —
-        // testID lookups + accessibility-text HID taps miss the
-        // placeholder. Calls becomeFirstResponder on the bar's text
-        // field so later inputText routes via appendSearchBarText.
-        r.success = EnnioRuntimeHelper::getInstance().focusSearchBar(
-            json::parseString(req.payload, "placeholder"));
-    } else if (req.type == "appendSearchBarText") {
-        // inputText semantics — append to current search bar text.
-        r.success = EnnioRuntimeHelper::getInstance().appendSearchBarText(
-            json::parseString(req.payload, "text"));
-    } else if (req.type == "eraseSearchBarText") {
-        // eraseText / clearText semantics on UISearchBar. Pass a
-        // very large count (e.g. INT_MAX from the CLI) to clear.
-        std::string countStr = json::parseString(req.payload, "count");
-        int count = 0;
-        try { count = std::stoi(countStr); } catch (...) { count = 0; }
-        r.success = EnnioRuntimeHelper::getInstance().eraseSearchBarText(count);
-    } else if (req.type == "pasteIntoFocusedField") {
-        // Layout-independent text input on locale-mismatched sims.
-        // Sets the system pasteboard and dispatches the canonical
-        // UIKit `paste:` action via the responder chain — same code
-        // path as the user tapping "Paste" in the long-press edit
-        // menu. Lets `inputText` route punctuation correctly when
-        // idb's HID `text` would mistranslate scan codes through the
-        // sim's iOS keyboard layout.
-        r.success = EnnioRuntimeHelper::getInstance().pasteIntoFocusedField(
-            json::parseString(req.payload, "text"));
-    } else if (req.type == "selectSegmentByLabel") {
-        // UISegmentedControl segment selection by visible label.
-        // Sidesteps the slow text-tap retry loop that the shadow-tree
-        // walk hits on RNCSegmentedControl labels.
-        r.success = EnnioRuntimeHelper::getInstance().selectSegmentByLabel(
-            json::parseString(req.payload, "label"));
-    } else if (req.type == "selectPickerValueByLabel") {
-        // Wheel-style UIPickerView selection. HID swipes against the
-        // spinner are flaky (touch begin/end timing inconsistent on
-        // iOS 26 simulator); this op walks every visible UIPickerView,
-        // matches a row by label, and fires the delegate's
-        // didSelectRow so RNCPicker emits onValueChange.
-        r.success = EnnioRuntimeHelper::getInstance().selectPickerValueByLabel(
-            json::parseString(req.payload, "label"));
-    } else if (req.type == "ping") {
-        r.success = true;
-        r.data = "\"pong\"";
-    } else {
-        r.error = "unknown_type";
+// =====================================================================
+// Minimal JSON helpers — extract the raw substrings we need from a
+// known-shape envelope. Sufficient for parsing the request; ObjC layer
+// uses NSJSONSerialization for args.
+// =====================================================================
+
+// Find the value substring of a top-level "key":<value> pair. value is
+// returned exactly as it appears in source (so a string value still has
+// surrounding quotes, an object value starts with '{', etc.). Empty
+// string if key not found at top level. NOT a general JSON parser —
+// only handles the flat envelope shape.
+static std::string extractRawValue(const std::string &json, const std::string &key) {
+    std::string needle = "\"" + key + "\"";
+    size_t depth = 0;
+    bool inString = false;
+    bool escape = false;
+    size_t i = 0;
+    auto match = [&](size_t pos) {
+        if (pos + needle.size() > json.size()) return false;
+        return json.compare(pos, needle.size(), needle) == 0;
+    };
+    while (i < json.size()) {
+        char c = json[i];
+        if (escape) {
+            escape = false;
+            i++;
+            continue;
+        }
+        if (inString) {
+            if (c == '\\') escape = true;
+            else if (c == '"') inString = false;
+            i++;
+            continue;
+        }
+        if (c == '"') {
+            if (depth == 1 && match(i)) {
+                // candidate top-level key
+                size_t after = i + needle.size();
+                while (after < json.size() && (json[after] == ' ' || json[after] == '\t')) after++;
+                if (after < json.size() && json[after] == ':') {
+                    after++;
+                    while (after < json.size() && (json[after] == ' ' || json[after] == '\t'))
+                        after++;
+                    // extract the value
+                    size_t start = after;
+                    if (start >= json.size()) return "";
+                    char vc = json[start];
+                    if (vc == '"') {
+                        // string value — return without surrounding quotes
+                        size_t end = start + 1;
+                        bool esc = false;
+                        while (end < json.size()) {
+                            char vv = json[end];
+                            if (esc) {
+                                esc = false;
+                                end++;
+                                continue;
+                            }
+                            if (vv == '\\') {
+                                esc = true;
+                                end++;
+                                continue;
+                            }
+                            if (vv == '"') break;
+                            end++;
+                        }
+                        return json.substr(start + 1, end - start - 1);
+                    } else if (vc == '{' || vc == '[') {
+                        int subDepth = 0;
+                        size_t end = start;
+                        bool inStr = false;
+                        bool esc = false;
+                        while (end < json.size()) {
+                            char vv = json[end];
+                            if (esc) {
+                                esc = false;
+                                end++;
+                                continue;
+                            }
+                            if (inStr) {
+                                if (vv == '\\') esc = true;
+                                else if (vv == '"') inStr = false;
+                                end++;
+                                continue;
+                            }
+                            if (vv == '"') inStr = true;
+                            else if (vv == '{' || vv == '[') subDepth++;
+                            else if (vv == '}' || vv == ']') {
+                                subDepth--;
+                                if (subDepth == 0) {
+                                    end++;
+                                    break;
+                                }
+                            }
+                            end++;
+                        }
+                        return json.substr(start, end - start);
+                    } else {
+                        // primitive (number, bool, null)
+                        size_t end = start;
+                        while (end < json.size()) {
+                            char vv = json[end];
+                            if (vv == ',' || vv == '}' || vv == ']' || vv == ' ' || vv == '\t' ||
+                                vv == '\n' || vv == '\r')
+                                break;
+                            end++;
+                        }
+                        return json.substr(start, end - start);
+                    }
+                }
+            }
+            inString = true;
+            i++;
+            continue;
+        }
+        if (c == '{' || c == '[') depth++;
+        else if (c == '}' || c == ']') depth--;
+        i++;
     }
-    return r;
+    return "";
 }
 
-// Read until newline. Returns false on EOF/error.
-static bool readLine(int fd, std::string& out) {
-    out.clear();
-    char buf[1];
+// Escape a string for JSON output.
+static std::string jsonEscape(const std::string &s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char c : s) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if ((unsigned char)c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+
+// =====================================================================
+// Dispatch
+// =====================================================================
+
+static std::string handleRequestLine(const std::string &line) {
+    std::string id = extractRawValue(line, "id");
+    std::string op = extractRawValue(line, "op");
+    std::string args = extractRawValue(line, "args");
+
+    if (op.empty()) {
+        return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+               ",\"ok\":false,\"err\":\"missing op\"}";
+    }
+
+    EnnioHandler handler;
+    {
+        std::lock_guard<std::mutex> lock(g_handlersMutex);
+        auto it = g_handlers.find(op);
+        if (it == g_handlers.end()) {
+            return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+                   ",\"ok\":false,\"err\":\"unknown op: " + jsonEscape(op) + "\"}";
+        }
+        handler = it->second;
+    }
+
+    try {
+        std::string data = handler(args.empty() ? std::string("{}") : args);
+        if (data.empty()) data = "null";
+        return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+               ",\"ok\":true,\"data\":" + data + "}";
+    } catch (const std::exception &e) {
+        return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+               ",\"ok\":false,\"err\":\"" + jsonEscape(e.what()) + "\"}";
+    } catch (...) {
+        return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+               ",\"ok\":false,\"err\":\"handler threw unknown exception\"}";
+    }
+}
+
+// One worker per connection. Reads newline-delimited requests, writes
+// newline-delimited responses, exits on EOF or write failure.
+static void connectionWorker(int fd) {
+    std::string buf;
+    buf.reserve(4096);
+    char chunk[2048];
     while (true) {
-        ssize_t n = ::read(fd, buf, 1);
-        if (n <= 0) return false;
-        if (buf[0] == '\n') return true;
-        out.push_back(buf[0]);
-        if (out.size() > (1u << 20)) return false; // 1 MiB ceiling
-    }
-}
-
-static bool writeLine(int fd, const std::string& line) {
-    std::string framed = line;
-    framed.push_back('\n');
-    const char* p = framed.data();
-    size_t left = framed.size();
-    while (left > 0) {
-        ssize_t n = ::write(fd, p, left);
-        if (n <= 0) return false;
-        p += n;
-        left -= static_cast<size_t>(n);
-    }
-    return true;
-}
-
-static void serveClient(int fd) {
-    std::string line;
-    while (readLine(fd, line)) {
-        Request req;
-        req.id = json::parseString(line, "id");
-        req.type = json::parseString(line, "type");
-        // payload is itself a JSON object at the "payload" key. The CLI
-        // inlines fields; we keep the whole line for downstream
-        // parseString lookups — same loose convention as CDP path.
-        req.payload = line;
-        Response resp = dispatchRequest(req);
-        if (!writeLine(fd, resp.toJSON())) break;
-    }
-    ::close(fd);
-}
-
-static void* acceptLoop(void* arg) {
-    int srv = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-    ::pthread_setname_np("ennio-control-socket");
-    while (true) {
-        int cfd = ::accept(srv, nullptr, nullptr);
-        if (cfd < 0) {
+        ssize_t n = read(fd, chunk, sizeof(chunk));
+        if (n == 0) break;
+        if (n < 0) {
             if (errno == EINTR) continue;
             break;
         }
-        // One client at a time. Sequential serves keep UIKit dispatch
-        // ordering predictable and side-step multi-writer races on the
-        // dispatch table. CLI uses a single persistent connection so
-        // there's no real concurrency pressure.
-        serveClient(cfd);
+        buf.append(chunk, (size_t)n);
+
+        size_t nl;
+        while ((nl = buf.find('\n')) != std::string::npos) {
+            std::string line = buf.substr(0, nl);
+            buf.erase(0, nl + 1);
+            if (line.empty()) continue;
+            std::string response = handleRequestLine(line);
+            response += '\n';
+            const char *p = response.data();
+            size_t remaining = response.size();
+            bool writeFailed = false;
+            while (remaining > 0) {
+                ssize_t w = write(fd, p, remaining);
+                if (w < 0) {
+                    if (errno == EINTR) continue;
+                    writeFailed = true;
+                    break;
+                }
+                p += w;
+                remaining -= (size_t)w;
+            }
+            if (writeFailed) {
+                close(fd);
+                return;
+            }
+        }
     }
-    ::close(srv);
-    return nullptr;
+    close(fd);
+}
+
+static void acceptLoop(int listenFd) {
+    while (true) {
+        int fd = accept(listenFd, nullptr, nullptr);
+        if (fd < 0) {
+            if (errno == EINTR) continue;
+            std::fprintf(stderr, "[Ennio] accept() failed: %s\n", std::strerror(errno));
+            // Brief backoff to avoid pegging a CPU on persistent failure.
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+        std::thread(connectionWorker, fd).detach();
+    }
 }
 
 void EnnioControlSocket::start() {
     bool expected = false;
     if (!g_started.compare_exchange_strong(expected, true)) return;
 
-    const std::string path = socketPath();
-
-    // Unlink stale sock from a crashed previous run. Best-effort.
-    ::unlink(path.c_str());
-
-    int srv = ::socket(AF_UNIX, SOCK_STREAM, 0);
-    if (srv < 0) {
-        std::fprintf(stderr, "[Ennio][socket] socket() failed: %s\n", std::strerror(errno));
-        g_started.store(false);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        std::fprintf(stderr, "[Ennio] socket() failed: %s\n", std::strerror(errno));
+        g_started = false;
         return;
     }
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
-    if (path.size() >= sizeof(addr.sun_path)) {
-        std::fprintf(stderr, "[Ennio][socket] path too long (%zu): %s\n", path.size(), path.c_str());
-        ::close(srv);
-        g_started.store(false);
-        return;
-    }
-    std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+    std::strncpy(addr.sun_path, kSocketPath, sizeof(addr.sun_path) - 1);
 
-    if (::bind(srv, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        std::fprintf(stderr, "[Ennio][socket] bind(%s) failed: %s\n", path.c_str(), std::strerror(errno));
-        ::close(srv);
-        g_started.store(false);
+    // Clean up any orphaned socket file from a previous run.
+    unlink(kSocketPath);
+
+    if (bind(fd, (sockaddr *)&addr, sizeof(addr)) < 0) {
+        std::fprintf(stderr, "[Ennio] bind(%s) failed: %s\n", kSocketPath, std::strerror(errno));
+        close(fd);
+        g_started = false;
         return;
     }
 
-    // 0600 — owner-only. Same user as the simulator process / CLI on a
-    // dev box. Other local users on a shared CI box cannot connect.
-    ::chmod(path.c_str(), 0600);
-
-    if (::listen(srv, 4) < 0) {
-        std::fprintf(stderr, "[Ennio][socket] listen() failed: %s\n", std::strerror(errno));
-        ::close(srv);
-        ::unlink(path.c_str());
-        g_started.store(false);
+    if (listen(fd, 4) < 0) {
+        std::fprintf(stderr, "[Ennio] listen() failed: %s\n", std::strerror(errno));
+        close(fd);
+        unlink(kSocketPath);
+        g_started = false;
         return;
     }
 
-    std::fprintf(stderr, "[Ennio][socket] listening on %s\n", path.c_str());
-
-    pthread_t t;
-    if (::pthread_create(&t, nullptr, &acceptLoop,
-                         reinterpret_cast<void*>(static_cast<intptr_t>(srv))) != 0) {
-        std::fprintf(stderr, "[Ennio][socket] pthread_create failed\n");
-        ::close(srv);
-        ::unlink(path.c_str());
-        g_started.store(false);
-        return;
-    }
-    ::pthread_detach(t);
+    std::thread(acceptLoop, fd).detach();
+    std::fprintf(stderr, "[Ennio] socket listening on %s\n", kSocketPath);
 }
 
 } // namespace ennio

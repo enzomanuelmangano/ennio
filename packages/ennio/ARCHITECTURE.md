@@ -74,10 +74,10 @@
 A11y-only. Two tiers (cache + walk). No JSI, no fiber tree, no RN private
 surface.
 
-| Tier      | Mechanism                                                       | Cost   | Catches                                                                            |
-| --------- | --------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------- |
-| Cache     | `NSMutableDictionary<NSString*, UIView*>` mapping testID → view | ~0.1ms | Any testID seen recently; invalidated on `clear_state` and when target view is gone |
-| A11y walk | Recursive UIView traversal matching `accessibilityIdentifier`   | ~5-10ms | Everything else with proper testID propagation                                     |
+| Tier      | Mechanism                                                       | Cost    | Catches                                                                             |
+| --------- | --------------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------- |
+| Cache     | `NSMutableDictionary<NSString*, UIView*>` mapping testID → view | ~0.1ms  | Any testID seen recently; invalidated on `clear_state` and when target view is gone |
+| A11y walk | Recursive UIView traversal matching `accessibilityIdentifier`   | ~5-10ms | Everything else with proper testID propagation                                      |
 
 **testID propagation requirement.** RN's stock components propagate `testID`
 → `accessibilityIdentifier` automatically. Custom wrappers (RNGH BaseButton,
@@ -96,10 +96,10 @@ SwiftUI / native UIKit / NativeScript apps that propagate
 
 Pure UIKit-based. No React commit hook in 0.1.
 
-| Op            | Mechanism                                                                                   | Cost   |
-| ------------- | ------------------------------------------------------------------------------------------- | ------ |
-| `wait_idle`   | `CFRunLoopObserver` for `kCFRunLoopBeforeWaiting` + no in-flight UIView animations          | ~50ms detect |
-| `wait_commit` | `CADisplayLink` frame-hash: sample visible UIView frames+alpha+labels, settle when stable   | ~100ms detect |
+| Op            | Mechanism                                                                                 | Cost          |
+| ------------- | ----------------------------------------------------------------------------------------- | ------------- |
+| `wait_idle`   | `CFRunLoopObserver` for `kCFRunLoopBeforeWaiting` + no in-flight UIView animations        | ~50ms detect  |
+| `wait_commit` | `CADisplayLink` frame-hash: sample visible UIView frames+alpha+labels, settle when stable | ~100ms detect |
 
 This is the "framework-agnostic" path argent uses for non-RN apps. Loses
 the ~5ms wake-on-commit advantage that an RN DevTools hook would give,
@@ -193,19 +193,19 @@ CLI tap flow: `find_by_testid` → coords → CLI sends to idb (Phase 1) →
 
 ## What's dropped vs current ennio
 
-| Dropped                                                                     | Why                                                                                              |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `cpp/HybridEnnio.{cpp,hpp}`                                                 | Fabric C++ surface; per-RN-minor coupling                                                        |
-| `cpp/ShadowTreeTraverser.{cpp,hpp}`                                         | Fabric C++ headers                                                                               |
-| `cpp/Protocol.{cpp,hpp}`                                                    | Was the `__ennioDispatch` request/response envelope; replaced by socket JSON                     |
-| `cpp/TestIDRegistry.{cpp,hpp}`                                              | Fabric ShadowNode registry walk; replaced by JS-side fiber observer + native NSMutableDictionary |
-| `cpp/IdleMonitor.hpp`                                                       | Fabric commit waiter; replaced by JS commit hook + condvar                                       |
-| `nitrogen/`, `src/Ennio.nitro.ts`, `react-native-nitro-modules` peer        | Nitro JSI bindings — not needed when transport is socket                                         |
-| `src/cli/hid-daemon.py`                                                     | Python gRPC daemon — Node speaks gRPC directly                                                   |
-| `RCTHost.start` swizzle (`ios/EnnioAutoInit.mm`)                            | Not needed — a11y-only discovery + UIKit settle has no JSI requirement                           |
-| `instance:didInitializeRuntime:` swizzle (WIP)                              | Same — no JSI capture needed                                                                     |
-| Hermes Inspector / CDP hot path                                             | Socket replaces; CDP optionally retained as fallback for `runScript`/`evalScript`                |
-| `prebuilt/libennio-rn0.83.6-sim.dylib` (per-RN slice)                       | One universal dylib                                                                              |
+| Dropped                                                              | Why                                                                                              |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `cpp/HybridEnnio.{cpp,hpp}`                                          | Fabric C++ surface; per-RN-minor coupling                                                        |
+| `cpp/ShadowTreeTraverser.{cpp,hpp}`                                  | Fabric C++ headers                                                                               |
+| `cpp/Protocol.{cpp,hpp}`                                             | Was the `__ennioDispatch` request/response envelope; replaced by socket JSON                     |
+| `cpp/TestIDRegistry.{cpp,hpp}`                                       | Fabric ShadowNode registry walk; replaced by JS-side fiber observer + native NSMutableDictionary |
+| `cpp/IdleMonitor.hpp`                                                | Fabric commit waiter; replaced by JS commit hook + condvar                                       |
+| `nitrogen/`, `src/Ennio.nitro.ts`, `react-native-nitro-modules` peer | Nitro JSI bindings — not needed when transport is socket                                         |
+| `src/cli/hid-daemon.py`                                              | Python gRPC daemon — Node speaks gRPC directly                                                   |
+| `RCTHost.start` swizzle (`ios/EnnioAutoInit.mm`)                     | Not needed — a11y-only discovery + UIKit settle has no JSI requirement                           |
+| `instance:didInitializeRuntime:` swizzle (WIP)                       | Same — no JSI capture needed                                                                     |
+| Hermes Inspector / CDP hot path                                      | Socket replaces; CDP optionally retained as fallback for `runScript`/`evalScript`                |
+| `prebuilt/libennio-rn0.83.6-sim.dylib` (per-RN slice)                | One universal dylib                                                                              |
 
 ## What's kept
 
@@ -224,9 +224,9 @@ CLI tap flow: `find_by_testid` → coords → CLI sends to idb (Phase 1) →
 
 ## What's added
 
-| Added                           | Purpose                                                                                           |
-| ------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `ios/EnnioBootstrap.mm`         | New `+load` + UIApplicationDidFinishLaunchingNotification bootstrap. Replaces `EnnioAutoInit.mm`. |
+| Added                                 | Purpose                                                                                                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ios/EnnioBootstrap.mm`               | New `+load` + UIApplicationDidFinishLaunchingNotification bootstrap. Replaces `EnnioAutoInit.mm`.                                                              |
 | `ios/EnnioFinder.{h,mm}`              | A11y/UIView walk + cache management.                                                                                                                           |
 | `ios/EnnioFiberWalker.mm`             | ObjC++ glue: JSI eval of `__ennio_findFiberByTestID`.                                                                                                          |
 | `ios/EnnioCommitHook.mm`              | ObjC++ glue: installs `__ennio_native_onCommit` JSI host fn, signals condvar.                                                                                  |
