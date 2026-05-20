@@ -76,6 +76,7 @@ const POST_LAUNCH_SETTLE_MS = 400; // Wait for sim teardown after clearState bef
 const POST_LAUNCH_IDLE_BUDGET_MS = 1500; // First waitForIdle after a launch.
 const TYPE_TEXT_IDLE_BUDGET_MS = 600; // Drain RN bridge after typeText so onChangeText commits before the next tap reads `value`.
 const POST_LAUNCH_SHADOW_COMMIT_MS = 250; // First shadow-tree commit settle after reconnect.
+const POST_RELOAD_TEARDOWN_MS = 2500; // Hermes context recycle after DevSettings.reload — Inspector WS is unstable for ~2s.
 const RETRY_POLL_MS = 100; // Predicate retry tick for waitFor / extendedWaitUntil.
 const POINT_TAP_SETTLE_MS = 60; // Quick settle after tapAt — no tab-nav animation.
 const RECORDING_SETTLE_MS = 500; // Settle after start/stopRecording so the next step sees a stable IO state.
@@ -606,6 +607,35 @@ class MaestroExecutor {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /**
+   * Poll Hermes Inspector until `__ennioDispatch` is installed AND the
+   * connection is stable. Require 3 consecutive successful 250ms-apart
+   * polls — on bridgeless RN the Bridgeless page can briefly look ready
+   * during runtime swap-in. Three stable hits across ~750ms means the
+   * new runtime has fully replaced the old one.
+   */
+  private async waitForDispatchReady(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    let stableHits = 0;
+    while (Date.now() < deadline) {
+      try {
+        const value = await this.client.evalForBootstrap(
+          `typeof globalThis.__ennioDispatch`,
+        );
+        if (value === 'function') {
+          stableHits++;
+          if (stableHits >= 3) return true;
+        } else {
+          stableHits = 0;
+        }
+      } catch {
+        stableHits = 0;
+      }
+      await this.sleep(250);
+    }
+    return false;
   }
 
   /**
@@ -2227,6 +2257,7 @@ class MaestroExecutor {
     // ~150-500ms vs ~5-6s for the hard relaunch below. Falls back
     // automatically when no callback is registered or the callback
     // throws — guarantees we never get stuck in a half-reset state.
+    // ─── Tier 1: app-registered hook ────────────────────────────
     try {
       const ok = await this.client.tryInvokeReset();
       if (ok) {
@@ -2247,11 +2278,67 @@ class MaestroExecutor {
         return;
       }
     } catch (err) {
-      this.log(
-        `clearState: hook failed (${(err as Error).message}); falling back to hard relaunch`,
-      );
+      this.log(`clearState: hook failed (${(err as Error).message}); falling back`);
     }
 
+    // ─── Tier 2: native reload (opt-in via ENNIO_NATIVE_RELOAD=1) ─
+    // The ennio dylib's swizzled `instance:didInitializeRuntime:`
+    // re-installs `__ennioDispatch` on every Hermes runtime recycle,
+    // so the CLI can short-circuit the slow `simctl terminate + launch`
+    // path and use RN's `DevSettings.reload` instead — same iOS
+    // process, ~3s vs ~6s.
+    //
+    // BUT in bridgeless RN, the Inspector WebSocket sometimes dies a
+    // tick or two AFTER the new runtime accepts commands, producing
+    // sporadic "Connection closed" errors on the first real eval.
+    // Gating behind an env var keeps the suite stable by default;
+    // users who want to experiment with the speedup can opt in.
+    if (process.env.ENNIO_NATIVE_RELOAD === '1') {
+      try {
+        try {
+          await this.client.clearAppData();
+        } catch {
+          /* best effort */
+        }
+        const fired = await this.client.tryNativeReload();
+        if (fired) {
+          this.log(
+            `clearState: ${targetAppId}${
+              bundlerUrl && devClientScheme
+                ? ` (devClient ${detectedScheme ? 'auto' : 'opt-in'} → ${bundlerUrl})`
+                : ''
+            } [native-reload]`,
+          );
+          await this.sleep(POST_RELOAD_TEARDOWN_MS);
+          const ok = await this.client.reconnect(DEFAULT_RECONNECT_TIMEOUT);
+          if (ok) {
+            const dispatchReady = await this.waitForDispatchReady(DEFAULT_RECONNECT_TIMEOUT);
+            if (dispatchReady) {
+              await this.client.reconnect(DEFAULT_RECONNECT_TIMEOUT);
+              this.writer.setClient(this.client);
+              this.reader.setClient(this.client);
+              this.writer.invalidateViewportCache();
+              await this.client.suppressDevNoise();
+              await this.sleep(POST_LAUNCH_SHADOW_COMMIT_MS);
+              try {
+                await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS);
+              } catch {
+                /* tolerate */
+              }
+              this.log('clearState: App reloaded natively');
+              return;
+            }
+            this.log('clearState: __ennioDispatch not ready post-reload; falling back');
+          } else {
+            this.log('clearState: reconnect after reload failed; falling back');
+          }
+        }
+      } catch (err) {
+        this.log(`clearState: native reload failed (${(err as Error).message}); falling back`);
+      }
+    }
+
+    // ─── Tier 3: hard relaunch ──────────────────────────────────
     this.log(
       `clearState: ${targetAppId}${
         bundlerUrl && devClientScheme
@@ -2367,14 +2454,48 @@ class MaestroExecutor {
           return;
         }
       } catch (err) {
-        this.log(
-          `launchApp: hook failed (${(err as Error).message}); falling back to hard relaunch`,
-        );
+        this.log(`launchApp: hook failed (${(err as Error).message}); falling back`);
       }
-      try {
-        await this.client.clearAppData();
-      } catch {
-        /* best effort */
+
+      // Tier 2: native reload (opt-in via ENNIO_NATIVE_RELOAD=1).
+      // See handleClearState for rationale.
+      if (process.env.ENNIO_NATIVE_RELOAD === '1') {
+        try {
+          try {
+            await this.client.clearAppData();
+          } catch {
+            /* best effort */
+          }
+          const fired = await this.client.tryNativeReload();
+          if (fired) {
+            this.log(`launchApp: ${targetAppId} (clearState) [native-reload]`);
+            await this.sleep(POST_RELOAD_TEARDOWN_MS);
+            const ok = await this.client.reconnect(DEFAULT_RECONNECT_TIMEOUT);
+            if (ok) {
+              const dispatchReady = await this.waitForDispatchReady(DEFAULT_RECONNECT_TIMEOUT);
+              if (dispatchReady) {
+                await this.client.reconnect(DEFAULT_RECONNECT_TIMEOUT);
+                this.writer.setClient(this.client);
+                this.reader.setClient(this.client);
+                this.writer.invalidateViewportCache();
+                await this.client.suppressDevNoise();
+                await this.sleep(POST_LAUNCH_SHADOW_COMMIT_MS);
+                try {
+                  await this.client.waitForIdle(POST_LAUNCH_IDLE_BUDGET_MS);
+                } catch {
+                  /* tolerate */
+                }
+                this.log('launchApp: Reloaded natively');
+                return;
+              }
+              this.log('launchApp: __ennioDispatch not ready post-reload; falling back');
+            } else {
+              this.log('launchApp: reconnect after reload failed; falling back');
+            }
+          }
+        } catch (err) {
+          this.log(`launchApp: native reload failed (${(err as Error).message}); falling back`);
+        }
       }
     }
     this.client.disconnect();

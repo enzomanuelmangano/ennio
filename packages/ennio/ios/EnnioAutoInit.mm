@@ -23,8 +23,73 @@
 #define ENNIO_HAVE_RCTINSTANCE 1
 #endif
 
+// Reload-aware bootstrap: in addition to swizzling `RCTHost.start`
+// (fires once at process boot), swizzle `RCTHost.instance:didInitializeRuntime:`
+// which RN calls EVERY time a new `jsi::Runtime` is created — initial
+// boot plus every reload triggered via `RCTTriggerReloadCommandListeners`
+// (`DevSettings.reload`, shake → Reload, the public CDP path, etc.).
+// Without this, `__ennioDispatch` disappears from JS after every reload
+// and the CLI's next eval errors with "Property '__ennioDispatch'
+// doesn't exist".
+//
+// We tried `host.runtimeDelegate` first (KVC readback confirmed the
+// delegate was set), but the forwarding method `instance:didInitializeRuntime:`
+// silently dropped the call in some RN configurations. Swizzling that
+// method directly bypasses the forwarder. Same trampoline pattern as
+// `ennio_start`: store original IMP, install ours, on call run the
+// post-init bootstrap then chain to the original.
+
 // Flag to track if Ennio has been initialized
 static BOOL _ennioInitialized = NO;
+
+// Original IMP of `RCTHost instance:didInitializeRuntime:` saved on
+// first swizzle so we can chain after running our re-bootstrap.
+static IMP _ennioOriginalDidInitImp = NULL;
+static SEL _ennioDidInitSel = NULL;
+
+#ifdef ENNIO_HAVE_RCTINSTANCE
+// Swizzled replacement: runs on the JS thread every time RCTInstance
+// finishes wiring up a new jsi::Runtime. We refresh the JS-thread
+// executor (instance pointer rotates on reload) and schedule the
+// re-bootstrap via `callFunctionOnBufferedRuntimeExecutor` so the
+// install happens AFTER the bundle finishes executing — installing on
+// `globalThis` before Metro's bundle wrapper runs would get clobbered.
+static void EnnioSwizzledDidInitializeRuntime(id self, SEL _cmd, id instance, facebook::jsi::Runtime& runtime) {
+    @try {
+        NSString* mark = [NSString stringWithFormat:@"%@/Library/_ennio_didinit_called.txt", NSHomeDirectory()];
+        [@"called" writeToFile:mark atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+        if ([instance isKindOfClass:[RCTInstance class]]) {
+            __strong RCTInstance* strongInstance = (RCTInstance*)instance;
+            // Update executor so background dispatchers route to the
+            // new RCTInstance (old one was just invalidated on reload).
+            margelo::nitro::ennio::HybridEnnio::JSThreadExecutor exec =
+                [strongInstance](std::function<void(facebook::jsi::Runtime&)>&& fn) {
+                    [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(fn)];
+                };
+            margelo::nitro::ennio::HybridEnnio::setJSThreadExecutor(std::move(exec));
+
+            // Schedule re-install onto the JS thread, post-bundle.
+            std::function<void(facebook::jsi::Runtime&)> reboot =
+                [](facebook::jsi::Runtime& rt) {
+                    margelo::nitro::ennio::HybridEnnio::nativeBootstrap(rt);
+                    NSString* mark2 = [NSString stringWithFormat:@"%@/Library/_ennio_reload_rebootstrapped.txt", NSHomeDirectory()];
+                    [@"ok" writeToFile:mark2 atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                    NSLog(@"[Ennio] Re-installed __ennioDispatch on reloaded JS context");
+                };
+            [strongInstance callFunctionOnBufferedRuntimeExecutor:std::move(reboot)];
+        }
+    } @catch (NSException* e) {
+        NSLog(@"[Ennio] swizzled didInitializeRuntime raised: %@", e);
+    }
+    // Chain to original so RCTHost still forwards to its runtimeDelegate
+    // (preserves app-provided init hooks).
+    if (_ennioOriginalDidInitImp != NULL) {
+        typedef void (*OrigFn)(id, SEL, id, facebook::jsi::Runtime&);
+        ((OrigFn)_ennioOriginalDidInitImp)(self, _cmd, instance, runtime);
+    }
+}
+#endif
 
 // Distribution channel detection. Ennio is a dev / QA tool and must
 // refuse to start on App Store production or Enterprise builds. The
@@ -164,6 +229,24 @@ static NSString* ennioDistributionName(EnnioDistribution d) {
     Method newSwizzledMethod = class_getInstanceMethod(hostClass, swizzledSelector);
     method_exchangeImplementations(originalMethod, newSwizzledMethod);
     NSLog(@"[Ennio] RCTHost.start swizzle installed successfully");
+
+#ifdef ENNIO_HAVE_RCTINSTANCE
+    // Also hook `instance:didInitializeRuntime:` — RCTInstance fires
+    // this on EVERY runtime init (initial + every reload). Bypasses
+    // the `host.runtimeDelegate` forwarder, which was silently
+    // dropping our calls in some RN configurations.
+    _ennioDidInitSel = NSSelectorFromString(@"instance:didInitializeRuntime:");
+    Method didInitMethod = class_getInstanceMethod(hostClass, _ennioDidInitSel);
+    if (didInitMethod) {
+        _ennioOriginalDidInitImp = method_setImplementation(
+            didInitMethod,
+            (IMP)EnnioSwizzledDidInitializeRuntime
+        );
+        NSLog(@"[Ennio] RCTHost instance:didInitializeRuntime: swizzle installed");
+    } else {
+        NSLog(@"[Ennio] Could not find instance:didInitializeRuntime: on RCTHost");
+    }
+#endif
 }
 
 + (void)swizzleFabricSurfaceStart:(Class)surfaceClass {

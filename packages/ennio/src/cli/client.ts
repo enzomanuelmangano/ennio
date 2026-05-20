@@ -575,6 +575,41 @@ export class EnnioClient {
   }
 
   /**
+   * Public eval — used by the runner's reload-readiness probe.
+   */
+  async evalForBootstrap(expression: string): Promise<unknown> {
+    return this.eval(expression);
+  }
+
+  /**
+   * Fire RN's `DevSettings.reload()` via CDP. Same path shake → Reload
+   * uses. Hermes JS context recycles in the SAME iOS process; the ennio
+   * dylib's swizzled `instance:didInitializeRuntime:` re-installs
+   * `__ennioDispatch` on the new runtime. Caller is responsible for
+   * the post-reload reconnect + readiness wait.
+   */
+  async tryNativeReload(): Promise<boolean> {
+    try {
+      const fired = await this.eval(
+        `(function() {
+          try {
+            var p = globalThis.nativeModuleProxy;
+            if (p && p.DevSettings && typeof p.DevSettings.reload === 'function') {
+              p.DevSettings.reload();
+              return true;
+            }
+          } catch (e) {}
+          return false;
+        })()`,
+      );
+      return fired === true;
+    } catch {
+      // Eval races the reload-induced WS teardown; treat as fired.
+      return true;
+    }
+  }
+
+  /**
    * If the app registered a reset callback via
    * `registerEnnioReset(fn)`, run it in-process and return true.
    * Returns false when no callback is present (caller falls back to
