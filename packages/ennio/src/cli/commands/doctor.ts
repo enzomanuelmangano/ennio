@@ -3,17 +3,17 @@
  *
  * Checks, in order:
  *   1. Booted iOS simulator (or ENNIO_UDID)
- *   2. idb_companion connected (used for HID actuation + a11y fallbacks)
- *   3. Hermes Inspector reachable (Metro on :8081, app exposes JS context)
- *
- * Each check prints `[PASS]` / `[FAIL]` + a one-line cause. Exit code is
- * 0 only when every check passes.
+ *   2. idb_companion connected (used for HID actuation in Phase 1)
+ *   3. libennio.dylib socket reachable at /tmp/ennio-control.sock
+ *      (the in-app dylib listener — bootstrap-ready iff a real iOS app
+ *      launched it via SIMCTL_CHILD_DYLD_INSERT_LIBRARIES or Pod link)
  */
 
 import { execSync } from 'child_process';
-import { getBootedSimulatorId } from '../maestro-runner';
-import { tryConnection } from '../cli/bootstrap';
+
 import type { Flags } from '../cli/args';
+import { EnnioSocketClient } from '../socket-client';
+import { getTargetUdid as getBootedSimulatorId } from '../sim';
 
 type Result = { name: string; ok: boolean; detail: string };
 
@@ -47,15 +47,21 @@ export async function runDoctorCommand(_positional: string[], _flags: Flags): Pr
   }
   results.push({ name: 'idb_companion', ok: idbOk, detail: idbDetail });
 
-  const client = await tryConnection();
-  results.push({
-    name: 'Hermes Inspector',
-    ok: !!client,
-    detail: client
-      ? 'connected'
-      : 'no JS context — launch a Debug build, confirm Metro is running, confirm @reactiive/ennio-expo-plugin was applied at last prebuild',
-  });
-  if (client) client.disconnect();
+  const client = new EnnioSocketClient();
+  const socketUp = await client.connect();
+  let socketDetail = 'not listening — launch the target app with libennio injected';
+  if (socketUp) {
+    try {
+      const r = await client.call('ping');
+      const bootstrap =
+        r.ok && r.data ? (r.data as { bootstrap?: string }).bootstrap || 'unknown' : 'unknown';
+      socketDetail = `connected, bootstrap=${bootstrap}`;
+    } catch (e) {
+      socketDetail = `connected but ping failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    client.close();
+  }
+  results.push({ name: 'libennio socket', ok: socketUp, detail: socketDetail });
 
   for (const r of results) {
     const tag = r.ok ? '[PASS]' : '[FAIL]';

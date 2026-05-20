@@ -1,30 +1,26 @@
 /**
- * `ennio test <flow.yaml | dir | glob>` — run one or more Maestro YAML flows.
+ * `ennio test <flow.yaml | dir | glob>` — run one or more Maestro YAML
+ * flows.
  *
- * Bare invocation (`ennio <flow.yaml>`) routes here too via the dispatcher.
+ * v0.1 socket-first runner. Assumes the in-app dylib (libennio) is
+ * already loaded into a running iOS Sim app — i.e. the app was launched
+ * with `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=<dylib>` (zero-install path)
+ * or the app links EnnioCore via the Pod plugin.
  */
 
 import { existsSync, statSync } from 'fs';
-import { resolve, basename, join } from 'path';
+import { basename, join, resolve } from 'path';
+
 import { glob } from 'glob';
-import { runMaestroTests } from '../maestro-runner';
-import { parseMaestroFile } from '../maestro-parser';
-import { NitroWriter, type Writer } from '../writer';
-import { NitroReader, type Reader } from '../reader';
-import type { EnnioClient } from '../client';
-import { connectOrLaunch } from '../cli/bootstrap';
+
 import type { Flags } from '../cli/args';
+import { parseMaestroFile } from '../maestro-parser';
+import { runFlow } from '../runner';
 
 function isMaestroFile(filePath: string): boolean {
   return filePath.endsWith('.yaml') || filePath.endsWith('.yml');
 }
 
-// Maestro convention: filenames starting with `_` are subflows meant to
-// be invoked via `runFlow: { file: _name.yaml }` from a parent, not
-// directly. They typically rely on `${VAR}` references inherited from
-// the parent's env block; running them standalone leaves the JS context
-// empty and `${TEST_EMAIL}` gets typed as a literal. Skip them when
-// expanding a directory.
 function isSubflowFile(filePath: string): boolean {
   return basename(filePath).startsWith('_');
 }
@@ -41,51 +37,18 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
           .map((f) => resolve(f)),
       );
     } else {
-      // Explicit path / glob — honour the user's request verbatim
-      // (allow targeting a `_subflow.yaml` directly when testing it).
       const matches = await glob(pattern);
       files.push(
-        ...matches
-          .filter((f) => isMaestroFile(f) && !f.includes('/subflows/'))
-          .map((f) => resolve(f)),
+        ...matches.filter((f) => isMaestroFile(f) && !f.includes('/subflows/')).map((f) => resolve(f)),
       );
     }
   }
   return files;
 }
 
-interface TestFileResultWithClient {
-  file: string;
-  passed: number;
-  failed: number;
-  client?: EnnioClient;
-}
-
-async function runTestFile(
-  client: EnnioClient,
-  writer: Writer,
-  reader: Reader,
-  filePath: string,
-  options: { verbose?: boolean; trace?: boolean; port?: number },
-): Promise<TestFileResultWithClient> {
-  const fileName = basename(filePath);
-  console.log(`▸ ${fileName}`);
-  // Don't catch here. `runMaestroTests` returns assertion failures as
-  // `results.tests[i].passed === false`; a thrown error means the runner
-  // itself crashed (bad yaml, WS dead, etc.) and is not a flow failure.
-  // Surfacing it as one would mask infrastructure breakage.
-  const results = await runMaestroTests(client, writer, reader, filePath, options);
-  for (const test of results.tests) {
-    if (test.passed) console.log(`  [PASS] ${test.name}`);
-    else console.log(`  [FAIL] ${test.name}: ${test.error || 'unknown error'}`);
-  }
-  console.log(`  ${results.passed} passed, ${results.failed} failed\n`);
-  return { file: fileName, passed: results.passed, failed: results.failed, client: results.client };
-}
-
 export async function runTestCommand(positional: string[], flags: Flags): Promise<number> {
   const verbose = flags.verbose ?? false;
-  const trace = flags.trace ?? false;
+  const dylibPath = process.env.ENNIO_DYLIB_PATH || null;
 
   if (positional.length === 0) {
     console.error('Usage: ennio test <flow.yaml | dir | glob> [options]');
@@ -100,42 +63,31 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
 
   console.log('\n🧪 Ennio\n');
 
-  let appId: string | undefined;
-  try {
-    appId = parseMaestroFile(files[0]).appId;
-  } catch {
-    /* tolerate; bootstrap will surface */
-  }
-
-  const result = await connectOrLaunch({ appId });
-  if (!result.ok) {
-    console.error(result.reason);
-    return 1;
-  }
-  console.log(`(Connected via Hermes Inspector)\n`);
-
-  let writer: Writer = new NitroWriter(result.client);
-  let reader: Reader = new NitroReader(result.client);
-  let currentClient = result.client;
-
-  let totalPassed = 0;
-  let totalFailed = 0;
-  try {
-    for (const file of files) {
-      const r = await runTestFile(currentClient, writer, reader, file, { verbose, trace });
-      totalPassed += r.passed;
-      totalFailed += r.failed;
-      if (r.client) {
-        currentClient = r.client;
-        writer = new NitroWriter(currentClient);
-        reader = new NitroReader(currentClient);
+  let totalPass = 0;
+  let totalFail = 0;
+  for (const file of files) {
+    const flow = parseMaestroFile(file);
+    console.log(`▸ ${basename(file)}`);
+    try {
+      const result = await runFlow(flow, { dylibPath: dylibPath ?? undefined, verbose });
+      if (result.passed) {
+        console.log(`  [PASS] ${result.stepsRun} steps\n`);
+        totalPass++;
+      } else {
+        totalFail++;
+        const f = result.failure!;
+        console.log(
+          `  [FAIL] step ${f.step} (${f.command}): ${f.reason}\n` +
+            `         ran ${result.stepsPassed}/${result.stepsRun} steps before failure\n`,
+        );
       }
+    } catch (err) {
+      totalFail++;
+      console.log(`  [ERROR] ${err instanceof Error ? err.message : String(err)}\n`);
     }
-  } finally {
-    currentClient.disconnect();
   }
 
   console.log('─'.repeat(40));
-  console.log(`Total: ${totalPassed} passed, ${totalFailed} failed`);
-  return totalFailed > 0 ? 1 : 0;
+  console.log(`Total: ${totalPass} passed, ${totalFail} failed`);
+  return totalFail > 0 ? 1 : 0;
 }

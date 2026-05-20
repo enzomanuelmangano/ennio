@@ -9,7 +9,7 @@
 import { execSync } from 'child_process';
 import { dirname } from 'path';
 import { mkdirSync } from 'fs';
-import { getBootedSimulatorId } from '../maestro-runner';
+import { getTargetUdid as getBootedSimulatorId } from '../sim';
 import type { Flags } from '../cli/args';
 
 export function runScreenshotCommand(positional: string[], _flags: Flags): number {
