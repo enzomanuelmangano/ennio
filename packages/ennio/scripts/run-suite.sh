@@ -35,7 +35,13 @@ while IFS= read -r -d '' file; do
 
     echo "▸ $name"
     log="$LOG_DIR/$name.log"
-    # Each flow gets a fresh app launch via the CLI's auto-launch path.
+    # Fresh start between flows: terminate the app + drop the socket
+    # file. The CLI's auto-launch path re-runs the app with DYLD inject.
+    # Without this, flows that use `launchApp` (no clearState) inherit
+    # whatever screen the previous flow left, and tap targets that are
+    # only present in the initial state (tab bar items) go missing.
+    xcrun simctl terminate "$UDID" com.ennio.example >/dev/null 2>&1 || true
+    rm -f /tmp/ennio-control.sock
     if ENNIO_UDID="$UDID" ENNIO_DYLIB_PATH="$DYLIB" \
         node "$CLI" test "$file" >"$log" 2>&1; then
         echo "  [PASS]"
