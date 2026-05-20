@@ -71,41 +71,52 @@
 
 ## Discovery
 
-Three tiers, in order:
+A11y-only. Two tiers (cache + walk). No JSI, no fiber tree, no RN private
+surface.
 
-| Tier | Mechanism | Cost | When it catches |
-|------|-----------|------|-----------------|
-| Cache | `NSMutableDictionary<NSString*, NSNumber*>` mapping testID → reactTag | ~0.1ms + ~0.5ms RCTUIManager lookup | Any testID seen since the last React commit |
-| Fiber walk | JSI eval of `__ennio_findFiberByTestID(testID)`, returns `stateNode.tag` | ~10-30ms cold | testIDs that React renders (most user-land cases, including RNGH wrappers that drop a11y) |
-| A11y walk | Recursive UIView traversal matching `accessibilityIdentifier` | ~5-10ms | Non-React-rendered UIViews (alert buttons, system controls, share sheets) |
+| Tier      | Mechanism                                                       | Cost   | Catches                                                                            |
+| --------- | --------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------- |
+| Cache     | `NSMutableDictionary<NSString*, UIView*>` mapping testID → view | ~0.1ms | Any testID seen recently; invalidated on `clear_state` and when target view is gone |
+| A11y walk | Recursive UIView traversal matching `accessibilityIdentifier`   | ~5-10ms | Everything else with proper testID propagation                                     |
 
-**Cache invalidation**: cleared on `clear_state` and on `RCTHost.start`
-(reload). Populated opportunistically by `__ennio_fiberObserver` on every
-React commit — see "Sync" below.
+**testID propagation requirement.** RN's stock components propagate `testID`
+→ `accessibilityIdentifier` automatically. Custom wrappers (RNGH BaseButton,
+pressto without patch, zeego DropdownMenu, react-native-ios-context-menu)
+may drop the propagation. Users wrap these once via the `ennio-a11y` helper
+package or babel plugin. Same requirement Maestro / XCUITest / argent / etc.
+have — propagation discipline is industry standard.
+
+This trade — fiber-walk-free in exchange for a one-time user-land setup —
+buys: zero JSI capture, zero RCTHost swizzle, zero React internal patches,
+zero per-React-major risk. Engine is framework-agnostic (also works on
+SwiftUI / native UIKit / NativeScript apps that propagate
+`accessibilityIdentifier`).
 
 ## Sync (settle)
 
-Pure UIKit-only sync would mean polling. RN-aware sync hooks React's
-public DevTools protocol for instant wake.
+Pure UIKit-based. No React commit hook in 0.1.
 
-### Phase 1 (L1): commit fire
+| Op            | Mechanism                                                                                   | Cost   |
+| ------------- | ------------------------------------------------------------------------------------------- | ------ |
+| `wait_idle`   | `CFRunLoopObserver` for `kCFRunLoopBeforeWaiting` + no in-flight UIView animations          | ~50ms detect |
+| `wait_commit` | `CADisplayLink` frame-hash: sample visible UIView frames+alpha+labels, settle when stable   | ~100ms detect |
 
-JS-side patch on `__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot`. Every
-commit fires a JSI host fn → native condition variable signaled →
-`wait_commit` socket op returns within ~5ms of the commit.
+This is the "framework-agnostic" path argent uses for non-RN apps. Loses
+the ~5ms wake-on-commit advantage that an RN DevTools hook would give,
+but in exchange:
 
-If non-RN app or React DevTools hook unavailable: fall back to
-`CADisplayLink` frame-hash heuristic. ~100ms detection. Same socket op,
-different backing.
+- No JSI runtime capture
+- No `RCTHost.start` swizzle
+- No React internals patched
+- No per-React-major maintenance
 
-### Phase 2 (L2/L3, deferred): fiber diff events
+Speed loss per `waitFor`: ~80ms vs commit-hook path. Over a 30-step flow
+with 5 waits: ~400ms. Real but small.
 
-Per-commit fiber diff. Native receives events stream
-`{type:'mount'|'update'|'unmount', testID, tag}`. Enables surgical
-`waitFor` (wakes only when the target fiber mounts), and `assertVisible`
-that survives mid-commit reads.
-
-L2/L3 are optional power-ups. Ship L1 in 0.1.
+If future need arises, an optional React commit hook can be added in
+0.2+ as an opt-in fast path (the dylib detects RN, captures runtime,
+installs hook → wakes on commit). Same socket op (`wait_commit`),
+different backing. Architecture supports it; we just don't ship with it.
 
 ## Bootstrap
 
@@ -113,23 +124,18 @@ L2/L3 are optional power-ups. Ship L1 in 0.1.
 +load (ObjC class)
   └─ EnnioControlSocket::start()    // socket listener thread
   └─ register UIApplicationDidFinishLaunchingNotification
-  └─ distribution gate (refuse AppStore/Enterprise)
+  └─ distribution gate (refuse AppStore/Enterprise builds)
 
 UIApplicationDidFinishLaunchingNotification
   └─ find key UIWindow
-  └─ NSClassFromString(@"RCTHost") → RN detected
-  └─ if RN:
-      └─ swizzle RCTHost.start
-      └─ swizzled start runs:
-          └─ call original
-          └─ object_getIvar(host, "_instance") → RCTInstance
-          └─ [instance callFunctionOnBufferedRuntimeExecutor:^(rt) {
-                EnnioRuntimeHolder.runtime = &rt;
-                rt.evaluateJavaScript(kFiberWalkScript)   // install helper
-                rt.evaluateJavaScript(kCommitHookScript)  // install observer
-              }]
+  └─ start CFRunLoopObserver for wait_idle
+  └─ start CADisplayLink for wait_commit frame-hash
   └─ mark socket "ready" → start dispatching commands
 ```
+
+No swizzle. No JSI capture. No RN detection. Bootstrap is pure UIKit/
+CoreFoundation. Works identically on RN apps and any iOS Debug app
+with proper accessibility propagation.
 
 ## Wire protocol (CLI ↔ dylib)
 
@@ -137,109 +143,115 @@ Line-delimited JSON over Unix domain socket. Path:
 `<app sandbox>/Library/.ennio.sock` (resolved via `simctl get_app_container`).
 
 Request shape:
+
 ```json
-{"id":42,"op":"find_by_testid","args":{"testID":"cart-button"}}
+{ "id": 42, "op": "find_by_testid", "args": { "testID": "cart-button" } }
 ```
 
 Response shape:
+
 ```json
-{"id":42,"ok":true,"data":{"x":140.0,"y":220.0,"w":80.0,"h":40.0}}
+{ "id": 42, "ok": true, "data": { "x": 140.0, "y": 220.0, "w": 80.0, "h": 40.0 } }
 ```
 
 Or error:
+
 ```json
-{"id":42,"ok":false,"err":"testID not found: cart-button"}
+{ "id": 42, "ok": false, "err": "testID not found: cart-button" }
 ```
 
 ### Operations (Phase 1)
 
-| Op | Args | Returns |
-|----|------|---------|
-| `ping` | — | `{pong:true,bootstrap:"ready"}` |
-| `find_by_testid` | `testID` | `{x,y,w,h,reactTag?,via:"cache"\|"fiber"\|"a11y"}` |
-| `find_by_selector` | Maestro selector JSON | `{matches:[{x,y,w,h,testID?,text?}]}` |
-| `frame` | `testID` or `reactTag` | `{x,y,w,h}` |
-| `visible` | `testID` | `{visible:bool}` |
-| `wait_commit` | `maxMs` | `{commit:bool,elapsedMs}` |
-| `wait_idle` | `maxMs` | `{idle:bool,elapsedMs}` |
-| `tap_tab` | `name` | `{tapped:bool}` (UITabBarController delegate) |
-| `is_alert_present` | — | `{present:bool}` |
-| `alert_text` | — | `{text}` |
-| `alert_buttons` | — | `{buttons:[...]}` |
-| `alert_tap` | `buttonText` | `{tapped:bool}` |
-| `alert_dismiss` | — | `{dismissed:bool}` |
-| `scroll` | `testID`, `direction`, `distance` | `{scrolled:bool}` |
-| `scroll_to` | `scrollViewTestID`, `elementTestID` | `{scrolled:bool}` |
-| `back` | — | `{popped:bool}` |
-| `hide_keyboard` | — | `{hidden:bool}` |
-| `hardware_key` | `keyCode` | `{ok:bool}` |
-| `clipboard_copy` | `text` | `{copied:bool}` |
-| `clipboard_paste` | `testID` | `{pasted:bool}` |
-| `swipe_points` | `x1,y1,x2,y2,durationMs` | `{ok:bool}` |
-| `clear_state` | — | `{cleared:bool}` |
-| `is_menu_trigger_ancestor` | `testID` | `{is:bool}` |
+| Op                         | Args                                | Returns                                            |
+| -------------------------- | ----------------------------------- | -------------------------------------------------- |
+| `ping`                     | —                                   | `{pong:true,bootstrap:"ready"}`                    |
+| `find_by_testid`           | `testID`                            | `{x,y,w,h,reactTag?,via:"cache"\|"fiber"\|"a11y"}` |
+| `find_by_selector`         | Maestro selector JSON               | `{matches:[{x,y,w,h,testID?,text?}]}`              |
+| `frame`                    | `testID` or `reactTag`              | `{x,y,w,h}`                                        |
+| `visible`                  | `testID`                            | `{visible:bool}`                                   |
+| `wait_commit`              | `maxMs`                             | `{commit:bool,elapsedMs}`                          |
+| `wait_idle`                | `maxMs`                             | `{idle:bool,elapsedMs}`                            |
+| `tap_tab`                  | `name`                              | `{tapped:bool}` (UITabBarController delegate)      |
+| `is_alert_present`         | —                                   | `{present:bool}`                                   |
+| `alert_text`               | —                                   | `{text}`                                           |
+| `alert_buttons`            | —                                   | `{buttons:[...]}`                                  |
+| `alert_tap`                | `buttonText`                        | `{tapped:bool}`                                    |
+| `alert_dismiss`            | —                                   | `{dismissed:bool}`                                 |
+| `scroll`                   | `testID`, `direction`, `distance`   | `{scrolled:bool}`                                  |
+| `scroll_to`                | `scrollViewTestID`, `elementTestID` | `{scrolled:bool}`                                  |
+| `back`                     | —                                   | `{popped:bool}`                                    |
+| `hide_keyboard`            | —                                   | `{hidden:bool}`                                    |
+| `hardware_key`             | `keyCode`                           | `{ok:bool}`                                        |
+| `clipboard_copy`           | `text`                              | `{copied:bool}`                                    |
+| `clipboard_paste`          | `testID`                            | `{pasted:bool}`                                    |
+| `swipe_points`             | `x1,y1,x2,y2,durationMs`            | `{ok:bool}`                                        |
+| `clear_state`              | —                                   | `{cleared:bool}`                                   |
+| `is_menu_trigger_ancestor` | `testID`                            | `{is:bool}`                                        |
 
 CLI tap flow: `find_by_testid` → coords → CLI sends to idb (Phase 1) →
 `wait_commit` for settle.
 
 ## What's dropped vs current ennio
 
-| Dropped | Why |
-|---------|-----|
-| `cpp/HybridEnnio.{cpp,hpp}` | Fabric C++ surface; per-RN-minor coupling |
-| `cpp/ShadowTreeTraverser.{cpp,hpp}` | Fabric C++ headers |
-| `cpp/Protocol.{cpp,hpp}` | Was the `__ennioDispatch` request/response envelope; replaced by socket JSON |
-| `cpp/TestIDRegistry.{cpp,hpp}` | Fabric ShadowNode registry walk; replaced by JS-side fiber observer + native NSMutableDictionary |
-| `cpp/IdleMonitor.hpp` | Fabric commit waiter; replaced by JS commit hook + condvar |
-| `nitrogen/`, `src/Ennio.nitro.ts`, `react-native-nitro-modules` peer | Nitro JSI bindings — not needed when transport is socket |
-| `src/cli/hid-daemon.py` | Python gRPC daemon — Node speaks gRPC directly |
-| `instance:didInitializeRuntime:` swizzle (WIP from `feat/ennio-reset-hook`) | Socket survives reload; re-capture jsi::Runtime via re-fired RCTHost.start |
-| Hermes Inspector / CDP hot path | Socket replaces; CDP optionally retained as fallback for `runScript`/`evalScript` |
-| `prebuilt/libennio-rn0.83.6-sim.dylib` (per-RN slice) | One universal dylib |
+| Dropped                                                                     | Why                                                                                              |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `cpp/HybridEnnio.{cpp,hpp}`                                                 | Fabric C++ surface; per-RN-minor coupling                                                        |
+| `cpp/ShadowTreeTraverser.{cpp,hpp}`                                         | Fabric C++ headers                                                                               |
+| `cpp/Protocol.{cpp,hpp}`                                                    | Was the `__ennioDispatch` request/response envelope; replaced by socket JSON                     |
+| `cpp/TestIDRegistry.{cpp,hpp}`                                              | Fabric ShadowNode registry walk; replaced by JS-side fiber observer + native NSMutableDictionary |
+| `cpp/IdleMonitor.hpp`                                                       | Fabric commit waiter; replaced by JS commit hook + condvar                                       |
+| `nitrogen/`, `src/Ennio.nitro.ts`, `react-native-nitro-modules` peer        | Nitro JSI bindings — not needed when transport is socket                                         |
+| `src/cli/hid-daemon.py`                                                     | Python gRPC daemon — Node speaks gRPC directly                                                   |
+| `RCTHost.start` swizzle (`ios/EnnioAutoInit.mm`)                            | Not needed — a11y-only discovery + UIKit settle has no JSI requirement                           |
+| `instance:didInitializeRuntime:` swizzle (WIP)                              | Same — no JSI capture needed                                                                     |
+| Hermes Inspector / CDP hot path                                             | Socket replaces; CDP optionally retained as fallback for `runScript`/`evalScript`                |
+| `prebuilt/libennio-rn0.83.6-sim.dylib` (per-RN slice)                       | One universal dylib                                                                              |
 
 ## What's kept
 
-| Kept | Why |
-|------|-----|
-| `cpp/SelectorParser.{cpp,hpp}` | Maestro selector AST parsing; pure data, no RN deps |
-| `cpp/ElementMatcher.{cpp,hpp}` | Selector predicate evaluation; pure data |
-| `cpp/EnnioControlSocket.{cpp,h}` | Unix-domain socket listener; expanded for new protocol |
-| `ios/EnnioRuntimeHelper.{h,mm}` | UIKit selectors (tabs/alerts/scroll/back/keyboard); ported to new socket dispatch |
-| `ios/EnnioDebugBanner.{h,mm}` | Optional E2E ribbon |
-| Distribution gate logic | Runtime backstop; moved to new bootstrap file |
-| Maestro YAML parser + runner | Largely unchanged; transport refactored to socket-first |
-| `@reactiive/ennio-expo-plugin` | Pod link gate via `:configurations`; unchanged |
-| DYLD injection path (zero-install) | Real differentiator; unchanged |
-| `prebuilt/libennio-shim.dylib` | RN-agnostic shim gate; unchanged but now loads universal slice |
+| Kept                               | Why                                                                               |
+| ---------------------------------- | --------------------------------------------------------------------------------- |
+| `cpp/SelectorParser.{cpp,hpp}`     | Maestro selector AST parsing; pure data, no RN deps                               |
+| `cpp/ElementMatcher.{cpp,hpp}`     | Selector predicate evaluation; pure data                                          |
+| `cpp/EnnioControlSocket.{cpp,h}`   | Unix-domain socket listener; expanded for new protocol                            |
+| `ios/EnnioRuntimeHelper.{h,mm}`    | UIKit selectors (tabs/alerts/scroll/back/keyboard); ported to new socket dispatch |
+| `ios/EnnioDebugBanner.{h,mm}`      | Optional E2E ribbon                                                               |
+| Distribution gate logic            | Runtime backstop; moved to new bootstrap file                                     |
+| Maestro YAML parser + runner       | Largely unchanged; transport refactored to socket-first                           |
+| `@reactiive/ennio-expo-plugin`     | Pod link gate via `:configurations`; unchanged                                    |
+| DYLD injection path (zero-install) | Real differentiator; unchanged                                                    |
+| `prebuilt/libennio-shim.dylib`     | RN-agnostic shim gate; unchanged but now loads universal slice                    |
 
 ## What's added
 
-| Added | Purpose |
-|-------|---------|
-| `ios/EnnioBootstrap.mm` | New `+load` + UIApplicationDidFinishLaunchingNotification bootstrap. Replaces `EnnioAutoInit.mm`. |
-| `ios/EnnioRuntimeHolder.{h,mm}` | Stores captured `jsi::Runtime*` for later eval. |
-| `ios/EnnioFinder.{h,mm}` | A11y/UIView walk + cache management. |
-| `ios/EnnioFiberWalker.mm` | ObjC++ glue: JSI eval of `__ennio_findFiberByTestID`. |
-| `ios/EnnioCommitHook.mm` | ObjC++ glue: installs `__ennio_native_onCommit` JSI host fn, signals condvar. |
-| `ios/EnnioSettle.mm` | `wait_commit`/`wait_idle` handlers, condition variable, CFRunLoop / CADisplayLink fallback. |
-| `ios/SelectorRunner.mm` | ObjC++ glue between C++ SelectorParser/ElementMatcher and ObjC UIView walk. |
-| `js-helpers/ennio-fiber.js` | JS snippet evaluated in Hermes via JSI; defines `__ennio_findFiberByTestID`, `__ennio_fiberObserver`, commit-hook patch. Compiled into dylib as static string. |
-| `src/cli/socket-client.ts` (expanded) | Primary transport. Per-op typed wrappers. |
+| Added                           | Purpose                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `ios/EnnioBootstrap.mm`         | New `+load` + UIApplicationDidFinishLaunchingNotification bootstrap. Replaces `EnnioAutoInit.mm`. |
+| `ios/EnnioFinder.{h,mm}`              | A11y/UIView walk + cache management.                                                                                                                           |
+| `ios/EnnioFiberWalker.mm`             | ObjC++ glue: JSI eval of `__ennio_findFiberByTestID`.                                                                                                          |
+| `ios/EnnioCommitHook.mm`              | ObjC++ glue: installs `__ennio_native_onCommit` JSI host fn, signals condvar.                                                                                  |
+| `ios/EnnioSettle.mm`                  | `wait_commit`/`wait_idle` handlers, condition variable, CFRunLoop / CADisplayLink fallback.                                                                    |
+| `ios/SelectorRunner.mm`               | ObjC++ glue between C++ SelectorParser/ElementMatcher and ObjC UIView walk.                                                                                    |
+| `js-helpers/ennio-fiber.js`           | JS snippet evaluated in Hermes via JSI; defines `__ennio_findFiberByTestID`, `__ennio_fiberObserver`, commit-hook patch. Compiled into dylib as static string. |
+| `src/cli/socket-client.ts` (expanded) | Primary transport. Per-op typed wrappers.                                                                                                                      |
 
 ## Phase plan
 
 **Phase 1 (0.1) — architecture switch with idb retained**
+
 - All of the above, except own IOHID helper.
 - idb gRPC kept for HID, but Python daemon replaced with Node-side gRPC client (`@grpc/grpc-js`).
 - Ship: ~8 weeks of solo work.
 
 **Phase 2 (0.2) — replace idb**
+
 - Build `ennio-hid-helper` Mac binary linking `SimulatorKit.framework` + `CoreSimulator.framework`.
 - ~200 LOC ObjC.
 - Drop `idb_companion` brew dep, `fb-idb` pip dep, Python runtime.
 - Ship: ~3-4 weeks after 0.1.
 
 **Phase 3 (0.3+, deferred) — L2/L3 fiber events**
+
 - Fiber-diff observer per commit.
 - Targeted per-testID waiters for surgical `waitFor`.
 - ~2-3 weeks.
@@ -248,17 +260,17 @@ CLI tap flow: `find_by_testid` → coords → CLI sends to idb (Phase 1) →
 
 Surfaces touched:
 
-| Surface | Owner | Stability |
-|---------|-------|-----------|
-| UIView / UIAccessibility / UIKit selectors | Apple | ~decade |
-| `+load` / `UIApplicationDidFinishLaunchingNotification` | Apple | decade |
-| Unix domain socket | POSIX | forever |
-| `jsi::Runtime` public API | React Native | stable since RN 0.60 |
-| `__REACT_DEVTOOLS_GLOBAL_HOOK__` | React | DevTools public protocol; per React major |
-| `RCTUIManager viewForReactTag:` | React Native | stable since RN 0.40 |
-| `RCTHost.start` swizzle | React Native private ObjC | stable ~3 years |
-| `RCTInstance.callFunctionOnBufferedRuntimeExecutor:` | React Native private ObjC | stable |
-| `SimulatorKit` IOHID (Phase 2) | Apple private | sim-stable ~8 years |
-| `idb_companion` (Phase 1) | Facebook (archived) | breaks on new iOS, drops out at Phase 2 |
+| Surface                                                 | Owner                     | Stability                                 |
+| ------------------------------------------------------- | ------------------------- | ----------------------------------------- |
+| UIView / UIAccessibility / UIKit selectors              | Apple                     | ~decade                                   |
+| `+load` / `UIApplicationDidFinishLaunchingNotification` | Apple                     | decade                                    |
+| Unix domain socket                                      | POSIX                     | forever                                   |
+| `jsi::Runtime` public API                               | React Native              | stable since RN 0.60                      |
+| `__REACT_DEVTOOLS_GLOBAL_HOOK__`                        | React                     | DevTools public protocol; per React major |
+| `RCTUIManager viewForReactTag:`                         | React Native              | stable since RN 0.40                      |
+| `RCTHost.start` swizzle                                 | React Native private ObjC | stable ~3 years                           |
+| `RCTInstance.callFunctionOnBufferedRuntimeExecutor:`    | React Native private ObjC | stable                                    |
+| `SimulatorKit` IOHID (Phase 2)                          | Apple private             | sim-stable ~8 years                       |
+| `idb_companion` (Phase 1)                               | Facebook (archived)       | breaks on new iOS, drops out at Phase 2   |
 
 Maintenance: ~5-10 hr/month after 0.1 ships.
