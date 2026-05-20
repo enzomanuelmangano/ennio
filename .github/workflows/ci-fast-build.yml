@@ -315,7 +315,7 @@ jobs:
             base=$(basename "$f")
             [[ "$base" == _* ]] && continue
             [[ "$base" == 00-full-suite.yaml ]] && continue
-            if gtimeout 240 bunx ennio test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
+            if gtimeout 240 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
               echo "PASS  $base"
               PASS=$((PASS+1))
             else
