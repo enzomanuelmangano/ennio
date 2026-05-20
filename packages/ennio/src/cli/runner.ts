@@ -104,14 +104,10 @@ export async function runFlow(
     } catch {
       /* not running */
     }
-    execFileSync(
-      'xcrun',
-      ['simctl', 'launch', '--terminate-running-process', udid, flow.appId],
-      {
-        env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib },
-        stdio: 'pipe',
-      },
-    );
+    execFileSync('xcrun', ['simctl', 'launch', '--terminate-running-process', udid, flow.appId], {
+      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib },
+      stdio: 'pipe',
+    });
     if (!(await client.connectWithRetry(15_000))) {
       throw new Error(
         'Auto-launched the app with DYLD injection but libennio socket ' +
@@ -124,15 +120,19 @@ export async function runFlow(
     while (Date.now() < deadline) {
       try {
         const r = await client.call('ping');
-        const ready =
-          r.ok && r.data && (r.data as { bootstrap?: string }).bootstrap === 'ready';
+        const ready = r.ok && r.data && (r.data as { bootstrap?: string }).bootstrap === 'ready';
         if (ready) break;
       } catch {
         /* try again */
       }
       await sleep(100);
     }
-    await client.call('wait_commit', { maxMs: 6000, stableMs: 200 }).catch(() => undefined);
+    // Same first-paint settle as clearStateAndRelaunch — wait_commit
+    // reports stable immediately on a blank screen, so couple it with
+    // a minimum sleep that covers RN bridge boot + first paint.
+    await client.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);
+    await sleep(2000);
+    await client.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
   }
 
   const ctx: RunContext = {
@@ -642,9 +642,12 @@ async function clearStateAndRelaunch(ctx: RunContext): Promise<void> {
     await sleep(100);
   }
   // Past bootstrap=ready, but React Native + view layout pass needs a
-  // beat to populate the first frame. Wait_commit polls the visible
-  // UIView hash; we hold until it's stable for 200ms or we cap at 6s.
-  await reopen.call('wait_commit', { maxMs: 6000, stableMs: 200 }).catch(() => undefined);
+  // beat to populate the first frame. wait_commit returns "stable"
+  // even on a blank screen, so couple it with a minimum sleep that
+  // covers the RN bridge boot + first paint (~2s typical on iOS 26).
+  await reopen.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);
+  await sleep(2000);
+  await reopen.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
   // Discard the app-data path cache — sandbox UUID may have rotated.
   getAppContainer(ctx.udid, ctx.bundleId);
 }
