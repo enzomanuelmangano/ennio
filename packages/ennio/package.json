@@ -50,7 +50,12 @@
     "EnnioCore.podspec",
     "react-native.config.js",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "prebuilt/",
+    "scripts/build-shim.sh",
+    "scripts/build-dylib.sh",
+    "scripts/regen-manifest.sh",
+    "native-shim/"
   ],
   "keywords": [
     "react-native",

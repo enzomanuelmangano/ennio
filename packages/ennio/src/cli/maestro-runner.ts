@@ -8,6 +8,7 @@
  */
 
 import { EnnioClient, METRO_BASE } from './client';
+import { prepareDylibInjection } from './dylib';
 import type { Writer } from './writer';
 import type { Reader } from './reader';
 import { basename } from 'path';
@@ -2236,6 +2237,14 @@ class MaestroExecutor {
     }
     this.client.disconnect();
     terminateApp(deviceId, targetAppId);
+    // Re-arm dylib injection — same reasoning as handleLaunchApp.
+    if (process.env.ENNIO_DISABLE_DYLIB !== '1') {
+      try {
+        prepareDylibInjection(deviceId, targetAppId);
+      } catch {
+        /* non-fatal */
+      }
+    }
     await this.sleep(POST_LAUNCH_SETTLE_MS);
     // Dev-client deep-link path — see handleLaunchApp for rationale.
     if (bundlerUrl && devClientScheme) {
@@ -2320,6 +2329,19 @@ class MaestroExecutor {
     }
     this.client.disconnect();
     terminateApp(deviceId, targetAppId);
+
+    // Re-arm dylib injection on the simulator before the relaunch. The
+    // host app's process is about to be torn down and respawned; the
+    // launchctl env we set at bootstrap normally persists across the
+    // boot, but a sim reboot or external `launchctl unsetenv` would
+    // clear it. Idempotent — re-setting the same path is a no-op.
+    if (process.env.ENNIO_DISABLE_DYLIB !== '1') {
+      try {
+        prepareDylibInjection(deviceId, targetAppId);
+      } catch {
+        /* injection failure is non-fatal; CDP eval will surface it loud later */
+      }
+    }
 
     // Brief settle so the simulator finishes wiping data containers
     // before relaunch. Skipping this on iOS 26 sim can produce a Hermes

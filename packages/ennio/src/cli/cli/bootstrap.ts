@@ -6,6 +6,7 @@
  */
 
 import { EnnioClient, METRO_BASE } from '../client';
+import { describeInjection, prepareDylibInjection, registerCleanupOnExit } from '../dylib';
 import {
   deepLinkExpoDevClient,
   detectExpoDevClientScheme,
@@ -72,6 +73,22 @@ export async function connectOrLaunch(opts: BootstrapOptions): Promise<Bootstrap
         `No appId available to auto-launch — pass --app=<bundleId> or include \`appId:\` in the YAML.`,
     };
   }
+  // DYLD injection: arm the simulator's launchctl env BEFORE we launch
+  // the app. Without it the host process loads no ennio dylib and the
+  // first CDP eval against `__ennioDispatch` would fail. The shim is
+  // RN-agnostic; the real per-RN-version dylib only loads when the host
+  // process is actually a React Native app.
+  let injection: ReturnType<typeof prepareDylibInjection> | null = null;
+  if (process.env.ENNIO_DISABLE_DYLIB !== '1') {
+    try {
+      injection = prepareDylibInjection(udid, appId);
+      registerCleanupOnExit(udid);
+      if (verbose) console.log(describeInjection(injection));
+    } catch (e) {
+      if (verbose) console.log(`(ennio dylib injection skipped: ${(e as Error).message})`);
+    }
+  }
+
   // Auto-detect expo-dev-client. A plain `simctl launch` of a dev-client
   // build lands on the "DEVELOPMENT SERVERS" picker (no JS context) and
   // the Inspector poll below would just time out. Deep-link past the
