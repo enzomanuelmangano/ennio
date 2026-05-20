@@ -56,8 +56,10 @@ jobs:
 
       - name: Install idb (Facebook iOS device bridge)
         # Ennio drives real UITouch events via idb's HID layer.
+        # Also install GNU coreutils so the suite's `timeout` wrapper
+        # has `gtimeout` available — macOS doesn't ship `timeout`.
         run: |
-          brew install facebook/fb/idb-companion
+          brew install facebook/fb/idb-companion coreutils
           pip3 install fb-idb
 
       # -------------------------------------------------------------
@@ -95,9 +97,9 @@ jobs:
       # when ennio source changes OR the target RN version changes.
       # On a cache hit, the scratch-host scaffold below is skipped.
       # -------------------------------------------------------------
-      - name: Cache ennio prebuilt dylibs
+      - name: Cache ennio prebuilt dylibs (restore)
         id: dylib-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: packages/ennio/prebuilt
           key: ennio-dylib-${{ runner.os }}-rn${{ steps.rn.outputs.version }}-${{ hashFiles('packages/ennio/cpp/**', 'packages/ennio/ios/**', 'packages/ennio/native-shim/**', 'packages/ennio/scripts/**', 'packages/ennio/nitrogen/**', 'packages/ennio/EnnioCore.podspec', 'packages/ennio-expo-plugin/src/**') }}
@@ -169,6 +171,17 @@ jobs:
           }
           test -f packages/ennio/prebuilt/manifest.json || { echo "manifest missing"; exit 1; }
 
+      # Save the dylib cache as soon as it's known-good. Doing this
+      # mid-job (rather than the default post-job save) means the cache
+      # persists even if a later step (e.g. the suite) fails — next
+      # iteration restores the dylib without re-scaffolding.
+      - name: Cache ennio prebuilt dylibs (save)
+        if: always() && steps.dylib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: packages/ennio/prebuilt
+          key: ${{ steps.dylib-cache.outputs.cache-primary-key }}
+
       # -------------------------------------------------------------
       # Example app build path — no ennio dependency, just stock RN.
       # Fingerprint-keyed prebuild + DerivedData caches so warm PRs
@@ -183,8 +196,8 @@ jobs:
           echo "Fingerprint: $KEY"
           echo "key=$KEY" >> "$GITHUB_OUTPUT"
 
-      - name: Cache prebuilt iOS project
-        uses: actions/cache@v4
+      - name: Cache prebuilt iOS project (restore)
+        uses: actions/cache/restore@v4
         id: ios-cache
         with:
           path: |
@@ -204,8 +217,20 @@ jobs:
         working-directory: example/ios
         run: pod install
 
-      - name: Cache DerivedData
-        uses: actions/cache@v4
+      # Save ios prebuild immediately so suite failures don't cost us
+      # the next iteration's prebuild + pod install.
+      - name: Cache prebuilt iOS project (save)
+        if: always() && steps.ios-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            example/ios
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: ${{ steps.ios-cache.outputs.cache-primary-key }}
+
+      - name: Cache DerivedData (restore)
+        uses: actions/cache/restore@v4
         id: dd-cache
         with:
           path: ~/Library/Developer/Xcode/DerivedData
@@ -221,6 +246,15 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             COMPILER_INDEX_STORE_ENABLE=NO \
             build
+
+      # Save DerivedData after the build succeeds so suite failures
+      # don't cost us the compile output next time.
+      - name: Cache DerivedData (save)
+        if: always() && steps.dd-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ steps.dd-cache.outputs.cache-primary-key }}
 
       # -------------------------------------------------------------
       # Boot sim + install example.
@@ -281,7 +315,7 @@ jobs:
             base=$(basename "$f")
             [[ "$base" == _* ]] && continue
             [[ "$base" == 00-full-suite.yaml ]] && continue
-            if timeout 240 bunx ennio test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
+            if gtimeout 240 bunx ennio test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
               echo "PASS  $base"
               PASS=$((PASS+1))
             else
