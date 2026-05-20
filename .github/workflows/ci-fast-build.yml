@@ -298,6 +298,22 @@ jobs:
           done
 
       # -------------------------------------------------------------
+      # Pre-flight: burn one launch on the simulator so the Hermes
+      # Inspector has a warm bundle by the time the real suite runs.
+      # First connect after Metro starts takes 30-60s while the JS
+      # bundle loads; later launches hit a cache. Without this, the
+      # first flow in the suite consistently fails with
+      # "Could not connect to the Hermes Inspector".
+      # We discard the result — only the warmup side-effect matters.
+      # -------------------------------------------------------------
+      - name: Pre-flight warmup (load Hermes bundle)
+        working-directory: example
+        run: |
+          gtimeout 180 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" \
+            test maestro-e2e/01-auth-flow.yaml --verbose \
+            > /tmp/preflight.log 2>&1 || echo "Pre-flight finished (result ignored)"
+
+      # -------------------------------------------------------------
       # Run the full maestro-e2e suite. Each invocation of
       # `bunx ennio test` arms DYLD_INSERT_LIBRARIES on the sim, launches
       # the example, JSI binding is installed by the injected dylib,
@@ -339,5 +355,6 @@ jobs:
             /tmp/ennio-logs/
             /tmp/ennio-shots/
             /tmp/metro.log
+            /tmp/preflight.log
           retention-days: 7
           if-no-files-found: warn
