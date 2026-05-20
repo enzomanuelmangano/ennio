@@ -126,13 +126,19 @@ jobs:
           npm pkg set "dependencies.@reactiive/ennio=file:$GITHUB_WORKSPACE/packages/ennio"
           npm pkg set "devDependencies.@reactiive/ennio-expo-plugin=file:$GITHUB_WORKSPACE/packages/ennio-expo-plugin"
           npm install --legacy-peer-deps --no-audit --no-fund
+          # Stamp a unique bundle id. The default `com.anonymous.scratch`
+          # collides with a published App Store app, which makes
+          # `expo prebuild` prompt interactively and fail in CI.
+          UNIQUE_ID="com.reactiive.ennio.scratch.ci$(date +%s)$RANDOM"
           node -e "
             const fs=require('fs');
             const j=JSON.parse(fs.readFileSync('app.json'));
             j.expo.plugins = (j.expo.plugins||[]).concat(['@reactiive/ennio-expo-plugin']);
+            j.expo.ios = j.expo.ios || {};
+            j.expo.ios.bundleIdentifier = '$UNIQUE_ID';
             fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
           "
-          npx expo prebuild --platform ios --clean
+          npx expo prebuild --platform ios --clean --non-interactive
           cd ios
           xcodebuild \
             -workspace *.xcworkspace \

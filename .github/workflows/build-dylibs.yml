@@ -74,13 +74,18 @@ jobs:
           npm install --legacy-peer-deps --no-audit --no-fund
           # Wire the expo plugin into app.json (CI scaffold has app.json,
           # not app.config.ts).
+          # Stamp a unique bundle id. Default collides with a
+          # published App Store app, breaking non-interactive prebuild.
+          UNIQUE_ID="com.reactiive.ennio.scratch.ci$(date +%s)$RANDOM"
           node -e "
             const fs=require('fs');
             const j=JSON.parse(fs.readFileSync('app.json'));
             j.expo.plugins = (j.expo.plugins||[]).concat(['@reactiive/ennio-expo-plugin']);
+            j.expo.ios = j.expo.ios || {};
+            j.expo.ios.bundleIdentifier = '$UNIQUE_ID';
             fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
           "
-          npx expo prebuild --platform ios --clean
+          npx expo prebuild --platform ios --clean --non-interactive
           cd ios
           xcodebuild \
             -workspace *.xcworkspace \
