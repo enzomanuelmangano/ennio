@@ -1,0 +1,317 @@
+# PR-triggered end-to-end validation — dylib-injection path only.
+#
+# Goal: every PR (including drafts) builds the example app (which has NO
+# `@reactiive/ennio` dependency) and runs the full maestro-e2e suite with
+# the per-RN ennio dylib DYLD_INSERT_LIBRARIES'd into the simulator.
+# Same zero-install path users get from npm — the CI just produces the
+# dylib from current source instead of downloading a published tarball.
+#
+# Cache layers:
+#   1. bun + node_modules                         (keyed on lockfile)
+#   2. ennio prebuilt/ dylibs                     (keyed on ennio source hash + RN version)
+#   3. example/ios + ~/Library/Caches/CocoaPods   (keyed on @expo/fingerprint hash)
+#   4. example DerivedData                        (keyed on fingerprint + example native source SHAs)
+#   5. ccache                                     (keyed on fingerprint + commit SHA)
+#
+# Cold (first PR on a clean cache pool): ~25 min.
+# Warm (same fingerprint + same ennio source): ~5 min (mostly suite runtime).
+name: ci-fast-build
+
+on:
+  pull_request:
+    branches: [main]
+    # Run on draft PRs too — fast feedback while iterating, before ready-for-review.
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Build dylib + example, inject, run suite
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      RCT_USE_PREBUILT_HERMES: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.19
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Pin Xcode. Same version build-dylibs.yml uses, so dylib ABI matches
+      # what release artifacts ship with.
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      - name: Install idb (Facebook iOS device bridge)
+        # Ennio drives real UITouch events via idb's HID layer.
+        run: |
+          brew install facebook/fb/idb-companion
+          pip3 install fb-idb
+
+      - name: Install ccache
+        run: brew install ccache
+
+      # -------------------------------------------------------------
+      # JS deps (root workspace).
+      # -------------------------------------------------------------
+      - name: Cache bun + node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+            example/node_modules
+            packages/ennio/node_modules
+            packages/ennio-expo-plugin/node_modules
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'package.json', 'example/package.json', 'packages/*/package.json') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      # -------------------------------------------------------------
+      # Determine RN version the example targets. That's the slice we
+      # need to build and inject. (Example has no ennio dep — we read
+      # RN directly from its package.json.)
+      # -------------------------------------------------------------
+      - name: Detect example RN version
+        id: rn
+        run: |
+          RN=$(jq -r '.dependencies."react-native"' example/package.json | sed 's/[\^~]//g')
+          echo "Example RN version: $RN"
+          echo "version=$RN" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------
+      # Cache the ennio dylib slices directly. The dylib only changes
+      # when ennio source changes OR the target RN version changes.
+      # On a cache hit, the scratch-host scaffold below is skipped.
+      # -------------------------------------------------------------
+      - name: Cache ennio prebuilt dylibs
+        id: dylib-cache
+        uses: actions/cache@v4
+        with:
+          path: packages/ennio/prebuilt
+          key: ennio-dylib-${{ runner.os }}-rn${{ steps.rn.outputs.version }}-${{ hashFiles('packages/ennio/cpp/**', 'packages/ennio/ios/**', 'packages/ennio/native-shim/**', 'packages/ennio/scripts/**', 'packages/ennio/nitrogen/**', 'packages/ennio/EnnioCore.podspec', 'packages/ennio-expo-plugin/src/**') }}
+
+      # -------------------------------------------------------------
+      # Scratch host: throwaway Expo+RN@<example-rn> project with ennio
+      # installed as a local pod. Only purpose is producing EnnioCore
+      # .o files in its DerivedData. Same scaffold build-dylibs.yml
+      # uses for release matrix, pinned to the example's RN version so
+      # the slice matches what the example will load at runtime.
+      # -------------------------------------------------------------
+      - name: Scaffold scratch host + build EnnioCore (cache miss)
+        if: steps.dylib-cache.outputs.cache-hit != 'true'
+        env:
+          RN_VERSION: ${{ steps.rn.outputs.version }}
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/scratch
+          cd /tmp/scratch
+          npx --yes create-expo-app . --template blank-typescript --no-install
+          npm pkg set "dependencies.react-native=$RN_VERSION"
+          npm pkg set "dependencies.react-native-nitro-modules=^0.35.5"
+          npm pkg set "dependencies.@reactiive/ennio=file:$GITHUB_WORKSPACE/packages/ennio"
+          npm pkg set "devDependencies.@reactiive/ennio-expo-plugin=file:$GITHUB_WORKSPACE/packages/ennio-expo-plugin"
+          npm install --legacy-peer-deps --no-audit --no-fund
+          node -e "
+            const fs=require('fs');
+            const j=JSON.parse(fs.readFileSync('app.json'));
+            j.expo.plugins = (j.expo.plugins||[]).concat(['@reactiive/ennio-expo-plugin']);
+            fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
+          "
+          npx expo prebuild --platform ios --clean
+          cd ios
+          xcodebuild \
+            -workspace *.xcworkspace \
+            -scheme "$(node -e "console.log(require('../app.json').expo.name)")" \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath /tmp/scratch-dd \
+            build
+
+      - name: Link shim + dylib slice (cache miss)
+        if: steps.dylib-cache.outputs.cache-hit != 'true'
+        run: |
+          bash packages/ennio/scripts/build-shim.sh
+          OBJ=$(find /tmp/scratch-dd -type d -path '*EnnioCore.build/Objects-normal/arm64' | head -n1)
+          test -n "$OBJ" || { echo "EnnioCore .o not found in scratch DerivedData"; exit 1; }
+          ENNIO_OBJECTS_DIR="$OBJ" bash packages/ennio/scripts/build-dylib.sh "${{ steps.rn.outputs.version }}"
+          bash packages/ennio/scripts/regen-manifest.sh
+          ls -lh packages/ennio/prebuilt/
+
+      - name: Verify dylibs present
+        run: |
+          test -f packages/ennio/prebuilt/libennio-shim.dylib || { echo "shim missing"; exit 1; }
+          test -f "packages/ennio/prebuilt/libennio-rn${{ steps.rn.outputs.version }}-sim.dylib" || {
+            echo "slice for RN ${{ steps.rn.outputs.version }} missing"; exit 1;
+          }
+          test -f packages/ennio/prebuilt/manifest.json || { echo "manifest missing"; exit 1; }
+
+      # -------------------------------------------------------------
+      # Example app build path — no ennio dependency, just stock RN.
+      # Fingerprint-keyed prebuild + DerivedData caches so warm PRs
+      # skip prebuild + pod install + most of the compile.
+      # -------------------------------------------------------------
+      - name: Compute Expo fingerprint
+        id: fp
+        working-directory: example
+        run: |
+          bunx fingerprint fingerprint:generate --platform ios > /tmp/expo-fp.json
+          KEY=$(jq -r '.hash' /tmp/expo-fp.json)
+          echo "Fingerprint: $KEY"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Cache prebuilt iOS project
+        uses: actions/cache@v4
+        id: ios-cache
+        with:
+          path: |
+            example/ios
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: ios-prebuild-${{ runner.os }}-${{ steps.fp.outputs.key }}
+          restore-keys: ios-prebuild-${{ runner.os }}-
+
+      - name: Prebuild (cache miss)
+        if: steps.ios-cache.outputs.cache-hit != 'true'
+        working-directory: example
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Pod install (cache miss)
+        if: steps.ios-cache.outputs.cache-hit != 'true'
+        working-directory: example/ios
+        run: pod install
+
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        id: dd-cache
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: dd-${{ runner.os }}-${{ steps.fp.outputs.key }}-${{ hashFiles('example/app/**', 'example/components/**', 'example/store/**') }}
+
+      - name: Configure ccache
+        run: |
+          mkdir -p ~/.ccache
+          echo "max_size = 5G" > ~/.ccache/ccache.conf
+          echo "compiler_check = content" >> ~/.ccache/ccache.conf
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ steps.fp.outputs.key }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ steps.fp.outputs.key }}-
+            ccache-${{ runner.os }}-
+
+      - name: Build example app (iOS sim, Debug)
+        working-directory: example/ios
+        env:
+          CC: ccache clang
+          CXX: ccache clang++
+        run: |
+          xcodebuild \
+            -workspace EnnioExample.xcworkspace \
+            -scheme EnnioExample \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+
+      # -------------------------------------------------------------
+      # Boot sim + install example.
+      # -------------------------------------------------------------
+      - name: Boot simulator
+        id: sim
+        run: |
+          xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 15 Pro" || true
+          sleep 5
+          UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
+          test -n "$UDID" || { echo "No sim booted"; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Booted sim: $UDID"
+
+      - name: Install example app
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*Debug-iphonesimulator/EnnioExample.app' -type d | head -n1)
+          test -n "$APP" || { echo "EnnioExample.app not found"; exit 1; }
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP"
+
+      # -------------------------------------------------------------
+      # Build ennio CLI (TS → dist/cli.js) so `bunx ennio test` works.
+      # -------------------------------------------------------------
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      # -------------------------------------------------------------
+      # Start Metro in background. The CLI talks to the app through
+      # Metro's Hermes Inspector channel.
+      # -------------------------------------------------------------
+      - name: Start Metro
+        run: |
+          cd example
+          (bunx expo start --port 8081 > /tmp/metro.log 2>&1 &)
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8081/status 2>/dev/null | grep -q packager-status:running; then
+              echo "Metro ready"; break
+            fi
+            sleep 2
+          done
+
+      # -------------------------------------------------------------
+      # Run the full maestro-e2e suite. Each invocation of
+      # `bunx ennio test` arms DYLD_INSERT_LIBRARIES on the sim, launches
+      # the example, JSI binding is installed by the injected dylib,
+      # suite runs, env vars cleared on exit.
+      # -------------------------------------------------------------
+      - name: Run maestro-e2e suite via ennio (dylib injection)
+        id: suite
+        working-directory: example
+        env:
+          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          mkdir -p /tmp/ennio-logs
+          PASS=0; FAIL=0
+          for f in maestro-e2e/*.yaml; do
+            base=$(basename "$f")
+            [[ "$base" == _* ]] && continue
+            [[ "$base" == 00-full-suite.yaml ]] && continue
+            if timeout 240 bunx ennio test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
+              echo "PASS  $base"
+              PASS=$((PASS+1))
+            else
+              echo "FAIL  $base"
+              FAIL=$((FAIL+1))
+            fi
+          done
+          echo ""
+          echo "Pass: $PASS  Fail: $FAIL"
+          [ "$FAIL" -eq 0 ]
+
+      # -------------------------------------------------------------
+      # Always upload artifacts so reviewers can debug from the PR.
+      # -------------------------------------------------------------
+      - name: Upload e2e artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            /tmp/ennio-logs/
+            /tmp/ennio-shots/
+            /tmp/metro.log
+          retention-days: 7
+          if-no-files-found: warn

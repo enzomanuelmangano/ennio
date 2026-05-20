@@ -49,6 +49,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
+    "@expo/fingerprint": "^0.16.7",
     "@reactiive/ennio-expo-plugin": "*",
     "@types/react": "~19.2.10",
     "expo-color-space-plugin": "^0.1.0",
