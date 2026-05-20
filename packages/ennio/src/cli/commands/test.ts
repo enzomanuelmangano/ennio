@@ -39,7 +39,9 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
     } else {
       const matches = await glob(pattern);
       files.push(
-        ...matches.filter((f) => isMaestroFile(f) && !f.includes('/subflows/')).map((f) => resolve(f)),
+        ...matches
+          .filter((f) => isMaestroFile(f) && !f.includes('/subflows/'))
+          .map((f) => resolve(f)),
       );
     }
   }

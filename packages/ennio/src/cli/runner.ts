@@ -26,11 +26,14 @@
 
 import { execFileSync } from 'node:child_process';
 
+import { dirname, resolve } from 'node:path';
+
 import {
   MaestroCommand,
   MaestroFlow,
   MaestroSelector,
   normalizeSelector,
+  parseMaestroFile,
 } from './maestro-parser';
 import { EnnioSocketClient } from './socket-client';
 import { tap as hidTap, swipe as hidSwipe, typeText as hidType } from './hid';
@@ -54,6 +57,9 @@ interface RunContext {
   /** dylib path; only used for clearState relaunch */
   dylibPath: string | null;
   verbose: boolean;
+  /** Path to the currently-executing flow file. Used for runFlow
+   *  subflow path resolution. */
+  flowPath: string;
 }
 
 export interface RunResult {
@@ -80,11 +86,53 @@ export async function runFlow(
   }
 
   const client = new EnnioSocketClient();
-  if (!(await client.connectWithRetry(15_000))) {
-    throw new Error(
-      'Could not connect to libennio socket at /tmp/ennio-control.sock. ' +
-        'Did you launch the app with SIMCTL_CHILD_DYLD_INSERT_LIBRARIES?',
+  if (!(await client.connect())) {
+    // Socket not up — app isn't running with libennio injected. Auto-
+    // launch with the dylib so users don't need a pre-step. Requires
+    // ENNIO_DYLIB_PATH (or --dylib) so we know which dylib to inject.
+    const dylib = options.dylibPath;
+    if (!dylib) {
+      throw new Error(
+        'libennio socket at /tmp/ennio-control.sock is not reachable. ' +
+          'Set ENNIO_DYLIB_PATH=<path-to-libennio.dylib> so the CLI can ' +
+          'auto-launch the app with DYLD injection, or launch it yourself ' +
+          'with SIMCTL_CHILD_DYLD_INSERT_LIBRARIES set.',
+      );
+    }
+    try {
+      terminateApp(udid, flow.appId);
+    } catch {
+      /* not running */
+    }
+    execFileSync(
+      'xcrun',
+      ['simctl', 'launch', '--terminate-running-process', udid, flow.appId],
+      {
+        env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib },
+        stdio: 'pipe',
+      },
     );
+    if (!(await client.connectWithRetry(15_000))) {
+      throw new Error(
+        'Auto-launched the app with DYLD injection but libennio socket ' +
+          'never came up. Check the app is a Debug build and the dylib ' +
+          'path is correct.',
+      );
+    }
+    // Wait for bootstrap=ready.
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      try {
+        const r = await client.call('ping');
+        const ready =
+          r.ok && r.data && (r.data as { bootstrap?: string }).bootstrap === 'ready';
+        if (ready) break;
+      } catch {
+        /* try again */
+      }
+      await sleep(100);
+    }
+    await client.call('wait_commit', { maxMs: 6000, stableMs: 200 }).catch(() => undefined);
   }
 
   const ctx: RunContext = {
@@ -93,6 +141,7 @@ export async function runFlow(
     bundleId: flow.appId,
     dylibPath: options.dylibPath ?? null,
     verbose: options.verbose ?? false,
+    flowPath: flow.filePath,
   };
 
   log(ctx, `▶ ${flow.name || flow.filePath} (${flow.commands.length} steps)`);
@@ -125,7 +174,13 @@ export async function runFlow(
 // Per-command dispatch
 // =====================================================================
 
-async function runCommand(ctx: RunContext, cmd: MaestroCommand): Promise<void> {
+async function runCommand(ctx: RunContext, rawCmd: MaestroCommand): Promise<void> {
+  // Maestro lets some commands be bare strings: `- hideKeyboard`,
+  // `- back`, `- launchApp`, etc. js-yaml parses those as plain strings,
+  // not `{hideKeyboard: true}`. Normalise so the dispatch below can use
+  // the same `'op' in cmd` shape unconditionally.
+  const cmd: MaestroCommand =
+    typeof rawCmd === 'string' ? ({ [rawCmd]: true } as unknown as MaestroCommand) : rawCmd;
   const desc = describeCommand(cmd);
   log(ctx, `· ${desc}`);
 
@@ -208,7 +263,8 @@ async function runCommand(ctx: RunContext, cmd: MaestroCommand): Promise<void> {
     return;
   }
   if ('eraseText' in cmd) {
-    const count = typeof cmd.eraseText === 'number' ? cmd.eraseText : (cmd.eraseText.characters ?? 1);
+    const count =
+      typeof cmd.eraseText === 'number' ? cmd.eraseText : (cmd.eraseText.characters ?? 1);
     for (let i = 0; i < count; i++) await ctx.client.call('hardware_key', { keyCode: 42 });
     return;
   }
@@ -229,6 +285,101 @@ async function runCommand(ctx: RunContext, cmd: MaestroCommand): Promise<void> {
     await sleep(150);
     return;
   }
+  if ('scrollUntilVisible' in cmd) {
+    // Resolve the target selector. Maestro accepts either a bare
+    // selector or { element: ..., direction, timeout }.
+    const arg = cmd.scrollUntilVisible as
+      | MaestroSelector
+      | { element: MaestroSelector; direction?: string; timeout?: number };
+    const target = 'element' in arg ? arg.element : (arg as MaestroSelector);
+    const dir = ('direction' in arg && arg.direction ? arg.direction : 'DOWN').toUpperCase();
+    const timeout = ('timeout' in arg && arg.timeout) || 10000;
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (await isVisible(ctx, target)) return;
+      // Centre swipe in the requested direction.
+      const cx = 195;
+      const cy = 422;
+      const dist = 400;
+      let x1 = cx,
+        y1 = cy,
+        x2 = cx,
+        y2 = cy;
+      if (dir === 'DOWN') {
+        y1 = cy + dist / 2;
+        y2 = cy - dist / 2;
+      } else if (dir === 'UP') {
+        y1 = cy - dist / 2;
+        y2 = cy + dist / 2;
+      } else if (dir === 'LEFT') {
+        x1 = cx + dist / 2;
+        x2 = cx - dist / 2;
+      } else if (dir === 'RIGHT') {
+        x1 = cx - dist / 2;
+        x2 = cx + dist / 2;
+      }
+      hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
+      await sleep(350);
+    }
+    throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
+  }
+  if ('swipe' in cmd) {
+    const s = cmd.swipe;
+    // Accept any of:
+    //   { direction: 'UP'|'DOWN'|'LEFT'|'RIGHT' }
+    //   { start: "50%,50%" | {x,y}, end: ... }
+    //   { from: <selector|string>, direction?: ... }
+    const sw = s as {
+      direction?: string;
+      start?: string | { x: number; y: number };
+      end?: string | { x: number; y: number };
+      from?: unknown;
+      duration?: number;
+    };
+    const winW = 390;
+    const winH = 844;
+    const parseCoord = (
+      val: string | { x: number; y: number } | undefined,
+      fallback: { x: number; y: number },
+    ): { x: number; y: number } => {
+      if (!val) return fallback;
+      if (typeof val === 'string') {
+        const [xs, ys] = val.split(',').map((p) => p.trim());
+        let x = parseFloat(xs);
+        let y = parseFloat(ys);
+        if (xs.endsWith('%') || (x <= 1 && xs.length > 0)) x = (x > 1 ? x / 100 : x) * winW;
+        if (ys.endsWith('%') || (y <= 1 && ys.length > 0)) y = (y > 1 ? y / 100 : y) * winH;
+        return { x, y };
+      }
+      return val;
+    };
+    let from = { x: winW / 2, y: winH / 2 };
+    let to = { x: winW / 2, y: winH / 2 };
+    if (sw.start || sw.end) {
+      from = parseCoord(sw.start, from);
+      to = parseCoord(sw.end, to);
+    } else if (sw.direction) {
+      const d = sw.direction.toUpperCase();
+      const dist = 400;
+      if (d === 'DOWN') {
+        from = { x: winW / 2, y: winH / 2 + dist / 2 };
+        to = { x: winW / 2, y: winH / 2 - dist / 2 };
+      } else if (d === 'UP') {
+        from = { x: winW / 2, y: winH / 2 - dist / 2 };
+        to = { x: winW / 2, y: winH / 2 + dist / 2 };
+      } else if (d === 'LEFT') {
+        from = { x: winW / 2 + dist / 2, y: winH / 2 };
+        to = { x: winW / 2 - dist / 2, y: winH / 2 };
+      } else if (d === 'RIGHT') {
+        from = { x: winW / 2 - dist / 2, y: winH / 2 };
+        to = { x: winW / 2 + dist / 2, y: winH / 2 };
+      }
+    }
+    hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 250);
+    await sleep(500);
+    await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
+    return;
+  }
   if ('scroll' in cmd) {
     const dir = (cmd.scroll.direction || 'DOWN').toLowerCase();
     // Centre swipe approximation. Window size assumed 390x844 — good
@@ -236,11 +387,23 @@ async function runCommand(ctx: RunContext, cmd: MaestroCommand): Promise<void> {
     const cx = 195;
     const cy = 422;
     const dist = 300;
-    let x1 = cx, y1 = cy, x2 = cx, y2 = cy;
-    if (dir === 'down') { y1 = cy + dist / 2; y2 = cy - dist / 2; }
-    else if (dir === 'up') { y1 = cy - dist / 2; y2 = cy + dist / 2; }
-    else if (dir === 'left') { x1 = cx + dist / 2; x2 = cx - dist / 2; }
-    else if (dir === 'right') { x1 = cx - dist / 2; x2 = cx + dist / 2; }
+    let x1 = cx,
+      y1 = cy,
+      x2 = cx,
+      y2 = cy;
+    if (dir === 'down') {
+      y1 = cy + dist / 2;
+      y2 = cy - dist / 2;
+    } else if (dir === 'up') {
+      y1 = cy - dist / 2;
+      y2 = cy + dist / 2;
+    } else if (dir === 'left') {
+      x1 = cx + dist / 2;
+      x2 = cx - dist / 2;
+    } else if (dir === 'right') {
+      x1 = cx - dist / 2;
+      x2 = cx + dist / 2;
+    }
     hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
     await sleep(400);
     return;
@@ -284,11 +447,62 @@ async function runCommand(ctx: RunContext, cmd: MaestroCommand): Promise<void> {
   }
   if ('waitForAnimationToEnd' in cmd) {
     const timeout =
-      cmd.waitForAnimationToEnd === true
-        ? 3000
-        : (cmd.waitForAnimationToEnd.timeout ?? 3000);
+      cmd.waitForAnimationToEnd === true ? 3000 : (cmd.waitForAnimationToEnd.timeout ?? 3000);
     await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 150 });
     return;
+  }
+  if ('runFlow' in cmd) {
+    const sub = cmd.runFlow;
+    // `when:` clause — evaluate the predicate against current screen.
+    // If false, skip the subflow entirely.
+    if (sub.when) {
+      const w = sub.when;
+      let satisfied = true;
+      if (w.visible) {
+        satisfied = await isVisible(ctx, normalizeSelector(w.visible));
+      } else if (w.notVisible) {
+        satisfied = !(await isVisible(ctx, normalizeSelector(w.notVisible)));
+      }
+      if (!satisfied) return;
+    }
+    // Inline commands form: { runFlow: { when?: ..., commands: [...] } }
+    if (sub.commands && Array.isArray(sub.commands)) {
+      for (const inner of sub.commands) await runCommand(ctx, inner);
+      return;
+    }
+    // File form: { runFlow: { file: "subflows/foo.yaml" } }
+    if (sub.file) {
+      const subPath = resolve(dirname(ctx.flowPath), sub.file);
+      const subFlow = parseMaestroFile(subPath);
+      const prevPath = ctx.flowPath;
+      ctx.flowPath = subPath;
+      try {
+        for (const inner of subFlow.commands) await runCommand(ctx, inner);
+      } finally {
+        ctx.flowPath = prevPath;
+      }
+      return;
+    }
+    return;
+  }
+  if ('repeat' in cmd) {
+    for (let i = 0; i < cmd.repeat.times; i++) {
+      for (const inner of cmd.repeat.commands) await runCommand(ctx, inner);
+    }
+    return;
+  }
+  if ('retry' in cmd) {
+    const maxRetries = cmd.retry.maxRetries ?? 3;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        for (const inner of cmd.retry.commands) await runCommand(ctx, inner);
+        return;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 
   // Anything else: warn and skip rather than fail loudly. v0.1 covers
@@ -420,8 +634,7 @@ async function clearStateAndRelaunch(ctx: RunContext): Promise<void> {
   while (Date.now() < deadline) {
     try {
       const r = await reopen.call('ping');
-      const ready =
-        r.ok && r.data && (r.data as { bootstrap?: string }).bootstrap === 'ready';
+      const ready = r.ok && r.data && (r.data as { bootstrap?: string }).bootstrap === 'ready';
       if (ready) break;
     } catch {
       /* try again */

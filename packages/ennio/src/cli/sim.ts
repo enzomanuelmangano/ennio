@@ -17,7 +17,9 @@ export function getTargetUdid(): string | null {
     const json = execFileSync('xcrun', ['simctl', 'list', 'devices', 'booted', '-j'], {
       encoding: 'utf-8',
     });
-    const data = JSON.parse(json) as { devices?: Record<string, { udid: string; state: string }[]> };
+    const data = JSON.parse(json) as {
+      devices?: Record<string, { udid: string; state: string }[]>;
+    };
     const buckets = data.devices ?? {};
     for (const key of Object.keys(buckets)) {
       for (const d of buckets[key]) {
