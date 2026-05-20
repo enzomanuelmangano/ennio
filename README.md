@@ -43,45 +43,25 @@ brew install facebook/fb/idb-companion
 pip3 install fb-idb
 ```
 
-**1. Install**
+### Install (zero-install path — recommended)
 
 ```bash
-bun add @reactiive/ennio react-native-nitro-modules
-bun add -d @reactiive/ennio-expo-plugin
+bun add -D @reactiive/ennio          # or npm install --save-dev
 ```
 
-(Or use the equivalent `npm install` / `yarn add` — `ennio-expo-plugin`
-is a build-time config plugin, so it belongs in `devDependencies`.)
+That's it. No config plugin to add, no `npx expo prebuild`, no pod
+install, no rebuild of your app. Ennio ships per-RN-version prebuilt
+dylibs in the npm tarball; the CLI `DYLD_INSERT_LIBRARIES`-injects the
+matching slice into your existing Debug build at simulator launch
+time. First `ennio test` is the same speed as the second.
 
-**2. Register the plugin** — add `"@reactiive/ennio-expo-plugin"` to `app.json`:
-
-```json
-{
-  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
-}
-```
-
-**3. Prebuild + run**
+Verify what got installed:
 
 ```bash
-npx expo prebuild --clean
-npx expo run:ios
+npm audit signatures              # confirms npm provenance (Sigstore)
 ```
 
-The plugin tags the pod as `:configurations => ['Debug']`, so Ennio
-is compiled + linked **only** for Debug builds. Release archives carry
-zero Ennio code, symbols, or `+load` hooks — automatic, no env var
-to remember. Inside a Debug build, autolinking adds the pod and a
-`+load` swizzle installs the `__ennioDispatch` JSI host function plus
-a React `onCommitFiberRoot` hook (so native can detect commit settle)
-before the first frame. Keep Metro running — the CLI reaches the app
-through Metro's Hermes Inspector.
-
-(Optional: a red diagonal **E2E** ribbon paints top-right of every
-screen if you set `showRibbon: true` in the plugin options — useful
-for QA artifact identification or demo videos. Off by default.)
-
-**4. Write a Maestro YAML flow** (`e2e/login.yaml`):
+**Write a Maestro YAML flow** (`e2e/login.yaml`):
 
 ```yaml
 appId: com.your.app
@@ -96,14 +76,144 @@ appId: com.your.app
     id: 'home-screen'
 ```
 
-**5. Run it**
+**Run it:**
 
 ```bash
 npx ennio test e2e/login.yaml
 ```
 
-That's it. See [Build gating](#build-gating) for plugin options and
-how Ennio stays out of Release builds.
+The CLI:
+
+1. Reads the host app's RN version from the installed bundle.
+2. Picks the matching dylib from `node_modules/@reactiive/ennio/prebuilt/`.
+3. Verifies its SHA-256 against `prebuilt/manifest.json` (refuses on
+   mismatch — see [Security](#security)).
+4. Sets `DYLD_INSERT_LIBRARIES`, `ENNIO_DYLIB_PATH`, and
+   `ENNIO_TARGET_BUNDLE_ID` on the simulator's launchctl env.
+5. Launches your app (via `simctl` or expo-dev-client deep-link).
+6. The shim dylib gates on bundle-id + RN-app presence and dlopens
+   the real slice only inside your targeted app.
+7. Clears the launchctl env on CLI exit (signal handlers + process
+   exit hook) so the simulator is left clean.
+
+If the host's RN version isn't in the prebuilt set, the CLI falls back
+to a local build:
+
+```bash
+bash node_modules/@reactiive/ennio/scripts/build-dylib.sh <rn-version>
+```
+
+That takes a few minutes once and caches the slice locally.
+
+### Install (pod-based path — alternative)
+
+The legacy install path links Ennio as a CocoaPod at build time. Useful
+if you want a single statically-linked Debug binary instead of runtime
+injection, or are pinning a specific Ennio version to your Debug build
+via lockfile guarantees.
+
+```bash
+bun add @reactiive/ennio react-native-nitro-modules
+bun add -d @reactiive/ennio-expo-plugin
+```
+
+Register the plugin in `app.json`:
+
+```json
+{
+  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
+}
+```
+
+Rebuild:
+
+```bash
+npx expo prebuild --clean
+npx expo run:ios
+```
+
+The plugin tags the pod as `:configurations => ['Debug']`, so Ennio
+is compiled + linked **only** for Debug builds. Release archives carry
+zero Ennio code, symbols, or `+load` hooks. To disable runtime
+injection when both paths are present:
+
+```bash
+ENNIO_DISABLE_DYLIB=1 npx ennio test e2e/
+```
+
+(Optional: a red diagonal **E2E** ribbon paints top-right of every
+screen if you set `showRibbon: true` in the plugin options — useful
+for QA artifact identification or demo videos. Off by default.)
+
+See [Build gating](#build-gating) for plugin options and how Ennio
+stays out of Release builds.
+
+## Security
+
+Runtime injection runs ennio's code in your app's process. The model
+that keeps it safe:
+
+1. **Sim-only.** Real-device codesigning blocks DYLD injection.
+   Distribution gate in the dylib refuses to install JSI hooks unless
+   the binary is signed as `EnnioDistDev` (no App Store receipt, no
+   provisioning profile mismatch). Production builds never run ennio.
+2. **Three-layer shim gate.** The tiny shim dylib set globally on the
+   sim's `DYLD_INSERT_LIBRARIES` only `dlopen`s the real slice when:
+   (a) the host process is a React Native app (`RCTInstance` class
+   present), (b) the host's bundle id matches `ENNIO_TARGET_BUNDLE_ID`,
+   and (c) no App Store receipt is present. Other apps on the same
+   simulator — including unrelated RN apps — load the shim, fall
+   through the gate, and exit. Nothing is loaded into them.
+3. **SHA-256 manifest.** Every dylib shipped in the npm tarball has
+   its hash recorded in `prebuilt/manifest.json`. The CLI verifies
+   each slice + the shim before arming `DYLD_INSERT_LIBRARIES`; a
+   mismatch refuses injection. Catches local tampering between
+   `npm install` and `ennio test`.
+4. **NPM provenance.** Releases are published from CI with
+   `npm publish --provenance` (Sigstore signatures linked to the GH
+   Actions workflow that built the tarball). Verify with
+   `npm audit signatures`.
+5. **Pinned Xcode + reproducible builds.** The CI matrix
+   (`.github/workflows/build-dylibs.yml`) pins Xcode and clang flags
+   so any tag can be independently rebuilt from source and the SHA-256
+   matches what was published.
+6. **Clean-up on exit.** The CLI clears the simulator's launchctl env
+   on `process.on('exit')`, `SIGINT`, `SIGTERM`, and `uncaughtException`.
+   A crash mid-test never leaves a stale injection that could leak
+   into your next dev session.
+7. **Symbol-surface diff in CI.** Each release diffs the dylib's
+   external symbol list against an allowlist. A patch that introduces
+   a network library or arbitrary syscalls fails CI loudly.
+
+## Production dylib build pipeline
+
+[`scripts/build-shim.sh`](packages/ennio/scripts/build-shim.sh) builds
+the RN-agnostic shim;
+[`scripts/build-dylib.sh`](packages/ennio/scripts/build-dylib.sh) links
+a per-RN-version slice from already-built EnnioCore object files;
+[`scripts/regen-manifest.sh`](packages/ennio/scripts/regen-manifest.sh)
+refreshes `prebuilt/manifest.json` after a local rebuild.
+
+CI ([`.github/workflows/build-dylibs.yml`](.github/workflows/build-dylibs.yml))
+is the only path that publishes to npm:
+
+```
+push tag v*  ──►  matrix job per RN version:
+                   1. scaffold scratch Expo+RN@<rn> app
+                   2. xcodebuild EnnioCore target
+                   3. build-dylib.sh → libennio-rn<rn>-sim.dylib
+                   4. symbol-surface diff vs allowlist
+                   5. smoke: boot sim + run a flow via injected dylib
+                   6. upload artifact
+              ──►  publish job:
+                   1. download all slices + shim
+                   2. regen-manifest.sh
+                   3. npm publish --provenance
+                   4. attach dylibs to GH Release
+```
+
+The support window is the most recent ~3 RN minors. Older versions
+fall back to the local-build path documented above.
 
 ## Architecture
 

@@ -14,15 +14,19 @@ UITouch that half-fires recognizers — the gesture goes through the same
 path a finger would.
 
 ```bash
-bun add @reactiive/ennio react-native-nitro-modules
-bun add -d @reactiive/ennio-expo-plugin
+bun add -D @reactiive/ennio          # or npm install --save-dev
 
 bunx ennio test e2e/01-auth-flow.yaml      # one flow
 bunx ennio test e2e/                       # every *.yaml in the directory
 ```
 
-(Or use the equivalent `npm install` / `yarn add` — `ennio-expo-plugin`
-is a build-time config plugin, so it belongs in `devDependencies`.)
+That's it. No config plugin to add, no `expo prebuild`, no pod
+install. Ennio ships per-RN-version prebuilt dylibs in the npm
+tarball; the CLI `DYLD_INSERT_LIBRARIES`-injects the matching slice
+into your existing Debug build at simulator launch time.
+
+Verify install integrity with `npm audit signatures` (CI publishes
+with Sigstore provenance).
 
 ## Requirements
 
@@ -37,11 +41,37 @@ is a build-time config plugin, so it belongs in `devDependencies`.)
   pip3 install fb-idb
   ```
 
-## Setup
+## How injection works
 
-The accompanying [`@reactiive/ennio-expo-plugin`](https://www.npmjs.com/package/@reactiive/ennio-expo-plugin)
-links the native runtime into **Debug builds only** via CocoaPods
-`:configurations`. Add it to `app.json`:
+The CLI sets `DYLD_INSERT_LIBRARIES` on the simulator's launchctl env
+to a tiny RN-agnostic shim (`libennio-shim.dylib`, ~30 KB). The shim
+loads into every process on the sim but gates on three checks:
+
+1. **`RCTInstance` class present** — catches non-RN apps + system daemons.
+2. **Bundle id matches `ENNIO_TARGET_BUNDLE_ID`** — catches stale env
+   leaking into a different RN app on the same sim.
+3. **No App Store receipt** — catches accidental real-device install.
+
+When all three pass, the shim `dlopen`s the per-RN-version slice
+(`libennio-rn<X.Y.Z>-sim.dylib`, ~3 MB). The slice's `+load` swizzles
+`RCTHost.start`, captures the live `jsi::Runtime`, and installs the
+`__ennioDispatch` JSI host function the CLI drives via Hermes
+Inspector CDP. Identical surface + performance to the pod-based
+install — different load mechanism.
+
+The CLI verifies each dylib's SHA-256 against `prebuilt/manifest.json`
+before arming the env; a mismatch refuses injection.
+
+## Alternative: pod-based install
+
+If you'd rather link Ennio statically into your Debug build:
+
+```bash
+bun add @reactiive/ennio react-native-nitro-modules
+bun add -d @reactiive/ennio-expo-plugin
+```
+
+Add the plugin to `app.json`:
 
 ```json
 {
@@ -49,7 +79,16 @@ links the native runtime into **Debug builds only** via CocoaPods
 }
 ```
 
-Then rebuild your app (`npx expo prebuild --clean && npx expo run:ios`).
+Rebuild (`npx expo prebuild --clean && npx expo run:ios`). The plugin
+tags the pod as `:configurations => ['Debug']` so Release binaries are
+unaffected.
+
+To make sure the CLI doesn't double-up runtime injection on top of
+the pod-linked symbols:
+
+```bash
+ENNIO_DISABLE_DYLIB=1 npx ennio test e2e/
+```
 
 ## Docs
 
