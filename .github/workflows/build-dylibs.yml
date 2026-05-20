@@ -23,7 +23,7 @@ on:
 jobs:
   build-shim:
     name: Build shim (RN-agnostic)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Build shim
@@ -38,7 +38,7 @@ jobs:
 
   build-slice:
     name: Build slice (RN ${{ matrix.rn }})
-    runs-on: macos-14
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
@@ -158,7 +158,7 @@ jobs:
   publish:
     name: Publish to npm with provenance
     needs: [build-shim, build-slice]
-    runs-on: macos-14
+    runs-on: macos-15
     if: startsWith(github.ref, 'refs/tags/v')
     # `id-token: write` is required for npm provenance (Sigstore).
     permissions:
