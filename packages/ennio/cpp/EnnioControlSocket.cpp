@@ -35,8 +35,27 @@ namespace ennio {
 
 std::atomic<bool> EnnioControlSocket::g_started{false};
 
-static std::mutex g_handlersMutex;
-static std::map<std::string, EnnioHandler> g_handlers;
+// Meyers singletons for the handlers map + its mutex.
+//
+// We can't use plain file-scope statics here: ObjC's `+load` runs at
+// dylib attach time, which is BEFORE C++ file-scope constructors are
+// guaranteed to have completed (static-initialization-order across
+// translation units is undefined). EnnioHandlers.mm's `+load` calls
+// registerHandler() from inside that window — touching a not-yet-
+// constructed std::map crashes with SIGSEGV during the first insert.
+//
+// Function-local statics are constructed on first access (C++11
+// guarantees thread-safe init), so registerHandler() always sees a
+// valid map regardless of when it's called.
+static std::map<std::string, EnnioHandler> &handlers() {
+    static std::map<std::string, EnnioHandler> instance;
+    return instance;
+}
+
+static std::mutex &handlersMutex() {
+    static std::mutex instance;
+    return instance;
+}
 
 static const char *kSocketPath = "/tmp/ennio-control.sock";
 
@@ -45,8 +64,8 @@ std::string EnnioControlSocket::socketPath() {
 }
 
 void EnnioControlSocket::registerHandler(const std::string &op, EnnioHandler handler) {
-    std::lock_guard<std::mutex> lock(g_handlersMutex);
-    g_handlers[op] = std::move(handler);
+    std::lock_guard<std::mutex> lock(handlersMutex());
+    handlers()[op] = std::move(handler);
 }
 
 // =====================================================================
@@ -205,16 +224,17 @@ static std::string handleRequestLine(const std::string &line) {
     std::string args = extractRawValue(line, "args");
 
     if (op.empty()) {
-        return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+        return std::string("{\"id\":") + (id.empty() ? std::string("null") : (std::string("\"") + jsonEscape(id) + "\"")) +
                ",\"ok\":false,\"err\":\"missing op\"}";
     }
 
     EnnioHandler handler;
     {
-        std::lock_guard<std::mutex> lock(g_handlersMutex);
-        auto it = g_handlers.find(op);
-        if (it == g_handlers.end()) {
-            return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+        std::lock_guard<std::mutex> lock(handlersMutex());
+        auto &map = handlers();
+        auto it = map.find(op);
+        if (it == map.end()) {
+            return std::string("{\"id\":") + (id.empty() ? std::string("null") : (std::string("\"") + jsonEscape(id) + "\"")) +
                    ",\"ok\":false,\"err\":\"unknown op: " + jsonEscape(op) + "\"}";
         }
         handler = it->second;
@@ -223,13 +243,13 @@ static std::string handleRequestLine(const std::string &line) {
     try {
         std::string data = handler(args.empty() ? std::string("{}") : args);
         if (data.empty()) data = "null";
-        return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+        return std::string("{\"id\":") + (id.empty() ? std::string("null") : (std::string("\"") + jsonEscape(id) + "\"")) +
                ",\"ok\":true,\"data\":" + data + "}";
     } catch (const std::exception &e) {
-        return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+        return std::string("{\"id\":") + (id.empty() ? std::string("null") : (std::string("\"") + jsonEscape(id) + "\"")) +
                ",\"ok\":false,\"err\":\"" + jsonEscape(e.what()) + "\"}";
     } catch (...) {
-        return std::string("{\"id\":") + (id.empty() ? "null" : id) +
+        return std::string("{\"id\":") + (id.empty() ? std::string("null") : (std::string("\"") + jsonEscape(id) + "\"")) +
                ",\"ok\":false,\"err\":\"handler threw unknown exception\"}";
     }
 }

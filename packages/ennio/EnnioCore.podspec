@@ -36,5 +36,5 @@ Pod::Spec.new do |s|
 
   # Public Apple frameworks only. No React-Core, no React-Fabric, no
   # nitrogen autolinking.
-  s.frameworks = 'UIKit', 'Foundation', 'QuartzCore', 'Security'
+  s.frameworks = 'UIKit', 'Foundation', 'QuartzCore', 'CoreGraphics', 'Security'
 end

@@ -148,23 +148,22 @@ static UIScrollView *_Nullable findEnclosingScrollView(UIView *view) {
     if (!a) return NO;
     for (UIAlertAction *act in a.actions) {
         if (![act.title isEqualToString:buttonText]) continue;
-        // Invoke the action handler via the private `handler` block
-        // ivar. UIAlertAction doesn't expose this publicly, but the
-        // ivar shape has been stable since iOS 8. Falls back to
-        // tapping via simulated UIKit dispatch if handler is nil.
+        // Read the handler block via KVC. UIAlertAction stores it as
+        // `handler` (private but stable since iOS 8). KVC is ARC-safe
+        // unlike object_getInstanceVariable.
+        void (^handler)(UIAlertAction *) = nil;
         @try {
-            id (^handler)(UIAlertAction *);
-            object_getInstanceVariable(act, "_handler", (void **)&handler);
-            // Dismiss first so the runtime sees the alert as gone
-            // before the handler fires (mirrors what UIKit does when
-            // user taps).
-            UIViewController *presenter = a.presentingViewController ?: rootVC();
-            [presenter dismissViewControllerAnimated:NO completion:^{
-                if (handler) handler(act);
-            }];
+            id raw = [act valueForKey:@"handler"];
+            if (raw) handler = (void (^)(UIAlertAction *))raw;
         } @catch (...) {
-            return NO;
+            // KVC fails -> no handler; treat as success (dismiss only).
         }
+        // Dismiss first so the alert is gone by the time the handler
+        // fires — matches what UIKit does on user tap.
+        UIViewController *presenter = a.presentingViewController ?: rootVC();
+        [presenter dismissViewControllerAnimated:NO completion:^{
+            if (handler) handler(act);
+        }];
         return YES;
     }
     return NO;

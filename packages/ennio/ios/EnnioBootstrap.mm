@@ -109,6 +109,26 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
 }
 
 + (void)load {
+    // Host-process gate. DYLD_INSERT_LIBRARIES can attach the dylib to
+    // any process that inherits the env var (launchctl, simctl helpers,
+    // springboard children, etc.). Most of those aren't iOS apps and
+    // our UIKit work would crash. Gate on the main bundle being an
+    // iOS app bundle: CFBundlePackageType == "APPL" and the bundle
+    // identifier looks like a real app (not a launchd label).
+    //
+    // We rely on NSClassFromString to load UIApplication, but in
+    // non-iOS-app hosts UIApplication is linked but never
+    // initialised. The bundle-type check is the reliable signal.
+    NSDictionary *info = [NSBundle mainBundle].infoDictionary;
+    NSString *pkgType = info[@"CFBundlePackageType"];
+    if (![pkgType isEqualToString:@"APPL"]) {
+        return;
+    }
+    // Also refuse if no bundle identifier is set (some test harnesses
+    // load .app bundles without one).
+    NSString *bundleId = [NSBundle mainBundle].bundleIdentifier;
+    if (bundleId.length == 0) return;
+
     NSString *mark =
         [NSString stringWithFormat:@"%@/Library/_ennio_load_fired.txt", NSHomeDirectory()];
     [@"loaded" writeToFile:mark atomically:YES encoding:NSUTF8StringEncoding error:nil];

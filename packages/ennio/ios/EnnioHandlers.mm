@@ -92,21 +92,19 @@ static std::string elapsedJson(uint32_t elapsedMs, BOOL ok) {
 }
 
 // Main-thread bounce helper for ops that must run on UIKit's thread.
-template <typename Fn>
-static auto onMain(Fn &&fn) -> decltype(fn()) {
-    if ([NSThread isMainThread]) return fn();
-    __block decltype(fn()) result;
-    dispatch_sync(dispatch_get_main_queue(), ^{
-        result = fn();
-    });
-    return result;
-}
-
-// Specialization for void-returning lambdas.
+// Takes a std::function<void()> — caller writes outputs into local
+// captures by reference. Two-step pattern: declare the result outside,
+// pass a lambda that fills it, then read after the call.
+//
+// Why not C++-templated onMain<R>: ObjC blocks can't capture C++
+// variables, so the simplest stable shape is a void lambda
+// that mutates by-reference captures.
 static void onMainVoid(std::function<void()> fn) {
     if ([NSThread isMainThread]) {
         fn();
     } else {
+        // Block captures the std::function by value; std::function
+        // is copyable so this is safe.
         dispatch_sync(dispatch_get_main_queue(), ^{
             fn();
         });
@@ -146,8 +144,8 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = argString(a, @"testID");
         if (!testID.length) throw std::runtime_error("missing testID");
-        __block EnnioRect rect = {0, 0, 0, 0};
-        __block BOOL found = NO;
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
         onMainVoid([&]() {
             UIView *v = [EnnioFinder findViewByTestID:testID];
             if (v && [EnnioFinder isOnScreen:v]) {
@@ -164,8 +162,8 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *text = argString(a, @"text");
         if (!text.length) throw std::runtime_error("missing text");
-        __block EnnioRect rect = {0, 0, 0, 0};
-        __block BOOL found = NO;
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
         onMainVoid([&]() {
             UIView *v = [EnnioFinder findViewByText:text];
             if (v && [EnnioFinder isOnScreen:v]) {
@@ -182,7 +180,7 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = argString(a, @"testID");
         if (!testID.length) throw std::runtime_error("missing testID");
-        __block EnnioRect rect = {0, 0, 0, 0};
+        EnnioRect rect = {0, 0, 0, 0};
         onMainVoid([&]() {
             UIView *v = [EnnioFinder findViewByTestID:testID];
             if (v) rect = [EnnioFinder windowRectFor:v];
@@ -195,7 +193,7 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = argString(a, @"testID");
         if (!testID.length) throw std::runtime_error("missing testID");
-        __block BOOL visible = NO;
+        BOOL visible = NO;
         onMainVoid([&]() {
             UIView *v = [EnnioFinder findViewByTestID:testID];
             visible = v && [EnnioFinder isOnScreen:v];
@@ -224,7 +222,7 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         NSDictionary *a = parseArgs(args);
         NSString *name = argString(a, @"name");
         if (!name.length) throw std::runtime_error("missing name");
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps tapTabByName:name]; });
         return std::string("{\"tapped\":") + (ok ? "true" : "false") + "}";
     });
@@ -233,25 +231,25 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         NSDictionary *a = parseArgs(args);
         NSString *name = argString(a, @"name");
         if (!name.length) throw std::runtime_error("missing name");
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps findTabByName:name]; });
         return std::string("{\"present\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("alert_present", [](const std::string &) -> std::string {
-        __block BOOL p = NO;
+        BOOL p = NO;
         onMainVoid([&]() { p = [EnnioOps isAlertPresent]; });
         return std::string("{\"present\":") + (p ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("alert_text", [](const std::string &) -> std::string {
-        __block NSString *t = @"";
+        NSString *t = @"";
         onMainVoid([&]() { t = [EnnioOps alertText]; });
         return std::string("{\"text\":") + stringJson(t) + "}";
     });
 
     EnnioControlSocket::registerHandler("alert_buttons", [](const std::string &) -> std::string {
-        __block NSArray<NSString *> *btns = @[];
+        NSArray<NSString *> *btns = @[];
         onMainVoid([&]() { btns = [EnnioOps alertButtons]; });
         return std::string("{\"buttons\":") + stringArrayJson(btns) + "}";
     });
@@ -260,13 +258,13 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         NSDictionary *a = parseArgs(args);
         NSString *btn = argString(a, @"buttonText");
         if (!btn.length) throw std::runtime_error("missing buttonText");
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps tapAlertButton:btn]; });
         return std::string("{\"tapped\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("alert_dismiss", [](const std::string &) -> std::string {
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps dismissAlert]; });
         return std::string("{\"dismissed\":") + (ok ? "true" : "false") + "}";
     });
@@ -277,7 +275,7 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         NSString *dir = argString(a, @"direction");
         double dist = argDouble(a, @"distance", 200);
         if (!testID.length || !dir.length) throw std::runtime_error("missing args");
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps scrollTestID:testID direction:dir distance:dist]; });
         return std::string("{\"scrolled\":") + (ok ? "true" : "false") + "}";
     });
@@ -287,19 +285,19 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         NSString *svID = argString(a, @"scrollViewTestID") ?: @"";
         NSString *elID = argString(a, @"elementTestID");
         if (!elID.length) throw std::runtime_error("missing elementTestID");
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps scrollViewWithTestID:svID toTestID:elID]; });
         return std::string("{\"scrolled\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("back", [](const std::string &) -> std::string {
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps backGesture]; });
         return std::string("{\"popped\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("hide_keyboard", [](const std::string &) -> std::string {
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps hideKeyboard]; });
         return std::string("{\"hidden\":") + (ok ? "true" : "false") + "}";
     });
@@ -307,7 +305,7 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
     EnnioControlSocket::registerHandler("hardware_key", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         int code = argInt(a, @"keyCode", 0);
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps pressHardwareKey:code]; });
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
@@ -315,7 +313,7 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
     EnnioControlSocket::registerHandler("clipboard_copy", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         NSString *text = argString(a, @"text") ?: @"";
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps clipboardCopy:text]; });
         return std::string("{\"copied\":") + (ok ? "true" : "false") + "}";
     });
@@ -324,13 +322,13 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         NSDictionary *a = parseArgs(args);
         NSString *testID = argString(a, @"testID");
         if (!testID.length) throw std::runtime_error("missing testID");
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps clipboardPasteIntoTestID:testID]; });
         return std::string("{\"pasted\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("clipboard_text", [](const std::string &) -> std::string {
-        __block NSString *t = @"";
+        NSString *t = @"";
         onMainVoid([&]() { t = [EnnioOps clipboardText]; });
         return std::string("{\"text\":") + stringJson(t) + "}";
     });
@@ -342,13 +340,13 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         double x2 = argDouble(a, @"x2", 0);
         double y2 = argDouble(a, @"y2", 0);
         double dur = argDouble(a, @"durationMs", 150);
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps swipeFromX:x1 y:y1 toX:x2 y:y2 durationMs:dur]; });
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("clear_state", [](const std::string &) -> std::string {
-        __block BOOL ok = NO;
+        BOOL ok = NO;
         onMainVoid([&]() {
             [EnnioFinder invalidateCache];
             ok = [EnnioOps clearAppData];

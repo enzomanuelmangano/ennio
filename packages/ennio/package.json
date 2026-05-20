@@ -51,7 +51,13 @@
     "scripts/regen-manifest.sh",
     "native-shim/"
   ],
-  "keywords": ["react-native", "e2e", "testing", "maestro", "ios"],
+  "keywords": [
+    "react-native",
+    "e2e",
+    "testing",
+    "maestro",
+    "ios"
+  ],
   "license": "MIT",
   "publishConfig": {
     "access": "public"
