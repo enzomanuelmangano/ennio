@@ -641,7 +641,20 @@ async function runCommand(
     };
     const code = map[name];
     if (code != null) await ctx.client.call('hardware_key', { keyCode: code });
+    // pressKey Enter on a form input typically triggers a submit
+    // handler that runs React state updates (Bluesky's
+    // configureProxy → agent.setHeader → re-render of the entire
+    // navigator). Without waiting for that to settle, the very next
+    // tapOn lands on a JS bridge mid-update — onPress wired to a
+    // stale closure, press registered but no effect. Wait for
+    // commit + UIView stable.
     await sleep(80);
+    await ctx.client
+      .call('wait_react_commit', { sinceMs: 0, maxMs: 800 })
+      .catch(() => undefined);
+    await ctx.client
+      .call('wait_commit', { maxMs: 1500, stableMs: 150 })
+      .catch(() => undefined);
     return;
   }
   if ('back' in cmd) {
@@ -1088,16 +1101,12 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
       /* fall through */
     }
   }
-  // Sub-pixel rounding fix: for tiny rects, place the tap inside
-  // the rounded-down floor of the rect rather than the geometric
-  // center. Otherwise a 1×1 element at (401, 101) rounds to (402, 102)
-  // when idb rounds the center.
-  let center: { x: number; y: number };
-  if (rect.w <= 2 && rect.h <= 2) {
-    center = { x: rect.x, y: rect.y };
-  } else {
-    center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
-  }
+  // Geometric center. Sub-pixel coords like (401.5, 101.5) for a 1×1
+  // px Pressable flow through to fb-idb's `tap(x: float, y: float)`
+  // unrounded — see hid-daemon.py — so they land dead-center inside
+  // the view's hit-test box. Earlier impls rounded at the daemon
+  // boundary which shifted boundary taps off the view.
+  const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
   const baseHash = preHash ?? (await captureHash(ctx));
   // Micro-sleep between discovery and tap. find_by_testid
   // dispatch_syncs onto main; following that with idb's HID event
@@ -1119,36 +1128,49 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // observe a hash change the tap clearly worked, so we can exit
   // self-heal early. Most successful taps fire the change in <150ms.
   if (sel.id && baseHash) {
-    // Event-driven self-heal. The post-tap path already waits for
-    // first hash change. If that observed a change, the tap clearly
-    // worked — no self-heal needed; bail. Otherwise, give the JS
-    // bridge a brief window (300 ms) to deliver a deferred commit,
-    // then re-check identity + hash. Skips the unconditional 500 ms
-    // fixed sleep that used to fire on every testID tap.
-    const earlyChange = await timedAsync(ctx, 'tap.selfHealHashCheck', async () => {
-      const r = await ctx.client.call('wait_hash_change', {
-        sinceHash: baseHash,
-        maxMs: 300,
+    // Event-driven self-heal with exponential backoff. The first
+    // hash-change wait covers the common case (RN commit landed +
+    // visible state changed). When the tap registered but the
+    // JS-side handler depended on async state that wasn't ready
+    // (e.g. Bluesky's e2eSignInAlice fires onPress immediately, but
+    // login() runs against the agent which is still mid-configureProxy
+    // from the prior pressKey Enter), the visible state stays the
+    // same and we'd give up without retrying. Exponential backoff
+    // 300 ms → 10 s ceiling — short waits absorb fast races
+    // cheaply, longer waits cover deeper agent / network /
+    // bundle-reload races without timing out a flow.
+    const retryWindows = [300, 600, 1200, 2400, 4800, 10000];
+    let succeeded = false;
+    for (const windowMs of retryWindows) {
+      const earlyChange = await timedAsync(ctx, 'tap.selfHealHashCheck', async () => {
+        const r = await ctx.client.call('wait_hash_change', {
+          sinceHash: baseHash,
+          maxMs: windowMs,
+        });
+        return !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
       });
-      return !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
-    });
-    if (earlyChange) return;
-    const recheck = await timedAsync(ctx, 'tap.selfHealRefind', () =>
-      ctx.client.call('find_by_testid', { testID: sel.id! }),
-    );
-    if (recheck.ok && recheck.data) {
+      if (earlyChange) {
+        succeeded = true;
+        break;
+      }
+      const recheck = await timedAsync(ctx, 'tap.selfHealRefind', () =>
+        ctx.client.call('find_by_testid', { testID: sel.id! }),
+      );
+      if (!(recheck.ok && recheck.data)) break;
       const r = recheck.data as Rect;
       const sameSpot =
         Math.abs(r.x + r.w / 2 - center.x) < 6 && Math.abs(r.y + r.h / 2 - center.y) < 6;
-      if (sameSpot) {
-        const postHash = await captureHash(ctx);
-        if (postHash && postHash === baseHash) {
-          await timedAsync(ctx, 'tap.selfHealRetap', () =>
-            hidTapFast(ctx.udid, center.x, center.y),
-          );
-        }
+      if (!sameSpot) break;
+      const postHash = await captureHash(ctx);
+      if (!(postHash && postHash === baseHash)) {
+        succeeded = true;
+        break;
       }
+      await timedAsync(ctx, 'tap.selfHealRetap', () =>
+        hidTapFast(ctx.udid, center.x, center.y),
+      );
     }
+    void succeeded;
   }
 }
 

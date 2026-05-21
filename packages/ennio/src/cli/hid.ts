@@ -43,9 +43,7 @@ export async function tapFast(
     await d.tap(x, y, Math.round(durationSec * 1000));
     return;
   } catch (err) {
-    if (process.env.ENNIO_DEBUG_HID) {
-      process.stderr.write(`[ennio] hid-daemon fallback to CLI: ${String(err)}\n`);
-    }
+    process.stderr.write(`[ennio] hid-daemon fallback to CLI: ${String(err)}\n`);
   }
   void getIdbClient;
   idb([

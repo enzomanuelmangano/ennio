@@ -55,8 +55,8 @@ function findDaemonScript(): string {
   // sits in dist/cli.js; published package keeps src/cli/ alongside.
   const here = __dirname;
   const candidates = [
-    join(here, 'hid-daemon.py'),                       // dev source layout
-    join(here, '..', 'src', 'cli', 'hid-daemon.py'),   // dist/ + src/cli/
+    join(here, 'hid-daemon.py'), // dev source layout
+    join(here, '..', 'src', 'cli', 'hid-daemon.py'), // dist/ + src/cli/
     join(here, '..', '..', 'src', 'cli', 'hid-daemon.py'),
     join(here, '..', '..', '..', 'src', 'cli', 'hid-daemon.py'),
     join(here, '..', '..', '..', 'packages', 'ennio', 'src', 'cli', 'hid-daemon.py'),
@@ -94,10 +94,34 @@ class HidDaemon {
   }
 
   /** Resolves when daemon prints `ready` (~150 ms — python import +
-   *  gRPC channel build). */
+   *  gRPC channel build). Rejects after 5 s — covers misconfigured
+   *  python interpreters where `import idb` blocks indefinitely
+   *  without printing to stderr. Caller falls back to CLI subprocess
+   *  on rejection. */
   ready(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.queue.push({ resolve, reject });
+      const ack: PendingAck = {
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      };
+      const timer = setTimeout(() => {
+        const idx = this.queue.indexOf(ack);
+        if (idx >= 0) this.queue.splice(idx, 1);
+        try {
+          this.proc.kill('SIGTERM');
+        } catch {
+          /* already gone */
+        }
+        this.dead = true;
+        reject(new Error('hid-daemon ready timeout (5s)'));
+      }, 5_000);
+      this.queue.push(ack);
     });
   }
 
@@ -128,7 +152,10 @@ class HidDaemon {
   }
 
   tap(x: number, y: number, durationMs: number = 80): Promise<void> {
-    return this.send(`tap ${Math.round(x)} ${Math.round(y)} ${durationMs}`);
+    if (process.env.ENNIO_DEBUG_HID) {
+      process.stderr.write(`[hid-daemon] tap ${x} ${y} ${durationMs}\n`);
+    }
+    return this.send(`tap ${x} ${y} ${durationMs}`);
   }
 
   swipe(x1: number, y1: number, x2: number, y2: number, durationMs: number = 300): Promise<void> {

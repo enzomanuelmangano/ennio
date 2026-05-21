@@ -105,8 +105,8 @@ async def handle(client: Client, line: str) -> None:
             if len(parts) < 3:
                 print("err tap-needs-x-y", flush=True)
                 return
-            x = int(round(float(parts[1])))
-            y = int(round(float(parts[2])))
+            x = float(parts[1])
+            y = float(parts[2])
             dur_ms = float(parts[3]) if len(parts) > 3 else 80.0
             await client.tap(x=x, y=y, duration=dur_ms / 1000.0)
             print("ok", flush=True)
