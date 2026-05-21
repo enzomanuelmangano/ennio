@@ -22,6 +22,7 @@
 
 #import "EnnioBootstrap.h"
 #import "EnnioControlSocket.h"
+#import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
 
 #import <objc/runtime.h>
@@ -165,9 +166,11 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
     g_ennioKeyWindow = resolveKeyWindow();
 
     [EnnioSettle start];
+    [EnnioReactObserver start];
 
     g_ennioReady = YES;
-    NSLog(@"[Ennio] Bootstrap ready — socket dispatching commands");
+    NSLog(@"[Ennio] Bootstrap ready — socket dispatching commands (RN observer: %@)",
+          [EnnioReactObserver attachmentDescription]);
 }
 
 @end

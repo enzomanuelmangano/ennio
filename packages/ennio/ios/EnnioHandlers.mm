@@ -17,6 +17,7 @@
 #import "EnnioBootstrap.h"
 #import "EnnioFinder.h"
 #import "EnnioOps.h"
+#import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
 #import "PrivateAPI/EnnioTouchSynth.h"
 
@@ -230,6 +231,27 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         char buf[32];
         snprintf(buf, sizeof(buf), "{\"hash\":\"%llx\"}", (unsigned long long)h);
         return std::string(buf);
+    });
+
+    EnnioControlSocket::registerHandler("react_commit_ts", [](const std::string &) -> std::string {
+        uint64_t ts = [EnnioReactObserver lastCommitMs];
+        NSString *attach = [EnnioReactObserver attachmentDescription];
+        char buf[160];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"ts\":%llu,\"attach\":\"%s\"}",
+                      (unsigned long long)ts, attach.UTF8String);
+        return std::string(buf);
+    });
+
+    EnnioControlSocket::registerHandler("wait_react_commit", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 1000);
+        uint64_t sinceMs = 0;
+        id sinceV = a[@"sinceMs"];
+        if ([sinceV isKindOfClass:NSNumber.class]) sinceMs = [(NSNumber *)sinceV unsignedLongLongValue];
+        uint32_t elapsed = [EnnioReactObserver waitForCommitSince:sinceMs maxMs:maxMs];
+        BOOL ok = elapsed < maxMs;
+        return elapsedJson(elapsed, ok);
     });
 
     EnnioControlSocket::registerHandler("wait_commit", [](const std::string &args) -> std::string {

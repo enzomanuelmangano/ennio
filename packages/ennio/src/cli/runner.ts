@@ -396,11 +396,59 @@ async function runCommand(
       );
     }
     const preTapHash = await captureHash(ctx);
+    const preReact = await captureReactTs(ctx);
     await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
     if (isRepeatTap || nextIsSameTap) {
       // Tight gap so consecutive same-target taps register as a
       // double-tap on RN Pressables / RNGH Tap recognizers.
       await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
+    } else if (preReact.attach !== 'none') {
+      // Hermes/Paper/Fabric commit observer attached — block on the
+      // next RN commit AFTER the tap. This is O(1) inside the dylib
+      // (NSCondition broadcast from a swizzled mount method) and
+      // returns on the same vsync RN commits.
+      //
+      // We wait for *two* commits, not one: a Pressable's onPress
+      // typically dispatches a setState that takes one commit to
+      // reach the view tree, plus a second commit for the React
+      // effect that follows (focus transition, navigation push,
+      // dropdown open). Stopping after commit #1 caused inputText
+      // to fire before the just-tapped TextInput became first
+      // responder — see "Please enter your username" regression on
+      // login.yml.
+      const waitOneCommit = async (since: number, maxMs: number): Promise<number> => {
+        const r = await ctx.client
+          .call('wait_react_commit', { sinceMs: since, maxMs })
+          .catch(() => undefined);
+        if (!r || !r.ok || !r.data) return 0;
+        const data = r.data as { ok: boolean; elapsedMs: number };
+        if (!data.ok) return 0;
+        // Re-sample lastCommitMs so the next wait starts after this one.
+        const ts = await captureReactTs(ctx);
+        return ts.ts || since + (data.elapsedMs ?? 0);
+      };
+      const committed = await timedAsync(ctx, 'tap.postWaitReactCommit', async () => {
+        const after1 = await waitOneCommit(preReact.ts, 600);
+        if (!after1) return false;
+        await waitOneCommit(after1, 250);
+        return true;
+      });
+      if (!committed) {
+        // No commit fired — likely a no-op tap, fall back to the
+        // hash-change signal so we don't skip ahead.
+        await timedAsync(ctx, 'tap.postWaitHashChange', async () => {
+          await ctx.client
+            .call('wait_hash_change', { sinceHash: preTapHash, maxMs: 400 })
+            .catch(() => undefined);
+        });
+      }
+      // Pin the UIView tree once both commits are in: 80 ms of
+      // commit-quiet ensures layoutSubviews finished. Matches the
+      // hash-poll path's stableMs so we don't regress on screens
+      // that need a long layout pass.
+      await timedAsync(ctx, 'tap.postWaitCommit', () =>
+        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 80 }).catch(() => undefined),
+      );
     } else {
       // Event-driven post-tap settle. Replaces fixed POST_TAP_SETTLE_MS
       // sleep with a CADisplayLink-condition wait inside the dylib:
@@ -917,6 +965,27 @@ async function captureHash(ctx: RunContext): Promise<string> {
     /* hash unavailable */
   }
   return '';
+}
+
+// React Native commit observer — see ios/EnnioReactObserver.mm. Returns
+// {ts, attach}. attach is "paper" | "fabric" | "both" | "none". When
+// "none" the dylib has no RN hook attached and the caller should fall
+// back to the UIView frame-hash signal.
+async function captureReactTs(
+  ctx: RunContext,
+): Promise<{ ts: number; attach: 'paper' | 'fabric' | 'both' | 'none' }> {
+  try {
+    const r = await ctx.client.call('react_commit_ts');
+    if (r.ok && r.data) {
+      const d = r.data as { ts: number | string; attach: string };
+      const ts = typeof d.ts === 'number' ? d.ts : Number(d.ts) || 0;
+      const attach = (d.attach || 'none') as 'paper' | 'fabric' | 'both' | 'none';
+      return { ts, attach };
+    }
+  } catch {
+    /* observer op unavailable on older dylibs */
+  }
+  return { ts: 0, attach: 'none' };
 }
 
 // Retained for future post-tap settle experiments — see commit message.
