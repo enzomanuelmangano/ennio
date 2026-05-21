@@ -123,12 +123,17 @@ export class EnnioSocketClient {
   }
 
   /**
-   * Dispatch one op. Throws if disconnected. Resolves to the typed
-   * response (data depends on op).
+   * Dispatch one op. Resolves to the typed response (data depends on
+   * op). If the socket is disconnected when the call is made, attempt
+   * a single reconnect first — the dylib may have terminated + restored
+   * its listener between ops (rare but happens during reload).
    */
   async call(op: string, args: Record<string, unknown> = {}): Promise<EnnioSocketResponse> {
     if (!this.socket || this.socket.destroyed) {
-      throw new Error('ennio socket not connected');
+      const reopened = await this.connectWithRetry(5_000);
+      if (!reopened) {
+        throw new Error('ennio socket not connected');
+      }
     }
     const id = `r${++this.idSeq}`;
     const line = JSON.stringify({ id, op, args }) + '\n';

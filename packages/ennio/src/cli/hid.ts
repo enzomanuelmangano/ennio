@@ -19,7 +19,7 @@ function idb(args: string[]): void {
  * Tap at window-space point (x, y). Pass the simulator UDID via --udid
  * so idb_companion targets the right device.
  */
-export function tap(udid: string, x: number, y: number): void {
+export function tap(udid: string, x: number, y: number, durationSec: number = 0.2): void {
   // idb accepts ints only. Round to nearest pixel — UIKit hit-test is
   // tolerant of ~1pt offsets.
   //
@@ -37,7 +37,7 @@ export function tap(udid: string, x: number, y: number): void {
     '--udid',
     udid,
     '--duration',
-    '0.15',
+    String(durationSec),
     String(Math.round(x)),
     String(Math.round(y)),
   ]);
