@@ -24,6 +24,7 @@
 #import "EnnioControlSocket.h"
 #import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
+#import "EnnioTestIDIndex.h"
 
 #import <objc/runtime.h>
 
@@ -143,6 +144,12 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
         return;
     }
     NSLog(@"[Ennio] Distribution: %@ — starting", ennioDistributionName(dist));
+
+    // Install testID index swizzle BEFORE the socket listener / RN
+    // bootstrap. Any UIView.accessibilityIdentifier assignment after
+    // this call will land in the index — including RN's first commit
+    // wave that runs on the JS thread shortly after this point.
+    [EnnioTestIDIndex start];
 
     // Socket listener thread up immediately. Accepts will block until the
     // CLI connects — fine. Handlers will reject most ops with

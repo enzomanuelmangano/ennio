@@ -14,6 +14,7 @@
 
 #import "EnnioFinder.h"
 #import "EnnioBootstrap.h"
+#import "EnnioTestIDIndex.h"
 
 static NSMapTable<NSString *, UIView *> *g_cache;
 static dispatch_once_t g_cacheOnce;
@@ -337,6 +338,19 @@ static UIView *_Nullable walkAllWindows(BOOL (^matcher)(UIView *)) {
     UIView *cached = cacheLookup(testID);
     if (cached) return cached;
 
+    // Layer 1: O(1) hash lookup in the swizzle-populated testID index.
+    // Catches every UIView whose accessibilityIdentifier has been set
+    // since the dylib loaded — both Paper and Fabric apps because RN
+    // propagates testID via setAccessibilityIdentifier in both archs.
+    UIView *indexed = [EnnioTestIDIndex lookup:testID];
+    if (indexed) {
+        cacheStore(testID, indexed);
+        return indexed;
+    }
+
+    // Layer 2 + 3: fall back to UIView tree walk. Catches host code
+    // that assigns identifiers via runtime/KVC or before the swizzle
+    // was installed (rare, but possible during dyld-attach race).
     UIWindow *keyWin = [EnnioBootstrap keyWindow];
     UIView *match = walkByID(keyWin, testID);
     if (!match) {

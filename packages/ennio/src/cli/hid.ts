@@ -11,6 +11,7 @@
 
 import { execFileSync } from 'node:child_process';
 
+import { getHidDaemon } from './hid-daemon';
 import { getIdbClient } from './idb-grpc';
 
 function idb(args: string[]): void {
@@ -31,13 +32,21 @@ export async function tapFast(
   y: number,
   durationSec: number = 0.15,
 ): Promise<void> {
-  // Use idb CLI subprocess. Each spawn costs ~250 ms (vs ~30 ms via
-  // gRPC) but it's the only path that delivers a touch RN's
-  // Pressability/RNGH consistently accept on iOS 26 — the gRPC
-  // bidi-stream HID path produces events that get silently dropped
-  // by CoreSimulator's injector under conditions we haven't fully
-  // characterised (long-lived sessions, multi-tap bursts). Pay the
-  // CLI cost; correctness trumps the few hundred ms per flow.
+  // Persistent hid-daemon.py: one-time ~150 ms spawn cost, then each
+  // tap is ~3-8 ms (gRPC RTT to already-warm idb_companion). Beats
+  // both the per-tap CLI subprocess (~250 ms) and our broken
+  // bidi-stream gRPC client. Falls back to idb CLI if the daemon
+  // can't start (python missing, idb_companion socket absent, etc.) —
+  // correctness over speed.
+  try {
+    const d = await getHidDaemon(udid);
+    await d.tap(x, y, Math.round(durationSec * 1000));
+    return;
+  } catch (err) {
+    if (process.env.ENNIO_DEBUG_HID) {
+      process.stderr.write(`[ennio] hid-daemon fallback to CLI: ${String(err)}\n`);
+    }
+  }
   void getIdbClient;
   idb([
     'ui',

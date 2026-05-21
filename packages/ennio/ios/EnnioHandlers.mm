@@ -19,7 +19,9 @@
 #import "EnnioOps.h"
 #import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
+#import "EnnioTestIDIndex.h"
 #import "PrivateAPI/EnnioTouchSynth.h"
+#import "finders/EnnioFinderManager.h"
 
 #include "EnnioControlSocket.h"
 
@@ -139,6 +141,33 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         out += ready ? "ready" : "pending";
         out += "\"}";
         return out;
+    });
+
+    EnnioControlSocket::registerHandler("finder_status", [](const std::string &) -> std::string {
+        NSString *desc = [EnnioFinderManager attachmentDescription];
+        NSUInteger count = [EnnioTestIDIndex count];
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"strategies\":\"%s\",\"indexCount\":%lu}",
+                      desc.UTF8String, (unsigned long)count);
+        return std::string(buf);
+    });
+
+    EnnioControlSocket::registerHandler("finder_probe", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *testID = argString(a, @"testID");
+        if (!testID.length) throw std::runtime_error("missing testID");
+        BOOL indexHit = NO, uiviewHit = NO;
+        onMainVoid([&]() {
+            indexHit = [EnnioTestIDIndex lookup:testID] != nil;
+            uiviewHit = [EnnioFinder findViewByTestID:testID] != nil;
+        });
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"index\":%s,\"uiview\":%s}",
+                      indexHit ? "true" : "false",
+                      uiviewHit ? "true" : "false");
+        return std::string(buf);
     });
 
     EnnioControlSocket::registerHandler("find_by_testid", [](const std::string &args) -> std::string {
@@ -352,19 +381,16 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         NSString *testID = argString(a, @"testID");
         if (!testID.length) throw std::runtime_error("missing testID");
         uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 5000);
-        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:maxMs / 1000.0];
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
-        while ([deadline timeIntervalSinceNow] > 0) {
+        UIView *v = [EnnioFinderManager waitForTestID:testID maxMs:maxMs];
+        if (v) {
             onMainVoid([&]() {
-                UIView *v = [EnnioFinder findViewByTestID:testID];
-                if (v && [EnnioFinder isOnScreen:v]) {
+                if ([EnnioFinder isOnScreen:v]) {
                     rect = [EnnioFinder windowRectFor:v];
                     found = YES;
                 }
             });
-            if (found) break;
-            [NSThread sleepForTimeInterval:0.016];
         }
         if (!found) throw std::runtime_error("testID not found");
         return rectJson(rect);
