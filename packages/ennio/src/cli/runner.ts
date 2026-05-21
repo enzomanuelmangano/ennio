@@ -87,6 +87,23 @@ interface RunContext {
    *  work inside a single command (preWaitCommit, find, hidTap, …). */
   phaseTotals?: Map<string, number>;
   phaseCounts?: Map<string, number>;
+  /** Mutable bag populated by runScript and consumed by ${output.X}
+   *  substitution in subsequent inputText / tapOn text args. Mirrors
+   *  Maestro's `output` global available inside its JS sandbox. */
+  outputs: Record<string, unknown>;
+}
+
+// Replace Maestro-style ${output.X} placeholders with values from
+// ctx.outputs. Also handles ${env.X} → process.env.X.
+function interpolate(str: string, ctx: RunContext): string {
+  if (typeof str !== 'string') return str;
+  return str.replace(/\$\{(output|env)\.([A-Za-z0-9_]+)\}/g, (_, scope, key) => {
+    if (scope === 'output') {
+      const v = ctx.outputs[key];
+      return v == null ? '' : String(v);
+    }
+    return process.env[key] ?? '';
+  });
 }
 
 function recordPhase(ctx: RunContext, name: string, ms: number): void {
@@ -196,6 +213,7 @@ export async function runFlow(
     dylibPath: options.dylibPath ?? null,
     verbose: options.verbose ?? false,
     flowPath: flow.filePath,
+    outputs: {},
   };
 
   log(ctx, `▶ ${flow.name || flow.filePath} (${flow.commands.length} steps)`);
@@ -403,18 +421,21 @@ async function runCommand(
     return;
   }
   if ('inputText' in cmd) {
+    // Interpolate ${output.X} / ${env.X} so flows can feed a value
+    // produced by an earlier runScript (Maestro idiom).
+    const text = interpolate(String(cmd.inputText), ctx);
     // Prefer the in-process UIKeyInput.insertText path — it bypasses
     // the sim's hardware-keyboard locale, so chars like @, è, accents,
     // and quotes survive verbatim. Fall back to idb's HID-text path
     // when no firstResponder conforms to UIKeyInput (rare).
     let ok = false;
     try {
-      const r = await ctx.client.call('insert_text', { text: cmd.inputText });
+      const r = await ctx.client.call('insert_text', { text });
       ok = !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
     } catch {
       /* fall through to hidType */
     }
-    if (!ok) hidType(ctx.udid, cmd.inputText);
+    if (!ok) hidType(ctx.udid, text);
     await sleep(200);
     await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 80 });
     return;
@@ -715,16 +736,32 @@ async function runCommand(
     await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 150 });
     return;
   }
+  if ('runScript' in cmd) {
+    const scriptCmd = (cmd as { runScript: { file: string; env?: Record<string, string> } })
+      .runScript;
+    await runMaestroScript(ctx, scriptCmd);
+    return;
+  }
   if ('runFlow' in cmd) {
     const sub = cmd.runFlow;
     // `when:` clause — evaluate the predicate against current screen.
     // If false, skip the subflow entirely.
     if (sub.when) {
-      const w = sub.when;
+      const w = sub.when as {
+        visible?: unknown;
+        notVisible?: unknown;
+        platform?: string;
+      };
       let satisfied = true;
-      if (w.visible) {
+      if (w.platform) {
+        // Maestro platform gate: iOS / Android. We're an iOS-only
+        // runner, so the iOS branch always runs and the Android one
+        // is skipped.
+        satisfied = String(w.platform).toLowerCase() === 'ios';
+      }
+      if (satisfied && w.visible) {
         satisfied = await isVisible(ctx, normalizeSelector(w.visible));
-      } else if (w.notVisible) {
+      } else if (satisfied && w.notVisible) {
         satisfied = !(await isVisible(ctx, normalizeSelector(w.notVisible)));
       }
       if (!satisfied) return;
@@ -1152,6 +1189,85 @@ function parsePoint(p: MaestroSelector['point']): { x: number; y: number } {
     return { x, y };
   }
   throw new Error('tapOn point: invalid');
+}
+
+// =====================================================================
+// runScript — Maestro JS sandbox
+// =====================================================================
+//
+// Maestro's runScript executes JS in a GraalVM sandbox with custom
+// globals: http.{get,post,put,delete}, output (mutable bag), json
+// (synchronous parse), env (script-step env block). Bluesky's e2e
+// flows lean on this to bootstrap mock data and write the result
+// into output.X for later steps to interpolate via ${output.X}.
+//
+// We can't ship GraalVM, but Node's `vm` module + a tiny curl-backed
+// synchronous http shim covers the surface area Bluesky actually
+// uses (one http.post per setupServer.js invocation).
+//
+// Limitations:
+// - http calls are spawn-per-request (no keepalive); fine for setup.
+// - Only http.{get,post,put,delete} — no websockets, no streaming.
+// - Sandbox is permissive: scripts share the parent require graph
+//   for `node:vm` reasons but we don't expose require/process.
+
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { createContext, runInContext } from 'node:vm';
+
+function maestroHttpSync(
+  method: string,
+  url: string,
+  opts?: { headers?: Record<string, string>; body?: string },
+): { status: number; body: string; headers: Record<string, string> } {
+  const args = ['-sS', '-X', method.toUpperCase(), '-w', '\n%{http_code}', url];
+  if (opts?.headers) {
+    for (const [k, v] of Object.entries(opts.headers)) {
+      args.push('-H', `${k}: ${v}`);
+    }
+  }
+  if (opts?.body !== undefined) {
+    args.push('--data-binary', opts.body);
+  }
+  const res = spawnSync('curl', args, { encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 });
+  const out = (res.stdout ?? '') + (res.stderr ?? '');
+  const nl = out.lastIndexOf('\n');
+  let status = 0;
+  let body = out;
+  if (nl >= 0) {
+    const tail = out.slice(nl + 1).trim();
+    if (/^\d{3}$/.test(tail)) {
+      status = parseInt(tail, 10);
+      body = out.slice(0, nl);
+    }
+  }
+  return { status, body, headers: {} };
+}
+
+async function runMaestroScript(
+  ctx: RunContext,
+  script: { file: string; env?: Record<string, string> },
+): Promise<void> {
+  const scriptPath = resolve(dirname(ctx.flowPath), script.file);
+  const src = readFileSync(scriptPath, 'utf-8');
+  const sandbox = {
+    output: ctx.outputs,
+    http: {
+      get: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
+        maestroHttpSync('GET', url, opts),
+      post: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
+        maestroHttpSync('POST', url, opts),
+      put: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
+        maestroHttpSync('PUT', url, opts),
+      delete: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
+        maestroHttpSync('DELETE', url, opts),
+    },
+    json: (s: string) => JSON.parse(s),
+    console: { log: (...a: unknown[]) => process.stderr.write(`[script] ${a.join(' ')}\n`) },
+    ...(script.env ?? {}),
+  };
+  const vmCtx = createContext(sandbox);
+  runInContext(src, vmCtx, { filename: scriptPath, timeout: 30_000 });
 }
 
 function describeCommand(cmd: MaestroCommand): string {
