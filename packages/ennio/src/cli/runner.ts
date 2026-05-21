@@ -150,6 +150,7 @@ async function timedAsync<T>(ctx: RunContext, name: string, fn: () => Promise<T>
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function timedSync<T>(ctx: RunContext, name: string, fn: () => T): T {
   const t = Date.now();
   try {
@@ -376,8 +377,14 @@ async function runCommand(
     // target are typically intentional double-taps (RN DoubleTapBox
     // uses a <350 ms Date.now() gap detector).
     if (!isRepeatTap) {
+      // Light pre-tap settle. The post-tap path already produces a
+      // 200 ms stable window before the next find runs, so we only
+      // need a short spot-check here to absorb any in-flight layout
+      // that the prior assertion didn't wait for. Slashed from
+      // stableMs 600 / maxMs 3500 (which cost ~420 ms per tap on
+      // Bluesky) to stableMs 150 / maxMs 1500.
       await timedAsync(ctx, 'tap.preWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 3500, stableMs: 600 }).catch(() => undefined),
+        ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 300 }).catch(() => undefined),
       );
       // Belt-and-braces: even after the frame-hash is stable, a
       // presented sheet's residual overlay UIView can absorb touches
@@ -415,7 +422,7 @@ async function runCommand(
         await timedAsync(ctx, 'tap.postSleep', () => sleep(POST_TAP_SETTLE_MS));
       }
       await timedAsync(ctx, 'tap.postWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined),
+        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 80 }).catch(() => undefined),
       );
     }
     ctx.lastTapKey = tapKey;
@@ -984,14 +991,12 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
     center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
   }
   const baseHash = preHash ?? (await captureHash(ctx));
-  // Critical micro-sleep between discovery + tap. find_by_testid
-  // dispatch_syncs onto main; immediately following that with idb's
-  // HID event lands the touch in a narrow window where UIKit's
-  // hit-test layer-tree is still being re-established. RNGH's
-  // gesture recognizer silently rejects the tap. 80ms is enough on
-  // iOS 26 sims to clear the window; verified by smoke run of the
-  // race-sensitive flows (09 / 03).
-  await timedAsync(ctx, 'tap.preTapSleep', () => sleep(80));
+  // Micro-sleep between discovery and tap. find_by_testid
+  // dispatch_syncs onto main; following that with idb's HID event
+  // immediately lands the touch in a narrow window where UIKit's
+  // hit-test layer-tree is still being re-established. 30 ms clears
+  // it on iOS 26; lower values regress the race-sensitive flows.
+  await timedAsync(ctx, 'tap.preTapSleep', () => sleep(30));
   await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
   // Self-healing recovery for testID taps. If after the tap
   //   (a) the same testID still resolves at the same coords, AND
@@ -1006,11 +1011,20 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // observe a hash change the tap clearly worked, so we can exit
   // self-heal early. Most successful taps fire the change in <150ms.
   if (sel.id && baseHash) {
-    // 500ms is the empirical sweet spot. 300ms regressed 09's
-    // post-modal-dismiss quick-action-settings tap (the bridge
-    // hasn't fired onPress yet so the retap path would skip when
-    // it shouldn't) and 16's two-tap DoubleTap timing window.
-    await timedAsync(ctx, 'tap.selfHealSleep', () => sleep(500));
+    // Event-driven self-heal. The post-tap path already waits for
+    // first hash change. If that observed a change, the tap clearly
+    // worked — no self-heal needed; bail. Otherwise, give the JS
+    // bridge a brief window (300 ms) to deliver a deferred commit,
+    // then re-check identity + hash. Skips the unconditional 500 ms
+    // fixed sleep that used to fire on every testID tap.
+    const earlyChange = await timedAsync(ctx, 'tap.selfHealHashCheck', async () => {
+      const r = await ctx.client.call('wait_hash_change', {
+        sinceHash: baseHash,
+        maxMs: 300,
+      });
+      return !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
+    });
+    if (earlyChange) return;
     const recheck = await timedAsync(ctx, 'tap.selfHealRefind', () =>
       ctx.client.call('find_by_testid', { testID: sel.id! }),
     );
@@ -1021,7 +1035,9 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
       if (sameSpot) {
         const postHash = await captureHash(ctx);
         if (postHash && postHash === baseHash) {
-          timedSync(ctx, 'tap.selfHealRetap', () => hidTap(ctx.udid, center.x, center.y));
+          await timedAsync(ctx, 'tap.selfHealRetap', () =>
+            hidTapFast(ctx.udid, center.x, center.y),
+          );
         }
       }
     }
@@ -1047,6 +1063,27 @@ interface Rect {
 }
 
 async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect | null> {
+  // Fast path: push the polling INTO the dylib via wait_find_by_*
+  // so each retry is ~16 ms (one CADisplayLink tick) instead of
+  // the CLI's 100 ms loop. Single round-trip, ~6x lower latency
+  // on misses. Falls back to the legacy retry loop for selectors
+  // the fast path can't handle (childOf, mixed id+text, etc.).
+  if (sel.childOf && sel.childOf.id && sel.id) {
+    // childOf goes through the dedicated find_child_by_testid (no
+    // wait variant yet) — keep its existing path.
+  } else if (sel.id && !sel.text) {
+    const r = await timedAsync(ctx, 'tap.findFast', () =>
+      ctx.client
+        .call('wait_find_by_testid', { testID: sel.id!, maxMs: 5000 })
+        .catch(() => undefined),
+    );
+    if (r && r.ok && r.data) return r.data as Rect;
+  } else if (sel.text && !sel.id) {
+    const r = await timedAsync(ctx, 'tap.findFast', () =>
+      ctx.client.call('wait_find_by_text', { text: sel.text!, maxMs: 5000 }).catch(() => undefined),
+    );
+    if (r && r.ok && r.data) return r.data as Rect;
+  }
   // Match Maestro's implicit-wait semantics on tapOn: keep retrying the
   // find for ~7s before giving up. Layout passes after a clearState
   // relaunch or navigation transition often take 1-3s to settle.
@@ -1310,7 +1347,7 @@ function parsePoint(p: MaestroSelector['point']): { x: number; y: number } {
   throw new Error('tapOn point: invalid');
 }
 
-function maestroHttpSync(
+function maestroHttpSyncOnce(
   method: string,
   url: string,
   opts?: { headers?: Record<string, string>; body?: string },
@@ -1337,6 +1374,24 @@ function maestroHttpSync(
     }
   }
   return { status, body, headers: {} };
+}
+
+function maestroHttpSync(
+  method: string,
+  url: string,
+  opts?: { headers?: Record<string, string>; body?: string },
+): { status: number; body: string; headers: Record<string, string> } {
+  // Bluesky's mock PDS cycles its underlying process on each
+  // setupServer.js POST — the first call after a cycle can land
+  // mid-restart and return empty body + 500. Retry a few times
+  // with backoff before giving up.
+  let last = maestroHttpSyncOnce(method, url, opts);
+  for (let i = 0; i < 4 && (last.status >= 500 || last.body.trim() === ''); i++) {
+    const sleepMs = 500 * (i + 1);
+    spawnSync('sleep', [(sleepMs / 1000).toString()]);
+    last = maestroHttpSyncOnce(method, url, opts);
+  }
+  return last;
 }
 
 async function runMaestroScript(

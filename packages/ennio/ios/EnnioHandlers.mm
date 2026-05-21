@@ -325,6 +325,52 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         return std::string("{\"hidden\":") + (ok ? "true" : "false") + "}";
     });
 
+    EnnioControlSocket::registerHandler("wait_find_by_testid", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *testID = argString(a, @"testID");
+        if (!testID.length) throw std::runtime_error("missing testID");
+        uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 5000);
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:maxMs / 1000.0];
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
+        while ([deadline timeIntervalSinceNow] > 0) {
+            onMainVoid([&]() {
+                UIView *v = [EnnioFinder findViewByTestID:testID];
+                if (v && [EnnioFinder isOnScreen:v]) {
+                    rect = [EnnioFinder windowRectFor:v];
+                    found = YES;
+                }
+            });
+            if (found) break;
+            [NSThread sleepForTimeInterval:0.016];
+        }
+        if (!found) throw std::runtime_error("testID not found");
+        return rectJson(rect);
+    });
+
+    EnnioControlSocket::registerHandler("wait_find_by_text", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *text = argString(a, @"text");
+        if (!text.length) throw std::runtime_error("missing text");
+        uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 5000);
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:maxMs / 1000.0];
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
+        while ([deadline timeIntervalSinceNow] > 0) {
+            onMainVoid([&]() {
+                UIView *v = [EnnioFinder findViewByText:text];
+                if (v && [EnnioFinder isOnScreen:v]) {
+                    rect = [EnnioFinder windowRectFor:v];
+                    found = YES;
+                }
+            });
+            if (found) break;
+            [NSThread sleepForTimeInterval:0.016];
+        }
+        if (!found) throw std::runtime_error("text not found");
+        return rectJson(rect);
+    });
+
     EnnioControlSocket::registerHandler("activate_at_point", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         double x = (double)argInt(a, @"x", 0);
