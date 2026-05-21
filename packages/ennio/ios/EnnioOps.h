@@ -50,6 +50,13 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)backGesture;
 + (BOOL)hideKeyboard;
 
+/// Block the caller until no view controller in the hierarchy is
+/// mid-present or mid-dismiss (isBeingPresented / isBeingDismissed all
+/// NO), or `maxMs` elapses. Returns the elapsed milliseconds. Used as
+/// a pre-tap settle to avoid taps landing while a sheet's residual
+/// overlay UIView still absorbs touches.
++ (uint32_t)waitForPresentationIdleWithTimeout:(uint32_t)maxMs;
+
 // ─── Scrolling ──────────────────────────────────────────────────────
 
 + (BOOL)scrollTestID:(NSString *)testID
@@ -69,6 +76,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (BOOL)pressHardwareKey:(int)keyCode;
 
+/// Send a literal string to the firstResponder via UIKeyInput. Bypasses
+/// the simulator's hardware-keyboard locale, so unicode characters and
+/// special chars (@, è, accents) survive intact — idb's `ui text` is
+/// translated through the active keyboard layout and corrupts them.
++ (BOOL)insertText:(NSString *)text;
+
 // ─── Swipe at points ────────────────────────────────────────────────
 
 /// Synthesize a pan gesture from (x1,y1) to (x2,y2) over durationMs.
@@ -80,6 +93,22 @@ NS_ASSUME_NONNULL_BEGIN
               toX:(double)x2
                  y:(double)y2
         durationMs:(double)durationMs;
+
+/// Trigger UIRefreshControl on the scroll view containing (x, y).
+/// idb HID swipes don't reliably cross UIRefreshControl's pan-distance
+/// threshold on iOS 26 simulators (touch events arrive in two endpoint
+/// chunks without enough interpolated Moves). This synthesises the
+/// refresh by calling `beginRefreshing` + sending `valueChanged`
+/// actions directly on the UIRefreshControl. RN's RefreshControl
+/// listens for that event.
++ (BOOL)triggerRefreshAtX:(double)x y:(double)y;
+
+/// Returns YES if the scroll view containing (x, y) has a
+/// UIRefreshControl currently in the refreshing state. The CLI uses
+/// this to throttle YAML "warm-up + trigger" double-swipe patterns —
+/// without it, two idb HID swipes both cross the pan threshold on
+/// iOS 26 sim and fire onRefresh twice.
++ (BOOL)isRefreshingAtX:(double)x y:(double)y;
 
 // ─── Sandbox ────────────────────────────────────────────────────────
 

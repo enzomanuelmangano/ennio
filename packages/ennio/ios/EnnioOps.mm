@@ -219,10 +219,57 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
 // ─── Navigation ─────────────────────────────────────────────────────
 
 + (BOOL)backGesture {
+    // First try popping a navigation stack — covers the common Stack
+    // back-button case.
     UINavigationController *nav = findTopNavController();
-    if (!nav || nav.viewControllers.count < 2) return NO;
-    [nav popViewControllerAnimated:YES];
-    return YES;
+    if (nav && nav.viewControllers.count >= 2) {
+        [nav popViewControllerAnimated:YES];
+        return YES;
+    }
+    // Fall back to dismissing the topmost presented modal (sheet,
+    // formSheet, fullScreen). React Navigation's modal stack and
+    // expo-router's modals both surface here. Without this, a YAML
+    // `back` after presenting a modal goes nowhere and subsequent
+    // tab taps land on the still-visible sheet.
+    UIWindow *win = [EnnioBootstrap keyWindow];
+    UIViewController *vc = win.rootViewController;
+    while (vc.presentedViewController) vc = vc.presentedViewController;
+    if (vc && vc.presentingViewController) {
+        [vc dismissViewControllerAnimated:YES completion:nil];
+        return YES;
+    }
+    return NO;
+}
+
+static BOOL anyVCInTransition(UIViewController *root) {
+    if (!root) return NO;
+    if (root.isBeingPresented || root.isBeingDismissed) return YES;
+    if (root.transitionCoordinator) return YES;
+    for (UIViewController *child in root.childViewControllers) {
+        if (anyVCInTransition(child)) return YES;
+    }
+    if (root.presentedViewController) {
+        if (anyVCInTransition(root.presentedViewController)) return YES;
+    }
+    return NO;
+}
+
++ (uint32_t)waitForPresentationIdleWithTimeout:(uint32_t)maxMs {
+    NSDate *start = [NSDate date];
+    uint32_t step = 50;
+    while (true) {
+        __block BOOL inTransition = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            UIWindow *win = [EnnioBootstrap keyWindow];
+            UIViewController *root = win.rootViewController;
+            if (anyVCInTransition(root)) inTransition = YES;
+        });
+        if (!inTransition) break;
+        uint32_t elapsed = (uint32_t)([[NSDate date] timeIntervalSinceDate:start] * 1000);
+        if (elapsed >= maxMs) break;
+        [NSThread sleepForTimeInterval:step / 1000.0];
+    }
+    return (uint32_t)([[NSDate date] timeIntervalSinceDate:start] * 1000);
 }
 
 + (BOOL)hideKeyboard {
@@ -296,36 +343,33 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
 // ─── Hardware key ───────────────────────────────────────────────────
 
 + (BOOL)pressHardwareKey:(int)keyCode {
-    UIWindow *win = [EnnioBootstrap keyWindow];
-    if (!win) return NO;
-    // Walk the responder chain looking for a UIKeyInput conformer
-    // (UITextField, UITextView, etc.).
-    UIResponder *r = win;
-    UIResponder *first = nil;
-    while (r) {
-        if (r.isFirstResponder) {
-            first = r;
-            break;
+    // Find the current first responder by descending the view tree
+    // from every window. The responder-chain *upward* path goes
+    // view → … → window → app → nil; firstResponder lives DOWN in
+    // the subview tree (typically a UITextField/UITextView), so the
+    // upward walk from a window never sees it.
+    __block UIResponder *first = nil;
+    void (^findFirst)(UIView *) = nil;
+    __block __weak void (^weakFind)(UIView *);
+    weakFind = findFirst = ^(UIView *v) {
+        if (first) return;
+        if (v.isFirstResponder) { first = v; return; }
+        for (UIView *sub in v.subviews) {
+            weakFind(sub);
+            if (first) return;
         }
-        r = r.nextResponder;
-    }
-    if (!first) {
-        // Try scenes.
-        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-            if (![scene isKindOfClass:UIWindowScene.class]) continue;
-            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-                r = w;
-                while (r) {
-                    if (r.isFirstResponder) {
-                        first = r;
-                        break;
-                    }
-                    r = r.nextResponder;
-                }
-                if (first) break;
-            }
+    };
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            findFirst(w);
             if (first) break;
         }
+        if (first) break;
+    }
+    if (!first) {
+        UIWindow *win = [EnnioBootstrap keyWindow];
+        if (win) findFirst(win);
     }
     if (![first conformsToProtocol:@protocol(UIKeyInput)]) return NO;
     id<UIKeyInput> input = (id<UIKeyInput>)first;
@@ -342,6 +386,61 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
         default:
             return NO;
     }
+}
+
++ (BOOL)triggerRefreshAtX:(double)x y:(double)y {
+    UIWindow *win = [EnnioBootstrap keyWindow];
+    if (!win) return NO;
+    UIView *hit = [win hitTest:CGPointMake(x, y) withEvent:nil];
+    UIScrollView *sv = hit ? findEnclosingScrollView(hit) : nil;
+    if (!sv) return NO;
+    UIRefreshControl *rc = sv.refreshControl;
+    if (!rc) return NO;
+    // Skip if a refresh is already in progress — repeated downward
+    // swipes in YAML (warm-up + actual trigger) would otherwise fire
+    // valueChanged multiple times and inflate the test's hit counter.
+    if (rc.isRefreshing) return YES;
+    [rc beginRefreshing];
+    [rc sendActionsForControlEvents:UIControlEventValueChanged];
+    return YES;
+}
+
++ (BOOL)isRefreshingAtX:(double)x y:(double)y {
+    UIWindow *win = [EnnioBootstrap keyWindow];
+    if (!win) return NO;
+    UIView *hit = [win hitTest:CGPointMake(x, y) withEvent:nil];
+    UIScrollView *sv = hit ? findEnclosingScrollView(hit) : nil;
+    return sv && sv.refreshControl && sv.refreshControl.isRefreshing;
+}
+
++ (BOOL)insertText:(NSString *)text {
+    __block UIResponder *first = nil;
+    void (^findFirst)(UIView *) = nil;
+    __block __weak void (^weakFind)(UIView *);
+    weakFind = findFirst = ^(UIView *v) {
+        if (first) return;
+        if (v.isFirstResponder) { first = v; return; }
+        for (UIView *sub in v.subviews) {
+            weakFind(sub);
+            if (first) return;
+        }
+    };
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            findFirst(w);
+            if (first) break;
+        }
+        if (first) break;
+    }
+    if (!first) {
+        UIWindow *win = [EnnioBootstrap keyWindow];
+        if (win) findFirst(win);
+    }
+    if (![first conformsToProtocol:@protocol(UIKeyInput)]) return NO;
+    id<UIKeyInput> input = (id<UIKeyInput>)first;
+    [input insertText:text];
+    return YES;
 }
 
 // ─── Swipe at points ────────────────────────────────────────────────

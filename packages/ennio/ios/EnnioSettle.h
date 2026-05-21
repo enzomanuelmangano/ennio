@@ -37,6 +37,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// elapsed time in ms.
 + (uint32_t)waitForCommitWithTimeout:(uint32_t)maxMs stableForMs:(uint32_t)stableMs;
 
+/// Returns the current visible-UIView hash sample (the same value the
+/// CADisplayLink ticker observes). Callers use this to detect whether
+/// a tap actually changed anything on screen by comparing pre/post
+/// hashes; same value = visual no-op.
++ (uint64_t)currentHash;
+
 @end
 
 NS_ASSUME_NONNULL_END

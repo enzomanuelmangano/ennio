@@ -126,36 +126,73 @@ static NSString *_Nullable readAnyText(UIView *v) {
 //   2. substring `containsString:` on the same fields — caught by the
 //      collectByText caller via this same predicate
 //   3. KVC text fallback for RCTText and friends (RN <Text> view)
-static BOOL viewMatchesText(UIView *v, NSString *text) {
+// Returns 2 for exact match, 1 for substring match, 0 for no match.
+// Both arms use case-insensitive comparison — Maestro's text matcher
+// is case-insensitive and many apps re-case labels via text-transform
+// (a UILabel rendering "ORDERS" still wants to match selector
+// "Orders"). The two-tier rank prefers exact-match views over
+// substring matches (a `tapOn text: "Profile"` should hit the tab,
+// not the "Edit Profile" cell that substring-matches in a settings
+// list).
+static BOOL strEqualsCI(NSString *a, NSString *b) {
+    if (!a || !b) return NO;
+    return [a caseInsensitiveCompare:b] == NSOrderedSame;
+}
+
+static BOOL strContainsCI(NSString *haystack, NSString *needle) {
+    if (!haystack.length || !needle.length) return NO;
+    return [haystack rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+// UIKit decorates tab-bar items and similar controls with comma-
+// separated metadata in their accessibilityLabel:
+//   "Profile, Tab, 4 of 5, selected"
+// Strip the trailing metadata so the first segment ("Profile") can be
+// compared as an exact match — otherwise the tab-bar item loses to a
+// "Edit Profile" cell that substring-matches "Profile" on a settings
+// screen below it in the hierarchy.
+static NSString *primarySegment(NSString *s) {
+    if (!s.length) return s;
+    NSRange r = [s rangeOfString:@", "];
+    if (r.location == NSNotFound) return s;
+    return [s substringToIndex:r.location];
+}
+
+static int viewTextMatchRank(UIView *v, NSString *text) {
     NSString *aLabel = v.accessibilityLabel;
     NSString *aValue = v.accessibilityValue;
-    if ([aLabel isEqualToString:text]) return YES;
-    if ([aValue isEqualToString:text]) return YES;
+    if (strEqualsCI(aLabel, text)) return 2;
+    if (strEqualsCI(aValue, text)) return 2;
+    if (strEqualsCI(primarySegment(aLabel), text)) return 2;
+    if (strEqualsCI(primarySegment(aValue), text)) return 2;
     if ([v isKindOfClass:UILabel.class]) {
         UILabel *lbl = (UILabel *)v;
-        if ([lbl.text isEqualToString:text]) return YES;
+        if (strEqualsCI(lbl.text, text)) return 2;
     }
     if ([v isKindOfClass:UIButton.class]) {
         UIButton *btn = (UIButton *)v;
         NSString *title = [btn titleForState:UIControlStateNormal];
-        if ([title isEqualToString:text]) return YES;
+        if (strEqualsCI(title, text)) return 2;
     }
     NSString *anyText = readAnyText(v);
-    if ([anyText isEqualToString:text]) return YES;
-    // Substring fallback (Maestro default semantics).
-    if (aLabel.length && [aLabel containsString:text]) return YES;
-    if (aValue.length && [aValue containsString:text]) return YES;
+    if (strEqualsCI(anyText, text)) return 2;
+    if (strContainsCI(aLabel, text)) return 1;
+    if (strContainsCI(aValue, text)) return 1;
     if ([v isKindOfClass:UILabel.class]) {
         UILabel *lbl = (UILabel *)v;
-        if (lbl.text.length && [lbl.text containsString:text]) return YES;
+        if (strContainsCI(lbl.text, text)) return 1;
     }
     if ([v isKindOfClass:UIButton.class]) {
         UIButton *btn = (UIButton *)v;
         NSString *title = [btn titleForState:UIControlStateNormal];
-        if (title.length && [title containsString:text]) return YES;
+        if (strContainsCI(title, text)) return 1;
     }
-    if (anyText.length && [anyText containsString:text]) return YES;
-    return NO;
+    if (strContainsCI(anyText, text)) return 1;
+    return 0;
+}
+
+static BOOL viewMatchesText(UIView *v, NSString *text) {
+    return viewTextMatchRank(v, text) > 0;
 }
 
 // Collect every matching view (preorder DFS). Used to pick the best
@@ -187,19 +224,24 @@ static UIView *_Nullable walkByText(UIView *root, NSString *text) {
     if (!root) return nil;
     NSMutableArray<UIView *> *matches = [NSMutableArray new];
     collectByText(root, text, matches);
-    // First pass: prefer matches that are both ON SCREEN and interactive
-    // (tab buttons, controls). Filters out off-screen transition clones
-    // and screen-header labels at the same time.
+    // Selection priority (most-specific wins):
+    //   1. exact match + on-screen + interactive
+    //   2. exact match + on-screen
+    //   3. substring match + on-screen + interactive
+    //   4. substring match + on-screen
+    //   5. any match, even off-screen (last-resort, e.g. transitioning)
+    for (UIView *v in matches) {
+        if (viewTextMatchRank(v, text) == 2 && viewIsLikelyOnScreen(v) && isInteractive(v)) return v;
+    }
+    for (UIView *v in matches) {
+        if (viewTextMatchRank(v, text) == 2 && viewIsLikelyOnScreen(v)) return v;
+    }
     for (UIView *v in matches) {
         if (viewIsLikelyOnScreen(v) && isInteractive(v)) return v;
     }
-    // Second pass: any on-screen match (e.g. a header label).
     for (UIView *v in matches) {
         if (viewIsLikelyOnScreen(v)) return v;
     }
-    // Final fallback: even if off-screen, return SOMETHING so the
-    // caller can decide; isOnScreen at the find_by_text handler will
-    // reject if it doesn't pass.
     return matches.firstObject;
 }
 

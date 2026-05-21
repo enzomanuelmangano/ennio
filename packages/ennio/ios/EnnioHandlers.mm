@@ -209,6 +209,13 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         return elapsedJson(elapsed, ok);
     });
 
+    EnnioControlSocket::registerHandler("frame_hash", [](const std::string &) -> std::string {
+        uint64_t h = [EnnioSettle currentHash];
+        char buf[32];
+        snprintf(buf, sizeof(buf), "{\"hash\":\"%llx\"}", (unsigned long long)h);
+        return std::string(buf);
+    });
+
     EnnioControlSocket::registerHandler("wait_commit", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 1000);
@@ -300,6 +307,41 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps hideKeyboard]; });
         return std::string("{\"hidden\":") + (ok ? "true" : "false") + "}";
+    });
+
+    EnnioControlSocket::registerHandler("wait_presentation_idle", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 2000);
+        uint32_t elapsed = [EnnioOps waitForPresentationIdleWithTimeout:maxMs];
+        BOOL ok = elapsed < maxMs;
+        return elapsedJson(elapsed, ok);
+    });
+
+    EnnioControlSocket::registerHandler("is_refreshing", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        double x = (double)argInt(a, @"x", 195);
+        double y = (double)argInt(a, @"y", 200);
+        BOOL ok = NO;
+        onMainVoid([&]() { ok = [EnnioOps isRefreshingAtX:x y:y]; });
+        return std::string("{\"refreshing\":") + (ok ? "true" : "false") + "}";
+    });
+
+    EnnioControlSocket::registerHandler("trigger_refresh", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        double x = (double)argInt(a, @"x", 195);
+        double y = (double)argInt(a, @"y", 200);
+        BOOL ok = NO;
+        onMainVoid([&]() { ok = [EnnioOps triggerRefreshAtX:x y:y]; });
+        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
+    });
+
+    EnnioControlSocket::registerHandler("insert_text", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *text = argString(a, @"text");
+        if (!text) text = @"";
+        BOOL ok = NO;
+        onMainVoid([&]() { ok = [EnnioOps insertText:text]; });
+        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("hardware_key", [](const std::string &args) -> std::string {

@@ -203,4 +203,8 @@ static EnnioCommitTicker *g_commitTicker;
     }
 }
 
++ (uint64_t)currentHash {
+    return g_currentHash;
+}
+
 @end
