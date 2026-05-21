@@ -378,8 +378,24 @@ static BOOL anyVCInTransition(UIViewController *root) {
         case 42: // backspace
             if ([input respondsToSelector:@selector(deleteBackward)]) [input deleteBackward];
             return YES;
-        case 40: // return
-            [input insertText:@"\n"];
+        case 40: // return — fire onSubmitEditing-style action when
+                 // the firstResponder is a UITextField/UIControl,
+                 // so RN's TextInput.onSubmitEditing callback runs.
+                 // Falls back to a literal newline insert for
+                 // multiline fields.
+            if ([first isKindOfClass:UIControl.class]) {
+                UIControl *ctl = (UIControl *)first;
+                [ctl sendActionsForControlEvents:UIControlEventEditingDidEndOnExit];
+                if ([first isKindOfClass:UITextField.class]) {
+                    UITextField *tf = (UITextField *)first;
+                    id<UITextFieldDelegate> d = tf.delegate;
+                    if ([d respondsToSelector:@selector(textFieldShouldReturn:)]) {
+                        [d textFieldShouldReturn:tf];
+                    }
+                }
+            } else {
+                [input insertText:@"\n"];
+            }
             return YES;
         case 44: // space
             [input insertText:@" "];

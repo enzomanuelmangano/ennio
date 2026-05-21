@@ -24,7 +24,7 @@
 //   travel / setLocation / setPermissions
 //   recordVideo / startRecording
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 import { dirname, resolve } from 'node:path';
 
@@ -38,6 +38,29 @@ import {
 import { EnnioSocketClient } from './socket-client';
 import { tap as hidTap, swipe as hidSwipe, typeText as hidType } from './hid';
 import { ensureBootedSim, findDylib, getAppContainer, terminateApp } from './sim';
+
+// =====================================================================
+// runScript — Maestro JS sandbox
+// =====================================================================
+//
+// Maestro's runScript executes JS in a GraalVM sandbox with custom
+// globals: http.{get,post,put,delete}, output (mutable bag), json
+// (synchronous parse), env (script-step env block). Bluesky's e2e
+// flows lean on this to bootstrap mock data and write the result
+// into output.X for later steps to interpolate via ${output.X}.
+//
+// We can't ship GraalVM, but Node's `vm` module + a tiny curl-backed
+// synchronous http shim covers the surface area Bluesky actually
+// uses (one http.post per setupServer.js invocation).
+//
+// Limitations:
+// - http calls are spawn-per-request (no keepalive); fine for setup.
+// - Only http.{get,post,put,delete} — no websockets, no streaming.
+// - Sandbox is permissive: scripts share the parent require graph
+//   for `node:vm` reasons but we don't expose require/process.
+
+import { readFileSync } from 'node:fs';
+import { createContext, runInContext } from 'node:vm';
 
 // Default implicit-wait on visibility predicates. Maestro's default is
 // 5s. We use 10s because on iOS 26 sim, a tile-tap-driven screen
@@ -309,6 +332,15 @@ async function runCommand(
 
   if ('tapOn' in cmd) {
     const sel = normalizeSelector(cmd.tapOn);
+    // Maestro's `optional: true` modifier on tapOn: if the selector
+    // doesn't resolve within a short window, silently skip the step
+    // instead of failing the flow. Used in flows that may or may
+    // not see e.g. a "Not Now" prompt depending on app state.
+    const isOptional = !!(cmd.tapOn && typeof cmd.tapOn === 'object' && 'optional' in cmd.tapOn && (cmd.tapOn as { optional?: boolean }).optional);
+    if (isOptional) {
+      const r = await findOnce(ctx, sel);
+      if (!r) return;
+    }
     const tapKey = JSON.stringify(sel);
     const isRepeatTap = ctx.lastTapKey === tapKey;
     // Look-ahead: if the NEXT command is a tapOn on the same target,
@@ -1190,30 +1222,6 @@ function parsePoint(p: MaestroSelector['point']): { x: number; y: number } {
   }
   throw new Error('tapOn point: invalid');
 }
-
-// =====================================================================
-// runScript — Maestro JS sandbox
-// =====================================================================
-//
-// Maestro's runScript executes JS in a GraalVM sandbox with custom
-// globals: http.{get,post,put,delete}, output (mutable bag), json
-// (synchronous parse), env (script-step env block). Bluesky's e2e
-// flows lean on this to bootstrap mock data and write the result
-// into output.X for later steps to interpolate via ${output.X}.
-//
-// We can't ship GraalVM, but Node's `vm` module + a tiny curl-backed
-// synchronous http shim covers the surface area Bluesky actually
-// uses (one http.post per setupServer.js invocation).
-//
-// Limitations:
-// - http calls are spawn-per-request (no keepalive); fine for setup.
-// - Only http.{get,post,put,delete} — no websockets, no streaming.
-// - Sandbox is permissive: scripts share the parent require graph
-//   for `node:vm` reasons but we don't expose require/process.
-
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { createContext, runInContext } from 'node:vm';
 
 function maestroHttpSync(
   method: string,
