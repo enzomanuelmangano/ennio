@@ -430,6 +430,29 @@ static BOOL anyVCInTransition(UIViewController *root) {
     return sv && sv.refreshControl && sv.refreshControl.isRefreshing;
 }
 
++ (BOOL)focusByTestID:(NSString *)testID {
+    UIView *v = [EnnioFinder findViewByTestID:testID];
+    if (!v) return NO;
+    // RCTBaseTextInputView wraps the actual UITextField/UITextView in a
+    // child; ask becomeFirstResponder on the wrapper and let UIKit
+    // descend.
+    if (![v canBecomeFirstResponder]) {
+        UIView *inner = nil;
+        NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:v];
+        while (stack.count) {
+            UIView *cur = stack.lastObject;
+            [stack removeLastObject];
+            if ([cur canBecomeFirstResponder]) {
+                inner = cur;
+                break;
+            }
+            for (UIView *sub in cur.subviews) [stack addObject:sub];
+        }
+        if (inner) v = inner;
+    }
+    return [v becomeFirstResponder];
+}
+
 + (BOOL)insertText:(NSString *)text {
     __block UIResponder *first = nil;
     void (^findFirst)(UIView *) = nil;

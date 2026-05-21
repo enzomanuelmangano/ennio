@@ -82,6 +82,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// translated through the active keyboard layout and corrupts them.
 + (BOOL)insertText:(NSString *)text;
 
+/// Make the view bearing `testID` the firstResponder. Bypasses idb
+/// HID taps that can't focus a 1×1 px hidden input (a common
+/// e2e-only pattern in apps that need a side-channel to inject
+/// metadata into the app — Bluesky's e2eProxyHeaderInput etc.).
++ (BOOL)focusByTestID:(NSString *)testID;
+
 // ─── Swipe at points ────────────────────────────────────────────────
 
 /// Synthesize a pan gesture from (x1,y1) to (x2,y2) over durationMs.

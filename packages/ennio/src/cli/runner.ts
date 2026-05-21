@@ -336,7 +336,12 @@ async function runCommand(
     // doesn't resolve within a short window, silently skip the step
     // instead of failing the flow. Used in flows that may or may
     // not see e.g. a "Not Now" prompt depending on app state.
-    const isOptional = !!(cmd.tapOn && typeof cmd.tapOn === 'object' && 'optional' in cmd.tapOn && (cmd.tapOn as { optional?: boolean }).optional);
+    const isOptional = !!(
+      cmd.tapOn &&
+      typeof cmd.tapOn === 'object' &&
+      'optional' in cmd.tapOn &&
+      (cmd.tapOn as { optional?: boolean }).optional
+    );
     if (isOptional) {
       const r = await findOnce(ctx, sel);
       if (!r) return;
@@ -904,7 +909,26 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
       /* fall through to normal find */
     }
   }
-  const center = await timedAsync(ctx, 'tap.find', () => resolveCenter(ctx, sel));
+  const rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+  if (!rect) {
+    throw new Error(`element not found: ${JSON.stringify(sel)}`);
+  }
+  // Hidden test-only inputs: some apps expose a 1×1 px TextInput as
+  // a side-channel for e2e harness data (Bluesky's e2eProxyHeaderInput).
+  // idb HID taps on a 1px hit area are unreliable — RNGH's tap
+  // recognizer drops them and the underlying TextInput never becomes
+  // firstResponder. When we see one of those, focus the view directly
+  // via UIView.becomeFirstResponder so the next `inputText` op
+  // routes into it via the existing insert_text path.
+  if (sel.id && rect.w < 6 && rect.h < 6) {
+    try {
+      const r = await ctx.client.call('focus_testid', { testID: sel.id });
+      if (r.ok && r.data && (r.data as { ok: boolean }).ok) return;
+    } catch {
+      /* fall through to HID tap */
+    }
+  }
+  const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
   const baseHash = preHash ?? (await captureHash(ctx));
   // Critical micro-sleep between discovery + tap. find_by_testid
   // dispatch_syncs onto main; immediately following that with idb's

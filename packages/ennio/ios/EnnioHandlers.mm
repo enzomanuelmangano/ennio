@@ -335,6 +335,15 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 
+    EnnioControlSocket::registerHandler("focus_testid", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *testID = argString(a, @"testID");
+        if (!testID.length) throw std::runtime_error("missing testID");
+        BOOL ok = NO;
+        onMainVoid([&]() { ok = [EnnioOps focusByTestID:testID]; });
+        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
+    });
+
     EnnioControlSocket::registerHandler("insert_text", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         NSString *text = argString(a, @"text");
