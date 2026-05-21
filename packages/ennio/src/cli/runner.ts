@@ -390,9 +390,27 @@ async function runCommand(
       // double-tap on RN Pressables / RNGH Tap recognizers.
       await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
     } else {
-      await timedAsync(ctx, 'tap.postSleep', () => sleep(POST_TAP_SETTLE_MS));
+      // Event-driven post-tap settle. Replaces fixed POST_TAP_SETTLE_MS
+      // sleep with a CADisplayLink-condition wait inside the dylib:
+      // returns the instant the visible-UIView hash differs from
+      // pre-tap. Active screens react in 50-200ms; static-screen taps
+      // hit the 600ms ceiling and fall through to a short fixed sleep
+      // so we don't skip ahead of a slow React commit. Subsequent
+      // wait_commit smooths the transition's tail.
+      const changed = await timedAsync(ctx, 'tap.postWaitHashChange', async () => {
+        const r = await ctx.client
+          .call('wait_hash_change', { sinceHash: preTapHash, maxMs: 600 })
+          .catch(() => undefined);
+        return !!(r && r.ok && r.data && (r.data as { ok: boolean }).ok);
+      });
+      if (!changed) {
+        // Likely a no-op tap, OR the JS bridge hasn't fired its
+        // commit yet. Pay the legacy fixed-sleep budget so we don't
+        // race the next find on slow Hermes mounts.
+        await timedAsync(ctx, 'tap.postSleep', () => sleep(POST_TAP_SETTLE_MS));
+      }
       await timedAsync(ctx, 'tap.postWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 300 }).catch(() => undefined),
+        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined),
       );
     }
     ctx.lastTapKey = tapKey;
@@ -931,22 +949,31 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   if (!rect) {
     throw new Error(`element not found: ${JSON.stringify(sel)}`);
   }
-  // Hidden test-only inputs: some apps expose a 1×1 px TextInput as
-  // a side-channel for e2e harness data (Bluesky's e2eProxyHeaderInput).
-  // idb HID taps on a 1px hit area are unreliable — RNGH's tap
-  // recognizer drops them and the underlying TextInput never becomes
-  // firstResponder. When we see one of those, focus the view directly
-  // via UIView.becomeFirstResponder so the next `inputText` op
-  // routes into it via the existing insert_text path.
+  // Hidden test-only controls: some apps expose 1×1 px elements
+  // (TextInput and Pressable variants) as side-channels for e2e
+  // harnesses. idb HID taps round to int — a 1×1 rect at
+  // (401, 101) has its FP-center at (401.5, 101.5) which rounds
+  // to (402, 102) — landing on the sibling button 1 px below.
+  // Fall back to focus_testid for tiny TextInputs so the next
+  // inputText routes via insert_text → firstResponder.
   if (sel.id && rect.w < 6 && rect.h < 6) {
     try {
       const r = await ctx.client.call('focus_testid', { testID: sel.id });
       if (r.ok && r.data && (r.data as { ok: boolean }).ok) return;
     } catch {
-      /* fall through to HID tap */
+      /* fall through */
     }
   }
-  const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+  // Sub-pixel rounding fix: for tiny rects, place the tap inside
+  // the rounded-down floor of the rect rather than the geometric
+  // center. Otherwise a 1×1 element at (401, 101) rounds to (402, 102)
+  // when idb rounds the center.
+  let center: { x: number; y: number };
+  if (rect.w <= 2 && rect.h <= 2) {
+    center = { x: rect.x, y: rect.y };
+  } else {
+    center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+  }
   const baseHash = preHash ?? (await captureHash(ctx));
   // Critical micro-sleep between discovery + tap. find_by_testid
   // dispatch_syncs onto main; immediately following that with idb's
@@ -1016,14 +1043,8 @@ async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect 
   // relaunch or navigation transition often take 1-3s to settle.
   const deadline = Date.now() + 7000;
   while (Date.now() < deadline) {
-    if (sel.id) {
-      const r = await ctx.client.call('find_by_testid', { testID: sel.id });
-      if (r.ok) return r.data as Rect;
-    }
-    if (sel.text) {
-      const r = await ctx.client.call('find_by_text', { text: sel.text });
-      if (r.ok) return r.data as Rect;
-    }
+    const r = await findOnce(ctx, sel);
+    if (r) return r;
     await sleep(POLL_MS);
   }
   // For text selectors that look like tab-bar destinations (the
@@ -1079,6 +1100,21 @@ async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect 
 }
 
 async function findOnce(ctx: RunContext, sel: MaestroSelector): Promise<Rect | null> {
+  // Hierarchical childOf: prefer the dylib's scoped search so we
+  // don't pick the wrong matching descendant from a different
+  // ancestor (Maestro idiom: `id: postDropdownBtn / childOf: { id: feedItem-by-alice.test }`).
+  if (sel.childOf && sel.childOf.id && sel.id) {
+    const r = await ctx.client
+      .call('find_child_by_testid', {
+        childTestID: sel.id,
+        parentTestID: sel.childOf.id,
+      })
+      .catch(() => undefined);
+    if (r && r.ok) return r.data as Rect;
+    // Don't fall back to flat find — that would defeat the childOf
+    // constraint and return the first match anywhere.
+    return null;
+  }
   if (sel.id) {
     const r = await ctx.client.call('find_by_testid', { testID: sel.id });
     if (r.ok) return r.data as Rect;
@@ -1168,14 +1204,7 @@ async function relaunchAndReconnect(ctx: RunContext, launchArgs: string[] = []):
   }
   execFileSync(
     'xcrun',
-    [
-      'simctl',
-      'launch',
-      '--terminate-running-process',
-      ctx.udid,
-      ctx.bundleId,
-      ...launchArgs,
-    ],
+    ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
     {
       env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
       stdio: 'pipe',
@@ -1221,14 +1250,7 @@ async function clearStateAndRelaunch(ctx: RunContext, launchArgs: string[] = [])
   }
   execFileSync(
     'xcrun',
-    [
-      'simctl',
-      'launch',
-      '--terminate-running-process',
-      ctx.udid,
-      ctx.bundleId,
-      ...launchArgs,
-    ],
+    ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
     {
       env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
       stdio: 'pipe',

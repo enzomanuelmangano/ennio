@@ -430,6 +430,61 @@ static BOOL anyVCInTransition(UIViewController *root) {
     return sv && sv.refreshControl && sv.refreshControl.isRefreshing;
 }
 
++ (UIView *)findChildTestID:(NSString *)childTestID inParentTestID:(NSString *)parentTestID {
+    UIView *parent = [EnnioFinder findViewByTestID:parentTestID];
+    if (!parent) return nil;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:parent];
+    while (stack.count) {
+        UIView *cur = stack.lastObject;
+        [stack removeLastObject];
+        if ([cur.accessibilityIdentifier isEqualToString:childTestID]) return cur;
+        for (UIView *sub in cur.subviews) [stack addObject:sub];
+    }
+    return nil;
+}
+
++ (BOOL)activateByTestID:(NSString *)testID {
+    UIView *v = [EnnioFinder findViewByTestID:testID];
+    if (!v) return NO;
+    // Prefer onAccessibilityTap — direct callback delivery, no
+    // synthesized touch + hit-test indirection. UIView's default
+    // accessibilityActivate synthesizes a tap at the view's
+    // activation point and re-hit-tests; for stacked 1×1 px e2e
+    // controls (Bluesky), this can resolve to the wrong sibling.
+    SEL tap = NSSelectorFromString(@"_accessibilityHandleUserTouchActivate");
+    if ([v respondsToSelector:tap]) {
+        // Private but stable since iOS 10.
+        IMP imp = [v methodForSelector:tap];
+        ((void (*)(id, SEL))imp)(v, tap);
+        return YES;
+    }
+    if (v.accessibilityActivationPoint.x != 0 || v.accessibilityActivationPoint.y != 0) {
+        // No-op: leave the synthesized-tap path off and rely on the
+        // gesture recognizer search below.
+    }
+    // Find the first UIGestureRecognizer in the view's chain whose
+    // target action looks like a Pressable / TouchableX onPress and
+    // invoke it via the recognizer's _handleAction selector.
+    for (UIView *cur = v; cur; cur = cur.superview) {
+        for (UIGestureRecognizer *g in cur.gestureRecognizers) {
+            if (!g.isEnabled) continue;
+            // RNGH's GestureHandlerButton uses UITapGestureRecognizer.
+            if ([g isKindOfClass:UITapGestureRecognizer.class]) {
+                SEL fire = NSSelectorFromString(@"_handleAction");
+                if ([g respondsToSelector:fire]) {
+                    IMP imp = [g methodForSelector:fire];
+                    ((void (*)(id, SEL))imp)(g, fire);
+                    return YES;
+                }
+            }
+        }
+    }
+    // Last resort: the original accessibilityActivate, in case the
+    // view has overridden it usefully.
+    if ([v accessibilityActivate]) return YES;
+    return NO;
+}
+
 + (BOOL)focusByTestID:(NSString *)testID {
     UIView *v = [EnnioFinder findViewByTestID:testID];
     if (!v) return NO;

@@ -134,14 +134,42 @@ static NSString *_Nullable readAnyText(UIView *v) {
 // substring matches (a `tapOn text: "Profile"` should hit the tab,
 // not the "Edit Profile" cell that substring-matches in a settings
 // list).
-static BOOL strEqualsCI(NSString *a, NSString *b) {
-    if (!a || !b) return NO;
-    return [a caseInsensitiveCompare:b] == NSOrderedSame;
-}
-
 static BOOL strContainsCI(NSString *haystack, NSString *needle) {
     if (!haystack.length || !needle.length) return NO;
     return [haystack rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+// Maestro semantics: a text selector that contains regex
+// metacharacters is treated as a regex pattern; otherwise plain
+// substring. Used to match e.g. "Search for posts, users[,]? or feeds".
+static BOOL looksLikeRegex(NSString *s) {
+    if (s.length == 0) return NO;
+    NSCharacterSet *meta = [NSCharacterSet characterSetWithCharactersInString:@"[]?*+(){}|^$\\"];
+    return [s rangeOfCharacterFromSet:meta].location != NSNotFound;
+}
+
+static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
+    if (!haystack.length || !pattern.length) return NO;
+    NSError *err = nil;
+    NSRegularExpression *re = [NSRegularExpression
+        regularExpressionWithPattern:pattern
+                             options:NSRegularExpressionCaseInsensitive
+                               error:&err];
+    if (err || !re) return NO;
+    NSRange r = [re rangeOfFirstMatchInString:haystack options:0 range:NSMakeRange(0, haystack.length)];
+    return r.location != NSNotFound;
+}
+
+static BOOL strContainsOrRegex(NSString *haystack, NSString *needle) {
+    if (!haystack.length || !needle.length) return NO;
+    if (looksLikeRegex(needle)) return regexMatchCI(haystack, needle);
+    return strContainsCI(haystack, needle);
+}
+
+static BOOL strEqualsOrRegex(NSString *a, NSString *b) {
+    if (!a || !b) return NO;
+    if (looksLikeRegex(b)) return regexMatchCI(a, b);
+    return [a caseInsensitiveCompare:b] == NSOrderedSame;
 }
 
 // UIKit decorates tab-bar items and similar controls with comma-
@@ -161,33 +189,33 @@ static NSString *primarySegment(NSString *s) {
 static int viewTextMatchRank(UIView *v, NSString *text) {
     NSString *aLabel = v.accessibilityLabel;
     NSString *aValue = v.accessibilityValue;
-    if (strEqualsCI(aLabel, text)) return 2;
-    if (strEqualsCI(aValue, text)) return 2;
-    if (strEqualsCI(primarySegment(aLabel), text)) return 2;
-    if (strEqualsCI(primarySegment(aValue), text)) return 2;
+    if (strEqualsOrRegex(aLabel, text)) return 2;
+    if (strEqualsOrRegex(aValue, text)) return 2;
+    if (strEqualsOrRegex(primarySegment(aLabel), text)) return 2;
+    if (strEqualsOrRegex(primarySegment(aValue), text)) return 2;
     if ([v isKindOfClass:UILabel.class]) {
         UILabel *lbl = (UILabel *)v;
-        if (strEqualsCI(lbl.text, text)) return 2;
+        if (strEqualsOrRegex(lbl.text, text)) return 2;
     }
     if ([v isKindOfClass:UIButton.class]) {
         UIButton *btn = (UIButton *)v;
         NSString *title = [btn titleForState:UIControlStateNormal];
-        if (strEqualsCI(title, text)) return 2;
+        if (strEqualsOrRegex(title, text)) return 2;
     }
     NSString *anyText = readAnyText(v);
-    if (strEqualsCI(anyText, text)) return 2;
-    if (strContainsCI(aLabel, text)) return 1;
-    if (strContainsCI(aValue, text)) return 1;
+    if (strEqualsOrRegex(anyText, text)) return 2;
+    if (strContainsOrRegex(aLabel, text)) return 1;
+    if (strContainsOrRegex(aValue, text)) return 1;
     if ([v isKindOfClass:UILabel.class]) {
         UILabel *lbl = (UILabel *)v;
-        if (strContainsCI(lbl.text, text)) return 1;
+        if (strContainsOrRegex(lbl.text, text)) return 1;
     }
     if ([v isKindOfClass:UIButton.class]) {
         UIButton *btn = (UIButton *)v;
         NSString *title = [btn titleForState:UIControlStateNormal];
-        if (strContainsCI(title, text)) return 1;
+        if (strContainsOrRegex(title, text)) return 1;
     }
-    if (strContainsCI(anyText, text)) return 1;
+    if (strContainsOrRegex(anyText, text)) return 1;
     return 0;
 }
 

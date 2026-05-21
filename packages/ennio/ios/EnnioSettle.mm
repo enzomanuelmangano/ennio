@@ -207,4 +207,19 @@ static EnnioCommitTicker *g_commitTicker;
     return g_currentHash;
 }
 
++ (uint32_t)waitForHashChangeSince:(uint64_t)baselineHash maxMs:(uint32_t)maxMs {
+    NSDate *start = [NSDate date];
+    if (g_currentHash != baselineHash) return 0;
+    [g_commitCondition lock];
+    while (g_currentHash == baselineHash) {
+        uint32_t elapsed = (uint32_t)([[NSDate date] timeIntervalSinceDate:start] * 1000);
+        if (elapsed >= maxMs) break;
+        uint32_t remaining = maxMs - elapsed;
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:(NSTimeInterval)remaining / 1000.0];
+        [g_commitCondition waitUntilDate:deadline];
+    }
+    [g_commitCondition unlock];
+    return (uint32_t)([[NSDate date] timeIntervalSinceDate:start] * 1000);
+}
+
 @end

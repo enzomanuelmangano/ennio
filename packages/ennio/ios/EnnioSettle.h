@@ -43,6 +43,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// hashes; same value = visual no-op.
 + (uint64_t)currentHash;
 
+/// Wait until the visible-UIView hash differs from `baselineHash` for
+/// at least one CADisplayLink tick, or until `maxMs` elapses. Used as
+/// a post-tap event-driven settle in place of a fixed sleep: returns
+/// as soon as the screen reacts to a touch.
++ (uint32_t)waitForHashChangeSince:(uint64_t)baselineHash maxMs:(uint32_t)maxMs;
+
 @end
 
 NS_ASSUME_NONNULL_END

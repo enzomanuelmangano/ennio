@@ -209,6 +209,21 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         return elapsedJson(elapsed, ok);
     });
 
+    EnnioControlSocket::registerHandler("wait_hash_change", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *hexStr = argString(a, @"sinceHash");
+        uint64_t baseline = 0;
+        if (hexStr.length) {
+            unsigned long long v = 0;
+            sscanf([hexStr UTF8String], "%llx", &v);
+            baseline = (uint64_t)v;
+        }
+        uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 1000);
+        uint32_t elapsed = [EnnioSettle waitForHashChangeSince:baseline maxMs:maxMs];
+        BOOL ok = elapsed < maxMs;
+        return elapsedJson(elapsed, ok);
+    });
+
     EnnioControlSocket::registerHandler("frame_hash", [](const std::string &) -> std::string {
         uint64_t h = [EnnioSettle currentHash];
         char buf[32];
@@ -332,6 +347,33 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         double y = (double)argInt(a, @"y", 200);
         BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps triggerRefreshAtX:x y:y]; });
+        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
+    });
+
+    EnnioControlSocket::registerHandler("find_child_by_testid", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *childID = argString(a, @"childTestID");
+        NSString *parentID = argString(a, @"parentTestID");
+        if (!childID.length || !parentID.length) throw std::runtime_error("missing testIDs");
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
+        onMainVoid([&]() {
+            UIView *v = [EnnioOps findChildTestID:childID inParentTestID:parentID];
+            if (v && [EnnioFinder isOnScreen:v]) {
+                rect = [EnnioFinder windowRectFor:v];
+                found = YES;
+            }
+        });
+        if (!found) throw std::runtime_error("child testID not found");
+        return rectJson(rect);
+    });
+
+    EnnioControlSocket::registerHandler("activate_testid", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *testID = argString(a, @"testID");
+        if (!testID.length) throw std::runtime_error("missing testID");
+        BOOL ok = NO;
+        onMainVoid([&]() { ok = [EnnioOps activateByTestID:testID]; });
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 

@@ -88,6 +88,21 @@ NS_ASSUME_NONNULL_BEGIN
 /// metadata into the app — Bluesky's e2eProxyHeaderInput etc.).
 + (BOOL)focusByTestID:(NSString *)testID;
 
+/// Programmatically activate the view bearing `testID` — equivalent
+/// to a VoiceOver double-tap. For Pressables, fires the onPress
+/// action via accessibilityActivate. Used as a fallback when HID
+/// taps on 1×1 hit areas are too flaky (e.g. Bluesky's e2e-only
+/// test controls all rendered at 1×1).
++ (BOOL)activateByTestID:(NSString *)testID;
+
+/// Find a descendant view in the subtree of `parentTestID` whose own
+/// accessibilityIdentifier matches `childTestID`. Implements Maestro's
+/// `childOf:` hierarchical selector — pick the postDropdownBtn that
+/// lives inside feedItem-by-alice.test, not the first one in the
+/// flat tree. Returns the matched view, or nil. Output rect is
+/// reported via the same windowRectFor: path used by find_by_testid.
++ (nullable UIView *)findChildTestID:(NSString *)childTestID inParentTestID:(NSString *)parentTestID;
+
 // ─── Swipe at points ────────────────────────────────────────────────
 
 /// Synthesize a pan gesture from (x1,y1) to (x2,y2) over durationMs.
