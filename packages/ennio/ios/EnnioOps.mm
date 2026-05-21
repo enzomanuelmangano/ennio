@@ -525,6 +525,19 @@ static BOOL anyVCInTransition(UIViewController *root) {
         for (UIWindow *w in ((UIWindowScene *)scene).windows) {
             findFirst(w);
             if (first) break;
+            // Walk the rootVC's presented-VC chain. UISheetPresentationController
+            // hosts its content view detached from the window's literal
+            // subview tree — the firstResponder lives there but
+            // findFirst(window) misses it. Bluesky's @discord/bottom-sheet
+            // routes every modal form (create-list, edit-profile, etc.)
+            // through this path.
+            UIViewController *vc = w.rootViewController;
+            while (vc && !first) {
+                UIView *vcView = vc.viewIfLoaded;
+                if (vcView) findFirst(vcView);
+                vc = vc.presentedViewController;
+            }
+            if (first) break;
         }
         if (first) break;
     }

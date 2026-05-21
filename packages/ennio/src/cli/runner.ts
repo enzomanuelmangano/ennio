@@ -397,7 +397,37 @@ async function runCommand(
     }
     const preTapHash = await captureHash(ctx);
     const preReact = await captureReactTs(ctx);
-    await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
+    // If the next op is inputText (typing) and we have a testID,
+    // route the "tap to focus" through focus_testid: it calls
+    // becomeFirstResponder in-process — deterministic, no race with
+    // RN's onPress firing a state-driven focus transition. Without
+    // this, a freshly-presented form's first TextInput tap can land
+    // before RN has wired up the press handler, leaving the field
+    // unfocused; the inputText that follows types into nowhere.
+    // Observed on Bluesky's "Create moderation list" name field.
+    let typedInputShortcut = false;
+    if (
+      sel.id &&
+      !sel.text &&
+      !sel.childOf &&
+      nextRawCmd &&
+      typeof nextRawCmd === 'object' &&
+      'inputText' in nextRawCmd
+    ) {
+      try {
+        const r = await ctx.client.call('focus_testid', { testID: sel.id });
+        if (r.ok && r.data && (r.data as { ok: boolean }).ok) {
+          typedInputShortcut = true;
+        }
+      } catch {
+        /* fall through to normal tap */
+      }
+    }
+    if (!typedInputShortcut) {
+      await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
+    } else {
+      recordPhase(ctx, 'tap.focusShortcut', 1);
+    }
     if (isRepeatTap || nextIsSameTap) {
       // Tight gap so consecutive same-target taps register as a
       // double-tap on RN Pressables / RNGH Tap recognizers.
@@ -547,12 +577,21 @@ async function runCommand(
     // the sim's hardware-keyboard locale, so chars like @, è, accents,
     // and quotes survive verbatim. Fall back to idb's HID-text path
     // when no firstResponder conforms to UIKeyInput (rare).
+    // Retry insert_text up to 5 times with 100ms gaps. insert_text
+    // finds the current firstResponder + types via UIKeyInput. If the
+    // prior tap's focus hasn't transferred yet (RN onPress fires async,
+    // can lag the tap by a frame on first form mount — observed on
+    // Bluesky's Create-moderation-list name field), the first call
+    // returns NO. A short retry loop catches the focus once it lands.
     let ok = false;
-    try {
-      const r = await ctx.client.call('insert_text', { text });
-      ok = !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
-    } catch {
-      /* fall through to hidType */
+    for (let i = 0; i < 5 && !ok; i++) {
+      if (i > 0) await sleep(100);
+      try {
+        const r = await ctx.client.call('insert_text', { text });
+        ok = !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
+      } catch {
+        /* retry */
+      }
     }
     if (!ok) hidType(ctx.udid, text);
     await sleep(200);
