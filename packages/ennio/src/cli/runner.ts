@@ -82,6 +82,36 @@ interface RunContext {
    *  trigger_refresh shortcut so a YAML pattern of "warmup swipe +
    *  real swipe" doesn't fire the refresh handler twice. */
   lastRefreshAtMs?: number;
+  /** Aggregate per-phase timings. Used by the bottleneck reporter at
+   *  the end of each flow. Phase names map to the discrete chunks of
+   *  work inside a single command (preWaitCommit, find, hidTap, …). */
+  phaseTotals?: Map<string, number>;
+  phaseCounts?: Map<string, number>;
+}
+
+function recordPhase(ctx: RunContext, name: string, ms: number): void {
+  if (!ctx.phaseTotals) ctx.phaseTotals = new Map();
+  if (!ctx.phaseCounts) ctx.phaseCounts = new Map();
+  ctx.phaseTotals.set(name, (ctx.phaseTotals.get(name) ?? 0) + ms);
+  ctx.phaseCounts.set(name, (ctx.phaseCounts.get(name) ?? 0) + 1);
+}
+
+async function timedAsync<T>(ctx: RunContext, name: string, fn: () => Promise<T>): Promise<T> {
+  const t = Date.now();
+  try {
+    return await fn();
+  } finally {
+    recordPhase(ctx, name, Date.now() - t);
+  }
+}
+
+function timedSync<T>(ctx: RunContext, name: string, fn: () => T): T {
+  const t = Date.now();
+  try {
+    return fn();
+  } finally {
+    recordPhase(ctx, name, Date.now() - t);
+  }
 }
 
 export interface RunResult {
@@ -188,6 +218,7 @@ export async function runFlow(
       logStep(ctx, i + 1, dt, describeCommand(cmd));
       client.close();
       printSlowSteps(stepTimings);
+      printPhaseTotals(ctx);
       return {
         passed: false,
         stepsRun: i + 1,
@@ -202,6 +233,7 @@ export async function runFlow(
   }
   client.close();
   printSlowSteps(stepTimings);
+  printPhaseTotals(ctx);
   return { passed: true, stepsRun: flow.commands.length, stepsPassed };
 }
 
@@ -211,7 +243,31 @@ function printSlowSteps(timings: { step: number; ms: number; cmd: string }[]): v
   const total = timings.reduce((s, t) => s + t.ms, 0);
   const top = [...timings].sort((a, b) => b.ms - a.ms).slice(0, 5);
   process.stderr.write(`[ennio] total ${total}ms across ${timings.length} steps. Top 5:\n`);
-  for (const t of top) process.stderr.write(`[ennio]   ${String(t.ms).padStart(5)}ms  step ${t.step}: ${t.cmd}\n`);
+  for (const t of top)
+    process.stderr.write(`[ennio]   ${String(t.ms).padStart(5)}ms  step ${t.step}: ${t.cmd}\n`);
+}
+
+// Aggregate per-phase totals across the flow so the bottleneck is
+// obvious: e.g. "tap.postSleep took 32s across 40 taps" tells us the
+// 800 ms POST_TAP_SETTLE_MS is the dominant cost.
+function printPhaseTotals(ctx: RunContext): void {
+  if (!ctx.phaseTotals || ctx.phaseTotals.size === 0) return;
+  const entries = [...ctx.phaseTotals.entries()].map(([name, total]) => ({
+    name,
+    total,
+    count: ctx.phaseCounts?.get(name) ?? 0,
+  }));
+  entries.sort((a, b) => b.total - a.total);
+  process.stderr.write(`[ennio] phase totals (sorted by ms):\n`);
+  for (const e of entries) {
+    const avg = e.count > 0 ? Math.round(e.total / e.count) : 0;
+    process.stderr.write(
+      `[ennio]   ${String(e.total).padStart(6)}ms  ` +
+        `${String(e.count).padStart(4)}x  ` +
+        `${String(avg).padStart(4)}ms/call  ` +
+        `${e.name}\n`,
+    );
+  }
 }
 
 // =====================================================================
@@ -260,27 +316,29 @@ async function runCommand(
     // target are typically intentional double-taps (RN DoubleTapBox
     // uses a <350 ms Date.now() gap detector).
     if (!isRepeatTap) {
-      await ctx.client.call('wait_commit', { maxMs: 3500, stableMs: 600 }).catch(() => undefined);
+      await timedAsync(ctx, 'tap.preWaitCommit', () =>
+        ctx.client.call('wait_commit', { maxMs: 3500, stableMs: 600 }).catch(() => undefined),
+      );
       // Belt-and-braces: even after the frame-hash is stable, a
       // presented sheet's residual overlay UIView can absorb touches
       // for a few hundred ms while UIKit tears it down. Waiting until
       // no view controller reports isBeingPresented / isBeingDismissed
       // closes that gap. No-op when nothing is mid-transition.
-      await ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined);
+      await timedAsync(ctx, 'tap.preWaitPresentation', () =>
+        ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined),
+      );
     }
-    await execTapOn(ctx, sel);
+    const preTapHash = await captureHash(ctx);
+    await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
     if (isRepeatTap || nextIsSameTap) {
       // Tight gap so consecutive same-target taps register as a
       // double-tap on RN Pressables / RNGH Tap recognizers.
-      await sleep(120);
+      await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
     } else {
-      await sleep(POST_TAP_SETTLE_MS);
-      // Post-tap settle: wait for the navigation / state-change transition
-      // to complete before the next find. wait_commit returns as soon
-      // as the frame-hash is stable for stableMs, so a static screen
-      // costs ~stableMs; a transitioning one waits until the animation
-      // ends. maxMs caps the worst case (slow Hermes mount + layout).
-      await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 300 }).catch(() => undefined);
+      await timedAsync(ctx, 'tap.postSleep', () => sleep(POST_TAP_SETTLE_MS));
+      await timedAsync(ctx, 'tap.postWaitCommit', () =>
+        ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 300 }).catch(() => undefined),
+      );
     }
     ctx.lastTapKey = tapKey;
     return;
@@ -369,7 +427,11 @@ async function runCommand(
     let count: number;
     if (typeof cmd.eraseText === 'number') {
       count = cmd.eraseText;
-    } else if (cmd.eraseText && typeof cmd.eraseText === 'object' && 'characters' in cmd.eraseText) {
+    } else if (
+      cmd.eraseText &&
+      typeof cmd.eraseText === 'object' &&
+      'characters' in cmd.eraseText
+    ) {
       count = (cmd.eraseText as { characters: number }).characters;
     } else {
       count = 100; // bare form: clear the field
@@ -449,7 +511,9 @@ async function runCommand(
             hidSwipe(ctx.udid, cx, cy - small / 2, cx, cy + small / 2, 250);
           }
           await sleep(500);
-          await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
+          await ctx.client
+            .call('wait_commit', { maxMs: 1500, stableMs: 200 })
+            .catch(() => undefined);
         }
         return;
       }
@@ -667,7 +731,8 @@ async function runCommand(
     }
     // Inline commands form: { runFlow: { when?: ..., commands: [...] } }
     if (sub.commands && Array.isArray(sub.commands)) {
-      for (let i = 0; i < sub.commands.length; i++) await runCommand(ctx, sub.commands[i], sub.commands[i + 1]);
+      for (let i = 0; i < sub.commands.length; i++)
+        await runCommand(ctx, sub.commands[i], sub.commands[i + 1]);
       return;
     }
     // File form: { runFlow: { file: "subflows/foo.yaml" } }
@@ -677,7 +742,8 @@ async function runCommand(
       const prevPath = ctx.flowPath;
       ctx.flowPath = subPath;
       try {
-        for (let i = 0; i < subFlow.commands.length; i++) await runCommand(ctx, subFlow.commands[i], subFlow.commands[i + 1]);
+        for (let i = 0; i < subFlow.commands.length; i++)
+          await runCommand(ctx, subFlow.commands[i], subFlow.commands[i + 1]);
       } finally {
         ctx.flowPath = prevPath;
       }
@@ -687,7 +753,8 @@ async function runCommand(
   }
   if ('repeat' in cmd) {
     for (let i = 0; i < cmd.repeat.times; i++) {
-      for (let i = 0; i < cmd.repeat.commands.length; i++) await runCommand(ctx, cmd.repeat.commands[i], cmd.repeat.commands[i + 1]);
+      for (let i = 0; i < cmd.repeat.commands.length; i++)
+        await runCommand(ctx, cmd.repeat.commands[i], cmd.repeat.commands[i + 1]);
     }
     return;
   }
@@ -696,7 +763,8 @@ async function runCommand(
     let lastErr: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        for (let i = 0; i < cmd.retry.commands.length; i++) await runCommand(ctx, cmd.retry.commands[i], cmd.retry.commands[i + 1]);
+        for (let i = 0; i < cmd.retry.commands.length; i++)
+          await runCommand(ctx, cmd.retry.commands[i], cmd.retry.commands[i + 1]);
         return;
       } catch (e) {
         lastErr = e;
@@ -715,7 +783,41 @@ async function runCommand(
 // Helpers
 // =====================================================================
 
-async function execTapOn(ctx: RunContext, sel: MaestroSelector): Promise<void> {
+async function captureHash(ctx: RunContext): Promise<string> {
+  try {
+    const r = await ctx.client.call('frame_hash');
+    if (r.ok && r.data) return String((r.data as { hash: string }).hash);
+  } catch {
+    /* hash unavailable */
+  }
+  return '';
+}
+
+// Retained for future post-tap settle experiments — see commit message.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _waitForHashChange(
+  ctx: RunContext,
+  baseline: string,
+  maxMs: number,
+): Promise<boolean> {
+  if (!baseline) {
+    await sleep(POST_TAP_SETTLE_MS);
+    return true;
+  }
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    await sleep(60);
+    const cur = await captureHash(ctx);
+    if (cur && cur !== baseline) return true;
+  }
+  return false;
+}
+
+async function execTapOn(
+  ctx: RunContext,
+  sel: MaestroSelector,
+  preHash?: string,
+): Promise<void> {
   // Point-tap fast path — no discovery needed.
   if (sel.point !== undefined) {
     const { x, y } = parsePoint(sel.point);
@@ -737,23 +839,18 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector): Promise<void> {
       /* fall through to normal find */
     }
   }
-  const center = await resolveCenter(ctx, sel);
-  // Snapshot the screen hash so we can detect tap no-ops below.
-  let preHash = '';
-  try {
-    const h = await ctx.client.call('frame_hash');
-    if (h.ok && h.data) preHash = String((h.data as { hash: string }).hash);
-  } catch {
-    /* hash unavailable on older dylibs */
-  }
+  const center = await timedAsync(ctx, 'tap.find', () => resolveCenter(ctx, sel));
+  const baseHash = preHash ?? (await captureHash(ctx));
   // Critical micro-sleep between discovery + tap. find_by_testid
   // dispatch_syncs onto main; immediately following that with idb's
   // HID event lands the touch in a narrow window where UIKit's
   // hit-test layer-tree is still being re-established. RNGH's
-  // gesture recognizer silently rejects the tap.
-  await sleep(150);
-  hidTap(ctx.udid, center.x, center.y);
-  // Self-healing recovery for testID taps. If 500 ms after the tap
+  // gesture recognizer silently rejects the tap. 80ms is enough on
+  // iOS 26 sims to clear the window; verified by smoke run of the
+  // race-sensitive flows (09 / 03).
+  await timedAsync(ctx, 'tap.preTapSleep', () => sleep(80));
+  timedSync(ctx, 'tap.hidTap', () => hidTap(ctx.udid, center.x, center.y));
+  // Self-healing recovery for testID taps. If after the tap
   //   (a) the same testID still resolves at the same coords, AND
   //   (b) the screen hash is unchanged from before the tap,
   // the touch did not activate the pressable — usually because a
@@ -762,23 +859,28 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector): Promise<void> {
   // identity check) so legitimate state-only taps — toggles, switches,
   // counters — aren't double-fired: even an "in place" toggle changes
   // the frame hash because its tint/value redraws.
-  if (sel.id && preHash) {
-    await sleep(500);
-    const recheck = await ctx.client.call('find_by_testid', { testID: sel.id });
+  // Replace the old 500ms fixed wait with a hash-poll: as soon as we
+  // observe a hash change the tap clearly worked, so we can exit
+  // self-heal early. Most successful taps fire the change in <150ms.
+  if (sel.id && baseHash) {
+    // Fixed 500ms gives the JS pipeline a fair shot at running
+    // onPress → setState → commit. Shorter windows (a hash poll that
+    // returns immediately on ANY change) wrongly treated incidental
+    // hash flickers (focus ring, pressed-state tint, scroll inertia
+    // half-pixel offsets) as "the tap worked" and skipped retap on
+    // genuine misses where the underlying nav never started.
+    await timedAsync(ctx, 'tap.selfHealSleep', () => sleep(500));
+    const recheck = await timedAsync(ctx, 'tap.selfHealRefind', () =>
+      ctx.client.call('find_by_testid', { testID: sel.id! }),
+    );
     if (recheck.ok && recheck.data) {
       const r = recheck.data as Rect;
       const sameSpot =
         Math.abs(r.x + r.w / 2 - center.x) < 6 && Math.abs(r.y + r.h / 2 - center.y) < 6;
       if (sameSpot) {
-        let postHash = '';
-        try {
-          const h2 = await ctx.client.call('frame_hash');
-          if (h2.ok && h2.data) postHash = String((h2.data as { hash: string }).hash);
-        } catch {
-          /* */
-        }
-        if (postHash && postHash === preHash) {
-          hidTap(ctx.udid, center.x, center.y);
+        const postHash = await captureHash(ctx);
+        if (postHash && postHash === baseHash) {
+          timedSync(ctx, 'tap.selfHealRetap', () => hidTap(ctx.udid, center.x, center.y));
         }
       }
     }
