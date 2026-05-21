@@ -18,6 +18,7 @@
 #import "EnnioFinder.h"
 #import "EnnioOps.h"
 #import "EnnioSettle.h"
+#import "PrivateAPI/EnnioTouchSynth.h"
 
 #include "EnnioControlSocket.h"
 
@@ -322,6 +323,14 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         BOOL ok = NO;
         onMainVoid([&]() { ok = [EnnioOps hideKeyboard]; });
         return std::string("{\"hidden\":") + (ok ? "true" : "false") + "}";
+    });
+
+    EnnioControlSocket::registerHandler("activate_at_point", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        double x = (double)argInt(a, @"x", 0);
+        double y = (double)argInt(a, @"y", 0);
+        BOOL ok = [EnnioTouchSynth activateAtX:x y:y];
+        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("wait_presentation_idle", [](const std::string &args) -> std::string {

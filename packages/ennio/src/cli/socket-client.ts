@@ -20,7 +20,7 @@ import { Socket, createConnection } from 'node:net';
 
 // Per-request deadline. Long enough for a slow UIView walk on a busy
 // device; short enough that a hung handler doesn't deadlock the runner.
-const REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 
 const SOCKET_PATH = '/tmp/ennio-control.sock';
 

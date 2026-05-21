@@ -36,7 +36,12 @@ import {
   parseMaestroFile,
 } from './maestro-parser';
 import { EnnioSocketClient } from './socket-client';
-import { tap as hidTap, swipe as hidSwipe, typeText as hidType } from './hid';
+import {
+  tap as hidTap,
+  tapFast as hidTapFast,
+  swipe as hidSwipe,
+  typeText as hidType,
+} from './hid';
 import { ensureBootedSim, findDylib, getAppContainer, terminateApp } from './sim';
 
 // =====================================================================
@@ -475,11 +480,7 @@ async function runCommand(
     if (cmd.extendedWaitUntil.visible) {
       await waitUntilVisible(ctx, normalizeSelector(cmd.extendedWaitUntil.visible), timeout);
     } else if (cmd.extendedWaitUntil.notVisible) {
-      await waitUntilNotVisible(
-        ctx,
-        normalizeSelector(cmd.extendedWaitUntil.notVisible),
-        timeout,
-      );
+      await waitUntilNotVisible(ctx, normalizeSelector(cmd.extendedWaitUntil.notVisible), timeout);
     }
     return;
   }
@@ -991,7 +992,7 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // iOS 26 sims to clear the window; verified by smoke run of the
   // race-sensitive flows (09 / 03).
   await timedAsync(ctx, 'tap.preTapSleep', () => sleep(80));
-  timedSync(ctx, 'tap.hidTap', () => hidTap(ctx.udid, center.x, center.y));
+  await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
   // Self-healing recovery for testID taps. If after the tap
   //   (a) the same testID still resolves at the same coords, AND
   //   (b) the screen hash is unchanged from before the tap,

@@ -11,8 +11,43 @@
 
 import { execFileSync } from 'node:child_process';
 
+import { getIdbClient } from './idb-grpc';
+
 function idb(args: string[]): void {
   execFileSync('idb', args, { stdio: 'pipe' });
+}
+
+/**
+ * Fast async tap via persistent gRPC stream to idb_companion. Avoids
+ * the ~250 ms Python subprocess spawn that `idb ui tap` pays per tap
+ * — the stream stays open for the CLI lifetime so each tap is one
+ * gRPC roundtrip (~30-50 ms wall).
+ *
+ * Falls back to the sync idb CLI path if the gRPC client errors.
+ */
+export async function tapFast(
+  udid: string,
+  x: number,
+  y: number,
+  durationSec: number = 0.15,
+): Promise<void> {
+  try {
+    const client = getIdbClient(udid);
+    await client.tap(x, y, durationSec);
+  } catch (err) {
+    process.stderr.write(`[ennio] gRPC tap fallback: ${String(err)}\n`);
+    // Fallback: legacy idb CLI subprocess.
+    idb([
+      'ui',
+      'tap',
+      '--udid',
+      udid,
+      '--duration',
+      String(durationSec),
+      String(Math.round(x)),
+      String(Math.round(y)),
+    ]);
+  }
 }
 
 /**
