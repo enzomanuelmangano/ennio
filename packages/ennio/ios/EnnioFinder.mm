@@ -275,24 +275,56 @@ static UIView *_Nullable walkByText(UIView *root, NSString *text) {
 
 // Walk every UIWindow of every UIWindowScene — modal sheets and alerts
 // live in their own UIWindow. Returns the first match across all.
+//
+// Drops the hidden filter: iOS 26 UISheetPresentationController hosts
+// its content in a window with hidden=NO but isAttachedToScene=NO, and
+// some keyboard / system-level windows report hidden=YES while
+// still rendering their content (and crucially, while still being the
+// only place a presented sheet's RN content lives).
+//
+// Also walks each window's rootViewController's presentation chain so
+// modally-presented VCs whose .view is intentionally detached from
+// the window's subview hierarchy (UIPresentationController owns the
+// container view) are still searched.
 static UIView *_Nullable walkAllWindows(BOOL (^matcher)(UIView *)) {
     NSMutableArray<UIWindow *> *windows = [NSMutableArray new];
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
         for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-            if (!w.hidden) [windows addObject:w];
+            [windows addObject:w];
         }
     }
-    // Iterate top-down (last-presented first) so an alert beats a
-    // covered view of the same testID.
-    for (UIWindow *w in windows.reverseObjectEnumerator) {
+    // Helper: walk a view subtree + every presented VC chain rooted at
+    // its rootViewController, returning the first matching view.
+    UIView * (^walkSubtree)(UIView *) = ^UIView *(UIView *root) {
         NSMutableArray<UIView *> *stack = [NSMutableArray new];
-        [stack addObject:w];
+        [stack addObject:root];
         while (stack.count) {
             UIView *v = stack.lastObject;
             [stack removeLastObject];
             if (matcher(v)) return v;
             for (UIView *sub in v.subviews) [stack addObject:sub];
+        }
+        return nil;
+    };
+
+    // Iterate top-down (last-presented first) so an alert beats a
+    // covered view of the same testID.
+    for (UIWindow *w in windows.reverseObjectEnumerator) {
+        UIView *m = walkSubtree(w);
+        if (m) return m;
+        // Walk the rootVC's presented-VC chain. UISheetPresentationController
+        // adds the sheet view to its container, which may not be a subview
+        // of the window if iOS routes through a private host view.
+        UIViewController *vc = w.rootViewController;
+        while (vc) {
+            UIView *vcView = vc.viewIfLoaded;
+            if (vcView && vcView.superview == nil) {
+                // Detached from window — still walkable.
+                UIView *m2 = walkSubtree(vcView);
+                if (m2) return m2;
+            }
+            vc = vc.presentedViewController;
         }
     }
     return nil;
