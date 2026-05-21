@@ -467,11 +467,19 @@ async function runCommand(
     throw new Error(`assertAnyVisible: none of the ${selectors.length} selectors became visible`);
   }
   if ('extendedWaitUntil' in cmd) {
-    const timeout = cmd.extendedWaitUntil.timeout ?? DEFAULT_WAIT_MS;
+    // Maestro's extendedWaitUntil is meant for slow async data
+    // fetches that the regular 10s implicit wait can't cover. We
+    // use 60s default — Bluesky's home feed on a cold sign-in via
+    // mock PDS routinely takes 30-40s to render its first post.
+    const timeout = cmd.extendedWaitUntil.timeout ?? 60000;
     if (cmd.extendedWaitUntil.visible) {
-      await waitUntilVisible(ctx, cmd.extendedWaitUntil.visible, timeout);
+      await waitUntilVisible(ctx, normalizeSelector(cmd.extendedWaitUntil.visible), timeout);
     } else if (cmd.extendedWaitUntil.notVisible) {
-      await waitUntilNotVisible(ctx, cmd.extendedWaitUntil.notVisible, timeout);
+      await waitUntilNotVisible(
+        ctx,
+        normalizeSelector(cmd.extendedWaitUntil.notVisible),
+        timeout,
+      );
     }
     return;
   }
