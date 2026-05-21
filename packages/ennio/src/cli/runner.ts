@@ -649,12 +649,8 @@ async function runCommand(
     // stale closure, press registered but no effect. Wait for
     // commit + UIView stable.
     await sleep(80);
-    await ctx.client
-      .call('wait_react_commit', { sinceMs: 0, maxMs: 800 })
-      .catch(() => undefined);
-    await ctx.client
-      .call('wait_commit', { maxMs: 1500, stableMs: 150 })
-      .catch(() => undefined);
+    await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 800 }).catch(() => undefined);
+    await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
     return;
   }
   if ('back' in cmd) {
@@ -1128,49 +1124,44 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // observe a hash change the tap clearly worked, so we can exit
   // self-heal early. Most successful taps fire the change in <150ms.
   if (sel.id && baseHash) {
-    // Event-driven self-heal with exponential backoff. The first
-    // hash-change wait covers the common case (RN commit landed +
-    // visible state changed). When the tap registered but the
-    // JS-side handler depended on async state that wasn't ready
-    // (e.g. Bluesky's e2eSignInAlice fires onPress immediately, but
-    // login() runs against the agent which is still mid-configureProxy
-    // from the prior pressKey Enter), the visible state stays the
-    // same and we'd give up without retrying. Exponential backoff
-    // 300 ms → 10 s ceiling — short waits absorb fast races
-    // cheaply, longer waits cover deeper agent / network /
-    // bundle-reload races without timing out a flow.
-    const retryWindows = [300, 600, 1200, 2400, 4800, 10000];
-    let succeeded = false;
-    for (const windowMs of retryWindows) {
-      const earlyChange = await timedAsync(ctx, 'tap.selfHealHashCheck', async () => {
+    // Event-driven self-heal. Single long-window hash poll —
+    // wait_hash_change inside the dylib wakes per CADisplayLink
+    // tick, so the wait returns the instant the screen reacts to
+    // the tap. Covers fast cases AND slow-async cases (e.g.
+    // Bluesky's e2eSignInAlice fires onPress immediately but
+    // login() runs against an agent that's still mid-configureProxy
+    // from the prior pressKey Enter — visible state may not change
+    // for 1-3 s while the network call lands).
+    //
+    // 5 s budget per attempt. Two attempts: original tap +
+    // single retap. Total worst-case 10 s on a genuinely missed
+    // tap. Fast cases return in <100 ms.
+    const waitForEffect = (maxMs: number) =>
+      timedAsync(ctx, 'tap.selfHealHashCheck', async () => {
         const r = await ctx.client.call('wait_hash_change', {
           sinceHash: baseHash,
-          maxMs: windowMs,
+          maxMs,
         });
         return !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
       });
-      if (earlyChange) {
-        succeeded = true;
-        break;
-      }
+    let landed = await waitForEffect(5000);
+    if (!landed) {
       const recheck = await timedAsync(ctx, 'tap.selfHealRefind', () =>
         ctx.client.call('find_by_testid', { testID: sel.id! }),
       );
-      if (!(recheck.ok && recheck.data)) break;
-      const r = recheck.data as Rect;
-      const sameSpot =
-        Math.abs(r.x + r.w / 2 - center.x) < 6 && Math.abs(r.y + r.h / 2 - center.y) < 6;
-      if (!sameSpot) break;
-      const postHash = await captureHash(ctx);
-      if (!(postHash && postHash === baseHash)) {
-        succeeded = true;
-        break;
+      if (recheck.ok && recheck.data) {
+        const r = recheck.data as Rect;
+        const sameSpot =
+          Math.abs(r.x + r.w / 2 - center.x) < 6 && Math.abs(r.y + r.h / 2 - center.y) < 6;
+        if (sameSpot) {
+          await timedAsync(ctx, 'tap.selfHealRetap', () =>
+            hidTapFast(ctx.udid, center.x, center.y),
+          );
+          landed = await waitForEffect(5000);
+        }
       }
-      await timedAsync(ctx, 'tap.selfHealRetap', () =>
-        hidTapFast(ctx.udid, center.x, center.y),
-      );
     }
-    void succeeded;
+    void landed;
   }
 }
 
