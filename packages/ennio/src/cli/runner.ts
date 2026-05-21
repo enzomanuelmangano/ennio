@@ -794,7 +794,7 @@ async function captureHash(ctx: RunContext): Promise<string> {
 }
 
 // Retained for future post-tap settle experiments — see commit message.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 async function _waitForHashChange(
   ctx: RunContext,
   baseline: string,
@@ -813,11 +813,7 @@ async function _waitForHashChange(
   return false;
 }
 
-async function execTapOn(
-  ctx: RunContext,
-  sel: MaestroSelector,
-  preHash?: string,
-): Promise<void> {
+async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string): Promise<void> {
   // Point-tap fast path — no discovery needed.
   if (sel.point !== undefined) {
     const { x, y } = parsePoint(sel.point);
@@ -863,12 +859,10 @@ async function execTapOn(
   // observe a hash change the tap clearly worked, so we can exit
   // self-heal early. Most successful taps fire the change in <150ms.
   if (sel.id && baseHash) {
-    // Fixed 500ms gives the JS pipeline a fair shot at running
-    // onPress → setState → commit. Shorter windows (a hash poll that
-    // returns immediately on ANY change) wrongly treated incidental
-    // hash flickers (focus ring, pressed-state tint, scroll inertia
-    // half-pixel offsets) as "the tap worked" and skipped retap on
-    // genuine misses where the underlying nav never started.
+    // 500ms is the empirical sweet spot. 300ms regressed 09's
+    // post-modal-dismiss quick-action-settings tap (the bridge
+    // hasn't fired onPress yet so the retap path would skip when
+    // it shouldn't) and 16's two-tap DoubleTap timing window.
     await timedAsync(ctx, 'tap.selfHealSleep', () => sleep(500));
     const recheck = await timedAsync(ctx, 'tap.selfHealRefind', () =>
       ctx.client.call('find_by_testid', { testID: sel.id! }),
