@@ -77,20 +77,52 @@ export class IdbGrpcClient {
 
   /** Tap (down + delay + up) at sim window coordinates. */
   async tap(x: number, y: number, durationSec: number = 0.08): Promise<void> {
-    const stream = await this.ensureStream();
+    // Open a fresh session per tap. Long-lived streams were observed
+    // to deliver HIDEvents that idb_companion's CoreSimulator HID
+    // injector silently ignored on iOS 26 — likely because the
+    // companion buffers/dedupes events on a per-session basis. The
+    // Python idb CLI opens one session per tap (async with
+    // self._hid_session()) and that's what works reliably.
+    const stream = await this.openFreshStream();
     const writeOne = (msg: object) =>
       new Promise<void>((res, rej) => {
         const ok = stream.write(msg, (err?: Error) => (err ? rej(err) : res()));
-        // If buffer is full, drain event will fire; we don't await it
-        // because tap volume is small.
-        if (!ok) {
-          stream.once('drain', () => res());
-        }
+        if (!ok) stream.once('drain', () => res());
       });
     const point = { x: Math.round(x), y: Math.round(y) };
-    await writeOne({ press: { action: { touch: { point } }, direction: 'DOWN' } });
-    await writeOne({ delay: { duration: durationSec } });
-    await writeOne({ press: { action: { touch: { point } }, direction: 'UP' } });
+    try {
+      await writeOne({ press: { action: { touch: { point } }, direction: 'DOWN' } });
+      // Client-side sleep between DOWN and UP — matches the idb
+      // Python CLI's behavior (asyncio.sleep between sends).
+      await new Promise((res) => setTimeout(res, durationSec * 1000));
+      await writeOne({ press: { action: { touch: { point } }, direction: 'UP' } });
+    } finally {
+      // Close the stream so idb_companion flushes the event sequence
+      // immediately and registers it as a complete tap with the
+      // simulator's HID subsystem.
+      try {
+        stream.end();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private openFreshStream(): Promise<grpc.ClientWritableStream<any>> {
+    return new Promise((resolveStream, reject) => {
+      const s = this.client.hid((err: Error | null) => {
+        // Server may emit an err on stream end — that's normal.
+        void err;
+      });
+      if (!s) {
+        reject(new Error('idb gRPC stream init failed'));
+        return;
+      }
+      s.on('error', () => {
+        /* ignore — stream ended */
+      });
+      resolveStream(s);
+    });
   }
 
   /** Swipe between two points over durationSec. */

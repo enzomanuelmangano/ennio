@@ -31,23 +31,24 @@ export async function tapFast(
   y: number,
   durationSec: number = 0.15,
 ): Promise<void> {
-  try {
-    const client = getIdbClient(udid);
-    await client.tap(x, y, durationSec);
-  } catch (err) {
-    process.stderr.write(`[ennio] gRPC tap fallback: ${String(err)}\n`);
-    // Fallback: legacy idb CLI subprocess.
-    idb([
-      'ui',
-      'tap',
-      '--udid',
-      udid,
-      '--duration',
-      String(durationSec),
-      String(Math.round(x)),
-      String(Math.round(y)),
-    ]);
-  }
+  // Use idb CLI subprocess. Each spawn costs ~250 ms (vs ~30 ms via
+  // gRPC) but it's the only path that delivers a touch RN's
+  // Pressability/RNGH consistently accept on iOS 26 — the gRPC
+  // bidi-stream HID path produces events that get silently dropped
+  // by CoreSimulator's injector under conditions we haven't fully
+  // characterised (long-lived sessions, multi-tap bursts). Pay the
+  // CLI cost; correctness trumps the few hundred ms per flow.
+  void getIdbClient;
+  idb([
+    'ui',
+    'tap',
+    '--udid',
+    udid,
+    '--duration',
+    String(durationSec),
+    String(Math.round(x)),
+    String(Math.round(y)),
+  ]);
 }
 
 /**
