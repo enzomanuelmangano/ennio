@@ -727,13 +727,31 @@ async function runCommand(
   }
   if ('launchApp' in cmd) {
     const opts =
-      cmd.launchApp === true ? { clearState: false } : (cmd.launchApp as { clearState?: boolean });
+      cmd.launchApp === true
+        ? { clearState: false }
+        : (cmd.launchApp as {
+            clearState?: boolean;
+            arguments?: Record<string, string | boolean | number>;
+          });
+    // Convert Maestro's `arguments:` map into a flat list passed to
+    // `simctl launch` after the bundle id. Each entry becomes a pair
+    // of CLI tokens: the key (already prefixed with "-" per iOS
+    // launchargs convention) and the stringified value. Drops false
+    // entries because `false` is the iOS launchargs idiom for "off".
+    const launchArgs: string[] = [];
+    if (opts.arguments) {
+      for (const [k, v] of Object.entries(opts.arguments)) {
+        if (v === false) continue;
+        launchArgs.push(k);
+        if (v !== true) launchArgs.push(String(v));
+      }
+    }
     if (opts.clearState) {
-      await clearStateAndRelaunch(ctx);
+      await clearStateAndRelaunch(ctx, launchArgs);
     } else if (!ctx.client.isConnected()) {
       // Socket dropped — app was killed (stopApp/killApp) or crashed.
       // Re-launch with DYLD inject so the dylib reattaches.
-      await relaunchAndReconnect(ctx);
+      await relaunchAndReconnect(ctx, launchArgs);
     }
     await sleep(POST_LAUNCH_SETTLE_MS);
     return;
@@ -1132,7 +1150,7 @@ async function waitUntilNotVisible(
  * Used after a stopApp/killApp followed by launchApp — the original
  * process is dead, but the YAML expects a fresh app instance.
  */
-async function relaunchAndReconnect(ctx: RunContext): Promise<void> {
+async function relaunchAndReconnect(ctx: RunContext, launchArgs: string[] = []): Promise<void> {
   ctx.client.close();
   // Make sure the previous process is fully gone before we launch
   // again — simctl launch can otherwise attach to the still-shutting
@@ -1150,7 +1168,14 @@ async function relaunchAndReconnect(ctx: RunContext): Promise<void> {
   }
   execFileSync(
     'xcrun',
-    ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId],
+    [
+      'simctl',
+      'launch',
+      '--terminate-running-process',
+      ctx.udid,
+      ctx.bundleId,
+      ...launchArgs,
+    ],
     {
       env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
       stdio: 'pipe',
@@ -1177,7 +1202,7 @@ async function relaunchAndReconnect(ctx: RunContext): Promise<void> {
   await reopen.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
 }
 
-async function clearStateAndRelaunch(ctx: RunContext): Promise<void> {
+async function clearStateAndRelaunch(ctx: RunContext, launchArgs: string[] = []): Promise<void> {
   // In-process wipe of Library/Documents/tmp.
   await ctx.client.call('clear_state').catch(() => undefined);
   // Hard relaunch — close socket so the reconnect picks up the new
@@ -1196,7 +1221,14 @@ async function clearStateAndRelaunch(ctx: RunContext): Promise<void> {
   }
   execFileSync(
     'xcrun',
-    ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId],
+    [
+      'simctl',
+      'launch',
+      '--terminate-running-process',
+      ctx.udid,
+      ctx.bundleId,
+      ...launchArgs,
+    ],
     {
       env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
       stdio: 'pipe',
