@@ -25,6 +25,8 @@ pass=0
 fail=0
 err=0
 results=()
+timings=()
+suite_start=$(date +%s)
 
 while IFS= read -r -d '' file; do
     name=$(basename "$file")
@@ -42,21 +44,27 @@ while IFS= read -r -d '' file; do
     # only present in the initial state (tab bar items) go missing.
     xcrun simctl terminate "$UDID" com.ennio.example >/dev/null 2>&1 || true
     rm -f /tmp/ennio-control.sock
+    flow_start=$(date +%s)
     if ENNIO_UDID="$UDID" ENNIO_DYLIB_PATH="$DYLIB" \
         node "$CLI" test "$file" >"$log" 2>&1; then
-        echo "  [PASS]"
+        flow_dur=$(($(date +%s) - flow_start))
+        echo "  [PASS] ${flow_dur}s"
         pass=$((pass + 1))
         results+=("PASS|$name")
+        timings+=("$flow_dur|PASS|$name")
     else
+        flow_dur=$(($(date +%s) - flow_start))
         # Distinguish step failure from infra error
         if grep -q "\[FAIL\]" "$log"; then
-            echo "  [FAIL] $(grep -E '\[FAIL\] step' "$log" | head -1 | sed 's/^[[:space:]]*//')"
+            echo "  [FAIL] ${flow_dur}s $(grep -E '\[FAIL\] step' "$log" | head -1 | sed 's/^[[:space:]]*//')"
             fail=$((fail + 1))
             results+=("FAIL|$name")
+            timings+=("$flow_dur|FAIL|$name")
         else
-            echo "  [ERROR] (see $log)"
+            echo "  [ERROR] ${flow_dur}s (see $log)"
             err=$((err + 1))
             results+=("ERROR|$name")
+            timings+=("$flow_dur|ERROR|$name")
         fi
     fi
 done < <(find "$FLOW_DIR" -maxdepth 1 -name "$pattern" -type f -print0 | sort -z)
@@ -72,8 +80,8 @@ if [[ $total -gt 0 ]]; then
     pct=$((pass * 100 / total))
     echo "  pass rate: ${pct}%"
 fi
+suite_dur=$(($(date +%s) - suite_start))
+echo "  total wall-time: ${suite_dur}s"
 echo
-echo "Per-file results:"
-for r in "${results[@]}"; do
-    echo "  $r"
-done
+echo "Per-file results (sorted by duration, slowest first):"
+printf '%s\n' "${timings[@]}" | sort -t '|' -k1,1nr | awk -F '|' '{ printf "  %5ds  %-7s  %s\n", $1, $2, $3 }'
