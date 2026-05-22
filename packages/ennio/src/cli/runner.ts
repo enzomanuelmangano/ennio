@@ -771,19 +771,29 @@ async function runCommand(
       to = parseCoord(sw.end, to);
     } else if (sw.direction) {
       const d = sw.direction.toUpperCase();
-      const dist = 400;
+      // Wide swing: 700 pt covers a full bottom-sheet drag-to-dismiss
+      // (sheet height varies but 700 pt outdraws the dismiss threshold
+      // on every form-sheet shape we've seen). Plenty of margin for
+      // page scrolls and tab switches too.
+      const dist = 700;
+      // Maestro semantics: direction = finger drag direction on
+      // screen. `swipe DOWN` = finger moves top → bottom (dismisses
+      // top-anchored sheets, pulls down nav bars, etc). `swipe UP`
+      // = finger moves bottom → top (scroll content up, expand
+      // bottom sheet). iOS y-axis increases downward, so
+      // from.y < to.y for DOWN.
       if (d === 'DOWN') {
-        from = { x: winW / 2, y: winH / 2 + dist / 2 };
-        to = { x: winW / 2, y: winH / 2 - dist / 2 };
+        from = { x: winW / 2, y: 120 };
+        to = { x: winW / 2, y: 120 + dist };
       } else if (d === 'UP') {
-        from = { x: winW / 2, y: winH / 2 - dist / 2 };
-        to = { x: winW / 2, y: winH / 2 + dist / 2 };
+        from = { x: winW / 2, y: winH - 120 };
+        to = { x: winW / 2, y: winH - 120 - dist };
       } else if (d === 'LEFT') {
-        from = { x: winW / 2 + dist / 2, y: winH / 2 };
-        to = { x: winW / 2 - dist / 2, y: winH / 2 };
+        from = { x: winW - 40, y: winH / 2 };
+        to = { x: winW - 40 - dist, y: winH / 2 };
       } else if (d === 'RIGHT') {
-        from = { x: winW / 2 - dist / 2, y: winH / 2 };
-        to = { x: winW / 2 + dist / 2, y: winH / 2 };
+        from = { x: 40, y: winH / 2 };
+        to = { x: 40 + dist, y: winH / 2 };
       }
     }
     // Pre-swipe pull-to-refresh dedupe: if this is a downward pull
@@ -1158,9 +1168,7 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
       landed = await timedAsync(ctx, 'tap.selfHealHashCheck', () => targetMoved());
       if (landed) break;
       if (Date.now() - lastTapTs >= 500) {
-        await timedAsync(ctx, 'tap.selfHealRetap', () =>
-          hidTapFast(ctx.udid, center.x, center.y),
-        );
+        await timedAsync(ctx, 'tap.selfHealRetap', () => hidTapFast(ctx.udid, center.x, center.y));
         lastTapTs = Date.now();
       }
     }
