@@ -583,6 +583,19 @@ async function runCommand(
     return;
   }
   if ('inputText' in cmd) {
+    // Wait for ANY view to be the firstResponder before typing.
+    // Without this, a previous tap that opens a composer / modal
+    // may still be mid-animation when inputText fires — no field
+    // is focused yet, insert_text returns NO, hidType fallback
+    // types into nowhere.
+    // Poll for up to 2 s; first responder usually lands within
+    // 100-300 ms of an onPress-driven focus transition.
+    {
+      const fr = await ctx.client
+        .call('first_responder_ready', { maxMs: 2000 })
+        .catch(() => undefined);
+      void fr;
+    }
     // Interpolate ${output.X} / ${env.X} so flows can feed a value
     // produced by an earlier runScript (Maestro idiom).
     const text = interpolate(String(cmd.inputText), ctx);

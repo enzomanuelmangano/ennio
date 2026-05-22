@@ -489,6 +489,48 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 
+    EnnioControlSocket::registerHandler("first_responder_ready", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 2000);
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:maxMs / 1000.0];
+        BOOL ready = NO;
+        while ([deadline timeIntervalSinceNow] > 0 && !ready) {
+            onMainVoid([&]() {
+                // Walk every window + presented-VC chain looking for
+                // ANY UIResponder that's isFirstResponder + conforms
+                // to UIKeyInput. Required so subsequent insert_text
+                // doesn't fire into a half-mounted form.
+                for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                    if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                    for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                        UIViewController *vc = w.rootViewController;
+                        NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:w];
+                        while (vc) {
+                            UIView *vv = vc.viewIfLoaded;
+                            if (vv && !vv.superview) [stack addObject:vv];
+                            vc = vc.presentedViewController;
+                        }
+                        while (stack.count) {
+                            UIView *v = stack.lastObject;
+                            [stack removeLastObject];
+                            if (v.isFirstResponder &&
+                                [v conformsToProtocol:@protocol(UIKeyInput)]) {
+                                ready = YES;
+                                break;
+                            }
+                            for (UIView *sub in v.subviews) [stack addObject:sub];
+                        }
+                        if (ready) break;
+                    }
+                    if (ready) break;
+                }
+            });
+            if (ready) break;
+            [NSThread sleepForTimeInterval:0.05];
+        }
+        return std::string("{\"ready\":") + (ready ? "true" : "false") + "}";
+    });
+
     EnnioControlSocket::registerHandler("insert_text", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         NSString *text = argString(a, @"text");
