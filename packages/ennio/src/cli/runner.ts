@@ -342,15 +342,28 @@ async function runCommand(
     // doesn't resolve within a short window, silently skip the step
     // instead of failing the flow. Used in flows that may or may
     // not see e.g. a "Not Now" prompt depending on app state.
-    const isOptional = !!(
-      cmd.tapOn &&
-      typeof cmd.tapOn === 'object' &&
-      'optional' in cmd.tapOn &&
-      (cmd.tapOn as { optional?: boolean }).optional
-    );
+    const tapObj =
+      cmd.tapOn && typeof cmd.tapOn === 'object'
+        ? (cmd.tapOn as { optional?: boolean; repeat?: number; delay?: number })
+        : null;
+    const isOptional = !!tapObj?.optional;
     if (isOptional) {
       const r = await findOnce(ctx, sel);
       if (!r) return;
+    }
+    // Maestro `repeat: N` + `delay: ms`: tap the same target N times
+    // with `delay` ms between taps. Used for dismissing
+    // sometimes-present prompts (e.g. iCloud save-password sheet).
+    // Without this, ennio fires the tap once and proceeds, missing
+    // the dismiss when a slow-mounting prompt appears late.
+    if (tapObj?.repeat && tapObj.repeat > 1) {
+      const times = tapObj.repeat;
+      const delayMs = tapObj.delay ?? 200;
+      for (let i = 0; i < times; i++) {
+        if (i > 0) await sleep(delayMs);
+        await execTapOn(ctx, sel);
+      }
+      return;
     }
     const tapKey = JSON.stringify(sel);
     const isRepeatTap = ctx.lastTapKey === tapKey;
