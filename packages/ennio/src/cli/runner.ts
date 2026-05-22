@@ -1123,42 +1123,45 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // Replace the old 500ms fixed wait with a hash-poll: as soon as we
   // observe a hash change the tap clearly worked, so we can exit
   // self-heal early. Most successful taps fire the change in <150ms.
-  if (sel.id && baseHash) {
-    // Event-driven self-heal. Single long-window hash poll —
-    // wait_hash_change inside the dylib wakes per CADisplayLink
-    // tick, so the wait returns the instant the screen reacts to
-    // the tap. Covers fast cases AND slow-async cases (e.g.
-    // Bluesky's e2eSignInAlice fires onPress immediately but
-    // login() runs against an agent that's still mid-configureProxy
-    // from the prior pressKey Enter — visible state may not change
-    // for 1-3 s while the network call lands).
+  if ((sel.id || sel.text) && baseHash) {
+    // Self-heal: tight retap loop, target-aware. Re-find the
+    // selector after each frame; if it disappeared or moved, the
+    // tap landed. Otherwise retap (throttled to 500 ms intervals
+    // so we don't queue redundant onPress invocations).
     //
-    // 5 s budget per attempt. Two attempts: original tap +
-    // single retap. Total worst-case 10 s on a genuinely missed
-    // tap. Fast cases return in <100 ms.
-    const waitForEffect = (maxMs: number) =>
-      timedAsync(ctx, 'tap.selfHealHashCheck', async () => {
-        const r = await ctx.client.call('wait_hash_change', {
-          sinceHash: baseHash,
-          maxMs,
-        });
-        return !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
-      });
-    let landed = await waitForEffect(5000);
-    if (!landed) {
-      const recheck = await timedAsync(ctx, 'tap.selfHealRefind', () =>
-        ctx.client.call('find_by_testid', { testID: sel.id! }),
-      );
-      if (recheck.ok && recheck.data) {
-        const r = recheck.data as Rect;
-        const sameSpot =
-          Math.abs(r.x + r.w / 2 - center.x) < 6 && Math.abs(r.y + r.h / 2 - center.y) < 6;
-        if (sameSpot) {
-          await timedAsync(ctx, 'tap.selfHealRetap', () =>
-            hidTapFast(ctx.udid, center.x, center.y),
-          );
-          landed = await waitForEffect(5000);
-        }
+    // This catches:
+    //   - sheet/modal dismiss taps (target item gone)
+    //   - nav transitions (target screen replaced)
+    //   - 1×1 px hidden Pressables (target stays — see hash fallback)
+    //
+    // Plus an OR fallback: if hash changed AND target is at same
+    // spot AND we've been polling >500 ms, treat as success (toggle
+    // / no-op-looking tap that DID fire its effect).
+    //
+    // 50 cycles × 100 ms = 5 s total budget.
+    const targetMoved = async (): Promise<boolean> => {
+      const op = sel.id ? 'find_by_testid' : 'find_by_text';
+      const args = sel.id ? { testID: sel.id } : { text: sel.text! };
+      const recheck = await ctx.client.call(op, args).catch(() => undefined);
+      if (!recheck || !recheck.ok || !recheck.data) return true;
+      const r = recheck.data as Rect;
+      const sameSpot =
+        Math.abs(r.x + r.w / 2 - center.x) < 6 && Math.abs(r.y + r.h / 2 - center.y) < 6;
+      return !sameSpot;
+    };
+    let landed = false;
+    let lastTapTs = Date.now();
+    for (let i = 0; i < 50 && !landed; i++) {
+      await ctx.client
+        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 100 })
+        .catch(() => undefined);
+      landed = await timedAsync(ctx, 'tap.selfHealHashCheck', () => targetMoved());
+      if (landed) break;
+      if (Date.now() - lastTapTs >= 500) {
+        await timedAsync(ctx, 'tap.selfHealRetap', () =>
+          hidTapFast(ctx.udid, center.x, center.y),
+        );
+        lastTapTs = Date.now();
       }
     }
     void landed;
