@@ -925,6 +925,15 @@ async function runCommand(
       await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
       return;
     }
+    // Pre-swipe settle: wait for the screen to stop animating so the
+    // gesture lands on a stable target. Without this, a swipe fired
+    // immediately after a tab change or navigation push lands while
+    // the destination view is still in its layout pass — the
+    // gesture-recogniser hasn't been attached yet and the swipe is
+    // silently dropped. Observed on RN horizontal carousels: the
+    // first card looked stable but the FlatList's onLayout hadn't
+    // fired so the page-snap math couldn't run.
+    await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
     // Maestro default swipe duration is 400 ms (verified with
     // `maestro test` on a swipe-only flow: "Swipe ... in 400 ms").
     // We previously defaulted to 250 ms which was fast enough for
