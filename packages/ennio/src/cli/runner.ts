@@ -1449,31 +1449,48 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // ticks, cursor blink) flip the hash without proving the press
   // actually fired. Each iteration: short wait, re-find. If
   // findable AND still topmost-hittable → retap. If gone → exit.
-  // Single retap. Multi-retap caused toggle-button regression
-  // (tapping "Open drawer menu" repeatedly toggles drawer open/closed).
-  // Mantis cropper's late-recogniser case is rare enough that we
-  // accept a single retap and rely on flow-level retry for the
-  // residual cases.
+  // Self-heal retap. Default = single retap (preserves toggle-button
+  // safety: tapping drawer-menu repeatedly toggles open/closed). But
+  // when a non-RN modal VC (Mantis cropper, PHPicker chrome controls,
+  // etc.) is in the presented-VC chain, the host gesture-recogniser
+  // can attach asynchronously after the modal animates in — the
+  // first tap fires before onPress is wired and gets swallowed. In
+  // that case, retap up to 5 times until the target disappears.
+  // Detected by class-name suffix of any presented VC: gestures on
+  // those non-RN modals are dismissible (Done / ✓ / etc.) and have
+  // no toggle behaviour, so multi-retap is safe.
   if ((sel.id || sel.text) && baseHash) {
-    const hc = await ctx.client
-      .call('wait_hash_change', { sinceHash: baseHash, maxMs: 1500 })
-      .catch(() => undefined);
-    const hashChanged = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
-    if (!hashChanged) {
+    const chainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
+    const chain = ((chainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
+    const onLateRecogniserModal = chain.some(
+      (cls) =>
+        cls.includes('CropViewController') ||
+        cls.includes('Mantis') ||
+        cls.includes('PHPicker') ||
+        cls.includes('PhotoPicker'),
+    );
+    const maxRetaps = onLateRecogniserModal ? 5 : 1;
+    for (let i = 0; i < maxRetaps; i++) {
+      const hc = await ctx.client
+        .call('wait_hash_change', { sinceHash: baseHash, maxMs: onLateRecogniserModal ? 800 : 1500 })
+        .catch(() => undefined);
+      const hashChanged = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
       const re = await sampleRect();
-      if (re) {
-        let stillExposed = true;
-        if (sel.id) {
-          const ex = await ctx.client.call('is_exposed', { testID: sel.id }).catch(() => undefined);
-          if (ex && ex.ok && ex.data) {
-            stillExposed = !!(ex.data as { exposed?: boolean }).exposed;
-          }
-        }
-        if (stillExposed) {
-          const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
-          await timedAsync(ctx, 'tap.selfHealRetap', () => hidTapArgent(ctx.udid, c.x, c.y));
+      if (!re) break;
+      let stillExposed = true;
+      if (sel.id) {
+        const ex = await ctx.client.call('is_exposed', { testID: sel.id }).catch(() => undefined);
+        if (ex && ex.ok && ex.data) {
+          stillExposed = !!(ex.data as { exposed?: boolean }).exposed;
         }
       }
+      // Toggle-safety: outside late-recogniser modals, any hash
+      // change after the first tap is "done, don't retap" so we
+      // don't double-fire a drawer toggle.
+      if (!stillExposed) break;
+      if (hashChanged && !onLateRecogniserModal) break;
+      const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
+      await timedAsync(ctx, 'tap.selfHealRetap', () => hidTapArgent(ctx.udid, c.x, c.y));
     }
   }
 }
