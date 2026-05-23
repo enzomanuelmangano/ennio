@@ -1361,7 +1361,6 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
     x: stableRect.x + stableRect.w / 2,
     y: stableRect.y + stableRect.h / 2,
   };
-  void preHash;
   // Target-driven exposure wait. When a previous step's modal is
   // still mid-dismiss, the target may already be findable in the
   // view tree but covered by the closing overlay — tap lands on the
@@ -1429,20 +1428,52 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   //
   // Critically: NO sleep before the initial tap above. The retry
   // loop only fires if the first tap left the screen unchanged.
-  // No per-tap retap loop. A single tap fires (with the 50 ms hold
-  // press for text targets, fast Down+Up for id targets), then we
-  // move to the next step. If the tap missed, the next step's find
-  // deadline will time out, and the step-level retry in the runner
-  // loop re-fires the previous tap exactly once before retrying the
-  // current step. That avoids:
-  //   - timeout heuristics per tap (no "wait 3 s for save")
-  //   - selector-name heuristics ("publish"/"save"/etc — not
-  //     portable across languages or app naming conventions)
-  //   - double-triggering side-effects that are observable but
-  //     slow-to-render (an idempotent retap on a network-bound
-  //     Save still costs the user a duplicate request).
-  // Result: tap semantics stay the same as a real-user touch; flake
-  // recovery is contained at the flow level, not within every tap.
+  // Retap policy:
+  //   - Default: single retap when hash didn't diverge AND target
+  //     is still topmost-hittable. Covers the late-recogniser race
+  //     for most buttons.
+  //   - Cropper / PHPicker hosts: multi-retap (5x) with exposure as
+  //     the signal. These VCs have continuous in-place repaints
+  //     (rotation slider, photo grid flicker) that flap the hash —
+  //     hash-change exits the loop before the real tap effect lands.
+  //     iOS system classes, not app-specific naming.
+  if (sel.id || sel.text) {
+    const baseHash = preHash ?? (await captureHash(ctx));
+    const chainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
+    const chain = ((chainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
+    const isLateRecogniserHost = chain.some(
+      (cls) =>
+        cls.includes('CropViewController') ||
+        cls.includes('Mantis') ||
+        cls.includes('PHPicker') ||
+        cls.includes('PhotoPicker'),
+    );
+    const maxRetaps = isLateRecogniserHost ? 5 : 1;
+    for (let i = 0; i < maxRetaps; i++) {
+      const hc = await ctx.client
+        .call('wait_hash_change', {
+          sinceHash: baseHash,
+          maxMs: isLateRecogniserHost ? 800 : 1500,
+        })
+        .catch(() => undefined);
+      const hashChanged = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
+      const re = await sampleRect();
+      if (!re) break;
+      let stillExposed = true;
+      if (sel.id) {
+        const ex = await ctx.client.call('is_exposed', { testID: sel.id }).catch(() => undefined);
+        if (ex && ex.ok && ex.data) {
+          stillExposed = !!(ex.data as { exposed?: boolean }).exposed;
+        }
+      }
+      if (!stillExposed) break;
+      if (hashChanged && !isLateRecogniserHost) break;
+      const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
+      await timedAsync(ctx, 'tap.selfHealRetap', () =>
+        isTextOnlyTap ? hidPress(ctx.udid, c.x, c.y) : hidTapFast(ctx.udid, c.x, c.y),
+      );
+    }
+  }
 }
 
 async function resolveCenter(
