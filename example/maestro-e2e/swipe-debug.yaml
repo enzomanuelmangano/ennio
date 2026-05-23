@@ -1,6 +1,0 @@
-appId: com.ennio.example
----
-- swipe:
-    start: 90%,55%
-    end: 10%,55%
-    duration: 50
