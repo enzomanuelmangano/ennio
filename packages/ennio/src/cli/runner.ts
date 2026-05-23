@@ -1386,91 +1386,47 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // the position-stability gate above already proved the rect isn't
   // moving, so UIKit's hit-test layer-tree is settled.
   await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
-  // Self-healing recovery for testID taps. If after the tap
-  //   (a) the same testID still resolves at the same coords, AND
-  //   (b) the screen hash is unchanged from before the tap,
-  // the touch did not activate the pressable — usually because a
-  // residual presented-VC overlay absorbed it after a modal dismiss.
-  // Re-fire the tap once. We use the hash check (in addition to the
-  // identity check) so legitimate state-only taps — toggles, switches,
-  // counters — aren't double-fired: even an "in place" toggle changes
-  // the frame hash because its tint/value redraws.
-  // Replace the old 500ms fixed wait with a hash-poll: as soon as we
-  // observe a hash change the tap clearly worked, so we can exit
-  // self-heal early. Most successful taps fire the change in <150ms.
-  // Tiny ≤5px test-harness controls (Bluesky's TestCtrls.e2e.tsx
-  // pattern — 1×1 Pressables stacked in a top:100 absolute view with
-  // zIndex 100) stay exposed at the same coords across screen
-  // transitions, so an exposure-based retap loop never sees them
-  // disappear and burns its full 5 s budget firing duplicate onPress
-  // events. They DO need a couple of retaps though — coord rounding /
-  // animation timing can swallow a single touch. Cap them at a short
-  // fixed budget.
-  // Tiny ≤5px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx,
-  // stacked 1×1 px Pressables at top:100 right:0 zIndex:100): the
-  // integer-rounding hidTap path on the CLI subprocess rounds the
-  // FP center (401.5, 111.5) up to (402, 112) and misses the 1×1
-  // sibling's hit-box, hitting a *different* sibling whose onPress
-  // does something unwanted (the e2eRefreshHome → setShowLoggedOut
-  // regression — log the user out). Use the gRPC daemon path, which
-  // passes float coords through unrounded, and fire 3 times so a
-  // first-tap simulator miss still has recovery shots.
+  // Tiny ≤5 px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx
+  // stack of 1×1 px Pressables at top:100 right:0 zIndex:100): integer
+  // rounding misses the hit-box ~30 % of taps, so we fire pure DOWN+UP
+  // three times unconditionally. No exp-backoff loop here — the
+  // controls don't disappear after a press and there's no reliable
+  // signal we can use to stop early.
   if (rect.w <= 5 && rect.h <= 5) {
-    // 1×1 px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx).
-    // Use pure DOWN+UP — the swipe-as-tap path's 0.5 px Move lands
-    // outside the 1 px hit box.
     for (let i = 0; i < 3; i++) {
       if (i > 0) await sleep(80);
       await hidTapPureFast(ctx.udid, center.x, center.y);
     }
     return;
   }
-  // Single retap if the first tap left the screen unchanged. Wait
-  // long enough (1.5 s) for save/publish-style async commits to
-  // land, so we don't fire onPress twice and break navigation.
-  // If the tap opened a bottom-sheet / modal that takes longer than
-  // 1.5 s to animate (RNGH bottom sheet ~600 ms spring + content
-  // mount + first-frame layout), the hash-change exit fires late and
-  // we'd retap right as the sheet finishes opening — closing it. So
-  // also probe `is_exposed`: if the original target is now covered
-  // by a presented overlay, the tap registered even if the rendered
-  // frame hash is steady. Only retap when the target is BOTH still
-  // findable AND still topmost-hittable.
-  // Multi-retap self-heal. Some buttons are findable the same frame
-  // they mount (Mantis cropper's Done — appears as cropper finishes
-  // animating in, gesture recogniser attached a few frames later).
-  // The hit-test resolves to the button but onPress doesn't fire yet,
-  // so the tap is silently consumed. Maestro covers this by retrying
-  // the labelled tap for ~5 s; we do the same here.
+
+  // Find-and-tap retry loop. Every iteration re-finds the target at
+  // its CURRENT coords and re-fires — exactly Maestro's "retry-if-no-
+  // change" model. Stops the instant ANY of:
+  //   - the target is gone from the find walk (button dismissed its
+  //     host, navigated away)
+  //   - VC presentation chain changed (sheet / picker / nav push)
+  //   - is_exposed flipped false (modal slid over the hit point)
+  //   - render hash changed since pre-tap baseline (RN re-render
+  //     after setState — covers state-only buttons whose VC chain
+  //     doesn't move)
   //
-  // Success signal: target disappears from the find walk (button
-  // dismissed its host modal / triggered nav). The hash-change
-  // signal isn't strong enough — minor UI updates (status-bar
-  // ticks, cursor blink) flip the hash without proving the press
-  // actually fired. Each iteration: short wait, re-find. If
-  // findable AND still topmost-hittable → retap. If gone → exit.
-  // Self-heal retap. Default = single retap (preserves toggle-button
-  // safety: tapping drawer-menu repeatedly toggles open/closed). But
-  // when a non-RN modal VC (Mantis cropper, PHPicker chrome controls,
-  // etc.) is in the presented-VC chain, the host gesture-recogniser
-  // can attach asynchronously after the modal animates in — the
-  // first tap fires before onPress is wired and gets swallowed. In
-  // that case, retap up to 5 times until the target disappears.
-  // Detected by class-name suffix of any presented VC: gestures on
-  // those non-RN modals are dismissible (Done / ✓ / etc.) and have
-  // no toggle behaviour, so multi-retap is safe.
+  // Critically: NO sleep before the initial tap above. The retry
+  // loop only fires if the first tap left the screen unchanged.
   if ((sel.id || sel.text) && baseHash) {
-    const chainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
-    const chain = ((chainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
+    // Conditional retap: detect known late-recogniser modal hosts
+    // (Mantis cropper, PHPicker chrome) and fire up to 5 retries.
+    // Toggle / state buttons stay on single-retap with hash-change
+    // break — they update their host's render hash within ~150 ms of
+    // a successful press and we don't want to double-fire them.
+    const baseChainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
+    const chain = ((baseChainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
     const onLateRecogniserModal = chain.some(
       (cls) =>
         cls.includes('CropViewController') ||
         cls.includes('Mantis') ||
         cls.includes('PHPicker') ||
-        cls.includes('PhotoPicker') ||
-        cls.includes('BottomSheet') ||
-        cls.includes('SheetViewController') ||
-        cls.includes('UIAlertController'),
+        cls.includes('PhotoPicker'),
     );
     const maxRetaps = onLateRecogniserModal ? 5 : 1;
     for (let i = 0; i < maxRetaps; i++) {
@@ -1490,9 +1446,6 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
           stillExposed = !!(ex.data as { exposed?: boolean }).exposed;
         }
       }
-      // Toggle-safety: outside late-recogniser modals, any hash
-      // change after the first tap is "done, don't retap" so we
-      // don't double-fire a drawer toggle.
       if (!stillExposed) break;
       if (hashChanged && !onLateRecogniserModal) break;
       const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
