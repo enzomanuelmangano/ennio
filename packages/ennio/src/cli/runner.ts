@@ -41,6 +41,7 @@ import {
   tapFast as hidTapFast,
   tapPureFast as hidTapPureFast,
   tapArgent as hidTapArgent,
+  press as hidPress,
   swipe as hidSwipe,
   longPressDrag as hidLongPressDrag,
   typeText as hidType,
@@ -1385,7 +1386,25 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // Argent HID — reliable on iOS 26 RN Pressables. No pre-tap sleep:
   // the position-stability gate above already proved the rect isn't
   // moving, so UIKit's hit-test layer-tree is settled.
-  await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
+  // Text-only selectors: try activate_by_text first — invokes the
+  // view's _accessibilityHandleUserTouchActivate (UIView private but
+  // stable). Direct callback delivery, no synthesized touch + hit-
+  // test indirection, no gesture-recogniser race. Falls back to
+  // HID press (Down + 50 ms hold + Up) on activate failure so we
+  // don't lose coverage for views that don't conform to the private
+  // touch-activate protocol. ID selectors stay on fast tap.
+  const isTextOnlyTap = !!sel.text && !sel.id;
+  if (isTextOnlyTap) {
+    const r = await ctx.client
+      .call('activate_by_text', { text: sel.text! })
+      .catch(() => undefined);
+    const activated = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
+    if (!activated) {
+      await timedAsync(ctx, 'tap.hidTap', () => hidPress(ctx.udid, center.x, center.y));
+    }
+  } else {
+    await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
+  }
   // Tiny ≤5 px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx
   // stack of 1×1 px Pressables at top:100 right:0 zIndex:100): integer
   // rounding misses the hit-box ~30 % of taps, so we fire pure DOWN+UP
@@ -1414,11 +1433,6 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // Critically: NO sleep before the initial tap above. The retry
   // loop only fires if the first tap left the screen unchanged.
   if ((sel.id || sel.text) && baseHash) {
-    // Conditional retap: detect known late-recogniser modal hosts
-    // (Mantis cropper, PHPicker chrome) and fire up to 5 retries.
-    // Toggle / state buttons stay on single-retap with hash-change
-    // break — they update their host's render hash within ~150 ms of
-    // a successful press and we don't want to double-fire them.
     const baseChainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
     const chain = ((baseChainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
     const onLateRecogniserModal = chain.some(
@@ -1428,17 +1442,43 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
         cls.includes('PHPicker') ||
         cls.includes('PhotoPicker'),
     );
-    const maxRetaps = onLateRecogniserModal ? 5 : 1;
+    // Treat targets that map to a TextInput-style testID (or whose
+    // intent is to focus a field) as "idempotent": single retap with
+    // hash-change exit so we don't re-fire focus events. Everything
+    // else (buttons, nav links, action-sheet items) uses target-
+    // disappearance as the success signal — Maestro's effective
+    // model. If the button is still findable AND still topmost-
+    // hittable after the wait, the tap was eaten by a late
+    // recogniser; retap. Stops on disappearance OR cover.
+    // Exposure-loop retap only for ID-based tap intents. Text
+    // selectors are too ambiguous — "Open drawer menu" can match
+    // the trigger button AND a label inside the opened drawer, and
+    // each retap iteration re-finds at potentially shifting coords
+    // (drawer's label outranks the original trigger). Keep text
+    // taps on single-retap with hash-change exit.
+    const isInputFocusTap = !!(sel.id && /Input$|TextField$/i.test(sel.id));
+    const useExposureLoop = !!sel.id && !sel.text && !isInputFocusTap;
+    const maxRetaps = onLateRecogniserModal ? 5 : useExposureLoop ? 3 : 1;
+    const initialCenter = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
     for (let i = 0; i < maxRetaps; i++) {
       const hc = await ctx.client
         .call('wait_hash_change', {
           sinceHash: baseHash,
-          maxMs: onLateRecogniserModal ? 800 : 1500,
+          maxMs: onLateRecogniserModal ? 800 : 1200,
         })
         .catch(() => undefined);
       const hashChanged = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
       const re = await sampleRect();
       if (!re) break;
+      // Coord-stability guard: if a text selector now resolves to a
+      // VERY different rect than the initial find, we're matching a
+      // different element (e.g. "Open drawer menu" matched the
+      // trigger first, then matched a label inside the opened
+      // drawer). Don't retap at the new coords — the original tap
+      // succeeded.
+      const newCenter = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
+      const drift = Math.hypot(newCenter.x - initialCenter.x, newCenter.y - initialCenter.y);
+      if (drift > 60) break;
       let stillExposed = true;
       if (sel.id) {
         const ex = await ctx.client.call('is_exposed', { testID: sel.id }).catch(() => undefined);
@@ -1447,9 +1487,13 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
         }
       }
       if (!stillExposed) break;
-      if (hashChanged && !onLateRecogniserModal) break;
-      const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
-      await timedAsync(ctx, 'tap.selfHealRetap', () => hidTapArgent(ctx.udid, c.x, c.y));
+      // For text taps, hash-change is the exit. ID-based exposure
+      // loop ignores hash (target presence drives the decision).
+      // Late-recogniser modals tolerate any number of retaps.
+      if (hashChanged && !useExposureLoop && !onLateRecogniserModal) break;
+      await timedAsync(ctx, 'tap.selfHealRetap', () =>
+        hidTapArgent(ctx.udid, newCenter.x, newCenter.y),
+      );
     }
   }
 }

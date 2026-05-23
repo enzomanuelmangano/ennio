@@ -443,8 +443,7 @@ static BOOL anyVCInTransition(UIViewController *root) {
     return nil;
 }
 
-+ (BOOL)activateByTestID:(NSString *)testID {
-    UIView *v = [EnnioFinder findViewByTestID:testID];
++ (BOOL)activateView:(UIView *)v {
     if (!v) return NO;
     // Prefer onAccessibilityTap — direct callback delivery, no
     // synthesized touch + hit-test indirection. UIView's default
@@ -457,10 +456,6 @@ static BOOL anyVCInTransition(UIViewController *root) {
         IMP imp = [v methodForSelector:tap];
         ((void (*)(id, SEL))imp)(v, tap);
         return YES;
-    }
-    if (v.accessibilityActivationPoint.x != 0 || v.accessibilityActivationPoint.y != 0) {
-        // No-op: leave the synthesized-tap path off and rely on the
-        // gesture recognizer search below.
     }
     // Find the first UIGestureRecognizer in the view's chain whose
     // target action looks like a Pressable / TouchableX onPress and
@@ -483,6 +478,11 @@ static BOOL anyVCInTransition(UIViewController *root) {
     // view has overridden it usefully.
     if ([v accessibilityActivate]) return YES;
     return NO;
+}
+
++ (BOOL)activateByTestID:(NSString *)testID {
+    UIView *v = [EnnioFinder findViewByTestID:testID];
+    return [self activateView:v];
 }
 
 + (BOOL)focusByTestID:(NSString *)testID {

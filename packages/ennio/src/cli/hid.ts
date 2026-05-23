@@ -355,6 +355,34 @@ export const tapFast = tap;
 export const tapPureFast = tap;
 export const tapArgent = tap;
 
+/**
+ * Press: Down → ~50 ms hold → Up. Higher reliability for buttons
+ * whose gesture-recogniser ignores 0 ms-gap taps as event-loop
+ * glitches (Bluesky's "Go back" nav-header back-arrow). Costs ~30 ms
+ * more per call than tap() but worth it on targets where the simpler
+ * tap() doesn't reliably fire onPress.
+ */
+export async function press(udid: string, x: number, y: number): Promise<void> {
+  const { w, h } = await getScreenSize(udid);
+  const nx = Math.max(0, Math.min(1, x / w));
+  const ny = Math.max(0, Math.min(1, y / h));
+  trace(
+    `[argent-press] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
+  );
+  const events = [
+    { type: 'Down' as const, x: nx, y: ny },
+    { type: 'Up' as const, x: nx, y: ny, delayMs: 50 },
+  ];
+  await callTool('gesture-custom', { udid, events }, [
+    'run',
+    'gesture-custom',
+    '--udid',
+    udid,
+    '--events-json',
+    JSON.stringify(events),
+  ]);
+}
+
 export async function swipe(
   udid: string,
   x1: number,

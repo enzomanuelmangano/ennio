@@ -632,6 +632,28 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 
+    // Activate by text: find the view whose accessibilityLabel /
+    // value matches, then invoke its action directly via the same
+    // private touch-activate path activate_testid uses. Bypasses the
+    // host gesture-recogniser entirely — useful for nav-header back
+    // arrows whose recogniser ignores synthetic Down+Up touches that
+    // come from outside the XCUITest stack. Returns ok=false when
+    // the view doesn't conform to the activate protocol (e.g. plain
+    // UILabel without a tap recogniser) so the caller can fall back
+    // to a normal tap.
+    EnnioControlSocket::registerHandler("activate_by_text", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *text = argString(a, @"text");
+        if (!text.length) throw std::runtime_error("missing text");
+        BOOL ok = NO;
+        onMainVoid([&]() {
+            UIView *v = [EnnioFinder findViewByText:text];
+            if (!v || ![EnnioFinder isOnScreen:v]) return;
+            ok = [EnnioOps activateView:v];
+        });
+        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
+    });
+
     EnnioControlSocket::registerHandler("focus_testid", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         NSString *testID = argString(a, @"testID");

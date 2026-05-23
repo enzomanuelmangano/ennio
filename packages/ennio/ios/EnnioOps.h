@@ -95,6 +95,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// test controls all rendered at 1×1).
 + (BOOL)activateByTestID:(NSString *)testID;
 
+/// Lower-level: invoke the same private touch-activate path on a
+/// given UIView. Caller is expected to have already found / vetted
+/// the view (e.g. by text). Returns NO if no activate-capable
+/// gesture chain exists on the view.
++ (BOOL)activateView:(UIView *)view;
+
 /// Find a descendant view in the subtree of `parentTestID` whose own
 /// accessibilityIdentifier matches `childTestID`. Implements Maestro's
 /// `childOf:` hierarchical selector — pick the postDropdownBtn that
