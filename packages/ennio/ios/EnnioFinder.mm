@@ -456,7 +456,24 @@ static void collectAxByText(id root,
     if (axMatchesText(root, text)) {
         CGRect r = axFrameOf(root);
         if (!CGRectIsEmpty(r)) {
-            [outRects addObject:[NSValue valueWithCGRect:r]];
+            // Filter off-screen elements. AX walker exposes cached /
+            // recycled views (e.g. RN-Navigation's off-screen tab
+            // cache) at synthetic coords like x = -300. Tests would
+            // false-match these as "visible" — assertNotVisible would
+            // fail because the AX element persists invisible to the
+            // user. Bound rect to the key window's bounds.
+            UIWindow *keyWin = nil;
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    if (w.isKeyWindow) { keyWin = w; break; }
+                }
+                if (keyWin) break;
+            }
+            CGRect bounds = keyWin ? keyWin.bounds : CGRectMake(0, 0, 9999, 9999);
+            if (!CGRectIsEmpty(CGRectIntersection(r, bounds))) {
+                [outRects addObject:[NSValue valueWithCGRect:r]];
+            }
         }
     }
 
