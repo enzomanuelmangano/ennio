@@ -1,0 +1,14 @@
+appId: com.ennio.example
+---
+- launchApp:
+    clearState: true
+- runFlow:
+    file: subflows/navigate-cart.yaml
+- assertVisible:
+    id: 'cart-screen-empty'
+- tapOn:
+    id: 'browse-products-btn'
+- tapOn:
+    id: 'add-to-cart-1'
+- tapOn:
+    text: 'Cart'

@@ -325,6 +325,41 @@ static UIView *_Nullable bestFrom(NSArray<UIView *> *list) {
     return best ?: list.firstObject;
 }
 
+// When `walkByText` lands on a UILabel / RCTText whose parent is the
+// real tappable container (RN Pressable, RNGH GestureHandlerButton,
+// expo-router tab-bar item with a Liquid-Glass blur backdrop), tapping
+// the label rect doesn't hit-test inside the button's hit slop AND
+// some glass-effect host views don't forward touches up the responder
+// chain — the press never fires. Walk up to the nearest interactive
+// ancestor (Pressable, UIControl, view with a Tap recognizer, or
+// view with UIAccessibilityTraitButton/Link) and return THAT view's
+// rect instead. Falls back to the original view when no ancestor
+// qualifies.
+static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
+    if (!v) return nil;
+    // The matched view itself already qualifies — return as-is.
+    if (isInteractive(v) &&
+        ![v isKindOfClass:UILabel.class] &&
+        ![NSStringFromClass([v class]) hasPrefix:@"RCTText"] &&
+        ![NSStringFromClass([v class]) hasPrefix:@"RCTParagraph"]) {
+        return v;
+    }
+    UIView *cur = v.superview;
+    for (int hop = 0; hop < 6 && cur; hop++, cur = cur.superview) {
+        if (!cur.userInteractionEnabled) continue;
+        if ([cur isKindOfClass:UIControl.class]) return cur;
+        if ([cur isKindOfClass:UIButton.class]) return cur;
+        for (UIGestureRecognizer *g in cur.gestureRecognizers) {
+            if (g.isEnabled) return cur;
+        }
+        UIAccessibilityTraits t = cur.accessibilityTraits;
+        if ((t & UIAccessibilityTraitButton) || (t & UIAccessibilityTraitLink)) return cur;
+        NSString *cls = NSStringFromClass([cur class]);
+        if ([cls hasSuffix:@"GestureHandlerButton"]) return cur;
+    }
+    return v;
+}
+
 static UIView *_Nullable walkByText(UIView *root, NSString *text) {
     if (!root) return nil;
     NSMutableArray<UIView *> *matches = [NSMutableArray new];
@@ -359,13 +394,13 @@ static UIView *_Nullable walkByText(UIView *root, NSString *text) {
         if (onscreen) [anyOnscreen addObject:v];
     }
     UIView *r = bestFrom(exactOnscreenInteractive);
-    if (r) return r;
+    if (r) return promoteToInteractiveAncestor(r);
     r = bestFrom(exactOnscreen);
-    if (r) return r;
+    if (r) return promoteToInteractiveAncestor(r);
     r = bestFrom(anyOnscreenInteractive);
-    if (r) return r;
+    if (r) return promoteToInteractiveAncestor(r);
     r = bestFrom(anyOnscreen);
-    if (r) return r;
+    if (r) return promoteToInteractiveAncestor(r);
     return matches.firstObject;
 }
 

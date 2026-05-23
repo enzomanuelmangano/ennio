@@ -257,13 +257,23 @@ export async function execTapOn(
     // through the same path. Costs one extra round-trip when the
     // normal tap worked (exits the loop early via hashChanged), and
     // recovers the cases where it didn't.
-    if (sel.id) {
-      const finalHc = await ctx.client
-        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 80 })
-        .catch(() => undefined);
-      const finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
-      if (!finalChanged) {
+    const finalHc = await ctx.client
+      .call('wait_hash_change', { sinceHash: baseHash, maxMs: 80 })
+      .catch(() => undefined);
+    const finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
+    if (!finalChanged) {
+      if (sel.id) {
         await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
+      } else if (sel.text) {
+        // Text-only tap whose retap loop never moved the hash —
+        // find_by_text often returns the LABEL rect inside a button
+        // (e.g. a 21×12 px "Cart" label inside a tab-bar button).
+        // The HID tap lands on the label, iOS hit-test stays on the
+        // label view, and the parent button's onPress is never
+        // dispatched. activate_by_text walks accessibilityElements
+        // and invokes the button's accessibilityActivate, which RN
+        // wires to the React-side onPress.
+        await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
       }
     }
   }

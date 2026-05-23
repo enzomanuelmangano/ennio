@@ -753,8 +753,17 @@ async function runCommand(
       from?: unknown;
       duration?: number;
     };
-    const winW = 390;
-    const winH = 844;
+    // Query actual device dims so `%` swipe coords land on the real
+    // pixel — the hardcoded 390×844 was a 6.1" iPhone in portrait and
+    // is 12-30 pt off on iPhone 17 Pro / iPhone Air / iPad. That 30 pt
+    // gap is enough to land outside an RN carousel's content area:
+    // the gesture lands on the page-list background instead of the
+    // page itself, the recogniser ignores it, and the carousel never
+    // advances.
+    const sizeResp = await ctx.client.call('window_size').catch(() => undefined);
+    const sizeData = (sizeResp?.data as { w?: number; h?: number }) ?? {};
+    const winW = sizeData.w && sizeData.w > 0 ? sizeData.w : 390;
+    const winH = sizeData.h && sizeData.h > 0 ? sizeData.h : 844;
     const parseCoord = (
       val: string | { x: number; y: number } | undefined,
       fallback: { x: number; y: number },
@@ -916,7 +925,13 @@ async function runCommand(
       await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
       return;
     }
-    await hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 250);
+    // Maestro default swipe duration is 400 ms (verified with
+    // `maestro test` on a swipe-only flow: "Swipe ... in 400 ms").
+    // We previously defaulted to 250 ms which was fast enough for
+    // page-scroll but undershot the inertia threshold on RN
+    // horizontal carousels — pages snapped back to the original
+    // index instead of advancing.
+    await hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
     await sleep(500);
     await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
     return;
