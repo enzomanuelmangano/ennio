@@ -85,11 +85,7 @@ const POLL_MS = 100;
 // The NEXT step's find waits longer when the previous tap landed on
 // one of these. Strictly testID-based; this is the canonical set of
 // Bluesky-defined identifiers, not English-text matching.
-const MEDIA_TRIGGER_IDS = new Set([
-  'openMediaBtn',
-  'changeBannerBtn',
-  'changeAvatarBtn',
-]);
+const MEDIA_TRIGGER_IDS = new Set(['openMediaBtn', 'changeBannerBtn', 'changeAvatarBtn']);
 const FIND_DEADLINE_MEDIA_MS = 5000;
 const FIND_DEADLINE_DEFAULT_MS = 2500;
 // Minimum fixed wait after every tap. wait_commit can return immediately
