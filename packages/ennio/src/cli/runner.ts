@@ -40,7 +40,6 @@ import {
   tap as hidTap,
   tapFast as hidTapFast,
   tapPureFast as hidTapPureFast,
-  tapArgent as hidTapArgent,
   press as hidPress,
   swipe as hidSwipe,
   longPressDrag as hidLongPressDrag,
@@ -1362,7 +1361,7 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
     x: stableRect.x + stableRect.w / 2,
     y: stableRect.y + stableRect.h / 2,
   };
-  const baseHash = preHash ?? (await captureHash(ctx));
+  void preHash;
   // Target-driven exposure wait. When a previous step's modal is
   // still mid-dismiss, the target may already be findable in the
   // view tree but covered by the closing overlay — tap lands on the
@@ -1395,9 +1394,7 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // touch-activate protocol. ID selectors stay on fast tap.
   const isTextOnlyTap = !!sel.text && !sel.id;
   if (isTextOnlyTap) {
-    const r = await ctx.client
-      .call('activate_by_text', { text: sel.text! })
-      .catch(() => undefined);
+    const r = await ctx.client.call('activate_by_text', { text: sel.text! }).catch(() => undefined);
     const activated = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
     if (!activated) {
       await timedAsync(ctx, 'tap.hidTap', () => hidPress(ctx.udid, center.x, center.y));
@@ -1432,70 +1429,20 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   //
   // Critically: NO sleep before the initial tap above. The retry
   // loop only fires if the first tap left the screen unchanged.
-  if ((sel.id || sel.text) && baseHash) {
-    const baseChainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
-    const chain = ((baseChainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
-    const onLateRecogniserModal = chain.some(
-      (cls) =>
-        cls.includes('CropViewController') ||
-        cls.includes('Mantis') ||
-        cls.includes('PHPicker') ||
-        cls.includes('PhotoPicker'),
-    );
-    // Treat targets that map to a TextInput-style testID (or whose
-    // intent is to focus a field) as "idempotent": single retap with
-    // hash-change exit so we don't re-fire focus events. Everything
-    // else (buttons, nav links, action-sheet items) uses target-
-    // disappearance as the success signal — Maestro's effective
-    // model. If the button is still findable AND still topmost-
-    // hittable after the wait, the tap was eaten by a late
-    // recogniser; retap. Stops on disappearance OR cover.
-    // Exposure-loop retap only for ID-based tap intents. Text
-    // selectors are too ambiguous — "Open drawer menu" can match
-    // the trigger button AND a label inside the opened drawer, and
-    // each retap iteration re-finds at potentially shifting coords
-    // (drawer's label outranks the original trigger). Keep text
-    // taps on single-retap with hash-change exit.
-    const isInputFocusTap = !!(sel.id && /Input$|TextField$/i.test(sel.id));
-    const useExposureLoop = !!sel.id && !sel.text && !isInputFocusTap;
-    const maxRetaps = onLateRecogniserModal ? 5 : useExposureLoop ? 3 : 1;
-    const initialCenter = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
-    for (let i = 0; i < maxRetaps; i++) {
-      const hc = await ctx.client
-        .call('wait_hash_change', {
-          sinceHash: baseHash,
-          maxMs: onLateRecogniserModal ? 800 : 1200,
-        })
-        .catch(() => undefined);
-      const hashChanged = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
-      const re = await sampleRect();
-      if (!re) break;
-      // Coord-stability guard: if a text selector now resolves to a
-      // VERY different rect than the initial find, we're matching a
-      // different element (e.g. "Open drawer menu" matched the
-      // trigger first, then matched a label inside the opened
-      // drawer). Don't retap at the new coords — the original tap
-      // succeeded.
-      const newCenter = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
-      const drift = Math.hypot(newCenter.x - initialCenter.x, newCenter.y - initialCenter.y);
-      if (drift > 60) break;
-      let stillExposed = true;
-      if (sel.id) {
-        const ex = await ctx.client.call('is_exposed', { testID: sel.id }).catch(() => undefined);
-        if (ex && ex.ok && ex.data) {
-          stillExposed = !!(ex.data as { exposed?: boolean }).exposed;
-        }
-      }
-      if (!stillExposed) break;
-      // For text taps, hash-change is the exit. ID-based exposure
-      // loop ignores hash (target presence drives the decision).
-      // Late-recogniser modals tolerate any number of retaps.
-      if (hashChanged && !useExposureLoop && !onLateRecogniserModal) break;
-      await timedAsync(ctx, 'tap.selfHealRetap', () =>
-        hidTapArgent(ctx.udid, newCenter.x, newCenter.y),
-      );
-    }
-  }
+  // No per-tap retap loop. A single tap fires (with the 50 ms hold
+  // press for text targets, fast Down+Up for id targets), then we
+  // move to the next step. If the tap missed, the next step's find
+  // deadline will time out, and the step-level retry in the runner
+  // loop re-fires the previous tap exactly once before retrying the
+  // current step. That avoids:
+  //   - timeout heuristics per tap (no "wait 3 s for save")
+  //   - selector-name heuristics ("publish"/"save"/etc — not
+  //     portable across languages or app naming conventions)
+  //   - double-triggering side-effects that are observable but
+  //     slow-to-render (an idempotent retap on a network-bound
+  //     Save still costs the user a duplicate request).
+  // Result: tap semantics stay the same as a real-user touch; flake
+  // recovery is contained at the flow level, not within every tap.
 }
 
 async function resolveCenter(
