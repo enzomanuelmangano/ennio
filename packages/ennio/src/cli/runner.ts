@@ -79,6 +79,19 @@ import { createContext, runInContext } from 'node:vm';
 // more headroom.
 const DEFAULT_WAIT_MS = 15000;
 const POLL_MS = 100;
+// testIDs whose onPress kicks off a media-processing chain
+// (compressIfNeeded → re-encode → state update) that can outlast the
+// regular 2.5 s find deadline on default 4288×2848 simulator photos.
+// The NEXT step's find waits longer when the previous tap landed on
+// one of these. Strictly testID-based; this is the canonical set of
+// Bluesky-defined identifiers, not English-text matching.
+const MEDIA_TRIGGER_IDS = new Set([
+  'openMediaBtn',
+  'changeBannerBtn',
+  'changeAvatarBtn',
+]);
+const FIND_DEADLINE_MEDIA_MS = 5000;
+const FIND_DEADLINE_DEFAULT_MS = 2500;
 // Minimum fixed wait after every tap. wait_commit can return immediately
 // if the frame-hash is stable, but RN often starts the navigation
 // animation slightly LATER than the tap (event dispatched → JS handles
@@ -477,7 +490,7 @@ async function runCommand(
         ),
         timedAsync(ctx, 'tap.preWaitReactQuiet', () =>
           ctx.client
-            .call('wait_react_quiet', { stableMs: 250, maxMs: 3500 })
+            .call('wait_react_quiet', { stableMs: 150, maxMs: 1500 })
             .catch(() => undefined),
         ),
       ]);
@@ -1151,9 +1164,40 @@ async function runCommand(
     // animations) by polling for VC-chain stability. Picks up
     // transitions that don't fire React commits (UIKit-driven
     // dismiss without RN state change).
-    let lastChain = '';
+    //
+    // Two phases:
+    //   1. Wait for the chain to CHANGE (new VC presented or current
+    //      VC dismissed) — up to 3.5 s. Bluesky's Mantis crop tool is
+    //      a native UIViewController presented from a JS callback;
+    //      the call-out to the file system + crop UI init takes
+    //      ~3 s on cold launch, so the chain doesn't grow for several
+    //      seconds after the trigger tap. Without this phase we exit
+    //      while the modal is still spinning up.
+    //   2. After observing a change, wait for stability (3 stable
+    //      polls = 240 ms of no further change) for up to 5 s.
+    //
+    // If no change ever happens within phase 1, the screen was static
+    // — return early so static taps don't pay the full timeout.
+    const baselineR = await ctx.client.call('top_vc_chain').catch(() => undefined);
+    const baselineChain = JSON.stringify(
+      ((baselineR?.data as { chain?: string[] })?.chain ?? []) as string[],
+    );
+    let observedChange = false;
+    let lastChain = baselineChain;
+    const changeDeadline = Date.now() + 3500;
+    while (Date.now() < changeDeadline) {
+      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
+      const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
+      if (cur !== baselineChain) {
+        observedChange = true;
+        lastChain = cur;
+        break;
+      }
+      await sleep(80);
+    }
+    if (!observedChange) return;
     let stableCount = 0;
-    const stableDeadline = Date.now() + 1500;
+    const stableDeadline = Date.now() + 5000;
     while (Date.now() < stableDeadline) {
       const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
       const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
@@ -1406,20 +1450,33 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
     x: stableRect.x + stableRect.w / 2,
     y: stableRect.y + stableRect.h / 2,
   };
-  // Target-driven exposure wait. When a previous step's modal is
-  // still mid-dismiss, the target may already be findable in the
-  // view tree but covered by the closing overlay — tap lands on the
-  // overlay and gets eaten. Only blocks when this is actually the
-  // case, so there's zero overhead on normal taps. Caps at 2 s.
-  if (sel.id) {
-    const ex = await ctx.client.call('is_exposed', { testID: sel.id }).catch(() => undefined);
+  // Target-driven exposure wait. is_exposed hit-tests at the target's
+  // layout-rect center and walks the responder chain — if the hit
+  // doesn't land on the target (or a descendant) the target is
+  // either covered by an overlay OR still mid-animation (the layer's
+  // VISUAL position differs from its layout frame). Either way the
+  // tap would land on the wrong layer; wait for hit-test to confirm
+  // exposure.
+  //
+  // Applies to both testID and text selectors. Bluesky's
+  // ReportDialog sheet present causes the same race for "Create
+  // report for Misleading" (text selector) that the original
+  // testID-only wait was protecting against for modal-dismiss races
+  // on testID selectors.
+  const exposureSel: { testID?: string; text?: string } | null = sel.id
+    ? { testID: sel.id }
+    : sel.text
+      ? { text: sel.text }
+      : null;
+  if (exposureSel) {
+    const ex = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
     const exposed = !!(ex && ex.ok && ex.data && (ex.data as { exposed?: boolean }).exposed);
     if (!exposed) {
       await timedAsync(ctx, 'tap.waitExposed', async () => {
         const deadline = Date.now() + 2000;
         while (Date.now() < deadline) {
           await sleep(80);
-          const r = await ctx.client.call('is_exposed', { testID: sel.id! }).catch(() => undefined);
+          const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
           const ok = !!(r && r.ok && r.data && (r.data as { exposed?: boolean }).exposed);
           if (ok) break;
         }
@@ -1429,20 +1486,25 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // Argent HID — reliable on iOS 26 RN Pressables. No pre-tap sleep:
   // the position-stability gate above already proved the rect isn't
   // moving, so UIKit's hit-test layer-tree is settled.
-  // Text-only selectors: try activate_by_text first — invokes the
-  // view's _accessibilityHandleUserTouchActivate (UIView private but
-  // stable). Direct callback delivery, no synthesized touch + hit-
-  // test indirection, no gesture-recogniser race. Falls back to
-  // HID press (Down + 50 ms hold + Up) on activate failure so we
-  // don't lose coverage for views that don't conform to the private
-  // touch-activate protocol. ID selectors stay on fast tap.
+  //
+  // Text-only selectors use HID press (Down + 50 ms hold + Up) — the
+  // hold gives RNGH's Tap recognizer enough margin to arm. Earlier
+  // versions tried activate_by_text first (invokes
+  // _accessibilityHandleUserTouchActivate) but on Bluesky's
+  // CategoryCard in ReportDialog the activate returned success
+  // without triggering the React onPress, so the wizard never
+  // advanced. HID-first is simpler and consistent with how a real
+  // user interacts. The retap-self-heal loop below handles cases
+  // where a single HID misses.
   const isTextOnlyTap = !!sel.text && !sel.id;
   if (isTextOnlyTap) {
-    const r = await ctx.client.call('activate_by_text', { text: sel.text! }).catch(() => undefined);
-    const activated = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
-    if (!activated) {
-      await timedAsync(ctx, 'tap.hidTap', () => hidPress(ctx.udid, center.x, center.y));
-    }
+    // Use fast tap (Down + Up, no hold) — matches argent's
+    // gesture-tap and what a real finger does. The previous 50 ms
+    // hidPress hold was misinterpreted by RN-Screens bottom-sheet
+    // (ReportDialog) as a drag-to-dismiss gesture, closing the sheet
+    // instead of selecting the category. Down+Up immediately is the
+    // safest baseline; the retap-self-heal loop covers misses.
+    await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
   } else {
     await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
   }
@@ -1586,9 +1648,12 @@ async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect 
     // filter — find_by_testid alone identifies the unique element.
     // Falling through to the slow CLI poll for the id+text case was
     // burning ~7s/step on labelled buttons (home-screen `likeBtn`).
+    const findMaxMs = MEDIA_TRIGGER_IDS.has(ctx.lastTapTestID ?? '')
+      ? FIND_DEADLINE_MEDIA_MS
+      : FIND_DEADLINE_DEFAULT_MS;
     const r = await timedAsync(ctx, 'tap.findFast', () =>
       ctx.client
-        .call('wait_find_by_testid', { testID: sel.id!, maxMs: 2500 })
+        .call('wait_find_by_testid', { testID: sel.id!, maxMs: findMaxMs })
         .catch(() => undefined),
     );
     if (r && r.ok && r.data) return r.data as Rect;

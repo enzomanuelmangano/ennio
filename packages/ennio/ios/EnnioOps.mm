@@ -243,6 +243,15 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
     return NO;
 }
 
+// Check ONLY a VC's root view layer for a position/transform/opacity
+// animation. RN-Screens and react-native-reanimated drive sheet
+// present/dismiss as CAAnimations on the host view's layer — these
+// don't surface as UIViewController.isBeingPresented because the
+// host VC is already mounted. Walking the entire subview tree was
+// too slow (1.6 s/call on screens with persistent spinner CAAnimations
+// elsewhere). Only the immediate presentation host's layer matters
+// for the "sheet still sliding in" case — its sub-animations
+// (button highlights, spinners) are noise.
 static BOOL anyVCInTransition(UIViewController *root) {
     if (!root) return NO;
     if (root.isBeingPresented || root.isBeingDismissed) return YES;

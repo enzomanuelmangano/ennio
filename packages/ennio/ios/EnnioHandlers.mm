@@ -383,8 +383,32 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         if (!testID.length) throw std::runtime_error("missing testID");
         BOOL visible = NO;
         onMainVoid([&]() {
-            UIView *v = [EnnioFinder findViewByTestID:testID];
-            visible = v && [EnnioFinder isOnScreen:v];
+            // Prefer topmost-Y (live, on-screen, in-topmost-VC). If
+            // none matches, fall back to any view registered with the
+            // testID so we can scroll it into view below.
+            NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+            UIView *v = all.firstObject ?: [EnnioFinder findViewByTestID:testID];
+            if (v && [EnnioFinder isOnScreen:v]) { visible = YES; return; }
+            // Auto-scroll: Maestro's assertVisible auto-scrolls within
+            // the nearest scroll view to surface the target. Walk
+            // ancestors for the first UIScrollView and ask it to
+            // scroll the target into the visible rect. This matches
+            // assertVisible semantics on long profile screens where
+            // the asserted element (userBannerImage, etc.) is mounted
+            // but scrolled past after a modal-save cycle.
+            if (v && v.window) {
+                UIView *sv = v.superview;
+                while (sv && ![sv isKindOfClass:UIScrollView.class]) sv = sv.superview;
+                if ([sv isKindOfClass:UIScrollView.class]) {
+                    UIScrollView *scroll = (UIScrollView *)sv;
+                    CGRect target = [v convertRect:v.bounds toView:scroll];
+                    [scroll scrollRectToVisible:target animated:NO];
+                    // Force a layout pass so isOnScreen reads the new
+                    // window-space frame after the scroll.
+                    [scroll layoutIfNeeded];
+                    visible = [EnnioFinder isOnScreen:v];
+                }
+            }
         });
         return std::string("{\"visible\":") + (visible ? "true" : "false") + "}";
     });
