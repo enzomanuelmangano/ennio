@@ -159,10 +159,38 @@ export interface AXMatchRect {
  *   3. substring label/value match
  * On-screen elements (frame inside [0,1]) outrank off-screen.
  */
-export async function axQueryByText(
-  udid: string,
-  text: string,
-): Promise<AXMatchRect | null> {
+/**
+ * Take a compact signature of the OS a11y tree. Used by callers that
+ * need to wait for cross-process animations (PHPicker dismiss, share
+ * sheet) to settle — our in-process commit observer can't see them,
+ * but the OS a11y describe shape changes during the transition.
+ */
+export async function axTreeSnapshot(udid: string): Promise<string> {
+  const port = discoverToolServerPort();
+  if (port === null) return '';
+  const r = await postToolJSON(port, 'describe', { udid });
+  if (!r.ok || !r.body) return '';
+  try {
+    const parsed = JSON.parse(r.body) as { data?: { tree?: AXNode } };
+    const tree = parsed?.data?.tree;
+    if (!tree) return '';
+    const parts: string[] = [];
+    const walk = (n: AXNode | undefined): void => {
+      if (!n) return;
+      const f = n.frame;
+      parts.push(
+        `${n.role ?? ''}|${n.label ?? ''}|${f ? `${f.x.toFixed(3)},${f.y.toFixed(3)},${f.width.toFixed(3)},${f.height.toFixed(3)}` : ''}`,
+      );
+      for (const c of n.children ?? []) walk(c);
+    };
+    walk(tree);
+    return parts.join('\n');
+  } catch {
+    return '';
+  }
+}
+
+export async function axQueryByText(udid: string, text: string): Promise<AXMatchRect | null> {
   // argent describe queries the OS a11y service. The service can
   // return an empty/transitioning tree for ~50-150 ms while a sheet
   // animates in (PHPicker first frame, share sheet, etc.). Retry up
@@ -177,7 +205,9 @@ export async function axQueryByText(
     await new Promise((res) => setTimeout(res, 120));
   }
   if (attempt > 0) {
-    process.stderr.write(`[ax-fallback] no match for ${JSON.stringify(text)} after ${attempt} polls\n`);
+    process.stderr.write(
+      `[ax-fallback] no match for ${JSON.stringify(text)} after ${attempt} polls\n`,
+    );
   }
   return null;
 }
@@ -309,11 +339,16 @@ export async function tap(udid: string, x: number, y: number): Promise<void> {
   trace(
     `[argent-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
   );
-  await callTool(
+  await callTool('gesture-tap', { udid, x: nx, y: ny }, [
+    'run',
     'gesture-tap',
-    { udid, x: nx, y: ny },
-    ['run', 'gesture-tap', '--udid', udid, '--x', String(nx), '--y', String(ny)],
-  );
+    '--udid',
+    udid,
+    '--x',
+    String(nx),
+    '--y',
+    String(ny),
+  ]);
 }
 
 export const tapFast = tap;
@@ -337,42 +372,114 @@ export async function swipe(
   trace(
     `[argent-swipe] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) dur=${dur}`,
   );
-  await callTool(
+  await callTool('gesture-swipe', { udid, fromX, fromY, toX, toY, durationMs: dur }, [
+    'run',
     'gesture-swipe',
-    { udid, fromX, fromY, toX, toY, durationMs: dur },
+    '--udid',
+    udid,
+    '--fromX',
+    String(fromX),
+    '--fromY',
+    String(fromY),
+    '--toX',
+    String(toX),
+    '--toY',
+    String(toY),
+    '--durationMs',
+    String(dur),
+  ]);
+}
+
+/**
+ * Long-press-then-drag. Drag-to-sort list rows (e.g. RNGH
+ * draggable-flatlist) only enter drag mode after a long-press
+ * threshold — ~400 ms hold without motion. A plain swipe with
+ * gesture-swipe distributes Move events from frame 1 onward, which
+ * the recogniser interprets as a scroll, not a sort drag.
+ *
+ * Construct the gesture explicitly: Down at start, hold stationary
+ * for `holdMs`, then interpolate Move events over `moveMs` to the
+ * end coordinate, Up at end.
+ */
+export async function longPressDrag(
+  udid: string,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  holdMs: number,
+  moveMs: number,
+): Promise<void> {
+  const { w, h } = await getScreenSize(udid);
+  const norm = (px: number, dim: number) => Math.max(0, Math.min(1, px / dim));
+  const fromX = norm(x1, w);
+  const fromY = norm(y1, h);
+  const toX = norm(x2, w);
+  const toY = norm(y2, h);
+  trace(
+    `[argent-long-drag] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) hold=${holdMs} move=${moveMs}`,
+  );
+  // Build event sequence: Down → micro-Move stack to flush hold timer
+  // without triggering scroll → Move sequence to target → Up.
+  // Interpolated by argent (interpolate=20 → 20 intermediate Move
+  // events between adjacent keyframes; smooth glide).
+  const events: Array<{
+    type: 'Down' | 'Move' | 'Up';
+    x: number;
+    y: number;
+    delayMs?: number;
+  }> = [];
+  events.push({ type: 'Down', x: fromX, y: fromY });
+  // Hold stationary: emit Move events at the same point with cumulative
+  // delays summing to holdMs. argent's recogniser sees touch held in
+  // place → triggers long-press detection in the host RN gesture
+  // handler.
+  const holdSlices = 4;
+  for (let i = 0; i < holdSlices; i++) {
+    events.push({ type: 'Move', x: fromX, y: fromY, delayMs: Math.round(holdMs / holdSlices) });
+  }
+  // Then drag toward target. Keep delayMs short so each Move arrives
+  // ~one frame apart; total over the move duration.
+  const moveSlices = 8;
+  for (let i = 1; i <= moveSlices; i++) {
+    const t = i / moveSlices;
+    events.push({
+      type: 'Move',
+      x: fromX + (toX - fromX) * t,
+      y: fromY + (toY - fromY) * t,
+      delayMs: Math.round(moveMs / moveSlices),
+    });
+  }
+  events.push({ type: 'Up', x: toX, y: toY, delayMs: 50 });
+  await callTool(
+    'gesture-custom',
+    { udid, events, interpolate: 4 },
     [
       'run',
-      'gesture-swipe',
+      'gesture-custom',
       '--udid',
       udid,
-      '--fromX',
-      String(fromX),
-      '--fromY',
-      String(fromY),
-      '--toX',
-      String(toX),
-      '--toY',
-      String(toY),
-      '--durationMs',
-      String(dur),
+      '--events-json',
+      JSON.stringify(events),
+      '--interpolate',
+      '4',
     ],
   );
 }
 
 export async function typeText(udid: string, text: string): Promise<void> {
   trace(`[argent-keyboard] text=${JSON.stringify(text)}`);
-  await callTool(
-    'keyboard',
-    { udid, text },
-    ['run', 'keyboard', '--udid', udid, '--text', text],
-  );
+  await callTool('keyboard', { udid, text }, ['run', 'keyboard', '--udid', udid, '--text', text]);
 }
 
 export async function pressKey(udid: string, keyName: string): Promise<void> {
   trace(`[argent-keyboard] key=${keyName}`);
-  await callTool(
+  await callTool('keyboard', { udid, key: keyName }, [
+    'run',
     'keyboard',
-    { udid, key: keyName },
-    ['run', 'keyboard', '--udid', udid, '--key', keyName],
-  );
+    '--udid',
+    udid,
+    '--key',
+    keyName,
+  ]);
 }

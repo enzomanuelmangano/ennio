@@ -43,6 +43,14 @@ typedef struct {
 /// a UIView. Uses a11y walk, no cache.
 + (nullable UIView *)findViewByText:(NSString *)text;
 
+/// Resolve text against the UIAccessibility element tree. Walks
+/// accessibilityElements / accessibilityElementAtIndex: in addition
+/// to subviews, so cross-process UIRemoteView contents (PHPicker,
+/// share sheet, document picker) become reachable through their
+/// UIAccessibilityElement proxies. Returns an opaque match rect in
+/// window-space coords; the caller taps the rect's center.
++ (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found;
+
 /// Convert a UIView's bounds to window coordinates. Returns CGRectZero
 /// if the view is not attached to a window.
 + (EnnioRect)windowRectFor:(UIView *)view;

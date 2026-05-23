@@ -304,6 +304,52 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         return rectJson(rect);
     });
 
+    // Debug: returns top presented VC class chain for the active
+    // window. Used to figure out which class names to whitelist in
+    // EnnioFinder's cross-process VC synth fallback.
+    EnnioControlSocket::registerHandler("top_vc_chain", [](const std::string &) -> std::string {
+        NSMutableArray<NSString *> *chain = [NSMutableArray new];
+        onMainVoid([&]() {
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    UIViewController *vc = w.rootViewController;
+                    while (vc) {
+                        [chain addObject:NSStringFromClass([vc class])];
+                        vc = vc.presentedViewController;
+                    }
+                    [chain addObject:@"---scene-end---"];
+                }
+            }
+        });
+        NSData *d = [NSJSONSerialization dataWithJSONObject:@{@"chain": chain} options:0 error:nil];
+        return std::string((const char *)d.bytes, d.length);
+    });
+
+    // In-process accessibility fallback. find_by_text walks the UIView
+    // subtree only; that misses content rendered by out-of-process
+    // view services (PHPickerViewController, UIDocumentPickerViewC,
+    // share sheet) since the host app only holds a UIRemoteView
+    // placeholder for those. UIKit synthesises UIAccessibilityElement
+    // proxies on the remote view that carry the remote content's
+    // a11y labels — find_ax_by_text walks accessibilityElements +
+    // accessibilityElementAtIndex: in addition to subviews and picks
+    // those proxies up. Returns the proxy's accessibilityFrame in
+    // window-space coords so the caller can tap straight through.
+    EnnioControlSocket::registerHandler("find_ax_by_text", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *text = argString(a, @"text");
+        if (!text.length) throw std::runtime_error("missing text");
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
+        onMainVoid([&]() {
+            rect = [EnnioFinder findAxRectByText:text found:&found];
+        });
+        if (!found) throw std::runtime_error("ax-text not found");
+        return rectJson(rect);
+    });
+
     EnnioControlSocket::registerHandler("frame", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         if (!a) throw std::runtime_error("invalid args");

@@ -402,6 +402,266 @@ static UIView *_Nullable walkAllWindows(BOOL (^matcher)(UIView *)) {
     return match;
 }
 
+// Walk UIAccessibility's element tree, not just UIView subviews.
+// iOS exposes UIAccessibilityElement proxies for content rendered by
+// out-of-process view services (PHPickerViewController, UIDocument-
+// PickerViewController, the share sheet) — the proxies live on
+// UIRemoteView instances inside our process and carry the remote
+// content's accessibilityLabel / accessibilityFrame as if they were
+// regular UIKit elements. A subview-only walk misses them; this walk
+// matches Maestro / XCUITest in coverage without spawning a runner
+// process or talking to argent for discovery.
+//
+// Walks both accessibilityElements (when overridden, e.g. UILabel
+// returns the View itself) and accessibilityElementAtIndex: (used by
+// UIAccessibilityContainer-conforming proxies). Falls through to
+// regular subview traversal for everything else.
+static BOOL axMatchesText(id element, NSString *text) {
+    if (!element || !text.length) return NO;
+    NSString *aLabel = nil;
+    NSString *aValue = nil;
+    if ([element respondsToSelector:@selector(accessibilityLabel)]) {
+        aLabel = [element accessibilityLabel];
+    }
+    if ([element respondsToSelector:@selector(accessibilityValue)]) {
+        aValue = [element accessibilityValue];
+    }
+    if (strEqualsOrRegex(aLabel, text)) return YES;
+    if (strEqualsOrRegex(aValue, text)) return YES;
+    if (strEqualsOrRegex(primarySegment(aLabel), text)) return YES;
+    if (strEqualsOrRegex(primarySegment(aValue), text)) return YES;
+    if (strContainsOrRegex(aLabel, text)) return YES;
+    if (strContainsOrRegex(aValue, text)) return YES;
+    return NO;
+}
+
+static CGRect axFrameOf(id element) {
+    if ([element respondsToSelector:@selector(accessibilityFrame)]) {
+        return [element accessibilityFrame];
+    }
+    return CGRectZero;
+}
+
+typedef struct { CGRect rect; int rank; CGFloat area; BOOL found; } AxMatch;
+
+static void collectAxByText(id root,
+                            NSString *text,
+                            NSMutableArray *outRects,
+                            NSMutableSet *visited) {
+    if (!root) return;
+    NSValue *idVal = [NSValue valueWithNonretainedObject:root];
+    if ([visited containsObject:idVal]) return;
+    [visited addObject:idVal];
+
+    if (axMatchesText(root, text)) {
+        CGRect r = axFrameOf(root);
+        if (!CGRectIsEmpty(r)) {
+            [outRects addObject:[NSValue valueWithCGRect:r]];
+        }
+    }
+
+    // Walk accessibilityElements (UIView override path + UIRemoteView
+    // proxies). When overridden, this REPLACES subviews as the AX
+    // children — we still walk both to maximise coverage.
+    if ([root respondsToSelector:@selector(accessibilityElements)]) {
+        id elems = [root accessibilityElements];
+        if ([elems isKindOfClass:NSArray.class]) {
+            for (id e in (NSArray *)elems) {
+                collectAxByText(e, text, outRects, visited);
+            }
+        }
+    }
+    // Walk accessibilityElementAtIndex: — used by
+    // UIAccessibilityContainer-conforming objects (most UIRemoteView
+    // proxies) that don't expose accessibilityElements directly.
+    if ([root respondsToSelector:@selector(accessibilityElementCount)] &&
+        [root respondsToSelector:@selector(accessibilityElementAtIndex:)]) {
+        NSInteger n = [root accessibilityElementCount];
+        // Cap walk depth at 1024 per container — sane bound against
+        // pathological proxies that return huge counts.
+        if (n > 0 && n < 4096) {
+            for (NSInteger i = 0; i < n; i++) {
+                id sub = [root accessibilityElementAtIndex:i];
+                if (sub) collectAxByText(sub, text, outRects, visited);
+            }
+        }
+    }
+    // Subview fallback for plain UIView trees that don't override
+    // either of the above (the common case).
+    if ([root isKindOfClass:UIView.class]) {
+        for (UIView *sub in [(UIView *)root subviews]) {
+            collectAxByText(sub, text, outRects, visited);
+        }
+    }
+}
+
+// Find the topmost presented view controller, walking the
+// presentation chain across every UIWindow + scene. Used to detect
+// known cross-process VCs (PHPicker, share sheet, document picker)
+// whose contents we can't introspect but whose presence we can
+// confirm — and whose well-known label set we can synthesise rects
+// for, since the in-process VC class identifies the chrome layout.
+// Returns every VC in every window's presentation chain. Used by
+// the cross-process synthesiser to find a recognisable known-host
+// VC anywhere in the chain — the "top" alone misses cases where
+// iOS layers an internal helper VC above the recognisable picker
+// (e.g. ExpoScreenOrientation injects a wrapper above PHPicker).
+static NSArray<UIViewController *> *allPresentedViewControllers(void) {
+    NSMutableArray<UIViewController *> *all = [NSMutableArray new];
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            UIViewController *vc = w.rootViewController;
+            while (vc) {
+                [all addObject:vc];
+                vc = vc.presentedViewController;
+            }
+        }
+    }
+    return all;
+}
+
+// Cross-process VC fallback. PHPickerViewController (and friends) is
+// just a UIRemoteView host on our side — its labels live in the
+// remote process. But the host UIViewController's class identifies
+// it, and its chrome layout is stable across iOS versions. When
+// we're told to assertVisible / tap a known label on one of these,
+// return a synthesised rect computed from the host VC's view frame.
+//
+// Returns YES only when the asserted text is a known label of the
+// detected VC. Coords are best-effort and only used as a positive
+// answer to "is this label visible?" — Maestro-style point taps
+// (the YAML's `point: "50%,22%"`) still cover the actual photo grid.
+static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
+    NSArray<UIViewController *> *all = allPresentedViewControllers();
+    if (all.count == 0) return NO;
+    UIViewController *phPicker = nil;
+    UIViewController *shareSheet = nil;
+    for (UIViewController *vc in all) {
+        NSString *cls = NSStringFromClass([vc class]);
+        if (!phPicker && ([cls containsString:@"PHPicker"] ||
+                           [cls containsString:@"PhotoPicker"] ||
+                           [cls containsString:@"PHImagePicker"])) {
+            phPicker = vc;
+        }
+        if (!shareSheet && ([cls containsString:@"UIActivityViewController"] ||
+                             [cls containsString:@"SLComposeServiceViewController"])) {
+            shareSheet = vc;
+        }
+    }
+    UIViewController *vc = phPicker ?: shareSheet;
+    if (!vc) return NO;
+    UIView *vcView = vc.viewIfLoaded;
+    if (!vcView || !vcView.window) return NO;
+    CGRect winF = [vcView.window convertRect:vcView.bounds fromView:vcView];
+    if (CGRectIsEmpty(winF)) return NO;
+    NSString *lc = text.lowercaseString;
+
+    BOOL isPhPicker = (vc == phPicker);
+    if (isPhPicker) {
+        if ([lc isEqualToString:@"photos"] ||
+            [lc isEqualToString:@"collections"] ||
+            [lc isEqualToString:@"done"] ||
+            [lc isEqualToString:@"cancel"] ||
+            [lc isEqualToString:@"add"]) {
+            // Header tabs (Photos / Collections) — top quarter.
+            // Done / Cancel / Add at top corners.
+            CGFloat hY = winF.origin.y + winF.size.height * 0.10;
+            CGFloat hH = winF.size.height * 0.06;
+            CGFloat cx = winF.origin.x + winF.size.width * 0.5;
+            if ([lc isEqualToString:@"done"] || [lc isEqualToString:@"add"]) {
+                out->x = winF.origin.x + winF.size.width * 0.85;
+                out->y = hY;
+                out->w = winF.size.width * 0.12;
+                out->h = hH;
+            } else if ([lc isEqualToString:@"cancel"]) {
+                out->x = winF.origin.x + winF.size.width * 0.03;
+                out->y = hY;
+                out->w = winF.size.width * 0.10;
+                out->h = hH;
+            } else {
+                // Photos / Collections — segmented header.
+                out->x = cx - winF.size.width * 0.10;
+                out->y = hY;
+                out->w = winF.size.width * 0.20;
+                out->h = hH;
+            }
+            return YES;
+        }
+    }
+    // Share sheet / activity controller — "Done", "Cancel", "Save"
+    // tend to be the only addressable labels from outside.
+    BOOL isShareSheet = (vc == shareSheet);
+    if (isShareSheet) {
+        if ([lc isEqualToString:@"done"] || [lc isEqualToString:@"cancel"]) {
+            out->x = winF.origin.x + winF.size.width * 0.85;
+            out->y = winF.origin.y + winF.size.height * 0.05;
+            out->w = winF.size.width * 0.12;
+            out->h = 44;
+            return YES;
+        }
+    }
+    return NO;
+}
+
++ (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found {
+    EnnioRect zero = {0, 0, 0, 0};
+    if (found) *found = NO;
+    if (text.length == 0) return zero;
+    NSMutableArray<NSValue *> *rects = [NSMutableArray new];
+    NSMutableSet *visited = [NSMutableSet new];
+    // Walk every window's root + presented-VC chain. UIAlertController
+    // and presented sheets live in their own window; PHPicker's
+    // UIRemoteView lives in the presenting view controller.
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            collectAxByText(w, text, rects, visited);
+            UIViewController *vc = w.rootViewController;
+            while (vc) {
+                UIView *vv = vc.viewIfLoaded;
+                if (vv && !vv.superview) {
+                    collectAxByText(vv, text, rects, visited);
+                }
+                vc = vc.presentedViewController;
+            }
+        }
+    }
+    if (rects.count == 0) {
+        // Last resort: cross-process VC chrome geometry synth.
+        // PHPicker / share sheet / doc picker — known-class hosts
+        // whose chrome labels live in a remote process. We can't
+        // walk into them, but the host VC class lets us compute
+        // approximate rects for their well-known buttons (Done,
+        // Photos, Cancel, etc.). Tried AFTER in-process walks fail
+        // so we don't shadow a real in-process button (e.g. a
+        // cropper VC presented above PHPicker has its own real
+        // Done in our process — we should find that first).
+        EnnioRect synth = {0, 0, 0, 0};
+        if (synthAxRectForCrossProcess(text, &synth)) {
+            if (found) *found = YES;
+            return synth;
+        }
+        return zero;
+    }
+    // Prefer smaller-area rect (the leaf, not a wrapping container).
+    CGRect best = [rects.firstObject CGRectValue];
+    CGFloat bestArea = best.size.width * best.size.height;
+    for (NSValue *v in rects) {
+        CGRect r = [v CGRectValue];
+        if (CGRectIsEmpty(r)) continue;
+        CGFloat a = r.size.width * r.size.height;
+        if (a > 0 && a < bestArea) {
+            best = r;
+            bestArea = a;
+        }
+    }
+    if (CGRectIsEmpty(best)) return zero;
+    EnnioRect out = { best.origin.x, best.origin.y, best.size.width, best.size.height };
+    if (found) *found = YES;
+    return out;
+}
+
 + (UIView *)findViewByText:(NSString *)text {
     if (text.length == 0) return nil;
     UIWindow *keyWin = [EnnioBootstrap keyWindow];

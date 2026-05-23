@@ -42,6 +42,7 @@ import {
   tapPureFast as hidTapPureFast,
   tapArgent as hidTapArgent,
   swipe as hidSwipe,
+  longPressDrag as hidLongPressDrag,
   typeText as hidType,
   axQueryByText,
 } from './hid';
@@ -291,7 +292,8 @@ export async function runFlow(
       const msg = err instanceof Error ? err.message : String(err);
       const isFindMiss = /element not found|assertVisible\/waitFor timeout/i.test(msg);
       const isFindableStep =
-        cmd && typeof cmd === 'object' &&
+        cmd &&
+        typeof cmd === 'object' &&
         ('tapOn' in cmd || 'assertVisible' in cmd || 'waitFor' in cmd);
       if (lastTapCmd && isFindMiss && isFindableStep) {
         try {
@@ -303,8 +305,7 @@ export async function runFlow(
           stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
           logStep(ctx, i + 1, dt, describeCommand(cmd));
           stepsPassed++;
-          lastTapCmd =
-            typeof cmd === 'object' && cmd && 'tapOn' in cmd ? cmd : undefined;
+          lastTapCmd = typeof cmd === 'object' && cmd && 'tapOn' in cmd ? cmd : undefined;
           continue;
         } catch {
           /* fall through to fail */
@@ -503,9 +504,7 @@ async function runCommand(
     const nextEditsField =
       !!nextRawCmd &&
       typeof nextRawCmd === 'object' &&
-      ('inputText' in nextRawCmd ||
-        'eraseText' in nextRawCmd ||
-        'clearText' in nextRawCmd);
+      ('inputText' in nextRawCmd || 'eraseText' in nextRawCmd || 'clearText' in nextRawCmd);
     if (sel.id && /Input$/i.test(sel.id) && nextEditsField) {
       await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
     }
@@ -874,38 +873,61 @@ async function runCommand(
     };
     let from = { x: winW / 2, y: winH / 2 };
     let to = { x: winW / 2, y: winH / 2 };
+    // Maestro idiom: `from: <selector>` resolves the selector and
+    // uses its centre as the drag start. Used for drag-to-sort
+    // handles (feed-reorder.yml's `from: { id: "feed-drag-handle" }`).
+    // Without this, the runner falls back to mid-screen which lands
+    // on a static row → no drag fires → reorder never happens.
+    if (sw.from && typeof sw.from === 'object') {
+      const fromSel = normalizeSelector(sw.from as MaestroSelector);
+      const rect = await resolveRect(ctx, fromSel);
+      if (rect) {
+        from = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+      }
+    }
     if (sw.start || sw.end) {
       from = parseCoord(sw.start, from);
       to = parseCoord(sw.end, to);
     } else if (sw.direction) {
       const d = sw.direction.toUpperCase();
-      // Wide swing: 700 pt covers a full bottom-sheet drag-to-dismiss
-      // (sheet height varies but 700 pt outdraws the dismiss threshold
-      // on every form-sheet shape we've seen). Plenty of margin for
-      // page scrolls and tab switches too.
-      const dist = 700;
+      // If `from:` resolved a selector above, drag relative to that
+      // point — needed for drag-to-sort handles where the YAML
+      // specifies both `from: <selector>` and `direction:` (the
+      // selector is the grab handle, the direction is the sort
+      // movement). Without this branch, we'd discard the resolved
+      // selector and drag from mid-screen, missing the handle entirely.
+      const usingSelectorFrom = !!(sw.from && typeof sw.from === 'object');
+      const dist = 200;
       // Maestro semantics: direction = finger drag direction on
-      // screen. `swipe DOWN` = finger moves top → bottom (dismisses
-      // top-anchored sheets, pulls down nav bars, etc). `swipe UP`
-      // = finger moves bottom → top (scroll content up, expand
-      // bottom sheet). iOS y-axis increases downward, so
+      // screen. iOS y-axis increases downward, so
       // from.y < to.y for DOWN.
-      if (d === 'DOWN') {
-        // Start ABOVE the sheet's grab handle (y~80 on iOS 26
-        // UISheetPresentationController) so the drag-to-dismiss
-        // gesture wins over the sheet's inner scroll view, which
-        // would otherwise eat the swipe as a content scroll.
-        from = { x: winW / 2, y: 60 };
-        to = { x: winW / 2, y: 60 + dist };
-      } else if (d === 'UP') {
-        from = { x: winW / 2, y: winH - 120 };
-        to = { x: winW / 2, y: winH - 120 - dist };
-      } else if (d === 'LEFT') {
-        from = { x: winW - 40, y: winH / 2 };
-        to = { x: winW - 40 - dist, y: winH / 2 };
-      } else if (d === 'RIGHT') {
-        from = { x: 40, y: winH / 2 };
-        to = { x: 40 + dist, y: winH / 2 };
+      if (usingSelectorFrom) {
+        if (d === 'DOWN') to = { x: from.x, y: from.y + dist };
+        else if (d === 'UP') to = { x: from.x, y: from.y - dist };
+        else if (d === 'LEFT') to = { x: from.x - dist, y: from.y };
+        else if (d === 'RIGHT') to = { x: from.x + dist, y: from.y };
+      } else {
+        // No selector — full-screen swing. Wide swing: 700 pt covers
+        // a full bottom-sheet drag-to-dismiss. Plenty of margin for
+        // page scrolls and tab switches too.
+        const full = 700;
+        if (d === 'DOWN') {
+          // Start ABOVE the sheet's grab handle (y~80 on iOS 26
+          // UISheetPresentationController) so the drag-to-dismiss
+          // gesture wins over the sheet's inner scroll view, which
+          // would otherwise eat the swipe as a content scroll.
+          from = { x: winW / 2, y: 60 };
+          to = { x: winW / 2, y: 60 + full };
+        } else if (d === 'UP') {
+          from = { x: winW / 2, y: winH - 120 };
+          to = { x: winW / 2, y: winH - 120 - full };
+        } else if (d === 'LEFT') {
+          from = { x: winW - 40, y: winH / 2 };
+          to = { x: winW - 40 - full, y: winH / 2 };
+        } else if (d === 'RIGHT') {
+          from = { x: 40, y: winH / 2 };
+          to = { x: 40 + full, y: winH / 2 };
+        }
       }
     }
     // Pre-swipe pull-to-refresh dedupe: if this is a downward pull
@@ -943,6 +965,26 @@ async function runCommand(
         return;
       }
       ctx.lastRefreshAtMs = now;
+    }
+    // Drag-to-sort detection. RN draggable-flatlist (used by Bluesky's
+    // "Edit my feeds" reorder UI) only enters drag mode after a
+    // long-press of ~400 ms. A plain swipe — even with a 1 s
+    // duration — is read as a scroll because every emitted Move
+    // event arrives between Down and the scroll-recogniser's pan
+    // threshold. The "select by handle + then move" pattern fires
+    // when YAML uses `from: <selector>` (Maestro's idiom for drag
+    // anchored on a known element). Drop into a long-press-then-drag
+    // gesture in that case: Down, hold ~500 ms, then glide to the
+    // target.
+    const usingSelectorFrom = !!(sw.from && typeof sw.from === 'object');
+    if (usingSelectorFrom) {
+      const totalDur = sw.duration ?? 1000;
+      const holdMs = Math.min(600, Math.max(400, totalDur * 0.5));
+      const moveMs = Math.max(250, totalDur - holdMs);
+      await hidLongPressDrag(ctx.udid, from.x, from.y, to.x, to.y, holdMs, moveMs);
+      await sleep(400);
+      await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
+      return;
     }
     await hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 250);
     await sleep(500);
@@ -1045,7 +1087,32 @@ async function runCommand(
       cmd.waitForAnimationToEnd === true ? 3000 : (cmd.waitForAnimationToEnd.timeout ?? 3000);
     await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 150 });
     return;
+    // In-process: React-commit quiet. Catches RN-side animations
+    // ending (sheet animateOut, navigation transition).
   }
+    // Cross-process safety: PHPicker / share sheet / document picker
+    // dismiss in another XPC process — wait_commit is blind to that.
+    // Poll the in-process VC chain until no cross-process picker VC
+    // is presented. ~10 ms per poll (one socket round-trip), and we
+    // bail the instant the picker is gone, so cost is negligible on
+    // RN-only screens. Reusing the in-process `top_vc_chain` op:
+    // pure UIKit, no argent, no AX-server dependency.
+    const dismissDeadline = Date.now() + 2500;
+    while (Date.now() < dismissDeadline) {
+      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
+      if (!r || !r.ok) break;
+      const chain = ((r.data as { chain?: string[] })?.chain ?? []);
+      const hasCrossProcess = chain.some(
+        (cls) =>
+          cls.includes('PHPicker') ||
+          cls.includes('PhotoPicker') ||
+          cls.includes('PHImagePicker') ||
+          cls.includes('UIActivityViewController') ||
+          cls.includes('UIDocumentPickerViewController'),
+      );
+      if (!hasCrossProcess) break;
+      await sleep(80);
+    }
   if ('runScript' in cmd) {
     const scriptCmd = (cmd as { runScript: { file: string; env?: Record<string, string> } })
       .runScript;
@@ -1244,15 +1311,11 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
       return null;
     }
     if (sel.id) {
-      const r = await ctx.client
-        .call('find_by_testid', { testID: sel.id })
-        .catch(() => undefined);
+      const r = await ctx.client.call('find_by_testid', { testID: sel.id }).catch(() => undefined);
       if (r && r.ok && r.data) return r.data as Rect;
     }
     if (sel.text) {
-      const r = await ctx.client
-        .call('find_by_text', { text: sel.text })
-        .catch(() => undefined);
+      const r = await ctx.client.call('find_by_text', { text: sel.text }).catch(() => undefined);
       if (r && r.ok && r.data) return r.data as Rect;
     }
     return null;
@@ -1289,6 +1352,26 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
     y: stableRect.y + stableRect.h / 2,
   };
   const baseHash = preHash ?? (await captureHash(ctx));
+  // Target-driven exposure wait. When a previous step's modal is
+  // still mid-dismiss, the target may already be findable in the
+  // view tree but covered by the closing overlay — tap lands on the
+  // overlay and gets eaten. Only blocks when this is actually the
+  // case, so there's zero overhead on normal taps. Caps at 2 s.
+  if (sel.id) {
+    const ex = await ctx.client.call('is_exposed', { testID: sel.id }).catch(() => undefined);
+    const exposed = !!(ex && ex.ok && ex.data && (ex.data as { exposed?: boolean }).exposed);
+    if (!exposed) {
+      await timedAsync(ctx, 'tap.waitExposed', async () => {
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline) {
+          await sleep(80);
+          const r = await ctx.client.call('is_exposed', { testID: sel.id! }).catch(() => undefined);
+          const ok = !!(r && r.ok && r.data && (r.data as { exposed?: boolean }).exposed);
+          if (ok) break;
+        }
+      });
+    }
+  }
   // Argent HID — reliable on iOS 26 RN Pressables. No pre-tap sleep:
   // the position-stability gate above already proved the rect isn't
   // moving, so UIKit's hit-test layer-tree is settled.
@@ -1343,6 +1426,24 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // by a presented overlay, the tap registered even if the rendered
   // frame hash is steady. Only retap when the target is BOTH still
   // findable AND still topmost-hittable.
+  // Multi-retap self-heal. Some buttons are findable the same frame
+  // they mount (Mantis cropper's Done — appears as cropper finishes
+  // animating in, gesture recogniser attached a few frames later).
+  // The hit-test resolves to the button but onPress doesn't fire yet,
+  // so the tap is silently consumed. Maestro covers this by retrying
+  // the labelled tap for ~5 s; we do the same here.
+  //
+  // Success signal: target disappears from the find walk (button
+  // dismissed its host modal / triggered nav). The hash-change
+  // signal isn't strong enough — minor UI updates (status-bar
+  // ticks, cursor blink) flip the hash without proving the press
+  // actually fired. Each iteration: short wait, re-find. If
+  // findable AND still topmost-hittable → retap. If gone → exit.
+  // Single retap. Multi-retap caused toggle-button regression
+  // (tapping "Open drawer menu" repeatedly toggles drawer open/closed).
+  // Mantis cropper's late-recogniser case is rare enough that we
+  // accept a single retap and rely on flow-level retry for the
+  // residual cases.
   if ((sel.id || sel.text) && baseHash) {
     const hc = await ctx.client
       .call('wait_hash_change', { sinceHash: baseHash, maxMs: 1500 })
@@ -1353,18 +1454,14 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
       if (re) {
         let stillExposed = true;
         if (sel.id) {
-          const ex = await ctx.client
-            .call('is_exposed', { testID: sel.id })
-            .catch(() => undefined);
+          const ex = await ctx.client.call('is_exposed', { testID: sel.id }).catch(() => undefined);
           if (ex && ex.ok && ex.data) {
             stillExposed = !!(ex.data as { exposed?: boolean }).exposed;
           }
         }
         if (stillExposed) {
           const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
-          await timedAsync(ctx, 'tap.selfHealRetap', () =>
-            hidTapArgent(ctx.udid, c.x, c.y),
-          );
+          await timedAsync(ctx, 'tap.selfHealRetap', () => hidTapArgent(ctx.udid, c.x, c.y));
         }
       }
     }
@@ -1503,22 +1600,20 @@ async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect 
     }
   }
 
-  // Cross-process AX fallback. The dylib's UIView walk only sees views
-  // mounted in this app's process. iOS PHPickerViewController,
-  // UIDocumentPickerViewController, and the native share sheet run in
-  // separate XPC processes, so their labels never appear to find_by_*.
-  // Maestro reaches them through XCUITest's accessibility query;
-  // ennio gets the same coverage by hitting argent's simulator-server
-  // describe endpoint, which queries the OS-level a11y tree across
-  // process boundaries. We only fall through here when both fast-path
-  // and slow-path RN finds have already failed, so this adds zero
-  // overhead on the hot path. Text-bearing selectors only — testIDs
-  // are an in-process concept that AX won't have.
+  // In-process accessibility fallback. find_by_text walks the UIView
+  // subtree only; that misses content rendered by out-of-process
+  // view services (PHPickerViewController, document picker, share
+  // sheet) whose host app gets only a UIRemoteView placeholder.
+  // UIKit synthesises UIAccessibilityElement proxies on the remote
+  // view that carry the cross-process content's a11y labels — the
+  // dylib's find_ax_by_text walks accessibilityElements +
+  // accessibilityElementAtIndex: and picks those proxies up. Stays
+  // entirely in-process (no argent describe).
   if (sel.text) {
-    const axRect = await timedAsync(ctx, 'tap.findAxFallback', () =>
-      axQueryByText(ctx.udid, sel.text!),
+    const r = await timedAsync(ctx, 'tap.findAxFallback', () =>
+      ctx.client.call('find_ax_by_text', { text: sel.text! }).catch(() => undefined),
     );
-    if (axRect) return axRect;
+    if (r && r.ok && r.data) return r.data as Rect;
   }
   return null;
 }
@@ -1572,14 +1667,14 @@ async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<boolean
           if (btn && btn.toLowerCase().includes(sel.text.toLowerCase())) return true;
         }
       }
-      // Cross-process AX: PHPickerViewController, native share sheet,
-      // document picker, etc. live in separate XPC processes. Their
-      // a11y labels aren't visible to our in-process walks, but they
-      // are reachable through argent's simulator-server describe
-      // endpoint. Used as a last-resort positive answer so the
-      // negative path (assertNotVisible) doesn't stall.
-      const axRect = await axQueryByText(ctx.udid, sel.text);
-      if (axRect) return true;
+      // Cross-process AX via in-process UIAccessibilityElement proxy
+      // walk. UIRemoteView (PHPicker, share sheet, document picker)
+      // exposes the remote content's a11y labels through proxy
+      // objects sitting on the UIRemoteView itself — visible to a
+      // UIAccessibilityContainer walk even though they're not in
+      // the regular subview tree.
+      const r2 = await ctx.client.call('find_ax_by_text', { text: sel.text }).catch(() => undefined);
+      if (r2 && r2.ok && r2.data) return true;
     } catch {
       /* not an alert */
     }
