@@ -933,7 +933,17 @@ async function runCommand(
     // silently dropped. Observed on RN horizontal carousels: the
     // first card looked stable but the FlatList's onLayout hadn't
     // fired so the page-snap math couldn't run.
-    await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
+    //
+    // stableMs 350 / maxMs 2500 outlasts:
+    // - RN-Nav push spring (~300 ms tail commit)
+    // - FlatList initial layout + page-snap-state attach (~150 ms)
+    // - expo-router tab change transition (~250 ms)
+    // Below ~300 ms the carousel's gesture-recogniser was still
+    // mid-mount when the swipe Down event arrived; the recogniser
+    // received only the Up event after attaching, which it dropped
+    // as a no-op.
+    await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 350 }).catch(() => undefined);
+    await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
     // Maestro default swipe duration is 400 ms (verified with
     // `maestro test` on a swipe-only flow: "Swipe ... in 400 ms").
     // We previously defaulted to 250 ms which was fast enough for
