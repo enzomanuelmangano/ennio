@@ -190,6 +190,33 @@ static bool attachFabricSwizzle(void) {
     return g_lastCommitMs;
 }
 
+/// Wait until React has been quiet for stableMs (no commits observed
+/// for that long), or until maxMs elapses. Returns 1 if quiet was
+/// reached, 0 if the timeout fired while commits were still arriving.
++ (BOOL)waitForReactQuietStableMs:(uint32_t)stableMs maxMs:(uint32_t)maxMs {
+    if (!g_paperAttached && !g_fabricAttached) return YES;
+    uint64_t start = nowMs();
+    [g_cond lock];
+    while (true) {
+        uint64_t now = nowMs();
+        uint64_t sinceCommit = now - g_lastCommitMs;
+        if (sinceCommit >= stableMs) {
+            [g_cond unlock];
+            return YES;
+        }
+        uint64_t totalElapsed = now - start;
+        if (totalElapsed >= maxMs) {
+            [g_cond unlock];
+            return NO;
+        }
+        uint64_t waitMs = stableMs - sinceCommit;
+        uint64_t remaining = maxMs - totalElapsed;
+        if (waitMs > remaining) waitMs = remaining;
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:(NSTimeInterval)waitMs / 1000.0];
+        [g_cond waitUntilDate:deadline];
+    }
+}
+
 + (uint32_t)waitForCommitSince:(uint64_t)sinceMs maxMs:(uint32_t)maxMs {
     // No observer attached → bail; caller falls back to hash polling.
     if (!g_paperAttached && !g_fabricAttached) return 0;

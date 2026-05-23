@@ -110,6 +110,38 @@ static void swizzledSetAID(id self, SEL _cmd, NSString *testID) {
     return peekLive(testID);
 }
 
+// All live views matching testID, sorted by window-space Y (top-to-
+// bottom), then X (left-to-right). Lets Maestro's `index: N` selector
+// pick the Nth visible match — needed for postDropdownBtn / replyBtn
+// flows that operate on a specific feed item.
++ (NSArray<UIView *> *)lookupAll:(NSString *)testID {
+    if (!testID.length) return @[];
+    ensureInit();
+    NSMutableArray<UIView *> *out = [NSMutableArray array];
+    os_unfair_lock_lock(&g_lock);
+    NSHashTable<UIView *> *bucket = g_index[testID];
+    if (bucket) {
+        for (UIView *v in bucket) {
+            if (!v || !v.window) continue;
+            if (![v.accessibilityIdentifier isEqualToString:testID]) continue;
+            [out addObject:v];
+        }
+    }
+    os_unfair_lock_unlock(&g_lock);
+    [out sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+        UIWindow *wa = a.window;
+        UIWindow *wb = b.window;
+        CGRect ra = wa ? [wa convertRect:a.bounds fromView:a] : a.frame;
+        CGRect rb = wb ? [wb convertRect:b.bounds fromView:b] : b.frame;
+        if (ra.origin.y < rb.origin.y) return NSOrderedAscending;
+        if (ra.origin.y > rb.origin.y) return NSOrderedDescending;
+        if (ra.origin.x < rb.origin.x) return NSOrderedAscending;
+        if (ra.origin.x > rb.origin.x) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+    return out;
+}
+
 + (UIView *)waitFor:(NSString *)testID maxMs:(uint32_t)maxMs {
     UIView *hit = peekLive(testID);
     if (hit) return hit;

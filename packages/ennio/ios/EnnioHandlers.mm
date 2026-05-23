@@ -170,6 +170,104 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         return std::string(buf);
     });
 
+    EnnioControlSocket::registerHandler("window_size", [](const std::string &) -> std::string {
+        double w = 0, h = 0;
+        onMainVoid([&]() {
+            UIWindow *win = [EnnioBootstrap keyWindow];
+            if (win) {
+                w = win.bounds.size.width;
+                h = win.bounds.size.height;
+            }
+        });
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "{\"w\":%.2f,\"h\":%.2f}", w, h);
+        return std::string(buf);
+    });
+
+    // Returns whether the view at (testID|text) is exposed for touch
+    // at its own center — i.e. UIKit's hitTest at that point resolves
+    // to the target view or a descendant. Used by the self-heal
+    // retap loop to detect when a tap opened a modal/sheet that now
+    // occludes the originally-tapped target (target still findable in
+    // the view tree, but no longer receives touches). Without this,
+    // re-tapping at the same coords lands on the modal's backdrop and
+    // dismisses the modal we just opened.
+    EnnioControlSocket::registerHandler("is_exposed", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = argString(a, @"testID");
+        NSString *text = argString(a, @"text");
+        if (!testID.length && !text.length) throw std::runtime_error("missing selector");
+        BOOL exposed = NO;
+        BOOL found = NO;
+        onMainVoid([&]() {
+            UIView *target = testID.length
+                ? [EnnioFinder findViewByTestID:testID]
+                : [EnnioFinder findViewByText:text];
+            if (!target || ![EnnioFinder isOnScreen:target]) return;
+            found = YES;
+            UIWindow *win = target.window;
+            if (!win) return;
+            CGRect r = [win convertRect:target.bounds fromView:target];
+            CGPoint center = CGPointMake(CGRectGetMidX(r), CGRectGetMidY(r));
+            UIView *hit = [win hitTest:center withEvent:nil];
+            // Walk up from the hit view — target is exposed if the
+            // hit-test ends up at target or a descendant of target.
+            UIView *cursor = hit;
+            while (cursor) {
+                if (cursor == target) { exposed = YES; break; }
+                cursor = cursor.superview;
+            }
+        });
+        char buf[64];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"found\":%s,\"exposed\":%s}",
+                      found ? "true" : "false",
+                      exposed ? "true" : "false");
+        return std::string(buf);
+    });
+
+    EnnioControlSocket::registerHandler("count_by_testid", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        NSString *testID = argString(a, @"testID");
+        if (!testID.length) throw std::runtime_error("missing testID");
+        NSUInteger total = 0;
+        NSUInteger onScreen = 0;
+        onMainVoid([&]() {
+            NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+            total = all.count;
+            for (UIView *v in all) {
+                if ([EnnioFinder isOnScreen:v]) onScreen++;
+            }
+        });
+        char buf[128];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"total\":%lu,\"onScreen\":%lu}",
+                      (unsigned long)total, (unsigned long)onScreen);
+        return std::string(buf);
+    });
+
+    EnnioControlSocket::registerHandler("find_by_testid_nth", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = argString(a, @"testID");
+        if (!testID.length) throw std::runtime_error("missing testID");
+        NSInteger idx = (NSInteger)argInt(a, @"index", 0);
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
+        onMainVoid([&]() {
+            NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+            if (idx < 0 || idx >= (NSInteger)all.count) return;
+            UIView *v = all[idx];
+            if (v && [EnnioFinder isOnScreen:v]) {
+                rect = [EnnioFinder windowRectFor:v];
+                found = YES;
+            }
+        });
+        if (!found) throw std::runtime_error("testID not found at index");
+        return rectJson(rect);
+    });
+
     EnnioControlSocket::registerHandler("find_by_testid", [](const std::string &args) -> std::string {
         NSDictionary *a = parseArgs(args);
         if (!a) throw std::runtime_error("invalid args");
@@ -290,6 +388,14 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         uint32_t elapsed = [EnnioSettle waitForCommitWithTimeout:maxMs stableForMs:stableMs];
         BOOL ok = elapsed < maxMs;
         return elapsedJson(elapsed, ok);
+    });
+
+    EnnioControlSocket::registerHandler("wait_react_quiet", [](const std::string &args) -> std::string {
+        NSDictionary *a = parseArgs(args);
+        uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 1000);
+        uint32_t stableMs = (uint32_t)argInt(a, @"stableMs", 250);
+        BOOL ok = [EnnioReactObserver waitForReactQuietStableMs:stableMs maxMs:maxMs];
+        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("tap_tab", [](const std::string &args) -> std::string {

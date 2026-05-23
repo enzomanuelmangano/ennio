@@ -152,10 +152,17 @@ class HidDaemon {
   }
 
   tap(x: number, y: number, durationMs: number = 80): Promise<void> {
-    if (process.env.ENNIO_DEBUG_HID) {
+    if (true) {
       process.stderr.write(`[hid-daemon] tap ${x} ${y} ${durationMs}\n`);
     }
     return this.send(`tap ${x} ${y} ${durationMs}`);
+  }
+
+  tapPure(x: number, y: number, durationMs: number = 80): Promise<void> {
+    if (true) {
+      process.stderr.write(`[hid-daemon] tap_pure ${x} ${y} ${durationMs}\n`);
+    }
+    return this.send(`tap_pure ${x} ${y} ${durationMs}`);
   }
 
   swipe(x1: number, y1: number, x2: number, y2: number, durationMs: number = 300): Promise<void> {

@@ -39,8 +39,11 @@ import { EnnioSocketClient } from './socket-client';
 import {
   tap as hidTap,
   tapFast as hidTapFast,
+  tapPureFast as hidTapPureFast,
+  tapArgent as hidTapArgent,
   swipe as hidSwipe,
   typeText as hidType,
+  axQueryByText,
 } from './hid';
 import { ensureBootedSim, findDylib, getAppContainer, terminateApp } from './sim';
 
@@ -73,7 +76,7 @@ import { createContext, runInContext } from 'node:vm';
 // screen + UIKit layout pass + RNGH gesture acceptance). Tests pass
 // the same flow definitions Maestro accepts; we just give the runtime
 // more headroom.
-const DEFAULT_WAIT_MS = 10000;
+const DEFAULT_WAIT_MS = 15000;
 const POLL_MS = 100;
 // Minimum fixed wait after every tap. wait_commit can return immediately
 // if the frame-hash is stable, but RN often starts the navigation
@@ -106,6 +109,17 @@ interface RunContext {
    *  same target, the runner shortens its post-tap settle so the two
    *  taps land inside RN's double-tap window (<350 ms). */
   lastTapKey?: string;
+  /** TestID of the previously-tapped target. Used to apply an extra
+   *  pre-tap settle when the previous tap was on a button that
+   *  triggers an async network round-trip (publish, submit, send),
+   *  to outlast that flow before letting the next tap proceed. */
+  lastTapTestID?: string;
+  /** Set when the previous step typed/erased text. The next non-input
+   *  tap calls hide_keyboard first so iOS's editing-menu popover
+   *  doesn't intercept the touch (observed on Bluesky's edit-profile
+   *  modal: Save tap fires onto the popover instead of the button,
+   *  modal never dismisses). */
+  lastWasTextInput?: boolean;
   /** Timestamp of the last UIRefreshControl trigger. Throttles the
    *  trigger_refresh shortcut so a YAML pattern of "warmup swipe +
    *  real swipe" doesn't fire the refresh handler twice. */
@@ -249,17 +263,53 @@ export async function runFlow(
 
   let stepsPassed = 0;
   const stepTimings: { step: number; ms: number; cmd: string }[] = [];
+  let lastTapCmd: unknown = undefined;
   for (let i = 0; i < flow.commands.length; i++) {
     const cmd = flow.commands[i];
     const nextCmd = flow.commands[i + 1];
     const t0 = Date.now();
     try {
+      process.stderr.write(`[step ${i + 1}] ${describeCommand(cmd)}\n`);
       await runCommand(ctx, cmd, nextCmd);
       const dt = Date.now() - t0;
       stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
       logStep(ctx, i + 1, dt, describeCommand(cmd));
       stepsPassed++;
+      if (typeof cmd === 'object' && cmd && 'tapOn' in cmd) {
+        lastTapCmd = cmd;
+      } else {
+        lastTapCmd = undefined;
+      }
     } catch (err) {
+      // Step-level retry for find-failure following a tapOn. Bluesky's
+      // dropdown / sheet open is non-deterministic: ennio's HID tap
+      // lands at the right pixel but the RN responder system
+      // intermittently swallows the press (~40% flake on home-screen
+      // step 21→22). If the failing step is a tapOn or assertVisible
+      // that can't find its target AND the previous step was a tapOn,
+      // re-fire that previous tap once and retry the current step.
+      const msg = err instanceof Error ? err.message : String(err);
+      const isFindMiss = /element not found|assertVisible\/waitFor timeout/i.test(msg);
+      const isFindableStep =
+        cmd && typeof cmd === 'object' &&
+        ('tapOn' in cmd || 'assertVisible' in cmd || 'waitFor' in cmd);
+      if (lastTapCmd && isFindMiss && isFindableStep) {
+        try {
+          log(ctx, `↻ retrying previous tap before step ${i + 1}`);
+          await runCommand(ctx, lastTapCmd as any, cmd);
+          await sleep(150);
+          await runCommand(ctx, cmd, nextCmd);
+          const dt = Date.now() - t0;
+          stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
+          logStep(ctx, i + 1, dt, describeCommand(cmd));
+          stepsPassed++;
+          lastTapCmd =
+            typeof cmd === 'object' && cmd && 'tapOn' in cmd ? cmd : undefined;
+          continue;
+        } catch {
+          /* fall through to fail */
+        }
+      }
       const dt = Date.now() - t0;
       stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
       logStep(ctx, i + 1, dt, describeCommand(cmd));
@@ -288,10 +338,17 @@ export async function runFlow(
 // bottlenecks per-flow without verbose mode.
 function printSlowSteps(timings: { step: number; ms: number; cmd: string }[]): void {
   const total = timings.reduce((s, t) => s + t.ms, 0);
-  const top = [...timings].sort((a, b) => b.ms - a.ms).slice(0, 5);
-  process.stderr.write(`[ennio] total ${total}ms across ${timings.length} steps. Top 5:\n`);
-  for (const t of top)
-    process.stderr.write(`[ennio]   ${String(t.ms).padStart(5)}ms  step ${t.step}: ${t.cmd}\n`);
+  process.stderr.write(`[ennio] total ${total}ms across ${timings.length} steps:\n`);
+  // Full per-step dump (in execution order). Outliers are easier to
+  // spot than from a top-5 — a single 8 s step amid 30 fast ones
+  // shows up as a vertical bar of zeros around it.
+  const avg = total / Math.max(timings.length, 1);
+  for (const t of timings) {
+    const flag = t.ms >= Math.max(avg * 3, 1500) ? '  ⚠ outlier' : '';
+    process.stderr.write(
+      `[ennio]   ${String(t.ms).padStart(6)}ms  step ${String(t.step).padStart(2)}: ${t.cmd}${flag}\n`,
+    );
+  }
 }
 
 // Aggregate per-phase totals across the flow so the bottleneck is
@@ -389,24 +446,45 @@ async function runCommand(
     // Repeat-tap case skips this — back-to-back tapOns on the same
     // target are typically intentional double-taps (RN DoubleTapBox
     // uses a <350 ms Date.now() gap detector).
+    // If the previous step typed/erased text and the next tap targets
+    // anything other than another text field, iOS's editing-menu
+    // popover ("Select / Select All / AutoFill") is still floating
+    // over the screen — it eats the first tap as a dismiss, so the
+    // intended Save / Submit button never fires. Resign first
+    // responder before the tap so the popover clears with the
+    // keyboard. Skipped when the tap IS into another Input field
+    // (back-to-back form edits stay focused).
+    const tapIsIntoInput = sel.id && /Input$/i.test(sel.id);
+    if (ctx.lastWasTextInput && !tapIsIntoInput) {
+      await ctx.client.call('hide_keyboard').catch(() => undefined);
+    }
+    ctx.lastWasTextInput = false;
     if (!isRepeatTap) {
-      // Light pre-tap settle. The post-tap path already produces a
-      // 200 ms stable window before the next find runs, so we only
-      // need a short spot-check here to absorb any in-flight layout
-      // that the prior assertion didn't wait for. Slashed from
-      // stableMs 600 / maxMs 3500 (which cost ~420 ms per tap on
-      // Bluesky) to stableMs 150 / maxMs 1500.
-      await timedAsync(ctx, 'tap.preWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 300 }).catch(() => undefined),
-      );
-      // Belt-and-braces: even after the frame-hash is stable, a
-      // presented sheet's residual overlay UIView can absorb touches
-      // for a few hundred ms while UIKit tears it down. Waiting until
-      // no view controller reports isBeingPresented / isBeingDismissed
-      // closes that gap. No-op when nothing is mid-transition.
-      await timedAsync(ctx, 'tap.preWaitPresentation', () =>
-        ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined),
-      );
+      // Run pre-tap settles in parallel — they observe orthogonal
+      // signals (React commit stability vs presented-VC animation
+      // teardown). Sequential was ~250 ms/call * 2; parallel collapses
+      // to the slower of the two (~190 ms/call).
+      await Promise.all([
+        timedAsync(ctx, 'tap.preWaitCommit', () =>
+          ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined),
+        ),
+        timedAsync(ctx, 'tap.preWaitPresentation', () =>
+          ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined),
+        ),
+      ]);
+      // If the previous tap was on a button whose onPress runs async
+      // work (publish / save / submit / send / signIn / signOut /
+      // confirm), the standard hash-quiet exits while the callback
+      // is still in-flight. Block on React commits going quiet so
+      // the next tap doesn't race a still-mutating navigator stack.
+      const ASYNC_BTN_RE = /publish|submit|send|signIn|signOut|confirm|save/i;
+      if (ctx.lastTapTestID && ASYNC_BTN_RE.test(ctx.lastTapTestID)) {
+        await timedAsync(ctx, 'tap.preWaitAsyncSettle', () =>
+          ctx.client
+            .call('wait_react_quiet', { stableMs: 400, maxMs: 2000 })
+            .catch(() => undefined),
+        );
+      }
     }
     const preTapHash = await captureHash(ctx);
     const preReact = await captureReactTs(ctx);
@@ -418,29 +496,20 @@ async function runCommand(
     // before RN has wired up the press handler, leaving the field
     // unfocused; the inputText that follows types into nowhere.
     // Observed on Bluesky's "Create moderation list" name field.
-    let typedInputShortcut = false;
-    if (
-      sel.id &&
-      !sel.text &&
-      !sel.childOf &&
-      nextRawCmd &&
+    // Edit-form text inputs (RN TextInput with `defaultValue`) reject
+    // the first tap. Detect by testID matching /Input$/ AND next op
+    // editing the field — call focus_testid as primary; argent tap
+    // still fires below as belt-and-braces.
+    const nextEditsField =
+      !!nextRawCmd &&
       typeof nextRawCmd === 'object' &&
-      'inputText' in nextRawCmd
-    ) {
-      try {
-        const r = await ctx.client.call('focus_testid', { testID: sel.id });
-        if (r.ok && r.data && (r.data as { ok: boolean }).ok) {
-          typedInputShortcut = true;
-        }
-      } catch {
-        /* fall through to normal tap */
-      }
+      ('inputText' in nextRawCmd ||
+        'eraseText' in nextRawCmd ||
+        'clearText' in nextRawCmd);
+    if (sel.id && /Input$/i.test(sel.id) && nextEditsField) {
+      await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
     }
-    if (!typedInputShortcut) {
-      await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
-    } else {
-      recordPhase(ctx, 'tap.focusShortcut', 1);
-    }
+    await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
     if (isRepeatTap || nextIsSameTap) {
       // Tight gap so consecutive same-target taps register as a
       // double-tap on RN Pressables / RNGH Tap recognizers.
@@ -485,10 +554,6 @@ async function runCommand(
             .catch(() => undefined);
         });
       }
-      // Pin the UIView tree once both commits are in: 80 ms of
-      // commit-quiet ensures layoutSubviews finished. Matches the
-      // hash-poll path's stableMs so we don't regress on screens
-      // that need a long layout pass.
       await timedAsync(ctx, 'tap.postWaitCommit', () =>
         ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 80 }).catch(() => undefined),
       );
@@ -512,30 +577,38 @@ async function runCommand(
         // race the next find on slow Hermes mounts.
         await timedAsync(ctx, 'tap.postSleep', () => sleep(POST_TAP_SETTLE_MS));
       }
+      // 250 ms of commit-quiet outlasts setState batching in cases
+      // like Bluesky's composer: closeComposer fires setState(undefined)
+      // synchronously, but the subsequent commit (which clears the
+      // overlay's view subtree) can land 100-200 ms later. The next
+      // tapOn composeFAB would otherwise race that commit and trigger
+      // the "Never replace an already open composer" guard — leaving
+      // the FAB onPress a no-op. 80 ms was enough on lighter screens
+      // but missed this window. 250 ms × ~20 taps/flow ≈ 5 s/flow
+      // budget, still well inside the 3× Maestro speedup target.
       await timedAsync(ctx, 'tap.postWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 80 }).catch(() => undefined),
+        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined),
       );
     }
     ctx.lastTapKey = tapKey;
+    ctx.lastTapTestID = sel.id;
     return;
   }
   if ('doubleTapOn' in cmd) {
     const sel = normalizeSelector(cmd.doubleTapOn);
     const { x, y } = await resolveCenter(ctx, sel);
-    hidTap(ctx.udid, x, y);
+    await hidTap(ctx.udid, x, y);
     await sleep(80);
-    hidTap(ctx.udid, x, y);
+    await hidTap(ctx.udid, x, y);
     await sleep(POST_TAP_SETTLE_MS);
     return;
   }
   if ('longPress' in cmd || 'longPressOn' in cmd) {
     const sel = normalizeSelector(('longPress' in cmd ? cmd.longPress : cmd.longPressOn) as any);
     const { x, y } = await resolveCenter(ctx, sel);
-    // Long press = idb ui tap with a hold duration. Maestro's default
-    // long-press is 1500ms; many RN long-press handlers register at
-    // ~500ms so 0.8s comfortably crosses both thresholds without making
-    // the test feel slow.
-    hidTap(ctx.udid, x, y, 0.8);
+    // Long press = tap with hold duration. Maestro default 1500ms;
+    // many RN long-press handlers register at ~500ms.
+    await hidTap(ctx.udid, x, y, 0.8);
     await sleep(POST_TAP_SETTLE_MS);
     return;
   }
@@ -590,28 +663,34 @@ async function runCommand(
     // types into nowhere.
     // Poll for up to 2 s; first responder usually lands within
     // 100-300 ms of an onPress-driven focus transition.
-    {
+    // 500 ms is enough for a healthy focus transition; longer windows
+    // routinely fire on already-broken state (prior tap landed on
+    // the wrong field) and pad the step by 2 s before we fall back
+    // to the hardware-keyboard path that types into nowhere anyway.
+    const text = interpolate(String(cmd.inputText), ctx);
+    // Try insert_text (UIKeyInput on the current firstResponder) up
+    // to 3 times. Between attempts, if the prior tap target was a
+    // testID, re-tap it via argent — that's the cheapest way to
+    // recover when the original tap didn't actually move focus into
+    // the field (Bluesky's login username TextInput is the textbook
+    // case). After 3 failed attempts, fall back to a single
+    // hardware-keyboard type — at worst the chars land somewhere
+    // useful and the next step fails fast.
+    let ok = false;
+    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+      if (attempt > 0 && ctx.lastTapTestID) {
+        const rect = await ctx.client
+          .call('find_by_testid', { testID: ctx.lastTapTestID })
+          .catch(() => undefined);
+        if (rect && rect.ok && rect.data) {
+          const r = rect.data as { x: number; y: number; w: number; h: number };
+          await hidTapFast(ctx.udid, r.x + r.w / 2, r.y + r.h / 2);
+        }
+      }
       const fr = await ctx.client
-        .call('first_responder_ready', { maxMs: 2000 })
+        .call('first_responder_ready', { maxMs: 500 })
         .catch(() => undefined);
       void fr;
-    }
-    // Interpolate ${output.X} / ${env.X} so flows can feed a value
-    // produced by an earlier runScript (Maestro idiom).
-    const text = interpolate(String(cmd.inputText), ctx);
-    // Prefer the in-process UIKeyInput.insertText path — it bypasses
-    // the sim's hardware-keyboard locale, so chars like @, è, accents,
-    // and quotes survive verbatim. Fall back to idb's HID-text path
-    // when no firstResponder conforms to UIKeyInput (rare).
-    // Retry insert_text up to 5 times with 100ms gaps. insert_text
-    // finds the current firstResponder + types via UIKeyInput. If the
-    // prior tap's focus hasn't transferred yet (RN onPress fires async,
-    // can lag the tap by a frame on first form mount — observed on
-    // Bluesky's Create-moderation-list name field), the first call
-    // returns NO. A short retry loop catches the focus once it lands.
-    let ok = false;
-    for (let i = 0; i < 5 && !ok; i++) {
-      if (i > 0) await sleep(100);
       try {
         const r = await ctx.client.call('insert_text', { text });
         ok = !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
@@ -619,9 +698,11 @@ async function runCommand(
         /* retry */
       }
     }
-    if (!ok) hidType(ctx.udid, text);
-    await sleep(200);
+    if (!ok) await hidType(ctx.udid, text);
+    // No fixed sleep: wait_commit's CADisplayLink ticker already
+    // catches the post-insert layout pass + onChangeText commit.
     await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 80 });
+    ctx.lastWasTextInput = true;
     return;
   }
   if ('eraseText' in cmd) {
@@ -642,6 +723,7 @@ async function runCommand(
       count = 100; // bare form: clear the field
     }
     for (let i = 0; i < count; i++) await ctx.client.call('hardware_key', { keyCode: 42 });
+    ctx.lastWasTextInput = true;
     return;
   }
   if ('clearText' in cmd) {
@@ -720,9 +802,9 @@ async function runCommand(
           const cy = 422;
           const small = 150;
           if (dir === 'DOWN') {
-            hidSwipe(ctx.udid, cx, cy + small / 2, cx, cy - small / 2, 250);
+            await hidSwipe(ctx.udid, cx, cy + small / 2, cx, cy - small / 2, 250);
           } else if (dir === 'UP') {
-            hidSwipe(ctx.udid, cx, cy - small / 2, cx, cy + small / 2, 250);
+            await hidSwipe(ctx.udid, cx, cy - small / 2, cx, cy + small / 2, 250);
           }
           await sleep(500);
           await ctx.client
@@ -755,7 +837,7 @@ async function runCommand(
         x1 = cx - dist / 2;
         x2 = cx + dist / 2;
       }
-      hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
+      await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
       await sleep(500);
     }
     throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
@@ -809,8 +891,12 @@ async function runCommand(
       // bottom sheet). iOS y-axis increases downward, so
       // from.y < to.y for DOWN.
       if (d === 'DOWN') {
-        from = { x: winW / 2, y: 120 };
-        to = { x: winW / 2, y: 120 + dist };
+        // Start ABOVE the sheet's grab handle (y~80 on iOS 26
+        // UISheetPresentationController) so the drag-to-dismiss
+        // gesture wins over the sheet's inner scroll view, which
+        // would otherwise eat the swipe as a content scroll.
+        from = { x: winW / 2, y: 60 };
+        to = { x: winW / 2, y: 60 + dist };
       } else if (d === 'UP') {
         from = { x: winW / 2, y: winH - 120 };
         to = { x: winW / 2, y: winH - 120 - dist };
@@ -858,7 +944,7 @@ async function runCommand(
       }
       ctx.lastRefreshAtMs = now;
     }
-    hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 250);
+    await hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 250);
     await sleep(500);
     await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
     return;
@@ -887,7 +973,7 @@ async function runCommand(
       x1 = cx - dist / 2;
       x2 = cx + dist / 2;
     }
-    hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
+    await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
     await sleep(400);
     return;
   }
@@ -900,16 +986,19 @@ async function runCommand(
             arguments?: Record<string, string | boolean | number>;
           });
     // Convert Maestro's `arguments:` map into a flat list passed to
-    // `simctl launch` after the bundle id. Each entry becomes a pair
-    // of CLI tokens: the key (already prefixed with "-" per iOS
-    // launchargs convention) and the stringified value. Drops false
-    // entries because `false` is the iOS launchargs idiom for "off".
+    // `simctl launch` after the bundle id. iOS NSUserDefaults launch
+    // arguments require a key+value pair (`-Key Value`) — emitting
+    // just the key is silently ignored, which surfaced as Bluesky's
+    // Expo dev-menu onboarding sheet popping up despite the
+    // `-EXDevMenuIsOnboardingFinished true` argument in setupApp.yml.
+    // Stringify booleans the way iOS expects ("YES"/"NO").
     const launchArgs: string[] = [];
     if (opts.arguments) {
       for (const [k, v] of Object.entries(opts.arguments)) {
-        if (v === false) continue;
         launchArgs.push(k);
-        if (v !== true) launchArgs.push(String(v));
+        if (v === true) launchArgs.push('YES');
+        else if (v === false) launchArgs.push('NO');
+        else launchArgs.push(String(v));
       }
     }
     if (opts.clearState) {
@@ -1096,7 +1185,7 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // Point-tap fast path — no discovery needed.
   if (sel.point !== undefined) {
     const { x, y } = parsePoint(sel.point);
-    hidTap(ctx.udid, x, y);
+    await hidTap(ctx.udid, x, y);
     return;
   }
   // UIAlertController auto-handler: button labels never make it into
@@ -1133,19 +1222,76 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
       /* fall through */
     }
   }
-  // Geometric center. Sub-pixel coords like (401.5, 101.5) for a 1×1
-  // px Pressable flow through to fb-idb's `tap(x: float, y: float)`
-  // unrounded — see hid-daemon.py — so they land dead-center inside
-  // the view's hit-test box. Earlier impls rounded at the daemon
-  // boundary which shifted boundary taps off the view.
-  const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+  // Position-stability gate: poll the selector-aware finder until 3
+  // consecutive samples (10 ms apart) return the same rect. Catches
+  // RN list reorder + composer mount animations — both shift the
+  // target's window-space coords mid-layout, and a tap fired at the
+  // first-seen rect lands on whatever view is at those coords AFTER
+  // the shift completes (postDropdownBtn → Bob's post instead of
+  // Alice's). The check costs ~30 ms in the common steady-state case
+  // (first 3 samples already identical), but climbs to ~2 s on a
+  // shifting layout. Replaces a stack of pre-tap settles that burned
+  // 700+ ms unconditionally.
+  const sampleRect = async (): Promise<Rect | null> => {
+    if (sel.childOf && sel.childOf.id && sel.id) {
+      const r = await ctx.client
+        .call('find_child_by_testid', {
+          childTestID: sel.id,
+          parentTestID: sel.childOf.id,
+        })
+        .catch(() => undefined);
+      if (r && r.ok && r.data) return r.data as Rect;
+      return null;
+    }
+    if (sel.id) {
+      const r = await ctx.client
+        .call('find_by_testid', { testID: sel.id })
+        .catch(() => undefined);
+      if (r && r.ok && r.data) return r.data as Rect;
+    }
+    if (sel.text) {
+      const r = await ctx.client
+        .call('find_by_text', { text: sel.text })
+        .catch(() => undefined);
+      if (r && r.ok && r.data) return r.data as Rect;
+    }
+    return null;
+  };
+  const sameRect = (a: Rect | null, b: Rect | null): boolean =>
+    !!a &&
+    !!b &&
+    Math.abs(a.x - b.x) < 1 &&
+    Math.abs(a.y - b.y) < 1 &&
+    Math.abs(a.w - b.w) < 1 &&
+    Math.abs(a.h - b.h) < 1;
+  let stableRect: Rect = rect;
+  {
+    const deadline = Date.now() + 800;
+    let s1: Rect | null = rect;
+    let s2: Rect | null = null;
+    let s3: Rect | null = null;
+    while (Date.now() < deadline) {
+      await sleep(10);
+      const cur = await sampleRect();
+      if (cur) {
+        s3 = s2;
+        s2 = s1;
+        s1 = cur;
+        if (sameRect(s1, s2) && sameRect(s2, s3)) {
+          stableRect = s1!;
+          break;
+        }
+      }
+    }
+  }
+  const center = {
+    x: stableRect.x + stableRect.w / 2,
+    y: stableRect.y + stableRect.h / 2,
+  };
   const baseHash = preHash ?? (await captureHash(ctx));
-  // Micro-sleep between discovery and tap. find_by_testid
-  // dispatch_syncs onto main; following that with idb's HID event
-  // immediately lands the touch in a narrow window where UIKit's
-  // hit-test layer-tree is still being re-established. 30 ms clears
-  // it on iOS 26; lower values regress the race-sensitive flows.
-  await timedAsync(ctx, 'tap.preTapSleep', () => sleep(30));
+  // Argent HID — reliable on iOS 26 RN Pressables. No pre-tap sleep:
+  // the position-stability gate above already proved the rect isn't
+  // moving, so UIKit's hit-test layer-tree is settled.
   await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
   // Self-healing recovery for testID taps. If after the tap
   //   (a) the same testID still resolves at the same coords, AND
@@ -1159,46 +1305,69 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
   // Replace the old 500ms fixed wait with a hash-poll: as soon as we
   // observe a hash change the tap clearly worked, so we can exit
   // self-heal early. Most successful taps fire the change in <150ms.
+  // Tiny ≤5px test-harness controls (Bluesky's TestCtrls.e2e.tsx
+  // pattern — 1×1 Pressables stacked in a top:100 absolute view with
+  // zIndex 100) stay exposed at the same coords across screen
+  // transitions, so an exposure-based retap loop never sees them
+  // disappear and burns its full 5 s budget firing duplicate onPress
+  // events. They DO need a couple of retaps though — coord rounding /
+  // animation timing can swallow a single touch. Cap them at a short
+  // fixed budget.
+  // Tiny ≤5px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx,
+  // stacked 1×1 px Pressables at top:100 right:0 zIndex:100): the
+  // integer-rounding hidTap path on the CLI subprocess rounds the
+  // FP center (401.5, 111.5) up to (402, 112) and misses the 1×1
+  // sibling's hit-box, hitting a *different* sibling whose onPress
+  // does something unwanted (the e2eRefreshHome → setShowLoggedOut
+  // regression — log the user out). Use the gRPC daemon path, which
+  // passes float coords through unrounded, and fire 3 times so a
+  // first-tap simulator miss still has recovery shots.
+  if (rect.w <= 5 && rect.h <= 5) {
+    // 1×1 px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx).
+    // Use pure DOWN+UP — the swipe-as-tap path's 0.5 px Move lands
+    // outside the 1 px hit box.
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) await sleep(80);
+      await hidTapPureFast(ctx.udid, center.x, center.y);
+    }
+    return;
+  }
+  // Single retap if the first tap left the screen unchanged. Wait
+  // long enough (1.5 s) for save/publish-style async commits to
+  // land, so we don't fire onPress twice and break navigation.
+  // If the tap opened a bottom-sheet / modal that takes longer than
+  // 1.5 s to animate (RNGH bottom sheet ~600 ms spring + content
+  // mount + first-frame layout), the hash-change exit fires late and
+  // we'd retap right as the sheet finishes opening — closing it. So
+  // also probe `is_exposed`: if the original target is now covered
+  // by a presented overlay, the tap registered even if the rendered
+  // frame hash is steady. Only retap when the target is BOTH still
+  // findable AND still topmost-hittable.
   if ((sel.id || sel.text) && baseHash) {
-    // Self-heal: tight retap loop, target-aware. Re-find the
-    // selector after each frame; if it disappeared or moved, the
-    // tap landed. Otherwise retap (throttled to 500 ms intervals
-    // so we don't queue redundant onPress invocations).
-    //
-    // This catches:
-    //   - sheet/modal dismiss taps (target item gone)
-    //   - nav transitions (target screen replaced)
-    //   - 1×1 px hidden Pressables (target stays — see hash fallback)
-    //
-    // Plus an OR fallback: if hash changed AND target is at same
-    // spot AND we've been polling >500 ms, treat as success (toggle
-    // / no-op-looking tap that DID fire its effect).
-    //
-    // 50 cycles × 100 ms = 5 s total budget.
-    const targetMoved = async (): Promise<boolean> => {
-      const op = sel.id ? 'find_by_testid' : 'find_by_text';
-      const args = sel.id ? { testID: sel.id } : { text: sel.text! };
-      const recheck = await ctx.client.call(op, args).catch(() => undefined);
-      if (!recheck || !recheck.ok || !recheck.data) return true;
-      const r = recheck.data as Rect;
-      const sameSpot =
-        Math.abs(r.x + r.w / 2 - center.x) < 6 && Math.abs(r.y + r.h / 2 - center.y) < 6;
-      return !sameSpot;
-    };
-    let landed = false;
-    let lastTapTs = Date.now();
-    for (let i = 0; i < 50 && !landed; i++) {
-      await ctx.client
-        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 100 })
-        .catch(() => undefined);
-      landed = await timedAsync(ctx, 'tap.selfHealHashCheck', () => targetMoved());
-      if (landed) break;
-      if (Date.now() - lastTapTs >= 500) {
-        await timedAsync(ctx, 'tap.selfHealRetap', () => hidTapFast(ctx.udid, center.x, center.y));
-        lastTapTs = Date.now();
+    const hc = await ctx.client
+      .call('wait_hash_change', { sinceHash: baseHash, maxMs: 1500 })
+      .catch(() => undefined);
+    const hashChanged = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
+    if (!hashChanged) {
+      const re = await sampleRect();
+      if (re) {
+        let stillExposed = true;
+        if (sel.id) {
+          const ex = await ctx.client
+            .call('is_exposed', { testID: sel.id })
+            .catch(() => undefined);
+          if (ex && ex.ok && ex.data) {
+            stillExposed = !!(ex.data as { exposed?: boolean }).exposed;
+          }
+        }
+        if (stillExposed) {
+          const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
+          await timedAsync(ctx, 'tap.selfHealRetap', () =>
+            hidTapArgent(ctx.udid, c.x, c.y),
+          );
+        }
       }
     }
-    void landed;
   }
 }
 
@@ -1229,22 +1398,41 @@ async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect 
   if (sel.childOf && sel.childOf.id && sel.id) {
     // childOf goes through the dedicated find_child_by_testid (no
     // wait variant yet) — keep its existing path.
-  } else if (sel.id && !sel.text) {
+  } else if (sel.id && typeof sel.index === 'number') {
+    // Maestro `index: N` — pick the Nth matching testID instance,
+    // sorted top-to-bottom by window Y. Needed for feed-item flows
+    // (postDropdownBtn index:0 must hit the first post, not the
+    // last-mounted one that find_by_testid returns by default).
     const r = await timedAsync(ctx, 'tap.findFast', () =>
       ctx.client
-        .call('wait_find_by_testid', { testID: sel.id!, maxMs: 5000 })
+        .call('find_by_testid_nth', { testID: sel.id!, index: sel.index })
+        .catch(() => undefined),
+    );
+    if (r && r.ok && r.data) return r.data as Rect;
+  } else if (sel.id) {
+    // Drop sel.text gating: when both id and text/label are set in
+    // YAML, the label is human-readable metadata, not an additional
+    // filter — find_by_testid alone identifies the unique element.
+    // Falling through to the slow CLI poll for the id+text case was
+    // burning ~7s/step on labelled buttons (home-screen `likeBtn`).
+    const r = await timedAsync(ctx, 'tap.findFast', () =>
+      ctx.client
+        .call('wait_find_by_testid', { testID: sel.id!, maxMs: 2500 })
         .catch(() => undefined),
     );
     if (r && r.ok && r.data) return r.data as Rect;
   } else if (sel.text && !sel.id) {
     const r = await timedAsync(ctx, 'tap.findFast', () =>
-      ctx.client.call('wait_find_by_text', { text: sel.text!, maxMs: 5000 }).catch(() => undefined),
+      ctx.client.call('wait_find_by_text', { text: sel.text!, maxMs: 2500 }).catch(() => undefined),
     );
     if (r && r.ok && r.data) return r.data as Rect;
   }
-  // Match Maestro's implicit-wait semantics on tapOn: keep retrying the
-  // find for ~7s before giving up. Layout passes after a clearState
-  // relaunch or navigation transition often take 1-3s to settle.
+  // Match Maestro's implicit-wait semantics on tapOn: keep retrying
+  // the find for ~7s before giving up. Layout passes after a
+  // clearState relaunch, RNGH bottom-sheet expansion (~600 ms spring
+  // + lazy-mount of inner buttons), or React-Navigation push can
+  // each take 1-3s to settle. Matches Maestro's default 10s a11y
+  // tap timeout closely enough for parity on slow-mount flows.
   const deadline = Date.now() + 7000;
   while (Date.now() < deadline) {
     const r = await findOnce(ctx, sel);
@@ -1272,6 +1460,20 @@ async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect 
     }
   }
 
+  // Skip auto-scroll for childOf selectors. Scrolling the screen
+  // shifts the parent out of view, then the child resolves against
+  // whatever happens to be at the polled coords — turning a "parent
+  // not yet mounted" race into a wrong-target tap. Wait was enough
+  // upstream; this selector cannot be auto-scroll-recovered.
+  if (sel.childOf) {
+    if (sel.text) {
+      const axRect = await timedAsync(ctx, 'tap.findAxFallback', () =>
+        axQueryByText(ctx.udid, sel.text!),
+      );
+      if (axRect) return axRect;
+    }
+    return null;
+  }
   // Last-chance fallback: auto-scroll. Element may be below the fold
   // in a scrollview the YAML didn't explicitly scroll. Try scrolling
   // DOWN up to 4 times, then UP up to 4 times. Maestro behaves this
@@ -1281,8 +1483,8 @@ async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect 
   const dist = 300;
   for (const dir of ['DOWN', 'UP'] as const) {
     for (let i = 0; i < 4; i++) {
-      if (dir === 'DOWN') hidSwipe(ctx.udid, cx, cy + dist / 2, cx, cy - dist / 2, 250);
-      else hidSwipe(ctx.udid, cx, cy - dist / 2, cx, cy + dist / 2, 250);
+      if (dir === 'DOWN') await hidSwipe(ctx.udid, cx, cy + dist / 2, cx, cy - dist / 2, 250);
+      else await hidSwipe(ctx.udid, cx, cy - dist / 2, cx, cy + dist / 2, 250);
       await sleep(500);
       await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
       const found = await findOnce(ctx, sel);
@@ -1299,6 +1501,24 @@ async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect 
       const stable = await findOnce(ctx, sel);
       return stable ?? found;
     }
+  }
+
+  // Cross-process AX fallback. The dylib's UIView walk only sees views
+  // mounted in this app's process. iOS PHPickerViewController,
+  // UIDocumentPickerViewController, and the native share sheet run in
+  // separate XPC processes, so their labels never appear to find_by_*.
+  // Maestro reaches them through XCUITest's accessibility query;
+  // ennio gets the same coverage by hitting argent's simulator-server
+  // describe endpoint, which queries the OS-level a11y tree across
+  // process boundaries. We only fall through here when both fast-path
+  // and slow-path RN finds have already failed, so this adds zero
+  // overhead on the hot path. Text-bearing selectors only — testIDs
+  // are an in-process concept that AX won't have.
+  if (sel.text) {
+    const axRect = await timedAsync(ctx, 'tap.findAxFallback', () =>
+      axQueryByText(ctx.udid, sel.text!),
+    );
+    if (axRect) return axRect;
   }
   return null;
 }
@@ -1352,6 +1572,14 @@ async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<boolean
           if (btn && btn.toLowerCase().includes(sel.text.toLowerCase())) return true;
         }
       }
+      // Cross-process AX: PHPickerViewController, native share sheet,
+      // document picker, etc. live in separate XPC processes. Their
+      // a11y labels aren't visible to our in-process walks, but they
+      // are reachable through argent's simulator-server describe
+      // endpoint. Used as a last-resort positive answer so the
+      // negative path (assertNotVisible) doesn't stall.
+      const axRect = await axQueryByText(ctx.udid, sel.text);
+      if (axRect) return true;
     } catch {
       /* not an alert */
     }
@@ -1493,13 +1721,26 @@ async function clearStateAndRelaunch(ctx: RunContext, launchArgs: string[] = [])
 }
 
 function parsePoint(p: MaestroSelector['point']): { x: number; y: number } {
+  // Maestro lets coords be `"x%,y%"` (percentage of window) or
+  // `"x,y"` (pixels). Without the %-aware path, `"90%,43%"` got
+  // parsed as the pixel point (90, 43) — top-left corner — instead
+  // of (362, 376), which is what every `point: 90%,43%` flow
+  // (curate-lists row Edit, create-account save-password
+  // dismiss) actually wants.
+  const winW = 402;
+  const winH = 874;
+  const parseAxis = (s: string, max: number): number => {
+    const t = s.trim();
+    if (t.endsWith('%')) return (parseFloat(t.slice(0, -1)) / 100) * max;
+    return parseFloat(t);
+  };
   if (typeof p === 'string') {
     const [xs, ys] = p.split(',').map((s) => s.trim());
-    return { x: parseFloat(xs), y: parseFloat(ys) };
+    return { x: parseAxis(xs, winW), y: parseAxis(ys, winH) };
   }
   if (p && typeof p === 'object') {
-    const x = typeof p.x === 'number' ? p.x : parseFloat(p.x);
-    const y = typeof p.y === 'number' ? p.y : parseFloat(p.y);
+    const x = typeof p.x === 'number' ? p.x : parseAxis(p.x, winW);
+    const y = typeof p.y === 'number' ? p.y : parseAxis(p.y, winH);
     return { x, y };
   }
   throw new Error('tapOn point: invalid');

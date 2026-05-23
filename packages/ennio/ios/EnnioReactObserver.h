@@ -42,6 +42,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// attached, returns immediately with 0 (caller should fall back).
 + (uint32_t)waitForCommitSince:(uint64_t)sinceMs maxMs:(uint32_t)maxMs;
 
+/// Wait until React has been quiet (no commits) for stableMs.
++ (BOOL)waitForReactQuietStableMs:(uint32_t)stableMs maxMs:(uint32_t)maxMs;
+
 /// "paper" | "fabric" | "both" | "none" — diagnostic string for the
 /// CLI to log on startup so users know which path is active.
 + (NSString *)attachmentDescription;

@@ -249,28 +249,67 @@ static BOOL viewIsLikelyOnScreen(UIView *v) {
     return !CGRectIsEmpty(CGRectIntersection(winRect, v.window.bounds));
 }
 
+// Compute on-screen window-space area for a view. Used to break ties
+// between multiple exact-match candidates — prefer the smaller view,
+// which is almost always the inner element a human reader would tap
+// (the UILabel "Description" rather than the wrapping TextField that
+// also exposes "Description" as its accessibilityLabel).
+static CGFloat viewWindowArea(UIView *v) {
+    if (!v || !v.window) return CGFLOAT_MAX;
+    CGRect r = [v.window convertRect:v.bounds fromView:v];
+    if (r.size.width <= 0 || r.size.height <= 0) return CGFLOAT_MAX;
+    return r.size.width * r.size.height;
+}
+
+static UIView *_Nullable bestFrom(NSArray<UIView *> *list) {
+    if (list.count == 0) return nil;
+    if (list.count == 1) return list.firstObject;
+    // Tie-break by smallest area — Maestro-equivalent semantics where
+    // text-targeted taps preferentially hit the narrowest matching
+    // element rather than a wrapping container.
+    UIView *best = nil;
+    CGFloat bestArea = CGFLOAT_MAX;
+    for (UIView *v in list) {
+        CGFloat a = viewWindowArea(v);
+        if (a < bestArea) {
+            bestArea = a;
+            best = v;
+        }
+    }
+    return best ?: list.firstObject;
+}
+
 static UIView *_Nullable walkByText(UIView *root, NSString *text) {
     if (!root) return nil;
     NSMutableArray<UIView *> *matches = [NSMutableArray new];
     collectByText(root, text, matches);
-    // Selection priority (most-specific wins):
-    //   1. exact match + on-screen + interactive
-    //   2. exact match + on-screen
-    //   3. substring match + on-screen + interactive
-    //   4. substring match + on-screen
-    //   5. any match, even off-screen (last-resort, e.g. transitioning)
+    // Bucket candidates by selection-priority tier, then within each
+    // tier pick the smallest. Without the size tie-break, an oversized
+    // TextField wrapper whose a11y label equals "Description" outranks
+    // the actual UILabel above it — a tap meant to defocus the field
+    // re-focuses it instead, and the iOS edit-menu popover never
+    // dismisses (blocks the next Save tap).
+    NSMutableArray<UIView *> *exactOnscreenInteractive = [NSMutableArray new];
+    NSMutableArray<UIView *> *exactOnscreen = [NSMutableArray new];
+    NSMutableArray<UIView *> *anyOnscreenInteractive = [NSMutableArray new];
+    NSMutableArray<UIView *> *anyOnscreen = [NSMutableArray new];
     for (UIView *v in matches) {
-        if (viewTextMatchRank(v, text) == 2 && viewIsLikelyOnScreen(v) && isInteractive(v)) return v;
+        BOOL onscreen = viewIsLikelyOnScreen(v);
+        BOOL inter = isInteractive(v);
+        int rank = viewTextMatchRank(v, text);
+        if (rank == 2 && onscreen && inter) [exactOnscreenInteractive addObject:v];
+        if (rank == 2 && onscreen) [exactOnscreen addObject:v];
+        if (onscreen && inter) [anyOnscreenInteractive addObject:v];
+        if (onscreen) [anyOnscreen addObject:v];
     }
-    for (UIView *v in matches) {
-        if (viewTextMatchRank(v, text) == 2 && viewIsLikelyOnScreen(v)) return v;
-    }
-    for (UIView *v in matches) {
-        if (viewIsLikelyOnScreen(v) && isInteractive(v)) return v;
-    }
-    for (UIView *v in matches) {
-        if (viewIsLikelyOnScreen(v)) return v;
-    }
+    UIView *r = bestFrom(exactOnscreenInteractive);
+    if (r) return r;
+    r = bestFrom(exactOnscreen);
+    if (r) return r;
+    r = bestFrom(anyOnscreenInteractive);
+    if (r) return r;
+    r = bestFrom(anyOnscreen);
+    if (r) return r;
     return matches.firstObject;
 }
 

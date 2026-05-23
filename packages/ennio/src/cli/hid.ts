@@ -1,131 +1,378 @@
-// HID actuation via idb CLI shell-out.
+// Device interaction via Argent's tool-server (direct HTTP) or CLI.
 //
-// Phase 1 design: keep idb_companion + idb CLI as the HID driver. Each
-// tap shells out to `idb ui tap`. Latency is ~250ms per tap (subprocess
-// spawn dominates) — acceptable for v0.1 smoke + first real flows.
-// Phase 2 will replace this with a SimulatorKit-based helper for
-// ~50µs/tap, drop the brew + pip deps.
+// Single source of truth for taps, swipes, keystrokes. Argent's
+// CoreSimulator HID injection fires RN Pressable.onPress reliably
+// on iOS 26 sim — idb's gRPC HID variants intermittently swallowed
+// presses on RN sheet/dropdown buttons, so we no longer ship them
+// in this binary.
 //
-// Coords come from the dylib via socket find_by_testid / find_by_text;
-// this module just converts them into idb invocations.
+// Fast path: POST to http://127.0.0.1:<port>/tools/<name> on the
+// long-running argent tool-server (~80 ms/call). Slow fallback:
+// `argent run <name>` subprocess (~150 ms/call cold start). The
+// HTTP path saves ~70 ms per HID event — across a 60-step flow
+// that's ~4 s, and the speedup compounds with self-heal retaps.
+//
+// Both paths produce the same RN responder events; the difference
+// is purely process-spawn overhead.
 
 import { execFileSync } from 'node:child_process';
+import { request as httpRequest } from 'node:http';
 
-import { getHidDaemon } from './hid-daemon';
-import { getIdbClient } from './idb-grpc';
+const screenSizeCache = new Map<string, { w: number; h: number }>();
 
-function idb(args: string[]): void {
-  execFileSync('idb', args, { stdio: 'pipe' });
-}
-
-/**
- * Fast async tap via persistent gRPC stream to idb_companion. Avoids
- * the ~250 ms Python subprocess spawn that `idb ui tap` pays per tap
- * — the stream stays open for the CLI lifetime so each tap is one
- * gRPC roundtrip (~30-50 ms wall).
- *
- * Falls back to the sync idb CLI path if the gRPC client errors.
- */
-export async function tapFast(
-  udid: string,
-  x: number,
-  y: number,
-  durationSec: number = 0.15,
-): Promise<void> {
-  // Persistent hid-daemon.py: one-time ~150 ms spawn cost, then each
-  // tap is ~3-8 ms (gRPC RTT to already-warm idb_companion). Beats
-  // both the per-tap CLI subprocess (~250 ms) and our broken
-  // bidi-stream gRPC client. Falls back to idb CLI if the daemon
-  // can't start (python missing, idb_companion socket absent, etc.) —
-  // correctness over speed.
+async function getScreenSize(udid: string): Promise<{ w: number; h: number }> {
+  const cached = screenSizeCache.get(udid);
+  if (cached) return cached;
   try {
-    const d = await getHidDaemon(udid);
-    await d.tap(x, y, Math.round(durationSec * 1000));
-    return;
-  } catch (err) {
-    process.stderr.write(`[ennio] hid-daemon fallback to CLI: ${String(err)}\n`);
+    const { EnnioSocketClient } = await import('./socket-client');
+    const c = new EnnioSocketClient();
+    if (await c.connectWithRetry(2_000)) {
+      const r = await c.call('window_size').catch(() => undefined);
+      c.close();
+      if (r && r.ok && r.data) {
+        const d = r.data as { w: number; h: number };
+        if (d.w > 0 && d.h > 0) {
+          screenSizeCache.set(udid, d);
+          return d;
+        }
+      }
+    }
+  } catch {
+    /* fall through */
   }
-  void getIdbClient;
-  idb([
-    'ui',
-    'tap',
-    '--udid',
-    udid,
-    '--duration',
-    String(durationSec),
-    String(Math.round(x)),
-    String(Math.round(y)),
+  const fb = { w: 402, h: 874 };
+  screenSizeCache.set(udid, fb);
+  return fb;
+}
+
+function trace(line: string): void {
+  process.stderr.write(`${line}\n`);
+}
+
+// Tool-server port discovery. argent's server runs on a stable
+// random port for the lifetime of the user's session; cache it
+// once. Fall back to CLI if the server isn't reachable.
+let toolServerPort: number | null | undefined;
+
+function discoverToolServerPort(): number | null {
+  if (toolServerPort !== undefined) return toolServerPort;
+  try {
+    const out = execFileSync('argent', ['server', 'status', '--json'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 1500,
+    }).toString();
+    const j = JSON.parse(out) as { port?: number; healthy?: boolean };
+    if (j.healthy && typeof j.port === 'number') {
+      toolServerPort = j.port;
+      trace(`[argent-http] tool-server port=${j.port}`);
+      return j.port;
+    }
+  } catch {
+    /* ignore */
+  }
+  toolServerPort = null;
+  return null;
+}
+
+function postToolJSON(
+  port: number,
+  toolName: string,
+  payload: Record<string, unknown>,
+  timeoutMs = 5000,
+): Promise<{ ok: boolean; status: number; body: string }> {
+  return new Promise((resolve) => {
+    const body = JSON.stringify(payload);
+    const req = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        method: 'POST',
+        path: `/tools/${encodeURIComponent(toolName)}`,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let chunks = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => {
+          chunks += c;
+        });
+        res.on('end', () => {
+          resolve({
+            ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300,
+            status: res.statusCode ?? 0,
+            body: chunks,
+          });
+        });
+      },
+    );
+    req.on('error', () => resolve({ ok: false, status: 0, body: '' }));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ ok: false, status: 0, body: '' });
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+function runArgentCLI(args: string[]): void {
+  // Subprocess fallback — used only when the tool-server HTTP path
+  // is unavailable. Inherit stdin/stderr; pipe stdout (argent prints
+  // result JSON there).
+  execFileSync('argent', args, { stdio: ['ignore', 'pipe', 'inherit'] });
+}
+
+interface AXNode {
+  role?: string;
+  label?: string;
+  value?: string;
+  identifier?: string;
+  frame?: { x: number; y: number; width: number; height: number };
+  children?: AXNode[];
+}
+
+export interface AXMatchRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Query argent's `describe` endpoint and find the first AX element
+ * whose label, value, or identifier matches `text`. Returns a window-
+ * space pixel rect (compatible with `tap`/`hidTap` callers).
+ *
+ * This is a cross-process AX fallback for selectors that miss the
+ * dylib's in-process UIView walk — typically native UIKit views like
+ * PHPickerViewController whose process boundary blocks our finder.
+ * Maestro hits these through XCUITest's a11y query; we reach the same
+ * data via argent's simulator-server bridge.
+ *
+ * Search order:
+ *   1. exact identifier match
+ *   2. exact label match
+ *   3. substring label/value match
+ * On-screen elements (frame inside [0,1]) outrank off-screen.
+ */
+export async function axQueryByText(
+  udid: string,
+  text: string,
+): Promise<AXMatchRect | null> {
+  // argent describe queries the OS a11y service. The service can
+  // return an empty/transitioning tree for ~50-150 ms while a sheet
+  // animates in (PHPicker first frame, share sheet, etc.). Retry up
+  // to ~1.5 s on miss so flow-level retries don't have to.
+  const deadline = Date.now() + 1500;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    const r = await axQueryOnce(udid, text);
+    if (r) return r;
+    attempt++;
+    if (Date.now() >= deadline) break;
+    await new Promise((res) => setTimeout(res, 120));
+  }
+  if (attempt > 0) {
+    process.stderr.write(`[ax-fallback] no match for ${JSON.stringify(text)} after ${attempt} polls\n`);
+  }
+  return null;
+}
+
+async function axQueryOnce(udid: string, text: string): Promise<AXMatchRect | null> {
+  const port = discoverToolServerPort();
+  if (port === null) {
+    trace(`[ax-once] no port for ${text}`);
+    return null;
+  }
+  const r = await postToolJSON(port, 'describe', { udid });
+  if (!r.ok || !r.body) {
+    trace(`[ax-once] HTTP ${r.status} for ${text}`);
+    return null;
+  }
+  let parsed: { data?: { tree?: AXNode } };
+  try {
+    parsed = JSON.parse(r.body);
+  } catch {
+    return null;
+  }
+  const root = parsed?.data?.tree;
+  if (!root) return null;
+  const { w, h } = await getScreenSize(udid);
+  type Match = { node: AXNode; rank: number };
+  const matches: Match[] = [];
+  const lc = text.toLowerCase();
+  const walk = (n: AXNode | undefined): void => {
+    if (!n) return;
+    const id = n.identifier ?? '';
+    const lbl = n.label ?? '';
+    const val = n.value ?? '';
+    let rank = 0;
+    if (id === text) rank = 4;
+    else if (lbl === text) rank = 3;
+    else if (lbl.toLowerCase() === lc) rank = 3;
+    else if (val === text || val.toLowerCase() === lc) rank = 2;
+    else if (lbl.toLowerCase().includes(lc)) rank = 1;
+    else if (val.toLowerCase().includes(lc)) rank = 1;
+    if (rank > 0 && n.frame) matches.push({ node: n, rank });
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(root);
+  if (matches.length === 0) {
+    let nodeCount = 0;
+    const count = (n: AXNode | undefined): void => {
+      if (!n) return;
+      nodeCount++;
+      for (const c of n.children ?? []) count(c);
+    };
+    count(root);
+    trace(`[ax-once] tree=${nodeCount} nodes, no match for ${JSON.stringify(text)}`);
+    return null;
+  }
+  // Prefer on-screen + interactive role + highest rank.
+  const interactive = new Set([
+    'AXButton',
+    'AXLink',
+    'AXMenuItem',
+    'AXCell',
+    'AXSearchField',
+    'AXTextField',
+    'AXSwitch',
+    'AXCheckBox',
   ]);
+  matches.sort((a, b) => {
+    const onA =
+      !!a.node.frame &&
+      a.node.frame.x >= 0 &&
+      a.node.frame.x < 1 &&
+      a.node.frame.y >= 0 &&
+      a.node.frame.y < 1;
+    const onB =
+      !!b.node.frame &&
+      b.node.frame.x >= 0 &&
+      b.node.frame.x < 1 &&
+      b.node.frame.y >= 0 &&
+      b.node.frame.y < 1;
+    if (onA !== onB) return onA ? -1 : 1;
+    if (a.rank !== b.rank) return b.rank - a.rank;
+    const intA = interactive.has(a.node.role ?? '') ? 1 : 0;
+    const intB = interactive.has(b.node.role ?? '') ? 1 : 0;
+    if (intA !== intB) return intB - intA;
+    return 0;
+  });
+  const f = matches[0].node.frame!;
+  return {
+    x: f.x * w,
+    y: f.y * h,
+    w: f.width * w,
+    h: f.height * h,
+  };
 }
 
 /**
- * Tap at window-space point (x, y). Pass the simulator UDID via --udid
- * so idb_companion targets the right device.
+ * Convenience accessor mirroring axQueryByText for callers that
+ * already have a window size cached.
  */
-export function tap(udid: string, x: number, y: number, durationSec: number = 0.2): void {
-  // idb accepts ints only. Round to nearest pixel — UIKit hit-test is
-  // tolerant of ~1pt offsets.
-  //
-  // Default --duration 0.15s. Without an explicit duration, idb's tap
-  // is essentially instantaneous — touchDown and touchUp at the same
-  // mach_absolute_time. React Native Gesture Handler's BaseButton +
-  // PressableScale + RNGH's TapGestureRecognizer all need a measurable
-  // gap between begin/end to advance their state machine. 0.1s passes
-  // most controls but iOS-26 sim list-item Pressables (FlashList rows,
-  // gauntlet tiles) reject the tap; 0.15s clears them consistently
-  // without making sequential taps feel slow.
-  idb([
-    'ui',
-    'tap',
-    '--udid',
-    udid,
-    '--duration',
-    String(durationSec),
-    String(Math.round(x)),
-    String(Math.round(y)),
-  ]);
+export async function getCachedScreenSize(udid: string): Promise<{ w: number; h: number }> {
+  return getScreenSize(udid);
 }
 
-/**
- * Press a single key by HID keycode. Used for hardware-key sequences
- * the dylib's hardware_key handler doesn't model (mostly: arrow keys,
- * tab, escape).
- */
-export function pressKey(udid: string, hidCode: number): void {
-  idb(['ui', 'key', '--udid', udid, String(hidCode)]);
+async function callTool(
+  toolName: string,
+  payload: Record<string, unknown>,
+  cliArgs: string[],
+): Promise<void> {
+  const port = discoverToolServerPort();
+  if (port !== null) {
+    const r = await postToolJSON(port, toolName, payload);
+    if (r.ok) return;
+    // If the server returns a 4xx/5xx, surface it like the CLI would
+    // — don't silently fall back to CLI on logic errors.
+    if (r.status >= 400 && r.status < 600 && r.body) {
+      throw new Error(`argent ${toolName} HTTP ${r.status}: ${r.body}`);
+    }
+    // Network-level failure: tool-server may have died mid-flow.
+    // Invalidate the cached port so the next call re-discovers, and
+    // fall through to CLI for this one event.
+    toolServerPort = undefined;
+  }
+  runArgentCLI(cliArgs);
 }
 
-/**
- * Type a literal string via the host keyboard. idb forwards each char
- * as a keystroke through the sim's hardware-keyboard layer.
- */
-export function typeText(udid: string, text: string): void {
-  idb(['ui', 'text', '--udid', udid, text]);
+export async function tap(udid: string, x: number, y: number): Promise<void> {
+  const { w, h } = await getScreenSize(udid);
+  const nx = Math.max(0, Math.min(1, x / w));
+  const ny = Math.max(0, Math.min(1, y / h));
+  trace(
+    `[argent-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
+  );
+  await callTool(
+    'gesture-tap',
+    { udid, x: nx, y: ny },
+    ['run', 'gesture-tap', '--udid', udid, '--x', String(nx), '--y', String(ny)],
+  );
 }
 
-/**
- * Synthesised swipe from (x1,y1) to (x2,y2) over durationMs.
- */
-export function swipe(
+export const tapFast = tap;
+export const tapPureFast = tap;
+export const tapArgent = tap;
+
+export async function swipe(
   udid: string,
   x1: number,
   y1: number,
   x2: number,
   y2: number,
   durationMs: number,
-): void {
-  // idb ui swipe takes seconds. Default 0.25s if duration omitted.
-  const seconds = durationMs > 0 ? (durationMs / 1000).toFixed(3) : '0.25';
-  idb([
-    'ui',
-    'swipe',
-    '--udid',
-    udid,
-    '--duration',
-    seconds,
-    String(Math.round(x1)),
-    String(Math.round(y1)),
-    String(Math.round(x2)),
-    String(Math.round(y2)),
-  ]);
+): Promise<void> {
+  const { w, h } = await getScreenSize(udid);
+  const fromX = Math.max(0, Math.min(1, x1 / w));
+  const fromY = Math.max(0, Math.min(1, y1 / h));
+  const toX = Math.max(0, Math.min(1, x2 / w));
+  const toY = Math.max(0, Math.min(1, y2 / h));
+  const dur = Math.max(50, durationMs || 250);
+  trace(
+    `[argent-swipe] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) dur=${dur}`,
+  );
+  await callTool(
+    'gesture-swipe',
+    { udid, fromX, fromY, toX, toY, durationMs: dur },
+    [
+      'run',
+      'gesture-swipe',
+      '--udid',
+      udid,
+      '--fromX',
+      String(fromX),
+      '--fromY',
+      String(fromY),
+      '--toX',
+      String(toX),
+      '--toY',
+      String(toY),
+      '--durationMs',
+      String(dur),
+    ],
+  );
+}
+
+export async function typeText(udid: string, text: string): Promise<void> {
+  trace(`[argent-keyboard] text=${JSON.stringify(text)}`);
+  await callTool(
+    'keyboard',
+    { udid, text },
+    ['run', 'keyboard', '--udid', udid, '--text', text],
+  );
+}
+
+export async function pressKey(udid: string, keyName: string): Promise<void> {
+  trace(`[argent-keyboard] key=${keyName}`);
+  await callTool(
+    'keyboard',
+    { udid, key: keyName },
+    ['run', 'keyboard', '--udid', udid, '--key', keyName],
+  );
 }

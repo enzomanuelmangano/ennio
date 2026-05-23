@@ -101,7 +101,21 @@ async def handle(client: Client, line: str) -> None:
     # Node parent only sees as an unexpected EOF).
     try:
         if op == "tap":
-            # tap <x> <y> [durationMs]
+            # tap <x> <y> [durationMs] — pure DOWN+UP.
+            if len(parts) < 3:
+                print("err tap-needs-x-y", flush=True)
+                return
+            x = float(parts[1])
+            y = float(parts[2])
+            dur_ms = float(parts[3]) if len(parts) > 3 else 80.0
+            await client.tap(x=x, y=y, duration=dur_ms / 1000.0)
+            print("ok", flush=True)
+        elif op == "tap_pure":
+            # tap_pure <x> <y> [durationMs]
+            #
+            # Pure DOWN+UP without motion. Required for 1×1 px
+            # Pressables (TestCtrls.e2e.tsx): the swipe-as-tap above
+            # ends outside the 1 px hit box and misses entirely.
             if len(parts) < 3:
                 print("err tap-needs-x-y", flush=True)
                 return

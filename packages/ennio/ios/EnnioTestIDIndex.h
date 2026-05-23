@@ -41,6 +41,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Latest-registered live view for testID, or nil.
 + (UIView *_Nullable)lookup:(NSString *)testID;
 
+/// All live views matching testID, sorted by window-space Y/X.
++ (NSArray<UIView *> *)lookupAll:(NSString *)testID;
+
 /// Block until lookup(testID) returns non-nil or maxMs elapses.
 /// Wakes on each registration broadcast — no polling.
 + (UIView *_Nullable)waitFor:(NSString *)testID maxMs:(uint32_t)maxMs;
