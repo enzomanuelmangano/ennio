@@ -897,7 +897,12 @@ async function runCommand(
       // movement). Without this branch, we'd discard the resolved
       // selector and drag from mid-screen, missing the handle entirely.
       const usingSelectorFrom = !!(sw.from && typeof sw.from === 'object');
-      const dist = 200;
+      // ~1.5 feed row heights in Bluesky's reorder list. Drag has to
+      // clear the adjacent row's midpoint to register a swap; over-
+      // shooting by half a row gives margin against tiny rounding
+      // errors without risking a 2-position move (which would leave
+      // the list in a different state than the assertion expects).
+      const dist = 130;
       // Maestro semantics: direction = finger drag direction on
       // screen. iOS y-axis increases downward, so
       // from.y < to.y for DOWN.
@@ -978,11 +983,16 @@ async function runCommand(
     // target.
     const usingSelectorFrom = !!(sw.from && typeof sw.from === 'object');
     if (usingSelectorFrom) {
+      // RN draggable-flatlist enters drag mode on a hold >= ~500 ms.
+      // 800 ms gives a safe margin over the recogniser's debounce.
+      // Glide intentionally slow so each move event is consumed by
+      // the list's onMove callback — a fast glide overshoots before
+      // the data array updates.
       const totalDur = sw.duration ?? 1000;
-      const holdMs = Math.min(600, Math.max(400, totalDur * 0.5));
-      const moveMs = Math.max(250, totalDur - holdMs);
+      const holdMs = 800;
+      const moveMs = Math.max(500, totalDur - holdMs);
       await hidLongPressDrag(ctx.udid, from.x, from.y, to.x, to.y, holdMs, moveMs);
-      await sleep(400);
+      await sleep(500);
       await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
       return;
     }
@@ -1090,29 +1100,29 @@ async function runCommand(
     // In-process: React-commit quiet. Catches RN-side animations
     // ending (sheet animateOut, navigation transition).
   }
-    // Cross-process safety: PHPicker / share sheet / document picker
-    // dismiss in another XPC process — wait_commit is blind to that.
-    // Poll the in-process VC chain until no cross-process picker VC
-    // is presented. ~10 ms per poll (one socket round-trip), and we
-    // bail the instant the picker is gone, so cost is negligible on
-    // RN-only screens. Reusing the in-process `top_vc_chain` op:
-    // pure UIKit, no argent, no AX-server dependency.
-    const dismissDeadline = Date.now() + 2500;
-    while (Date.now() < dismissDeadline) {
-      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-      if (!r || !r.ok) break;
-      const chain = ((r.data as { chain?: string[] })?.chain ?? []);
-      const hasCrossProcess = chain.some(
-        (cls) =>
-          cls.includes('PHPicker') ||
-          cls.includes('PhotoPicker') ||
-          cls.includes('PHImagePicker') ||
-          cls.includes('UIActivityViewController') ||
-          cls.includes('UIDocumentPickerViewController'),
-      );
-      if (!hasCrossProcess) break;
-      await sleep(80);
-    }
+  // Cross-process safety: PHPicker / share sheet / document picker
+  // dismiss in another XPC process — wait_commit is blind to that.
+  // Poll the in-process VC chain until no cross-process picker VC
+  // is presented. ~10 ms per poll (one socket round-trip), and we
+  // bail the instant the picker is gone, so cost is negligible on
+  // RN-only screens. Reusing the in-process `top_vc_chain` op:
+  // pure UIKit, no argent, no AX-server dependency.
+  const dismissDeadline = Date.now() + 2500;
+  while (Date.now() < dismissDeadline) {
+    const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
+    if (!r || !r.ok) break;
+    const chain = (r.data as { chain?: string[] })?.chain ?? [];
+    const hasCrossProcess = chain.some(
+      (cls) =>
+        cls.includes('PHPicker') ||
+        cls.includes('PhotoPicker') ||
+        cls.includes('PHImagePicker') ||
+        cls.includes('UIActivityViewController') ||
+        cls.includes('UIDocumentPickerViewController'),
+    );
+    if (!hasCrossProcess) break;
+    await sleep(80);
+  }
   if ('runScript' in cmd) {
     const scriptCmd = (cmd as { runScript: { file: string; env?: Record<string, string> } })
       .runScript;
@@ -1673,7 +1683,9 @@ async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<boolean
       // objects sitting on the UIRemoteView itself — visible to a
       // UIAccessibilityContainer walk even though they're not in
       // the regular subview tree.
-      const r2 = await ctx.client.call('find_ax_by_text', { text: sel.text }).catch(() => undefined);
+      const r2 = await ctx.client
+        .call('find_ax_by_text', { text: sel.text })
+        .catch(() => undefined);
       if (r2 && r2.ok && r2.data) return true;
     } catch {
       /* not an alert */

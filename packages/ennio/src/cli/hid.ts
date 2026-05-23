@@ -419,27 +419,25 @@ export async function longPressDrag(
   trace(
     `[argent-long-drag] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) hold=${holdMs} move=${moveMs}`,
   );
-  // Build event sequence: Down → micro-Move stack to flush hold timer
-  // without triggering scroll → Move sequence to target → Up.
-  // Interpolated by argent (interpolate=20 → 20 intermediate Move
-  // events between adjacent keyframes; smooth glide).
-  const events: Array<{
+  // Event sequence: Down → stationary Move stack (drives hold timer
+  // without changing position) → keyframe Move sequence to target →
+  // Up. interpolate inserts intermediate frames between adjacent
+  // keyframes for a smooth glide.
+  const events: {
     type: 'Down' | 'Move' | 'Up';
     x: number;
     y: number;
     delayMs?: number;
-  }> = [];
+  }[] = [];
   events.push({ type: 'Down', x: fromX, y: fromY });
-  // Hold stationary: emit Move events at the same point with cumulative
-  // delays summing to holdMs. argent's recogniser sees touch held in
-  // place → triggers long-press detection in the host RN gesture
-  // handler.
+  // Hold stationary: emit Move events at the same point with
+  // cumulative delays summing to holdMs. The recogniser sees the
+  // touch held in place long enough to trip the long-press detector.
   const holdSlices = 4;
   for (let i = 0; i < holdSlices; i++) {
     events.push({ type: 'Move', x: fromX, y: fromY, delayMs: Math.round(holdMs / holdSlices) });
   }
-  // Then drag toward target. Keep delayMs short so each Move arrives
-  // ~one frame apart; total over the move duration.
+  // Glide to target.
   const moveSlices = 8;
   for (let i = 1; i <= moveSlices; i++) {
     const t = i / moveSlices;
@@ -450,21 +448,17 @@ export async function longPressDrag(
       delayMs: Math.round(moveMs / moveSlices),
     });
   }
-  events.push({ type: 'Up', x: toX, y: toY, delayMs: 50 });
-  await callTool(
+  events.push({ type: 'Up', x: toX, y: toY, delayMs: 80 });
+  await callTool('gesture-custom', { udid, events, interpolate: 4 }, [
+    'run',
     'gesture-custom',
-    { udid, events, interpolate: 4 },
-    [
-      'run',
-      'gesture-custom',
-      '--udid',
-      udid,
-      '--events-json',
-      JSON.stringify(events),
-      '--interpolate',
-      '4',
-    ],
-  );
+    '--udid',
+    udid,
+    '--events-json',
+    JSON.stringify(events),
+    '--interpolate',
+    '4',
+  ]);
 }
 
 export async function typeText(udid: string, text: string): Promise<void> {
