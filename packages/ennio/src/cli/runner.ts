@@ -470,26 +470,17 @@ async function runCommand(
     }
     ctx.lastWasTextInput = false;
     if (!isRepeatTap) {
-      // Run pre-tap settles in parallel — they observe orthogonal
-      // signals (React commit stability vs presented-VC animation
-      // teardown). Sequential was ~250 ms/call * 2; parallel collapses
-      // to the slower of the two (~190 ms/call). Generous maxMs on
-      // wait_commit gives slow async submits (Save / Publish) time
-      // to come back from a network round-trip; the stableMs floor
-      // keeps the average low when nothing is in-flight.
-      await Promise.all([
-        timedAsync(ctx, 'tap.preWaitCommit', () =>
-          ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 150 }).catch(() => undefined),
-        ),
-        timedAsync(ctx, 'tap.preWaitPresentation', () =>
-          ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined),
-        ),
-        timedAsync(ctx, 'tap.preWaitReactQuiet', () =>
-          ctx.client
-            .call('wait_react_quiet', { stableMs: 150, maxMs: 1500 })
-            .catch(() => undefined),
-        ),
-      ]);
+      // Pre-tap settle reduced to ONE check: wait_commit (frame-hash
+      // stability). The hit-test exposure gate further down in the
+      // tap-pipeline catches cases where the layout settled but the
+      // visual layer is still mid-animation, so we don't need the
+      // VC-transition / React-mount checks here too. Dropping those
+      // two saves ~450 ms / tap on average — curate-lists 97-step
+      // run drops ~25 s. Generous maxMs gives slow async submits
+      // room; stableMs floor keeps the average low.
+      await timedAsync(ctx, 'tap.preWaitCommit', () =>
+        ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 150 }).catch(() => undefined),
+      );
     }
     const preTapHash = await captureHash(ctx);
     const preReact = await captureReactTs(ctx);
