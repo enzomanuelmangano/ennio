@@ -464,28 +464,21 @@ async function runCommand(
       // Run pre-tap settles in parallel — they observe orthogonal
       // signals (React commit stability vs presented-VC animation
       // teardown). Sequential was ~250 ms/call * 2; parallel collapses
-      // to the slower of the two (~190 ms/call).
+      // to the slower of the two (~190 ms/call). Generous maxMs on
+      // wait_commit gives slow async submits (Save / Publish) time
+      // to come back from a network round-trip; the stableMs floor
+      // keeps the average low when nothing is in-flight.
       await Promise.all([
         timedAsync(ctx, 'tap.preWaitCommit', () =>
-          ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined),
+          ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 150 }).catch(() => undefined),
         ),
         timedAsync(ctx, 'tap.preWaitPresentation', () =>
           ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined),
         ),
+        timedAsync(ctx, 'tap.preWaitReactQuiet', () =>
+          ctx.client.call('wait_react_quiet', { stableMs: 250, maxMs: 1500 }).catch(() => undefined),
+        ),
       ]);
-      // If the previous tap was on a button whose onPress runs async
-      // work (publish / save / submit / send / signIn / signOut /
-      // confirm), the standard hash-quiet exits while the callback
-      // is still in-flight. Block on React commits going quiet so
-      // the next tap doesn't race a still-mutating navigator stack.
-      const ASYNC_BTN_RE = /publish|submit|send|signIn|signOut|confirm|save/i;
-      if (ctx.lastTapTestID && ASYNC_BTN_RE.test(ctx.lastTapTestID)) {
-        await timedAsync(ctx, 'tap.preWaitAsyncSettle', () =>
-          ctx.client
-            .call('wait_react_quiet', { stableMs: 400, maxMs: 2000 })
-            .catch(() => undefined),
-        );
-      }
     }
     const preTapHash = await captureHash(ctx);
     const preReact = await captureReactTs(ctx);

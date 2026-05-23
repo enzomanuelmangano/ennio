@@ -276,7 +276,20 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
         onMainVoid([&]() {
-            UIView *v = [EnnioFinder findViewByTestID:testID];
+            // When multiple live views share a testID (e.g. Bluesky
+            // notifications screen has both a reply card and a follow
+            // card under feedItem-by-bob.test), prefer the visually
+            // topmost on-screen match. Picking the last-registered
+            // view via the swizzle's insertion order is non-deterministic
+            // because RN's mount ordering shifts between runs. Pinning
+            // to topmost Y matches what Maestro's accessibility scan
+            // surfaces first, so single-match testIDs behave the same
+            // while ambiguous ones disambiguate stably.
+            NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+            UIView *v = all.firstObject;
+            if (!v) {
+                v = [EnnioFinder findViewByTestID:testID];
+            }
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
@@ -535,9 +548,15 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         uint32_t maxMs = (uint32_t)argInt(a, @"maxMs", 5000);
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
-        UIView *v = [EnnioFinderManager waitForTestID:testID maxMs:maxMs];
-        if (v) {
+        // Block until at least one view registers (event-driven via
+        // the testID-index condvar), then resolve to the topmost-Y
+        // match via lookupAll. See find_by_testid for the rationale —
+        // we can't trust insertion order to be visually meaningful.
+        UIView *waited = [EnnioFinderManager waitForTestID:testID maxMs:maxMs];
+        if (waited) {
             onMainVoid([&]() {
+                NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+                UIView *v = all.firstObject ?: waited;
                 if ([EnnioFinder isOnScreen:v]) {
                     rect = [EnnioFinder windowRectFor:v];
                     found = YES;
