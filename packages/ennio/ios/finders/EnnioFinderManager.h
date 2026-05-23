@@ -1,17 +1,13 @@
 //
 // EnnioFinderManager.h
 //
-// Coordinates ennio's three finder strategies. Single entry point for
+// Coordinates ennio's finder strategies. Single entry point for
 // every "find a view" request from the socket handlers:
 //
 //   1. EnnioTestIDIndex   — O(1) hash lookup, populated by swizzling
 //                           UIView.setAccessibilityIdentifier
 //                           (arch-agnostic; catches every RN view).
-//   2. EnnioFinderPaper   — RCTUIManager._shadowViewRegistry walk
-//                           (RN Paper apps; sees views before UIKit
-//                           mount).
-//   3. EnnioFinderFabric  — Fabric ShadowTree (currently stub).
-//   4. EnnioFinderUIView  — last-resort UIWindow + presented-VC walk.
+//   2. EnnioFinderUIView  — last-resort UIWindow + presented-VC walk.
 //
 // The manager also implements the event-driven waiting:
 // `waitForTestID:maxMs:` blocks on the testID-index NSCondition,

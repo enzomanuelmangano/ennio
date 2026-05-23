@@ -4,7 +4,6 @@
 
 #import "EnnioFinderManager.h"
 
-#import "EnnioFinderFabric.h"
 #import "EnnioFinderUIView.h"
 
 #import "../EnnioTestIDIndex.h"
@@ -20,15 +19,7 @@
     //    propagate testID through this setter.
     UIView *v = [EnnioTestIDIndex lookup:testID];
     if (v && [EnnioFinder isOnScreen:v]) return v;
-    // 2. Fabric shadow tree — stub today, real impl pending. Fabric's
-    //    ShadowNode owns the testID prop directly (unlike Paper which
-    //    splits it onto the UIView side), so when wired this catches
-    //    views before UIKit mount on new-arch apps.
-    if ([EnnioFinderFabric isAvailable]) {
-        v = [EnnioFinderFabric findByTestID:testID];
-        if (v && [EnnioFinder isOnScreen:v]) return v;
-    }
-    // 3. UIView walk — fallback for host code that bypassed the
+    // 2. UIView walk — fallback for host code that bypassed the
     //    swizzled setter (KVC ivar writes, runtime class swap, etc.)
     //    or that assigned the identifier before our dylib loaded.
     v = [EnnioFinderUIView findByTestID:testID];
