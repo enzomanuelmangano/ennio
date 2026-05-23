@@ -20,8 +20,8 @@
 #import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
 #import "EnnioTestIDIndex.h"
-#import "PrivateAPI/EnnioTouchSynth.h"
-#import "finders/EnnioFinderManager.h"
+#import "EnnioTouchSynth.h"
+#import "EnnioFinderManager.h"
 
 #include "EnnioControlSocket.h"
 

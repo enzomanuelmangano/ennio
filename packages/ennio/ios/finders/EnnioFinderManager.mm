@@ -5,9 +5,8 @@
 #import "EnnioFinderManager.h"
 
 #import "EnnioFinderUIView.h"
-
-#import "../EnnioTestIDIndex.h"
-#import "../EnnioFinder.h"
+#import "EnnioTestIDIndex.h"
+#import "EnnioFinder.h"
 
 @implementation EnnioFinderManager
 

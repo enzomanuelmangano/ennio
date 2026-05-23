@@ -23,9 +23,13 @@ Pod::Spec.new do |s|
 
   s.pod_target_xcconfig = {
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+    # Recursive `**` so the ios/ subfolder layout (bootstrap/, finders/,
+    # observers/, ops/, handlers/) resolves a flat #import regardless
+    # of which folder the importer lives in. Xcode expands `**` to
+    # every descendant directory at build time.
     'HEADER_SEARCH_PATHS' => [
       '"$(PODS_TARGET_SRCROOT)/cpp"',
-      '"$(PODS_TARGET_SRCROOT)/ios"',
+      '"$(PODS_TARGET_SRCROOT)/ios/**"',
     ].join(' ')
   }
 

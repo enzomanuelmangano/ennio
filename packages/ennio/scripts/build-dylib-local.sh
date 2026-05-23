@@ -19,6 +19,13 @@ SRCS=()
 SRCS+=("$ROOT/cpp/EnnioControlSocket.cpp")
 while IFS= read -r f; do SRCS+=("$f"); done < <(find "$ROOT/ios" -name '*.mm')
 
+# Enumerate every directory under ios/ as a header search path so a
+# flat #import "EnnioFinder.h" resolves regardless of which subfolder
+# the header lives in. Mirrors the recursive HEADER_SEARCH_PATHS in
+# EnnioCore.podspec.
+INCLUDES=( -I"$ROOT/cpp" -I"$ROOT/ios" )
+while IFS= read -r d; do INCLUDES+=( -I"$d" ); done < <(find "$ROOT/ios" -type d)
+
 echo "Compiling ${#SRCS[@]} sources → $OUT"
 
 xcrun --sdk iphonesimulator clang++ \
@@ -29,8 +36,7 @@ xcrun --sdk iphonesimulator clang++ \
     -fobjc-arc \
     -fno-objc-arc-exceptions \
     -O2 \
-    -I"$ROOT/cpp" \
-    -I"$ROOT/ios" \
+    "${INCLUDES[@]}" \
     -framework Foundation \
     -framework UIKit \
     -framework QuartzCore \

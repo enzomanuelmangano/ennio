@@ -3,7 +3,7 @@
 //
 
 #import "EnnioTouchSynth.h"
-#import "../EnnioBootstrap.h"
+#import "EnnioBootstrap.h"
 
 #import <objc/runtime.h>
 

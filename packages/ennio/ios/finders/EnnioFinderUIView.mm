@@ -3,7 +3,7 @@
 //
 
 #import "EnnioFinderUIView.h"
-#import "../EnnioFinder.h"
+#import "EnnioFinder.h"
 
 @implementation EnnioFinderUIView
 
