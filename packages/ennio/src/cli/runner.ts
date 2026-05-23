@@ -1095,33 +1095,52 @@ async function runCommand(
   if ('waitForAnimationToEnd' in cmd) {
     const timeout =
       cmd.waitForAnimationToEnd === true ? 3000 : (cmd.waitForAnimationToEnd.timeout ?? 3000);
-    await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 150 });
-    return;
     // In-process: React-commit quiet. Catches RN-side animations
     // ending (sheet animateOut, navigation transition).
-  }
-  // Cross-process safety: PHPicker / share sheet / document picker
-  // dismiss in another XPC process — wait_commit is blind to that.
-  // Poll the in-process VC chain until no cross-process picker VC
-  // is presented. ~10 ms per poll (one socket round-trip), and we
-  // bail the instant the picker is gone, so cost is negligible on
-  // RN-only screens. Reusing the in-process `top_vc_chain` op:
-  // pure UIKit, no argent, no AX-server dependency.
-  const dismissDeadline = Date.now() + 2500;
-  while (Date.now() < dismissDeadline) {
-    const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-    if (!r || !r.ok) break;
-    const chain = (r.data as { chain?: string[] })?.chain ?? [];
-    const hasCrossProcess = chain.some(
-      (cls) =>
-        cls.includes('PHPicker') ||
-        cls.includes('PhotoPicker') ||
-        cls.includes('PHImagePicker') ||
-        cls.includes('UIActivityViewController') ||
-        cls.includes('UIDocumentPickerViewController'),
-    );
-    if (!hasCrossProcess) break;
-    await sleep(80);
+    await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 150 });
+    // Cross-process safety: PHPicker / share sheet / document picker
+    // dismiss in another XPC process — wait_commit is blind to that.
+    // Poll the in-process VC chain until no cross-process picker VC
+    // is presented. ~10 ms per poll (one socket round-trip), and we
+    // bail the instant the picker is gone, so cost is negligible on
+    // RN-only screens.
+    const dismissDeadline = Date.now() + 2500;
+    while (Date.now() < dismissDeadline) {
+      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
+      if (!r || !r.ok) break;
+      const chain = (r.data as { chain?: string[] })?.chain ?? [];
+      const hasCrossProcess = chain.some(
+        (cls) =>
+          cls.includes('PHPicker') ||
+          cls.includes('PhotoPicker') ||
+          cls.includes('PHImagePicker') ||
+          cls.includes('UIActivityViewController') ||
+          cls.includes('UIDocumentPickerViewController'),
+      );
+      if (!hasCrossProcess) break;
+      await sleep(80);
+    }
+    // Tail-end: also wait for any UIKit modal transition currently
+    // in flight (Bluesky's Edit-modal dismiss, RN-Navigation push/pop
+    // animations) by polling for VC-chain stability. Picks up
+    // transitions that don't fire React commits (UIKit-driven
+    // dismiss without RN state change).
+    let lastChain = '';
+    let stableCount = 0;
+    const stableDeadline = Date.now() + 1500;
+    while (Date.now() < stableDeadline) {
+      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
+      const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
+      if (cur === lastChain) {
+        stableCount++;
+        if (stableCount >= 3) break;
+      } else {
+        stableCount = 0;
+        lastChain = cur;
+      }
+      await sleep(80);
+    }
+    return;
   }
   if ('runScript' in cmd) {
     const scriptCmd = (cmd as { runScript: { file: string; env?: Record<string, string> } })
