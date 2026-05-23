@@ -124,6 +124,17 @@ static void swizzledSetAID(id self, SEL _cmd, NSString *testID) {
         for (UIView *v in bucket) {
             if (!v || !v.window) continue;
             if (![v.accessibilityIdentifier isEqualToString:testID]) continue;
+            // Filter on-screen: RN VirtualizedList recycles cells —
+            // off-screen cells stay mounted at synthetic positions
+            // (e.g. y = -10000) so their reuse is cheap. Including
+            // them in the sorted list breaks `index: N` semantics
+            // because the topmost-by-Y entry is a recycled cell,
+            // not the visually-first item. A simple frame-intersect
+            // with the window bounds is enough to drop them.
+            UIWindow *win = v.window;
+            CGRect winRect = [win convertRect:v.bounds fromView:v];
+            if (CGRectIsEmpty(CGRectIntersection(winRect, win.bounds))) continue;
+            if (v.hidden || v.alpha < 0.05) continue;
             [out addObject:v];
         }
     }

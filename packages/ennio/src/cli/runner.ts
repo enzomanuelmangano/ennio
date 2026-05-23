@@ -1467,12 +1467,18 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
         cls.includes('CropViewController') ||
         cls.includes('Mantis') ||
         cls.includes('PHPicker') ||
-        cls.includes('PhotoPicker'),
+        cls.includes('PhotoPicker') ||
+        cls.includes('BottomSheet') ||
+        cls.includes('SheetViewController') ||
+        cls.includes('UIAlertController'),
     );
     const maxRetaps = onLateRecogniserModal ? 5 : 1;
     for (let i = 0; i < maxRetaps; i++) {
       const hc = await ctx.client
-        .call('wait_hash_change', { sinceHash: baseHash, maxMs: onLateRecogniserModal ? 800 : 1500 })
+        .call('wait_hash_change', {
+          sinceHash: baseHash,
+          maxMs: onLateRecogniserModal ? 800 : 1500,
+        })
         .catch(() => undefined);
       const hashChanged = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
       const re = await sampleRect();
