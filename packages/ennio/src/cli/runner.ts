@@ -476,7 +476,9 @@ async function runCommand(
           ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined),
         ),
         timedAsync(ctx, 'tap.preWaitReactQuiet', () =>
-          ctx.client.call('wait_react_quiet', { stableMs: 250, maxMs: 1500 }).catch(() => undefined),
+          ctx.client
+            .call('wait_react_quiet', { stableMs: 250, maxMs: 3500 })
+            .catch(() => undefined),
         ),
       ]);
     }
@@ -1515,6 +1517,27 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
       await timedAsync(ctx, 'tap.selfHealRetap', () =>
         isTextOnlyTap ? hidPress(ctx.udid, c.x, c.y) : hidTapFast(ctx.udid, c.x, c.y),
       );
+    }
+    // Last-resort: if the entire retap loop above never moved the
+    // hash AND the target is still in the same place, the gesture
+    // recogniser likely never armed (RN onPress wired late after a
+    // remount, RNGH Pressable still in its initial layout pass).
+    // Invoke the accessibility activation handler directly — bypasses
+    // the gesture chain entirely. UIView's
+    // _accessibilityHandleUserTouchActivate is what VoiceOver fires
+    // when it double-taps an element, and React-Native Pressable
+    // hooks into accessibilityActivate so the React-side onPress runs
+    // through the same path. Costs one extra round-trip when the
+    // normal tap worked (we exit the loop early via hashChanged), and
+    // recovers the cases where it didn't.
+    if (sel.id) {
+      const finalHc = await ctx.client
+        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 80 })
+        .catch(() => undefined);
+      const finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
+      if (!finalChanged) {
+        await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
+      }
     }
   }
 }

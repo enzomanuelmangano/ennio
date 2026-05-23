@@ -114,10 +114,62 @@ static void swizzledSetAID(id self, SEL _cmd, NSString *testID) {
 // bottom), then X (left-to-right). Lets Maestro's `index: N` selector
 // pick the Nth visible match — needed for postDropdownBtn / replyBtn
 // flows that operate on a specific feed item.
+// Walk a view's responder chain to find its hosting UIViewController.
+// UIKit's -[UIView _viewControllerForAncestor] is private; the public
+// equivalent is the responder chain — UIViewController is a responder
+// inserted between its view and the view's parent view.
+static UIViewController *_Nullable hostingVC(UIView *v) {
+    UIResponder *r = v;
+    while (r) {
+        r = r.nextResponder;
+        if ([r isKindOfClass:UIViewController.class]) return (UIViewController *)r;
+    }
+    return nil;
+}
+
+// Walk down the presentedViewController chain from a window's root and
+// return the deepest non-dismissing VC — that's the modal currently
+// receiving touches. Returns nil if no scene/window is reachable.
+static UIViewController *_Nullable topmostPresentedVC(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        UIWindowScene *ws = (UIWindowScene *)scene;
+        UIWindow *keyWin = nil;
+        for (UIWindow *w in ws.windows) {
+            if (w.isKeyWindow) { keyWin = w; break; }
+        }
+        if (!keyWin) continue;
+        UIViewController *vc = keyWin.rootViewController;
+        while (vc.presentedViewController && !vc.presentedViewController.isBeingDismissed) {
+            vc = vc.presentedViewController;
+        }
+        return vc;
+    }
+    return nil;
+}
+
+// True iff `vc` is the topmost VC, or is contained inside it (its view
+// is a descendant of the topmost's view). Container VCs (UINavigation,
+// UITabBar, UIPageViewController) all wire their child VCs' views as
+// subviews of their own, so this check correctly accepts a nested
+// search results screen while a sheet is presented above it.
+static BOOL vcIsInTopmost(UIViewController *vc, UIViewController *topmost) {
+    if (!vc || !topmost) return YES; // fail-open if we couldn't resolve
+    if (vc == topmost) return YES;
+    UIView *topView = topmost.view;
+    UIView *probe = vc.view;
+    while (probe) {
+        if (probe == topView) return YES;
+        probe = probe.superview;
+    }
+    return NO;
+}
+
 + (NSArray<UIView *> *)lookupAll:(NSString *)testID {
     if (!testID.length) return @[];
     ensureInit();
     NSMutableArray<UIView *> *out = [NSMutableArray array];
+    UIViewController *topmost = topmostPresentedVC();
     os_unfair_lock_lock(&g_lock);
     NSHashTable<UIView *> *bucket = g_index[testID];
     if (bucket) {
@@ -134,7 +186,28 @@ static void swizzledSetAID(id self, SEL _cmd, NSString *testID) {
             UIWindow *win = v.window;
             CGRect winRect = [win convertRect:v.bounds fromView:v];
             if (CGRectIsEmpty(CGRectIntersection(winRect, win.bounds))) continue;
+            // Tighter on-screen check: a view with its center outside
+            // the window is not tappable, even if the bounding box
+            // technically clips into the window. Bluesky's edit profile
+            // page sometimes keeps a stale profileHeaderEditProfileButton
+            // mounted at y ≈ -3 after the second save cycle (RN's
+            // remount path), and the wider intersection check picks it
+            // up as "topmost" by Y. Tap fires at y=-3, lands in the
+            // status-bar inset, no gesture armed there.
+            CGPoint center = CGPointMake(CGRectGetMidX(winRect), CGRectGetMidY(winRect));
+            if (!CGRectContainsPoint(win.bounds, center)) continue;
             if (v.hidden || v.alpha < 0.05) continue;
+            // Filter to topmost presented VC: when a modal sheet is up
+            // (Bluesky composer, action sheets, settings modals), the
+            // underlying scroll-view children stay mounted with valid
+            // window rects but are covered by the modal. Touches can't
+            // reach them, so they must not be candidates. Walks the
+            // hosting VC's view up to topmost.view; accepts container
+            // VCs (navigation, page-view) whose children render inside
+            // the topmost. Fail-open when either resolution fails so
+            // we never block normal taps.
+            UIViewController *vvc = hostingVC(v);
+            if (!vcIsInTopmost(vvc, topmost)) continue;
             [out addObject:v];
         }
     }

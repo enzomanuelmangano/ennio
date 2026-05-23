@@ -25,6 +25,7 @@
 #import "EnnioOps.h"
 #import "EnnioBootstrap.h"
 #import "EnnioFinder.h"
+#import "EnnioTestIDIndex.h"
 
 #import <objc/runtime.h>
 
@@ -481,7 +482,12 @@ static BOOL anyVCInTransition(UIViewController *root) {
 }
 
 + (BOOL)activateByTestID:(NSString *)testID {
-    UIView *v = [EnnioFinder findViewByTestID:testID];
+    // Use the same topmost-Y disambiguation as find_by_testid so the
+    // activate fallback fires the same logical view our gesture-tap
+    // would target. Legacy findViewByTestID returns the last-registered
+    // entry which can be a detached or off-screen remount.
+    NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+    UIView *v = all.firstObject ?: [EnnioFinder findViewByTestID:testID];
     return [self activateView:v];
 }
 
