@@ -1173,7 +1173,6 @@ async function runCommand(
   log(ctx, `  (unsupported in v0.1, skipped: ${describeCommand(cmd)})`);
 }
 
-
 function maestroHttpSyncOnce(
   method: string,
   url: string,
@@ -1272,4 +1271,3 @@ function logStep(ctx: RunContext, step: number, ms: number, cmd: string): void {
   const msStr = String(ms).padStart(5);
   process.stderr.write(`[ennio] ${stepStr}  ${msStr}ms  ${cmd}\n`);
 }
-

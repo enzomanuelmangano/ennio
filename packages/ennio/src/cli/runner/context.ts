@@ -30,11 +30,7 @@ export const POLL_MS = 100;
 /// The NEXT step's find waits longer when the previous tap landed on
 /// one of these. Strictly testID-based; this is the canonical set of
 /// Bluesky-defined identifiers, not English-text matching.
-export const MEDIA_TRIGGER_IDS = new Set([
-  'openMediaBtn',
-  'changeBannerBtn',
-  'changeAvatarBtn',
-]);
+export const MEDIA_TRIGGER_IDS = new Set(['openMediaBtn', 'changeBannerBtn', 'changeAvatarBtn']);
 export const FIND_DEADLINE_MEDIA_MS = 5000;
 export const FIND_DEADLINE_DEFAULT_MS = 2500;
 
