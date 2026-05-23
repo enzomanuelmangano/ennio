@@ -286,13 +286,28 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
             // surfaces first, so single-match testIDs behave the same
             // while ambiguous ones disambiguate stably.
             NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
-            UIView *v = all.firstObject;
-            if (!v) {
-                v = [EnnioFinder findViewByTestID:testID];
+            // Walk every match in Y-order; lookupAll's filters
+            // accept views whose own hidden/alpha are fine, but
+            // isOnScreen ALSO checks ancestor hidden/alpha. RN
+            // sometimes keeps stale mounts in the tree with hidden
+            // ancestors after navigation — the testID stays alive
+            // but the view is dark. The first lookupAll hit can be
+            // that stale mount, so iterate until we find one that
+            // both has a usable frame and is genuinely visible
+            // through its ancestor chain.
+            for (UIView *cand in all) {
+                if ([EnnioFinder isOnScreen:cand]) {
+                    rect = [EnnioFinder windowRectFor:cand];
+                    found = YES;
+                    break;
+                }
             }
-            if (v && [EnnioFinder isOnScreen:v]) {
-                rect = [EnnioFinder windowRectFor:v];
-                found = YES;
+            if (!found) {
+                UIView *v = [EnnioFinder findViewByTestID:testID];
+                if (v && [EnnioFinder isOnScreen:v]) {
+                    rect = [EnnioFinder windowRectFor:v];
+                    found = YES;
+                }
             }
         });
         if (!found) throw std::runtime_error("testID not found");
@@ -576,16 +591,39 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         // the testID-index condvar), then resolve to the topmost-Y
         // match via lookupAll. See find_by_testid for the rationale —
         // we can't trust insertion order to be visually meaningful.
+        // Event-driven loop: each time the testID-index broadcasts
+        // (a setAccessibilityIdentifier swizzle hit), retry the
+        // visibility walk. Multiple views can share a testID — RN
+        // keeps stale mounts in the tree with hidden ancestors after
+        // navigation, and the first lookupAll hit can be the stale
+        // mount. waitForTestID returning a view only proves the
+        // identifier exists somewhere; we still have to find the one
+        // that's actually visible.
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:maxMs / 1000.0];
         UIView *waited = [EnnioFinderManager waitForTestID:testID maxMs:maxMs];
-        if (waited) {
+        while (waited && [deadline timeIntervalSinceNow] > 0) {
             onMainVoid([&]() {
                 NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
-                UIView *v = all.firstObject ?: waited;
-                if ([EnnioFinder isOnScreen:v]) {
-                    rect = [EnnioFinder windowRectFor:v];
+                for (UIView *cand in all) {
+                    if ([EnnioFinder isOnScreen:cand]) {
+                        rect = [EnnioFinder windowRectFor:cand];
+                        found = YES;
+                        break;
+                    }
+                }
+                if (!found && [EnnioFinder isOnScreen:waited]) {
+                    rect = [EnnioFinder windowRectFor:waited];
                     found = YES;
                 }
             });
+            if (found) break;
+            // No visible match yet — sleep until the next register
+            // event or 50 ms, whichever comes first.
+            uint32_t remaining = (uint32_t)([deadline timeIntervalSinceNow] * 1000);
+            uint32_t step = remaining < 50 ? remaining : 50;
+            if (step == 0) break;
+            UIView *next = [EnnioFinderManager waitForTestID:testID maxMs:step];
+            if (next) waited = next;
         }
         if (!found) throw std::runtime_error("testID not found");
         return rectJson(rect);

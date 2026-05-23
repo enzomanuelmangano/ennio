@@ -1171,7 +1171,7 @@ async function runCommand(
     );
     let observedChange = false;
     let lastChain = baselineChain;
-    const changeDeadline = Date.now() + 3500;
+    const changeDeadline = Date.now() + 1500;
     while (Date.now() < changeDeadline) {
       const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
       const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
@@ -1460,7 +1460,12 @@ async function execTapOn(ctx: RunContext, sel: MaestroSelector, preHash?: string
     const exposed = !!(ex && ex.ok && ex.data && (ex.data as { exposed?: boolean }).exposed);
     if (!exposed) {
       await timedAsync(ctx, 'tap.waitExposed', async () => {
-        const deadline = Date.now() + 2000;
+        // 800 ms cap: RN animations (sheet present/dismiss, modal
+        // slide) are typically 300-500 ms. 2 s was historical
+        // paranoia; trimming here saves up to 1.2 s on every
+        // outlier where hit-test fails. The retap-self-heal loop
+        // covers any case where the initial tap still misses.
+        const deadline = Date.now() + 800;
         while (Date.now() < deadline) {
           await sleep(80);
           const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
