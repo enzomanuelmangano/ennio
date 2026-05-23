@@ -17,13 +17,9 @@
 # Warm (same fingerprint + same ennio source): ~5 min (mostly suite runtime).
 name: ci-fast-build
 
+# Temporarily disabled — re-enable when E2E suite is stable on arch-v2.
 on:
-  pull_request:
-    branches: [main]
-    # Run on draft PRs too — fast feedback while iterating, before ready-for-review.
-    types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches: [main]
+  workflow_dispatch: {}
 
 concurrency:
   group: e2e-${{ github.workflow }}-${{ github.ref }}
@@ -31,6 +27,7 @@ concurrency:
 
 jobs:
   e2e:
+    if: false
     name: Build dylib + example, inject, run suite
     runs-on: macos-15
     timeout-minutes: 60

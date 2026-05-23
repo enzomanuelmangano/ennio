@@ -571,28 +571,21 @@ async function runCommand(
         // race the next find on slow Hermes mounts.
         await timedAsync(ctx, 'tap.postSleep', () => sleep(POST_TAP_SETTLE_MS));
       }
-      // 350 ms of commit-quiet outlasts:
-      // - setState batching (Bluesky composer close: setState
-      //   synchronous but commit clears overlay 100-200 ms later)
-      // - React-Navigation pop animations (~500 ms spring, RN
-      //   commits sprinkled across the curve, last one near the
-      //   end of the dismiss)
-      // - List re-layouts after data change
-      // Below ~300 ms we race the next tap onto a still-transitioning
-      // back-arrow on Bluesky's Feeds settings → next tap targets a
-      // stale view that the gesture-recogniser briefly ignores.
+      // 350 ms of commit-quiet outlasts setState batching, RN-Nav
+      // pop animations, list re-layouts. Below ~300 ms we race the
+      // next tap onto a still-transitioning view. maxMs trimmed
+      // 1500 → 800: in practice the screen stabilizes within
+      // 300-500 ms of the dismiss, so 800 ms is generous headroom
+      // without paying for the legacy worst-case ceiling.
       await timedAsync(ctx, 'tap.postWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 350 }).catch(() => undefined),
+        ctx.client.call('wait_commit', { maxMs: 800, stableMs: 350 }).catch(() => undefined),
       );
-      // Tail-end: also wait for any UIKit-level presentation
-      // transition (modal dismiss, RN-Navigation interactive pop) to
-      // finish. wait_commit catches RN-driven repaints but is blind
-      // to UIKit animations that don't issue React commits — e.g.
-      // Bluesky's Edit-Feeds modal dismiss runs purely on UIKit
-      // animation curves. wait_presentation_idle exits the instant
-      // no VC has a transitionCoordinator. Bounded cheaply: returns
-      // immediately when nothing is animating.
-      await ctx.client.call('wait_presentation_idle', { maxMs: 1500 }).catch(() => undefined);
+      // Tail-end: UIKit-level transitions (modal dismiss, RN-Nav
+      // interactive pop) that don't fire React commits. The
+      // transitionCoordinator on the dismissing VC clears in
+      // 300-400 ms; 500 ms cap covers normal cases. wait_commit
+      // above already absorbs longer JS-driven settle.
+      await ctx.client.call('wait_presentation_idle', { maxMs: 500 }).catch(() => undefined);
     }
     ctx.lastTapKey = tapKey;
     ctx.lastTapTestID = sel.id;

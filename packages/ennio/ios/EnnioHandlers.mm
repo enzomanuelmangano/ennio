@@ -398,10 +398,14 @@ static std::string stringArrayJson(NSArray<NSString *> *arr) {
         if (!testID.length) throw std::runtime_error("missing testID");
         BOOL visible = NO;
         onMainVoid([&]() {
-            // Prefer topmost-Y (live, on-screen, in-topmost-VC). If
-            // none matches, fall back to any view registered with the
-            // testID so we can scroll it into view below.
+            // Iterate every lookupAll match through isOnScreen — the
+            // firstObject can be a stale mount whose ancestor is
+            // hidden. Only after exhausting the index do we fall back
+            // to the legacy UIKit walk + auto-scroll.
             NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+            for (UIView *cand in all) {
+                if ([EnnioFinder isOnScreen:cand]) { visible = YES; return; }
+            }
             UIView *v = all.firstObject ?: [EnnioFinder findViewByTestID:testID];
             if (v && [EnnioFinder isOnScreen:v]) { visible = YES; return; }
             // Auto-scroll: Maestro's assertVisible auto-scrolls within

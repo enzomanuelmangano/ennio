@@ -232,6 +232,52 @@ static void collectByText(UIView *root, NSString *text, NSMutableArray<UIView *>
     for (UIView *sub in root.subviews) collectByText(sub, text, out);
 }
 
+// Topmost-VC helpers — duplicated from EnnioTestIDIndex.mm because
+// they're file-local statics there and we want the same semantics for
+// text-based finds. When a modal sheet is up, find_by_text must not
+// return a view that lives in the underlying scene's VC subtree
+// (e.g. the bottom tab bar's "Search" button hidden behind a
+// BottomSheet "Add people to list" modal — its label still matches
+// but its host VC is the underlying tab controller, not the sheet).
+static UIViewController *_Nullable finderHostingVC(UIView *v) {
+    UIResponder *r = v;
+    while (r) {
+        r = r.nextResponder;
+        if ([r isKindOfClass:UIViewController.class]) return (UIViewController *)r;
+    }
+    return nil;
+}
+
+static UIViewController *_Nullable finderTopmostPresentedVC(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        UIWindowScene *ws = (UIWindowScene *)scene;
+        UIWindow *keyWin = nil;
+        for (UIWindow *w in ws.windows) {
+            if (w.isKeyWindow) { keyWin = w; break; }
+        }
+        if (!keyWin) continue;
+        UIViewController *vc = keyWin.rootViewController;
+        while (vc.presentedViewController && !vc.presentedViewController.isBeingDismissed) {
+            vc = vc.presentedViewController;
+        }
+        return vc;
+    }
+    return nil;
+}
+
+static BOOL finderVCInTopmost(UIViewController *vc, UIViewController *topmost) {
+    if (!vc || !topmost) return YES; // fail-open
+    if (vc == topmost) return YES;
+    UIView *topView = topmost.view;
+    UIView *probe = vc.view;
+    while (probe) {
+        if (probe == topView) return YES;
+        probe = probe.superview;
+    }
+    return NO;
+}
+
 // Coarse on-screen check used by walkByText to skip transient/hidden
 // view-tree clones (UINavigationBar pre-renders 2 copies of every
 // title during transitions; only one is actually on screen).
@@ -283,12 +329,20 @@ static UIView *_Nullable walkByText(UIView *root, NSString *text) {
     if (!root) return nil;
     NSMutableArray<UIView *> *matches = [NSMutableArray new];
     collectByText(root, text, matches);
+    UIViewController *topmost = finderTopmostPresentedVC();
     // Bucket candidates by selection-priority tier, then within each
     // tier pick the smallest. Without the size tie-break, an oversized
     // TextField wrapper whose a11y label equals "Description" outranks
     // the actual UILabel above it — a tap meant to defocus the field
     // re-focuses it instead, and the iOS edit-menu popover never
     // dismisses (blocks the next Save tap).
+    //
+    // Adds a topmost-VC filter: when a modal is presented, only
+    // accept candidates whose host VC is the topmost. Without this,
+    // a tab bar button labelled "Search" hidden behind a
+    // BottomSheet outranks the sheet's search input field — the tap
+    // fires at the bottom tab bar coord, lands on the sheet backdrop
+    // at that point, and dismisses the sheet.
     NSMutableArray<UIView *> *exactOnscreenInteractive = [NSMutableArray new];
     NSMutableArray<UIView *> *exactOnscreen = [NSMutableArray new];
     NSMutableArray<UIView *> *anyOnscreenInteractive = [NSMutableArray new];
@@ -296,6 +350,8 @@ static UIView *_Nullable walkByText(UIView *root, NSString *text) {
     for (UIView *v in matches) {
         BOOL onscreen = viewIsLikelyOnScreen(v);
         BOOL inter = isInteractive(v);
+        BOOL inTop = finderVCInTopmost(finderHostingVC(v), topmost);
+        if (!inTop) continue;
         int rank = viewTextMatchRank(v, text);
         if (rank == 2 && onscreen && inter) [exactOnscreenInteractive addObject:v];
         if (rank == 2 && onscreen) [exactOnscreen addObject:v];
