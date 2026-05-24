@@ -270,6 +270,7 @@ jobs:
         working-directory: example
         env:
           ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+          ENNIO_DYLIB_PATH: ${{ github.workspace }}/packages/ennio/prebuilt/libennio-rn${{ steps.rn.outputs.version }}-sim.dylib
         run: |
           mkdir -p /tmp/ennio-logs
           PASS=0; FAIL=0

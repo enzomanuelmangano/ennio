@@ -1,0 +1,4 @@
+appId: com.ennio.example
+---
+- tapOn:
+    text: Cart

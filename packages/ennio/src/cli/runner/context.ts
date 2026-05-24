@@ -139,7 +139,11 @@ export async function timedAsync<T>(
   try {
     return await fn();
   } finally {
-    recordPhase(ctx, name, Date.now() - t);
+    const dt = Date.now() - t;
+    recordPhase(ctx, name, dt);
+    if (process.env.ENNIO_PHASE_TRACE) {
+      process.stderr.write(`[phase] ${name} ${dt}ms\n`);
+    }
   }
 }
 

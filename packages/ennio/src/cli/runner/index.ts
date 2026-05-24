@@ -479,9 +479,33 @@ async function runCommand(
         return ts.ts || since + (data.elapsedMs ?? 0);
       };
       const committed = await timedAsync(ctx, 'tap.postWaitReactCommit', async () => {
-        const after1 = await waitOneCommit(preReact.ts, 600);
-        if (!after1) return false;
-        await waitOneCommit(after1, 250);
+        // Poll hash + react-commit briefly. The dylib's
+        // wait_react_commit observer routinely misses commits under
+        // iOS 26's native nav transition (UIKit swaps VCs natively
+        // before RN's mount-method swizzle fires), burning the full
+        // 600ms cap on EVERY tap. Poll captureHash directly with a
+        // short cap and return as soon as the screen changes — that
+        // proves the press handler ran. Login.yml regression (typing
+        // before keyboard mount commit) handled by the nextEditsField
+        // branch below.
+        const deadline = Date.now() + 300;
+        let hashChanged = false;
+        while (Date.now() < deadline) {
+          const cur = await captureHash(ctx);
+          if (cur !== preTapHash) {
+            hashChanged = true;
+            break;
+          }
+          const after = await waitOneCommit(preReact.ts, 30);
+          if (after) {
+            hashChanged = true;
+            break;
+          }
+        }
+        if (!hashChanged) return false;
+        if (nextEditsField) {
+          await waitOneCommit(preReact.ts, 250);
+        }
         return true;
       });
       if (!committed) {
@@ -986,8 +1010,8 @@ async function runCommand(
     // mid-mount when the swipe Down event arrived; the recogniser
     // received only the Up event after attaching, which it dropped
     // as a no-op.
-    await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 350 }).catch(() => undefined);
-    await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
+    await ctx.client.call('wait_commit', { maxMs: 1200, stableMs: 200 }).catch(() => undefined);
+    await ctx.client.call('wait_presentation_idle', { maxMs: 400 }).catch(() => undefined);
     // Maestro default swipe duration is 400 ms (verified with
     // `maestro test` on a swipe-only flow: "Swipe ... in 400 ms").
     // We previously defaulted to 250 ms which was fast enough for
@@ -1092,10 +1116,12 @@ async function runCommand(
   }
   if ('waitForAnimationToEnd' in cmd) {
     const timeout =
-      cmd.waitForAnimationToEnd === true ? 3000 : (cmd.waitForAnimationToEnd.timeout ?? 3000);
+      cmd.waitForAnimationToEnd === true ? 1500 : (cmd.waitForAnimationToEnd.timeout ?? 1500);
     // In-process: React-commit quiet. Catches RN-side animations
-    // ending (sheet animateOut, navigation transition).
-    await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 150 });
+    // ending (sheet animateOut, navigation transition). 1.5s cap is
+    // enough for any typical RN animation (300-500ms); the previous
+    // 3s cap was burned on background re-renders that never settle.
+    await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 100 });
     // Cross-process safety: PHPicker / share sheet / document picker
     // dismiss in another XPC process — wait_commit is blind to that.
     // Poll the in-process VC chain until no cross-process picker VC

@@ -260,12 +260,7 @@ async function callTool(
   throw new Error(`unsupported tool: ${toolName}`);
 }
 
-export async function tap(
-  udid: string,
-  x: number,
-  y: number,
-  holdSec?: number,
-): Promise<void> {
+export async function tap(udid: string, x: number, y: number, holdSec?: number): Promise<void> {
   const { w, h } = await getScreenSize(udid);
   const nx = Math.max(0, Math.min(1, x / w));
   const ny = Math.max(0, Math.min(1, y / h));
