@@ -121,32 +121,24 @@ jobs:
           EXPO_SDK=$(jq -r '.dependencies.expo' "$GITHUB_WORKSPACE/example/package.json")
           npm pkg set "dependencies.expo=$EXPO_SDK"
           npm pkg set "dependencies.react-native=$RN_VERSION"
-          npm pkg set "dependencies.react-native-nitro-modules=^0.35.5"
-          npm pkg set "dependencies.@reactiive/ennio=file:$GITHUB_WORKSPACE/packages/ennio"
-          npm pkg set "devDependencies.@reactiive/ennio-expo-plugin=file:$GITHUB_WORKSPACE/packages/ennio-expo-plugin"
           npm install --legacy-peer-deps --no-audit --no-fund
-          # EnnioCore.podspec requires iOS 17.0. Expo's default is lower.
-          node -e "
-            const fs=require('fs');
-            const j=JSON.parse(fs.readFileSync('app.json'));
-            j.expo.ios = j.expo.ios || {};
-            j.expo.ios.deploymentTarget = '17.0';
-            fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
-          "
-          # Stamp a unique bundle id. The default `com.anonymous.scratch`
-          # collides with a published App Store app, which makes
-          # `expo prebuild` prompt interactively and fail in CI.
+          # Stamp a unique bundle id so expo prebuild doesn't prompt.
           UNIQUE_ID="com.reactiive.ennio.scratch.ci$(date +%s)$RANDOM"
           node -e "
             const fs=require('fs');
             const j=JSON.parse(fs.readFileSync('app.json'));
-            j.expo.plugins = (j.expo.plugins||[]).concat(['@reactiive/ennio-expo-plugin']);
             j.expo.ios = j.expo.ios || {};
             j.expo.ios.bundleIdentifier = '$UNIQUE_ID';
+            j.expo.ios.deploymentTarget = '17.0';
             fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
           "
           npx expo prebuild --platform ios --clean --non-interactive
           cd ios
+          # Add EnnioCore pod directly — no expo plugin or npm dep needed.
+          sed -i '' "/target '.*' do/a\\
+            pod 'EnnioCore', :path => ENV['GITHUB_WORKSPACE'] + '/packages/ennio'
+          " Podfile
+          pod install
           WORKSPACE=$(ls -d *.xcworkspace | head -1)
           xcodebuild \
             -workspace "$WORKSPACE" \
