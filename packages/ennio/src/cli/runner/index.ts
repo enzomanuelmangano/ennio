@@ -507,8 +507,12 @@ async function runCommand(
           const cur = await captureHash(ctx);
           if (cur !== preTapHash) {
             const animR = await ctx.client.call('animations_active').catch(() => undefined);
-            const animActive =
-              !!(animR && animR.ok && animR.data && (animR.data as { active?: boolean }).active);
+            const animActive = !!(
+              animR &&
+              animR.ok &&
+              animR.data &&
+              (animR.data as { active?: boolean }).active
+            );
             if (!animActive) {
               if (nextEditsField) {
                 await waitOneCommit(preReact.ts, 250);
