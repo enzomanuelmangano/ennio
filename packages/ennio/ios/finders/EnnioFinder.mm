@@ -345,13 +345,17 @@ static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
         return v;
     }
     // Cap promotion by area: don't return an ancestor whose window-
-    // space area is more than 6× the matched view's area. Without
-    // this, an outer drag-gesture container (e.g. a bottom-sheet's
-    // pan-to-dismiss RNGestureHandlerButton wrapping all rows) wins
-    // over the per-row Pressable, and the tap lands on the row whose
-    // current y intersects the cached center — usually the wrong one.
+    // space area is more than 25× the matched view's area. Without
+    // a cap, an outer drag-gesture container (e.g. a bottom-sheet's
+    // pan-to-dismiss handler wrapping all rows) wins over the per-row
+    // Pressable, and the tap lands on whatever row happens to
+    // intersect the cached center. The 25× threshold allows realistic
+    // label→button promotions (iOS 26 liquid-glass tab labels are
+    // ~10× smaller than their interactive tab button; bsky's Link
+    // wrapping a Text node is ~15× larger) while still rejecting
+    // whole-screen drag containers (typically 60×+ vs an inner row).
     CGFloat baseArea = viewWindowArea(v);
-    CGFloat areaCap = (baseArea > 0 && baseArea < CGFLOAT_MAX) ? baseArea * 6.0 : CGFLOAT_MAX;
+    CGFloat areaCap = (baseArea > 0 && baseArea < CGFLOAT_MAX) ? baseArea * 25.0 : CGFLOAT_MAX;
     UIView *cur = v.superview;
     for (int hop = 0; hop < 6 && cur; hop++, cur = cur.superview) {
         if (!cur.userInteractionEnabled) continue;
