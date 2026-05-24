@@ -458,21 +458,24 @@ static BOOL anyVCInTransition(UIViewController *root) {
     // synthesized touch + hit-test indirection. UIView's default
     // accessibilityActivate synthesizes a tap at the view's
     // activation point and re-hit-tests; for stacked 1×1 px e2e
-    // controls (Bluesky), this can resolve to the wrong sibling.
+    // controls or sibling Pressables sharing a hit region, this
+    // can resolve to the wrong target.
     SEL tap = NSSelectorFromString(@"_accessibilityHandleUserTouchActivate");
     if ([v respondsToSelector:tap]) {
-        // Private but stable since iOS 10.
         IMP imp = [v methodForSelector:tap];
         ((void (*)(id, SEL))imp)(v, tap);
         return YES;
     }
-    // Find the first UIGestureRecognizer in the view's chain whose
-    // target action looks like a Pressable / TouchableX onPress and
-    // invoke it via the recognizer's _handleAction selector.
+    // Try the public accessibilityActivate first now — RN Fabric's
+    // Pressable wires `onPress` through this by setting an
+    // accessibility-activation block on the view. Cheaper and more
+    // reliable on Fabric than the gesture-recogniser walk.
+    if ([v accessibilityActivate]) return YES;
+    // Walk ancestor chain for any UITapGestureRecognizer that
+    // exposes _handleAction (TouchableX / RNGH GestureHandlerButton).
     for (UIView *cur = v; cur; cur = cur.superview) {
         for (UIGestureRecognizer *g in cur.gestureRecognizers) {
             if (!g.isEnabled) continue;
-            // RNGH's GestureHandlerButton uses UITapGestureRecognizer.
             if ([g isKindOfClass:UITapGestureRecognizer.class]) {
                 SEL fire = NSSelectorFromString(@"_handleAction");
                 if ([g respondsToSelector:fire]) {
@@ -483,9 +486,26 @@ static BOOL anyVCInTransition(UIViewController *root) {
             }
         }
     }
-    // Last resort: the original accessibilityActivate, in case the
-    // view has overridden it usefully.
-    if ([v accessibilityActivate]) return YES;
+    // Subview walk — RN Pressable in Fabric occasionally hosts the
+    // tap recogniser on a child responder view (RCTSurfaceTouchHandler
+    // adapter / RCTPressabilityProxy). Try them all before giving up.
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:v];
+    while (stack.count) {
+        UIView *cur = stack.lastObject;
+        [stack removeLastObject];
+        for (UIGestureRecognizer *g in cur.gestureRecognizers) {
+            if (!g.isEnabled) continue;
+            if ([g isKindOfClass:UITapGestureRecognizer.class]) {
+                SEL fire = NSSelectorFromString(@"_handleAction");
+                if ([g respondsToSelector:fire]) {
+                    IMP imp = [g methodForSelector:fire];
+                    ((void (*)(id, SEL))imp)(g, fire);
+                    return YES;
+                }
+            }
+        }
+        for (UIView *sub in cur.subviews) [stack addObject:sub];
+    }
     return NO;
 }
 
