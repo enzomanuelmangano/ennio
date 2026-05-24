@@ -459,7 +459,17 @@ async function runCommand(
       !!nextRawCmd &&
       typeof nextRawCmd === 'object' &&
       ('inputText' in nextRawCmd || 'eraseText' in nextRawCmd || 'clearText' in nextRawCmd);
-    if (sel.id && /Input$/i.test(sel.id) && nextEditsField) {
+    if (sel.id && nextEditsField) {
+      // Call focus_testid for ANY testID-targeted tap that precedes
+      // an inputText/eraseText. Was previously gated on testID
+      // matching /Input$/, which excluded fields named
+      // payment-card-number / shipping-zip / etc. On slow CI those
+      // taps occasionally don't make the field firstResponder by
+      // the time inputText runs, so the chars land in whichever
+      // field WAS focused — usually the previous one — and the
+      // form ends up with the wrong text in the wrong field.
+      // becomeFirstResponder is deterministic; safe to invoke ahead
+      // of the regular HID tap (which still fires as belt-and-braces).
       await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
     }
     await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
