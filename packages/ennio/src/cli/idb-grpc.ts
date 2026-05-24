@@ -75,6 +75,42 @@ export class IdbGrpcClient {
     });
   }
 
+  /** Two consecutive taps at the same point within one HID session.
+   *  The second tap fires immediately after the first's UP, giving
+   *  the simulator a Down→Up→Down→Up sequence with a tight gap that
+   *  UITapGestureRecognizer recognises as a double-tap.
+   *
+   *  Why batch in a single stream: tap() closes its stream after each
+   *  press to force iOS to flush the touch session. Calling tap()
+   *  twice in a row therefore inserts a stream open/close roundtrip
+   *  between the two taps — the resulting gap is wider than UIKit's
+   *  ~350 ms double-tap window, so the second tap registers as a new
+   *  single tap and onPress (not onDoublePress) fires. Keeping the
+   *  whole sequence on one stream eliminates that gap. */
+  async doubleTap(x: number, y: number, gapMs: number = 80, holdMs: number = 60): Promise<void> {
+    const stream = await this.openFreshStream();
+    const writeOne = (msg: object) =>
+      new Promise<void>((res, rej) => {
+        const ok = stream.write(msg, (err?: Error) => (err ? rej(err) : res()));
+        if (!ok) stream.once('drain', () => res());
+      });
+    const point = { x, y };
+    try {
+      for (let i = 0; i < 2; i++) {
+        await writeOne({ press: { action: { touch: { point } }, direction: 'DOWN' } });
+        await new Promise((res) => setTimeout(res, holdMs));
+        await writeOne({ press: { action: { touch: { point } }, direction: 'UP' } });
+        if (i === 0) await new Promise((res) => setTimeout(res, gapMs));
+      }
+    } finally {
+      try {
+        stream.end();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   /** Tap (down + delay + up) at sim window coordinates. */
   async tap(x: number, y: number, durationSec: number = 0.08): Promise<void> {
     // Open a fresh session per tap. Long-lived streams were observed

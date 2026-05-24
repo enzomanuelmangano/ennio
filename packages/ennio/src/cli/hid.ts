@@ -213,8 +213,14 @@ async function callTool(
     const nx = payload.x as number;
     const ny = payload.y as number;
     const idb = getIdb(udid);
-    trace(`[hid] tap nx=${nx.toFixed(4)} ny=${ny.toFixed(4)}`);
-    await idb.tap(nx * w, ny * h);
+    if (payload.doubleTap) {
+      trace(`[hid] double-tap nx=${nx.toFixed(4)} ny=${ny.toFixed(4)}`);
+      await idb.doubleTap(nx * w, ny * h);
+      return;
+    }
+    const holdSec = (payload.holdSec as number | undefined) ?? 0.08;
+    trace(`[hid] tap nx=${nx.toFixed(4)} ny=${ny.toFixed(4)} hold=${holdSec}s`);
+    await idb.tap(nx * w, ny * h, holdSec);
     return;
   }
   if (toolName === 'gesture-swipe') {
@@ -254,12 +260,19 @@ async function callTool(
   throw new Error(`unsupported tool: ${toolName}`);
 }
 
-export async function tap(udid: string, x: number, y: number): Promise<void> {
+export async function tap(
+  udid: string,
+  x: number,
+  y: number,
+  holdSec?: number,
+): Promise<void> {
   const { w, h } = await getScreenSize(udid);
   const nx = Math.max(0, Math.min(1, x / w));
   const ny = Math.max(0, Math.min(1, y / h));
-  trace(`[hid-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`);
-  await callTool('gesture-tap', { udid, x: nx, y: ny }, [
+  trace(
+    `[hid-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})${holdSec ? ` hold=${holdSec}s` : ''}`,
+  );
+  await callTool('gesture-tap', { udid, x: nx, y: ny, ...(holdSec ? { holdSec } : {}) }, [
     'run',
     'gesture-tap',
     '--udid',
@@ -269,6 +282,16 @@ export async function tap(udid: string, x: number, y: number): Promise<void> {
     '--y',
     String(ny),
   ]);
+}
+
+export async function doubleTap(udid: string, x: number, y: number): Promise<void> {
+  const { w, h } = await getScreenSize(udid);
+  const nx = Math.max(0, Math.min(1, x / w));
+  const ny = Math.max(0, Math.min(1, y / h));
+  trace(
+    `[hid-double-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
+  );
+  await callTool('gesture-tap', { udid, x: nx, y: ny, doubleTap: true }, []);
 }
 
 export const tapFast = tap;

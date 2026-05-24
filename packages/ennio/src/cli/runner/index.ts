@@ -39,6 +39,7 @@ import { EnnioSocketClient } from '../socket-client';
 import {
   tap as hidTap,
   tapFast as hidTapFast,
+  doubleTap as hidDoubleTap,
   swipe as hidSwipe,
   longPressDrag as hidLongPressDrag,
   typeText as hidType,
@@ -190,6 +191,19 @@ export async function runFlow(
     try {
       process.stderr.write(`[step ${i + 1}] ${describeCommand(cmd)}\n`);
       await runCommand(ctx, cmd, nextCmd);
+      // A step (typically tapOn collapsing with its same-target peer
+      // into a single double-tap) can mark the next command consumed.
+      // Advance one extra position to skip it.
+      if (ctx.skipNextCmd) {
+        ctx.skipNextCmd = false;
+        if (i + 1 < flow.commands.length) {
+          const consumed = flow.commands[i + 1];
+          process.stderr.write(`[step ${i + 2}] ${describeCommand(consumed)} (collapsed)\n`);
+          stepsPassed++;
+          stepTimings.push({ step: i + 2, ms: 0, cmd: describeCommand(consumed) + ' (collapsed)' });
+          i++;
+        }
+      }
       const dt = Date.now() - t0;
       stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
       logStep(ctx, i + 1, dt, describeCommand(cmd));
@@ -354,6 +368,27 @@ async function runCommand(
     if (nextRawCmd && typeof nextRawCmd === 'object' && 'tapOn' in nextRawCmd) {
       const nextSel = normalizeSelector((nextRawCmd as { tapOn: unknown }).tapOn as any);
       if (JSON.stringify(nextSel) === tapKey) nextIsSameTap = true;
+    }
+    // When the next step taps the same target, collapse the pair into
+    // a single double-tap dispatched within ONE idb HID session. Each
+    // standalone tap() opens + closes its own gRPC stream — that
+    // open/close cycle inserts ~100ms between the two Down/Up sequences
+    // and exceeds RN/UIKit's ~350ms double-tap window, so the second
+    // tap registers as a fresh single tap (onPress fires twice instead
+    // of onDoubleTap once). Keeping both taps on one stream eliminates
+    // the gap. Skipped when the current tap targets a tiny (≤5 px)
+    // hidden test control where the pure-fast retry loop takes over.
+    if (nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
+      const rect = await findOnce(ctx, sel);
+      if (rect && (rect.w > 5 || rect.h > 5)) {
+        await timedAsync(ctx, 'tap.execTapOn', () =>
+          hidDoubleTap(ctx.udid, rect.x + rect.w / 2, rect.y + rect.h / 2),
+        );
+        ctx.lastTapKey = tapKey;
+        ctx.lastTapTestID = sel.id;
+        ctx.skipNextCmd = true;
+        return;
+      }
     }
     // Pre-tap settle: wait for the screen to stop animating so we tap
     // a stable button frame, not a half-transitioned one. Without this,

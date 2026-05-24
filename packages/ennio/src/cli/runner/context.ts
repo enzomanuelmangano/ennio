@@ -71,6 +71,12 @@ export interface RunContext {
    *  modal: Save tap fires onto the popover instead of the button,
    *  modal never dismisses). */
   lastWasTextInput?: boolean;
+  /** Set by a step that has already consumed the next command (e.g.
+   *  two consecutive `tapOn` on the same target collapsed into a
+   *  single doubleTap dispatched on the FIRST step). The runner loop
+   *  reads + clears this on the next iteration and advances past the
+   *  consumed command. */
+  skipNextCmd?: boolean;
   /** Timestamp of the last UIRefreshControl trigger. Throttles the
    *  trigger_refresh shortcut so a YAML pattern of "warmup swipe +
    *  real swipe" doesn't fire the refresh handler twice. */
