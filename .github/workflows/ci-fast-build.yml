@@ -99,55 +99,58 @@ jobs:
           key: ennio-dylib-${{ runner.os }}-rn${{ steps.rn.outputs.version }}-${{ hashFiles('packages/ennio/cpp/**', 'packages/ennio/ios/**', 'packages/ennio/native-shim/**', 'packages/ennio/scripts/**', 'packages/ennio/nitrogen/**', 'packages/ennio/EnnioCore.podspec', 'packages/ennio-expo-plugin/src/**') }}
 
       # -------------------------------------------------------------
-      # Minimal scratch host — bare iOS project with just EnnioCore pod.
-      # No Expo, no RN, no npm deps. EnnioCore.podspec is pure UIKit so
-      # it compiles standalone. Only purpose: produce .o files for dylib.
+      # Scratch host: throwaway Expo+RN@<example-rn> project with ennio
+      # installed as a local pod. Only purpose is producing EnnioCore
+      # .o files in its DerivedData. Same scaffold build-dylibs.yml
+      # uses for release matrix, pinned to the example's RN version so
+      # the slice matches what the example will load at runtime.
       # -------------------------------------------------------------
-      - name: Build EnnioCore .o files (cache miss)
+      - name: Scaffold scratch host + build EnnioCore (cache miss)
         if: steps.dylib-cache.outputs.cache-hit != 'true'
+        env:
+          RN_VERSION: ${{ steps.rn.outputs.version }}
         run: |
           set -euxo pipefail
-          mkdir -p /tmp/scratch/ios
-          cd /tmp/scratch/ios
-          # Minimal Podfile — just EnnioCore, nothing else.
-          cat > Podfile <<'PODEOF'
-          platform :ios, '17.0'
-          target 'Scratch' do
-            pod 'EnnioCore', :path => ENV['GITHUB_WORKSPACE'] + '/packages/ennio'
-          end
-          PODEOF
-          # Minimal Xcode project so pod install has a target to attach to.
-          mkdir -p Scratch
-          cat > Scratch/main.m <<'MEOF'
-          #import <UIKit/UIKit.h>
-          int main(int argc, char *argv[]) { return 0; }
-          MEOF
-          cat > Scratch/Info.plist <<'PEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>CFBundleIdentifier</key><string>com.ennio.scratch</string>
-            <key>CFBundleExecutable</key><string>Scratch</string>
-            <key>CFBundlePackageType</key><string>APPL</string>
-          </dict></plist>
-          PEOF
-          # Generate xcodeproj with xcodebuild's create-xcodeproj isn't
-          # available, so use a ruby one-liner to make a minimal .pbxproj
-          # that CocoaPods can integrate into.
-          gem install xcodeproj --no-document
-          ruby -e "
-            require 'xcodeproj'
-            proj = Xcodeproj::Project.new('Scratch.xcodeproj')
-            target = proj.new_target(:application, 'Scratch', :ios, '17.0')
-            group = proj.main_group.new_group('Scratch')
-            ref = group.new_file('Scratch/main.m')
-            target.add_file_references([ref])
-            proj.save
+          mkdir -p /tmp/scratch
+          cd /tmp/scratch
+          npx --yes create-expo-app . --template blank-typescript --no-install
+          # Pin Expo SDK to match the example's. create-expo-app defaults
+          # to the latest SDK, whose expo-modules-core ABI does not match
+          # RN 0.83. Mismatch surfaces as `no member 'CallInvoker' in
+          # namespace 'facebook::react'` during the Pods compile.
+          EXPO_SDK=$(jq -r '.dependencies.expo' "$GITHUB_WORKSPACE/example/package.json")
+          npm pkg set "dependencies.expo=$EXPO_SDK"
+          npm pkg set "dependencies.react-native=$RN_VERSION"
+          npm pkg set "dependencies.react-native-nitro-modules=^0.35.5"
+          npm pkg set "dependencies.@reactiive/ennio=file:$GITHUB_WORKSPACE/packages/ennio"
+          npm pkg set "devDependencies.@reactiive/ennio-expo-plugin=file:$GITHUB_WORKSPACE/packages/ennio-expo-plugin"
+          npm install --legacy-peer-deps --no-audit --no-fund
+          # EnnioCore.podspec requires iOS 17.0. Expo's default is lower.
+          node -e "
+            const fs=require('fs');
+            const j=JSON.parse(fs.readFileSync('app.json'));
+            j.expo.ios = j.expo.ios || {};
+            j.expo.ios.deploymentTarget = '17.0';
+            fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
           "
-          pod install
+          # Stamp a unique bundle id. The default `com.anonymous.scratch`
+          # collides with a published App Store app, which makes
+          # `expo prebuild` prompt interactively and fail in CI.
+          UNIQUE_ID="com.reactiive.ennio.scratch.ci$(date +%s)$RANDOM"
+          node -e "
+            const fs=require('fs');
+            const j=JSON.parse(fs.readFileSync('app.json'));
+            j.expo.plugins = (j.expo.plugins||[]).concat(['@reactiive/ennio-expo-plugin']);
+            j.expo.ios = j.expo.ios || {};
+            j.expo.ios.bundleIdentifier = '$UNIQUE_ID';
+            fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
+          "
+          npx expo prebuild --platform ios --clean --non-interactive
+          cd ios
+          WORKSPACE=$(ls -d *.xcworkspace | head -1)
           xcodebuild \
-            -workspace Scratch.xcworkspace \
-            -scheme Scratch \
+            -workspace "$WORKSPACE" \
+            -scheme "$(node -e "console.log(require('../app.json').expo.name)")" \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath /tmp/scratch-dd \
