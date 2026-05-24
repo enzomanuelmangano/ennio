@@ -193,7 +193,9 @@ export async function execTapOn(
   // descendant's center instead. Only triggers when find returns
   // a non-interactive wrapper (kind=descendant).
   if (sel.id && !sel.childOf) {
-    const tt = await ctx.client.call('find_tap_target_by_testid', { testID: sel.id }).catch(() => undefined);
+    const tt = await ctx.client
+      .call('find_tap_target_by_testid', { testID: sel.id })
+      .catch(() => undefined);
     if (tt && tt.ok && tt.data) {
       const data = tt.data as { x: number; y: number; w: number; h: number; kind?: string };
       if (data.kind === 'descendant') {
