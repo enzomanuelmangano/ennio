@@ -15,8 +15,6 @@ import { MaestroSelector } from '../maestro-parser';
 
 import {
   FIND_DEADLINE_DEFAULT_MS,
-  FIND_DEADLINE_MEDIA_MS,
-  MEDIA_TRIGGER_IDS,
   POLL_MS,
   POST_TAP_SETTLE_MS,
   Rect,
@@ -136,12 +134,9 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     // Drop sel.text gating: when both id and text/label are set in
     // YAML, the label is human-readable metadata, not an additional
     // filter — find_by_testid alone identifies the unique element.
-    const findMaxMs = MEDIA_TRIGGER_IDS.has(ctx.lastTapTestID ?? '')
-      ? FIND_DEADLINE_MEDIA_MS
-      : FIND_DEADLINE_DEFAULT_MS;
     const r = await timedAsync(ctx, 'tap.findFast', () =>
       ctx.client
-        .call('wait_find_by_testid', { testID: sel.id!, maxMs: findMaxMs })
+        .call('wait_find_by_testid', { testID: sel.id!, maxMs: FIND_DEADLINE_DEFAULT_MS })
         .catch(() => undefined),
     );
     if (r && r.ok && r.data) return r.data as Rect;

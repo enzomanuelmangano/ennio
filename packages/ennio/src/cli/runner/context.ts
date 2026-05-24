@@ -24,15 +24,13 @@ export const DEFAULT_WAIT_MS = 15000;
 /// poll inside the dylib on a CADisplayLink tick (~16 ms) instead.
 export const POLL_MS = 100;
 
-/// testIDs whose onPress kicks off a media-processing chain
-/// (compressIfNeeded → re-encode → state update) that can outlast the
-/// regular 2.5 s find deadline on default 4288×2848 simulator photos.
-/// The NEXT step's find waits longer when the previous tap landed on
-/// one of these. Strictly testID-based; this is the canonical set of
-/// Bluesky-defined identifiers, not English-text matching.
-export const MEDIA_TRIGGER_IDS = new Set(['openMediaBtn', 'changeBannerBtn', 'changeAvatarBtn']);
-export const FIND_DEADLINE_MEDIA_MS = 5000;
-export const FIND_DEADLINE_DEFAULT_MS = 2500;
+/// Default find-by-id deadline. Single value: any tap that kicks off
+/// a slow async chain (image picker → compress → re-encode → state
+/// update) extends the next find naturally because the polling loop
+/// runs until the target appears or this deadline expires. 4 s gives
+/// room for media-processing chains on default high-resolution
+/// simulator photos without making bona-fide negative findings drag.
+export const FIND_DEADLINE_DEFAULT_MS = 4000;
 
 /// Bridge wait — gives JS thread time to fire onPress → setState →
 /// React commit before wait_commit observes the screen. The frame-hash
