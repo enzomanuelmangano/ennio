@@ -57,7 +57,42 @@ export async function waitUntilVisible(
     if (await isVisible(ctx, sel)) return;
     await sleep(POLL_MS);
   }
+  // Dump diagnostic state to stderr so a CI-side failure log
+  // includes what was actually on screen at the timeout. Without
+  // this we'd only see "assertVisible timeout" and have to guess.
+  await dumpFailureState(ctx, sel, 'assertVisible');
   throw new Error(`assertVisible/waitFor timeout: ${JSON.stringify(sel)}`);
+}
+
+async function dumpFailureState(
+  ctx: RunContext,
+  sel: MaestroSelector,
+  op: string,
+): Promise<void> {
+  try {
+    const probe = sel.id
+      ? await ctx.client.call('finder_probe', { testID: sel.id }).catch(() => undefined)
+      : null;
+    if (probe) {
+      process.stderr.write(`[ennio:diag] ${op} ${JSON.stringify(sel)} probe=${JSON.stringify(probe.data)}\n`);
+    }
+    const chain = await ctx.client.call('top_vc_chain').catch(() => undefined);
+    if (chain && chain.ok) {
+      process.stderr.write(`[ennio:diag] top_vc_chain=${JSON.stringify(chain.data)}\n`);
+    }
+    const dump = await ctx.client.call('dump_views').catch(() => undefined);
+    if (dump && dump.ok) {
+      const views = dump.data as string[] | undefined;
+      if (Array.isArray(views)) {
+        process.stderr.write(`[ennio:diag] dump_views count=${views.length}\n`);
+        for (const v of views.slice(0, 50)) {
+          process.stderr.write(`[ennio:diag]   ${v}\n`);
+        }
+      }
+    }
+  } catch {
+    /* diagnostic failure shouldn't mask the original error */
+  }
 }
 
 export async function waitUntilNotVisible(
