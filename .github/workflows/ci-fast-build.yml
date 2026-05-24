@@ -99,64 +99,35 @@ jobs:
           key: ennio-dylib-${{ runner.os }}-rn${{ steps.rn.outputs.version }}-${{ hashFiles('packages/ennio/cpp/**', 'packages/ennio/ios/**', 'packages/ennio/native-shim/**', 'packages/ennio/scripts/**', 'packages/ennio/nitrogen/**', 'packages/ennio/EnnioCore.podspec', 'packages/ennio-expo-plugin/src/**') }}
 
       # -------------------------------------------------------------
-      # Scratch host: throwaway Expo+RN@<example-rn> project with ennio
-      # installed as a local pod. Only purpose is producing EnnioCore
-      # .o files in its DerivedData. Same scaffold build-dylibs.yml
-      # uses for release matrix, pinned to the example's RN version so
-      # the slice matches what the example will load at runtime.
+      # Compile EnnioCore .o files directly — no scratch host, no pod,
+      # no Expo. EnnioCore is pure UIKit/C++, just clang the sources.
       # -------------------------------------------------------------
-      - name: Scaffold scratch host + build EnnioCore (cache miss)
+      - name: Compile EnnioCore + link dylib (cache miss)
         if: steps.dylib-cache.outputs.cache-hit != 'true'
-        env:
-          RN_VERSION: ${{ steps.rn.outputs.version }}
         run: |
           set -euxo pipefail
-          mkdir -p /tmp/scratch
-          cd /tmp/scratch
-          npx --yes create-expo-app . --template blank-typescript --no-install
-          # Pin Expo SDK to match the example's. create-expo-app defaults
-          # to the latest SDK, whose expo-modules-core ABI does not match
-          # RN 0.83. Mismatch surfaces as `no member 'CallInvoker' in
-          # namespace 'facebook::react'` during the Pods compile.
-          EXPO_SDK=$(jq -r '.dependencies.expo' "$GITHUB_WORKSPACE/example/package.json")
-          npm pkg set "dependencies.expo=$EXPO_SDK"
-          npm pkg set "dependencies.react-native=$RN_VERSION"
-          npm install --legacy-peer-deps --no-audit --no-fund
-          # Stamp a unique bundle id so expo prebuild doesn't prompt.
-          UNIQUE_ID="com.reactiive.ennio.scratch.ci$(date +%s)$RANDOM"
-          node -e "
-            const fs=require('fs');
-            const j=JSON.parse(fs.readFileSync('app.json'));
-            j.expo.ios = j.expo.ios || {};
-            j.expo.ios.bundleIdentifier = '$UNIQUE_ID';
-            j.expo.ios.deploymentTarget = '17.0';
-            fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
-          "
-          npx expo prebuild --platform ios --clean --non-interactive
-          cd ios
-          # Add EnnioCore pod directly — no expo plugin or npm dep needed.
-          sed -i '' "/target '.*' do/a\\
-            pod 'EnnioCore', :path => ENV['GITHUB_WORKSPACE'] + '/packages/ennio'
-          " Podfile
-          pod install
-          WORKSPACE=$(ls -d *.xcworkspace | head -1)
-          xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$(node -e "console.log(require('../app.json').expo.name)")" \
-            -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath /tmp/scratch-dd \
-            build
+          ENNIO=$GITHUB_WORKSPACE/packages/ennio
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          OBJ_DIR=/tmp/ennio-obj
+          mkdir -p "$OBJ_DIR"
 
-      - name: Link shim + dylib slice (cache miss)
-        if: steps.dylib-cache.outputs.cache-hit != 'true'
-        run: |
-          bash packages/ennio/scripts/build-shim.sh
-          OBJ=$(find /tmp/scratch-dd -type d -path '*EnnioCore.build/Objects-normal/arm64' | head -n1)
-          test -n "$OBJ" || { echo "EnnioCore .o not found in scratch DerivedData"; exit 1; }
-          ENNIO_OBJECTS_DIR="$OBJ" bash packages/ennio/scripts/build-dylib.sh "${{ steps.rn.outputs.version }}"
-          bash packages/ennio/scripts/regen-manifest.sh
-          ls -lh packages/ennio/prebuilt/
+          CFLAGS="-arch arm64 -isysroot $SDK -std=c++17 -fobjc-arc -fmodules \
+            -target arm64-apple-ios17.0-simulator \
+            -I$ENNIO/cpp -I$ENNIO/ios/bootstrap -I$ENNIO/ios/finders \
+            -I$ENNIO/ios/handlers -I$ENNIO/ios/observers -I$ENNIO/ios/ops \
+            -I$ENNIO/ios/PrivateAPI -O2"
+
+          for f in $ENNIO/cpp/*.cpp; do
+            xcrun clang++ $CFLAGS -c "$f" -o "$OBJ_DIR/$(basename "$f" .cpp).o"
+          done
+          for f in $ENNIO/ios/**/*.mm; do
+            xcrun clang++ $CFLAGS -c "$f" -o "$OBJ_DIR/$(basename "$f" .mm).o"
+          done
+
+          bash "$ENNIO/scripts/build-shim.sh"
+          ENNIO_OBJECTS_DIR="$OBJ_DIR" bash "$ENNIO/scripts/build-dylib.sh" "${{ steps.rn.outputs.version }}"
+          bash "$ENNIO/scripts/regen-manifest.sh"
+          ls -lh "$ENNIO/prebuilt/"
 
       - name: Verify dylibs present
         run: |
