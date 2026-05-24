@@ -162,10 +162,23 @@ export async function execTapOn(
         }
       });
     }
+    // Re-sample rect post-exposure. The position-stability gate can
+    // lock onto a transient steady frame during a spring animation
+    // (overshoot, low-velocity inflection points). The view's final
+    // resting frame may differ by tens of pixels — tapping the cached
+    // center then lands on whatever view is currently at that coord.
+    // bsky's MoreOptions sheet reproduces this: "Delete list" finalises
+    // ~27 px below the captured stable rect.
+    const final = await sampleRect();
+    if (final) {
+      stableRect = final;
+      center.x = final.x + final.w / 2;
+      center.y = final.y + final.h / 2;
+    }
   }
-  // Argent HID — reliable on iOS 26 RN Pressables. No pre-tap sleep:
-  // the position-stability gate above already proved the rect isn't
-  // moving, so UIKit's hit-test layer-tree is settled.
+  // HID tap: down + up immediately. No pre-tap sleep — the position-
+  // stability gate above already proved the rect isn't moving, so
+  // UIKit's hit-test layer-tree is settled.
   //
   // Down + Up immediately is the safest baseline for both selector
   // kinds; the previous 50 ms hidPress hold was misinterpreted by

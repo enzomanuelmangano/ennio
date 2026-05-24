@@ -38,9 +38,11 @@ import {
 import { EnnioSocketClient } from '../socket-client';
 import {
   tap as hidTap,
+  tapFast as hidTapFast,
   swipe as hidSwipe,
   longPressDrag as hidLongPressDrag,
   typeText as hidType,
+  setDylibClient,
 } from '../hid';
 import { ensureBootedSim, findDylib, terminateApp } from '../sim';
 
@@ -160,6 +162,12 @@ export async function runFlow(
     await client.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
   }
 
+  // Expose the runner's dylib socket connection to hid.ts so its
+  // in-process tap/swipe/keyboard ops reuse this connection instead
+  // of opening a second one (which would serialise behind the runner's
+  // in-flight find_by_text calls inside the dylib worker).
+  setDylibClient(client);
+
   const ctx: RunContext = {
     client,
     udid,
@@ -224,6 +232,7 @@ export async function runFlow(
       const dt = Date.now() - t0;
       stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
       logStep(ctx, i + 1, dt, describeCommand(cmd));
+      setDylibClient(null);
       client.close();
       printSlowSteps(stepTimings);
       printPhaseTotals(ctx);
@@ -395,8 +404,8 @@ async function runCommand(
     // Observed on Bluesky's "Create moderation list" name field.
     // Edit-form text inputs (RN TextInput with `defaultValue`) reject
     // the first tap. Detect by testID matching /Input$/ AND next op
-    // editing the field — call focus_testid as primary; argent tap
-    // still fires below as belt-and-braces.
+    // editing the field — call focus_testid as primary; the regular
+    // tap below still fires as belt-and-braces.
     const nextEditsField =
       !!nextRawCmd &&
       typeof nextRawCmd === 'object' &&
@@ -568,7 +577,7 @@ async function runCommand(
     const text = interpolate(String(cmd.inputText), ctx);
     // Try insert_text (UIKeyInput on the current firstResponder) up
     // to 3 times. Between attempts, if the prior tap target was a
-    // testID, re-tap it via argent — that's the cheapest way to
+    // testID, re-tap it via the dylib activate path — that's the cheapest way to
     // recover when the original tap didn't actually move focus into
     // the field (Bluesky's login username TextInput is the textbook
     // case). After 3 failed attempts, fall back to a single

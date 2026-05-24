@@ -89,7 +89,7 @@ export class IdbGrpcClient {
         const ok = stream.write(msg, (err?: Error) => (err ? rej(err) : res()));
         if (!ok) stream.once('drain', () => res());
       });
-    const point = { x: Math.round(x), y: Math.round(y) };
+    const point = { x, y };
     try {
       await writeOne({ press: { action: { touch: { point } }, direction: 'DOWN' } });
       // Client-side sleep between DOWN and UP — matches the idb
@@ -141,8 +141,8 @@ export class IdbGrpcClient {
       });
     await writeOne({
       swipe: {
-        start: { x: Math.round(x1), y: Math.round(y1) },
-        end: { x: Math.round(x2), y: Math.round(y2) },
+        start: { x: x1, y: y1 },
+        end: { x: x2, y: y2 },
         delta: 0,
         duration: durationSec,
       },

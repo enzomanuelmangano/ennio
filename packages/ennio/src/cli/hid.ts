@@ -1,22 +1,63 @@
-// Device interaction via Argent's tool-server (direct HTTP) or CLI.
+// Device interaction. Single source of truth for taps, swipes,
+// keystrokes. Every gesture is dispatched through the in-process
+// dylib socket — no external tool-server, no subprocess.
 //
-// Single source of truth for taps, swipes, keystrokes. Argent's
-// CoreSimulator HID injection fires RN Pressable.onPress reliably
-// on iOS 26 sim — idb's gRPC HID variants intermittently swallowed
-// presses on RN sheet/dropdown buttons, so we no longer ship them
-// in this binary.
+// The dylib runs inside the target app (injected via DYLD_INSERT)
+// and listens on `/tmp/ennio-control.sock`. The runner opens that
+// socket once and shares it with this module via `setDylibClient`.
+// Each call here turns into one short JSON request on that same
+// connection.
 //
-// Fast path: POST to http://127.0.0.1:<port>/tools/<name> on the
-// long-running argent tool-server (~80 ms/call). Slow fallback:
-// `argent run <name>` subprocess (~150 ms/call cold start). The
-// HTTP path saves ~70 ms per HID event — across a 60-step flow
-// that's ~4 s, and the speedup compounds with self-heal retaps.
-//
-// Both paths produce the same RN responder events; the difference
-// is purely process-spawn overhead.
+// The public surface (tap / swipe / press / typeText / pressKey /
+// longPressDrag) is unchanged so callers don't need to migrate; only
+// the underlying `callTool` dispatch has been swapped out.
 
-import { execFileSync } from 'node:child_process';
-import { request as httpRequest } from 'node:http';
+import type { EnnioSocketClient } from './socket-client';
+import { IdbGrpcClient } from './idb-grpc';
+
+// =====================================================================
+// Shared dylib socket client. Set by the runner once per flow run via
+// `setDylibClient`. Every helper below pulls this connection — never
+// opens its own — so requests serialise correctly behind any in-flight
+// `find_by_*` / `wait_*` calls the runner itself is making.
+// =====================================================================
+
+let sharedClient: EnnioSocketClient | null = null;
+
+export function setDylibClient(c: EnnioSocketClient | null): void {
+  sharedClient = c;
+}
+
+function getDylibClient(): EnnioSocketClient {
+  if (!sharedClient) throw new Error('ennio dylib socket not connected');
+  return sharedClient;
+}
+
+// idb_companion gRPC client, lazy per-UDID. Single persistent
+// connection for the CLI's lifetime; the `tap` op internally opens
+// a fresh hid stream each call (idb_companion buffers per-session,
+// so reusing one stream silently swallows events on iOS 26).
+const idbClients = new Map<string, IdbGrpcClient>();
+
+function getIdb(udid: string): IdbGrpcClient {
+  let c = idbClients.get(udid);
+  if (!c) {
+    c = new IdbGrpcClient(udid);
+    idbClients.set(udid, c);
+  }
+  return c;
+}
+
+export function closeAllIdbClients(): void {
+  for (const c of idbClients.values()) {
+    try {
+      c.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  idbClients.clear();
+}
 
 const screenSizeCache = new Map<string, { w: number; h: number }>();
 
@@ -24,17 +65,13 @@ async function getScreenSize(udid: string): Promise<{ w: number; h: number }> {
   const cached = screenSizeCache.get(udid);
   if (cached) return cached;
   try {
-    const { EnnioSocketClient } = await import('./socket-client');
-    const c = new EnnioSocketClient();
-    if (await c.connectWithRetry(2_000)) {
-      const r = await c.call('window_size').catch(() => undefined);
-      c.close();
-      if (r && r.ok && r.data) {
-        const d = r.data as { w: number; h: number };
-        if (d.w > 0 && d.h > 0) {
-          screenSizeCache.set(udid, d);
-          return d;
-        }
+    const c = getDylibClient();
+    const r = await c.call('window_size').catch(() => undefined);
+    if (r && r.ok && r.data) {
+      const d = r.data as { w: number; h: number };
+      if (d.w > 0 && d.h > 0) {
+        screenSizeCache.set(udid, d);
+        return d;
       }
     }
   } catch {
@@ -49,91 +86,62 @@ function trace(line: string): void {
   process.stderr.write(`${line}\n`);
 }
 
-// Tool-server port discovery. argent's server runs on a stable
-// random port for the lifetime of the user's session; cache it
-// once. Fall back to CLI if the server isn't reachable.
-let toolServerPort: number | null | undefined;
+// =====================================================================
+// Tool dispatcher — translates the legacy tool-server payload shape
+// into dylib socket ops. Keeping the `callTool` shape lets the higher-
+// level helpers (tap / swipe / press / typeText / pressKey /
+// longPressDrag) stay byte-for-byte the same as the old code; only
+// the call sites below need a screen-size to map normalised coords
+// back to window-space pixels (which the dylib ops accept).
+// =====================================================================
 
-function discoverToolServerPort(): number | null {
-  if (toolServerPort !== undefined) return toolServerPort;
-  try {
-    const out = execFileSync('argent', ['server', 'status', '--json'], {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 1500,
-    }).toString();
-    const j = JSON.parse(out) as { port?: number; healthy?: boolean };
-    if (j.healthy && typeof j.port === 'number') {
-      toolServerPort = j.port;
-      trace(`[argent-http] tool-server port=${j.port}`);
-      return j.port;
-    }
-  } catch {
-    /* ignore */
-  }
-  toolServerPort = null;
-  return null;
+interface CustomEvent {
+  type: 'Down' | 'Move' | 'Up';
+  x: number;
+  y: number;
+  delayMs?: number;
 }
 
-function postToolJSON(
-  port: number,
-  toolName: string,
-  payload: Record<string, unknown>,
-  timeoutMs = 5000,
-): Promise<{ ok: boolean; status: number; body: string }> {
-  return new Promise((resolve) => {
-    const body = JSON.stringify(payload);
-    const req = httpRequest(
-      {
-        host: '127.0.0.1',
-        port,
-        method: 'POST',
-        path: `/tools/${encodeURIComponent(toolName)}`,
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-        },
-        timeout: timeoutMs,
-      },
-      (res) => {
-        let chunks = '';
-        res.setEncoding('utf8');
-        res.on('data', (c) => {
-          chunks += c;
-        });
-        res.on('end', () => {
-          resolve({
-            ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300,
-            status: res.statusCode ?? 0,
-            body: chunks,
-          });
-        });
-      },
+async function dispatchGestureCustom(
+  udid: string,
+  events: CustomEvent[],
+): Promise<void> {
+  const { w, h } = await getScreenSize(udid);
+  const idb = getIdb(udid);
+  const downs = events.filter((e) => e.type === 'Down');
+  const ups = events.filter((e) => e.type === 'Up');
+  const moves = events.filter((e) => e.type === 'Move');
+  if (downs.length === 1 && ups.length >= 1) {
+    const d = downs[0];
+    const u = ups[ups.length - 1];
+    const distinctMoves = moves.filter(
+      (m) => Math.abs(m.x - d.x) > 0.001 || Math.abs(m.y - d.y) > 0.001,
     );
-    req.on('error', () => resolve({ ok: false, status: 0, body: '' }));
-    req.on('timeout', () => {
-      req.destroy();
-      resolve({ ok: false, status: 0, body: '' });
-    });
-    req.write(body);
-    req.end();
-  });
+    if (distinctMoves.length === 0) {
+      const holdMs = events.reduce((acc, e) => acc + (e.delayMs ?? 0), 0) || 80;
+      trace(`[hid] tap nx=${d.x.toFixed(4)} ny=${d.y.toFixed(4)} hold=${holdMs}`);
+      await idb.tap(d.x * w, d.y * h, holdMs / 1000);
+      return;
+    }
+    const dur = events.reduce((acc, e) => acc + (e.delayMs ?? 0), 0) || 250;
+    trace(
+      `[hid] swipe nx=(${d.x.toFixed(4)},${d.y.toFixed(4)})→(${u.x.toFixed(4)},${u.y.toFixed(4)}) dur=${dur}`,
+    );
+    await idb.swipe(d.x * w, d.y * h, u.x * w, u.y * h, dur / 1000);
+    return;
+  }
+  throw new Error(`gesture-custom shape not supported (down=${downs.length} up=${ups.length} move=${moves.length})`);
 }
 
-function runArgentCLI(args: string[]): void {
-  // Subprocess fallback — used only when the tool-server HTTP path
-  // is unavailable. Inherit stdin/stderr; pipe stdout (argent prints
-  // result JSON there).
-  execFileSync('argent', args, { stdio: ['ignore', 'pipe', 'inherit'] });
-}
-
-interface AXNode {
-  role?: string;
-  label?: string;
-  value?: string;
-  identifier?: string;
-  frame?: { x: number; y: number; width: number; height: number };
-  children?: AXNode[];
-}
+// USB HID usage codes the dylib's `hardware_key` op accepts. Mirror
+// the switch in EnnioOps.pressHardwareKey.
+const KEY_NAME_TO_HID_USAGE: Record<string, number> = {
+  return: 40,
+  enter: 40,
+  delete: 42,
+  backspace: 42,
+  space: 44,
+};
 
 export interface AXMatchRect {
   x: number;
@@ -143,163 +151,47 @@ export interface AXMatchRect {
 }
 
 /**
- * Query argent's `describe` endpoint and find the first AX element
- * whose label, value, or identifier matches `text`. Returns a window-
- * space pixel rect (compatible with `tap`/`hidTap` callers).
- *
- * This is a cross-process AX fallback for selectors that miss the
- * dylib's in-process UIView walk — typically native UIKit views like
- * PHPickerViewController whose process boundary blocks our finder.
- * Maestro hits these through XCUITest's a11y query; we reach the same
- * data via argent's simulator-server bridge.
- *
- * Search order:
- *   1. exact identifier match
- *   2. exact label match
- *   3. substring label/value match
- * On-screen elements (frame inside [0,1]) outrank off-screen.
- */
-/**
- * Take a compact signature of the OS a11y tree. Used by callers that
- * need to wait for cross-process animations (PHPicker dismiss, share
- * sheet) to settle — our in-process commit observer can't see them,
- * but the OS a11y describe shape changes during the transition.
+ * Cross-process AX rect lookup. Backed by the dylib's
+ * `find_ax_by_text` op which walks the in-process UIAccessibility
+ * tree from every window/scene. Returns a window-space pixel rect
+ * compatible with `tap`/`hidTap` callers.
  */
 export async function axTreeSnapshot(udid: string): Promise<string> {
-  const port = discoverToolServerPort();
-  if (port === null) return '';
-  const r = await postToolJSON(port, 'describe', { udid });
-  if (!r.ok || !r.body) return '';
+  void udid;
+  const c = getDylibClient();
   try {
-    const parsed = JSON.parse(r.body) as { data?: { tree?: AXNode } };
-    const tree = parsed?.data?.tree;
-    if (!tree) return '';
-    const parts: string[] = [];
-    const walk = (n: AXNode | undefined): void => {
-      if (!n) return;
-      const f = n.frame;
-      parts.push(
-        `${n.role ?? ''}|${n.label ?? ''}|${f ? `${f.x.toFixed(3)},${f.y.toFixed(3)},${f.width.toFixed(3)},${f.height.toFixed(3)}` : ''}`,
-      );
-      for (const c of n.children ?? []) walk(c);
-    };
-    walk(tree);
-    return parts.join('\n');
+    const r = await c.call('ax_tree_snapshot');
+    if (!r.ok || !r.data) return '';
+    const d = r.data as { tree?: string };
+    return typeof d.tree === 'string' ? d.tree : '';
   } catch {
     return '';
   }
 }
 
 export async function axQueryByText(udid: string, text: string): Promise<AXMatchRect | null> {
-  // argent describe queries the OS a11y service. The service can
-  // return an empty/transitioning tree for ~50-150 ms while a sheet
-  // animates in (PHPicker first frame, share sheet, etc.). Retry up
-  // to ~1.5 s on miss so flow-level retries don't have to.
+  void udid;
+  // Single dylib roundtrip — the in-process AX walk is already fast
+  // (sub-millisecond). One short retry covers the case where the
+  // target's frame is still mid-transition.
   const deadline = Date.now() + 1500;
-  let attempt = 0;
+  const c = getDylibClient();
   while (Date.now() < deadline) {
-    const r = await axQueryOnce(udid, text);
-    if (r) return r;
-    attempt++;
+    try {
+      const r = await c.call('find_ax_by_text', { text });
+      if (r && r.ok && r.data) {
+        const d = r.data as { x?: number; y?: number; w?: number; h?: number };
+        if (d.x != null && d.y != null && d.w != null && d.h != null) {
+          return { x: d.x, y: d.y, w: d.w, h: d.h };
+        }
+      }
+    } catch {
+      /* retry */
+    }
     if (Date.now() >= deadline) break;
     await new Promise((res) => setTimeout(res, 120));
   }
-  if (attempt > 0) {
-    process.stderr.write(
-      `[ax-fallback] no match for ${JSON.stringify(text)} after ${attempt} polls\n`,
-    );
-  }
   return null;
-}
-
-async function axQueryOnce(udid: string, text: string): Promise<AXMatchRect | null> {
-  const port = discoverToolServerPort();
-  if (port === null) {
-    trace(`[ax-once] no port for ${text}`);
-    return null;
-  }
-  const r = await postToolJSON(port, 'describe', { udid });
-  if (!r.ok || !r.body) {
-    trace(`[ax-once] HTTP ${r.status} for ${text}`);
-    return null;
-  }
-  let parsed: { data?: { tree?: AXNode } };
-  try {
-    parsed = JSON.parse(r.body);
-  } catch {
-    return null;
-  }
-  const root = parsed?.data?.tree;
-  if (!root) return null;
-  const { w, h } = await getScreenSize(udid);
-  type Match = { node: AXNode; rank: number };
-  const matches: Match[] = [];
-  const lc = text.toLowerCase();
-  const walk = (n: AXNode | undefined): void => {
-    if (!n) return;
-    const id = n.identifier ?? '';
-    const lbl = n.label ?? '';
-    const val = n.value ?? '';
-    let rank = 0;
-    if (id === text) rank = 4;
-    else if (lbl === text) rank = 3;
-    else if (lbl.toLowerCase() === lc) rank = 3;
-    else if (val === text || val.toLowerCase() === lc) rank = 2;
-    else if (lbl.toLowerCase().includes(lc)) rank = 1;
-    else if (val.toLowerCase().includes(lc)) rank = 1;
-    if (rank > 0 && n.frame) matches.push({ node: n, rank });
-    for (const c of n.children ?? []) walk(c);
-  };
-  walk(root);
-  if (matches.length === 0) {
-    let nodeCount = 0;
-    const count = (n: AXNode | undefined): void => {
-      if (!n) return;
-      nodeCount++;
-      for (const c of n.children ?? []) count(c);
-    };
-    count(root);
-    trace(`[ax-once] tree=${nodeCount} nodes, no match for ${JSON.stringify(text)}`);
-    return null;
-  }
-  // Prefer on-screen + interactive role + highest rank.
-  const interactive = new Set([
-    'AXButton',
-    'AXLink',
-    'AXMenuItem',
-    'AXCell',
-    'AXSearchField',
-    'AXTextField',
-    'AXSwitch',
-    'AXCheckBox',
-  ]);
-  matches.sort((a, b) => {
-    const onA =
-      !!a.node.frame &&
-      a.node.frame.x >= 0 &&
-      a.node.frame.x < 1 &&
-      a.node.frame.y >= 0 &&
-      a.node.frame.y < 1;
-    const onB =
-      !!b.node.frame &&
-      b.node.frame.x >= 0 &&
-      b.node.frame.x < 1 &&
-      b.node.frame.y >= 0 &&
-      b.node.frame.y < 1;
-    if (onA !== onB) return onA ? -1 : 1;
-    if (a.rank !== b.rank) return b.rank - a.rank;
-    const intA = interactive.has(a.node.role ?? '') ? 1 : 0;
-    const intB = interactive.has(b.node.role ?? '') ? 1 : 0;
-    if (intA !== intB) return intB - intA;
-    return 0;
-  });
-  const f = matches[0].node.frame!;
-  return {
-    x: f.x * w,
-    y: f.y * h,
-    w: f.width * w,
-    h: f.height * h,
-  };
 }
 
 /**
@@ -313,23 +205,52 @@ export async function getCachedScreenSize(udid: string): Promise<{ w: number; h:
 async function callTool(
   toolName: string,
   payload: Record<string, unknown>,
-  cliArgs: string[],
+  _cliArgs: string[],
 ): Promise<void> {
-  const port = discoverToolServerPort();
-  if (port !== null) {
-    const r = await postToolJSON(port, toolName, payload);
-    if (r.ok) return;
-    // If the server returns a 4xx/5xx, surface it like the CLI would
-    // — don't silently fall back to CLI on logic errors.
-    if (r.status >= 400 && r.status < 600 && r.body) {
-      throw new Error(`argent ${toolName} HTTP ${r.status}: ${r.body}`);
-    }
-    // Network-level failure: tool-server may have died mid-flow.
-    // Invalidate the cached port so the next call re-discovers, and
-    // fall through to CLI for this one event.
-    toolServerPort = undefined;
+  const udid = payload.udid as string;
+  const dy = getDylibClient();
+  if (toolName === 'gesture-tap') {
+    const { w, h } = await getScreenSize(udid);
+    const nx = payload.x as number;
+    const ny = payload.y as number;
+    const idb = getIdb(udid);
+    trace(`[hid] tap nx=${nx.toFixed(4)} ny=${ny.toFixed(4)}`);
+    await idb.tap(nx * w, ny * h);
+    return;
   }
-  runArgentCLI(cliArgs);
+  if (toolName === 'gesture-swipe') {
+    const { w, h } = await getScreenSize(udid);
+    const fromX = (payload.fromX as number) * w;
+    const fromY = (payload.fromY as number) * h;
+    const toX = (payload.toX as number) * w;
+    const toY = (payload.toY as number) * h;
+    const durationMs = payload.durationMs as number;
+    const idb = getIdb(udid);
+    trace(`[hid] swipe (${fromX.toFixed(0)},${fromY.toFixed(0)})→(${toX.toFixed(0)},${toY.toFixed(0)}) dur=${durationMs}`);
+    await idb.swipe(fromX, fromY, toX, toY, (durationMs ?? 250) / 1000);
+    return;
+  }
+  if (toolName === 'gesture-custom') {
+    const events = payload.events as CustomEvent[];
+    await dispatchGestureCustom(udid, events);
+    return;
+  }
+  if (toolName === 'keyboard') {
+    if (typeof payload.text === 'string') {
+      const r = await dy.call('insert_text', { text: payload.text });
+      if (!r.ok) throw new Error(`insert_text failed: ${r.err ?? 'unknown'}`);
+      return;
+    }
+    if (typeof payload.key === 'string') {
+      const code = KEY_NAME_TO_HID_USAGE[payload.key.toLowerCase()];
+      if (code == null) throw new Error(`unsupported key: ${payload.key}`);
+      const r = await dy.call('hardware_key', { keyCode: code });
+      if (!r.ok) throw new Error(`hardware_key failed: ${r.err ?? 'unknown'}`);
+      return;
+    }
+    throw new Error('keyboard payload requires text or key');
+  }
+  throw new Error(`unsupported tool: ${toolName}`);
 }
 
 export async function tap(udid: string, x: number, y: number): Promise<void> {
@@ -337,7 +258,7 @@ export async function tap(udid: string, x: number, y: number): Promise<void> {
   const nx = Math.max(0, Math.min(1, x / w));
   const ny = Math.max(0, Math.min(1, y / h));
   trace(
-    `[argent-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
+    `[hid-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
   );
   await callTool('gesture-tap', { udid, x: nx, y: ny }, [
     'run',
@@ -367,7 +288,7 @@ export async function press(udid: string, x: number, y: number): Promise<void> {
   const nx = Math.max(0, Math.min(1, x / w));
   const ny = Math.max(0, Math.min(1, y / h));
   trace(
-    `[argent-press] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
+    `[hid-press] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
   );
   const events = [
     { type: 'Down' as const, x: nx, y: ny },
@@ -398,7 +319,7 @@ export async function swipe(
   const toY = Math.max(0, Math.min(1, y2 / h));
   const dur = Math.max(50, durationMs || 250);
   trace(
-    `[argent-swipe] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) dur=${dur}`,
+    `[hid-swipe] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) dur=${dur}`,
   );
   await callTool('gesture-swipe', { udid, fromX, fromY, toX, toY, durationMs: dur }, [
     'run',
@@ -445,7 +366,7 @@ export async function longPressDrag(
   const toX = norm(x2, w);
   const toY = norm(y2, h);
   trace(
-    `[argent-long-drag] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) hold=${holdMs} move=${moveMs}`,
+    `[hid-long-drag] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) hold=${holdMs} move=${moveMs}`,
   );
   // Event sequence: Down → stationary Move stack (drives hold timer
   // without changing position) → keyframe Move sequence to target →
@@ -490,12 +411,12 @@ export async function longPressDrag(
 }
 
 export async function typeText(udid: string, text: string): Promise<void> {
-  trace(`[argent-keyboard] text=${JSON.stringify(text)}`);
+  trace(`[hid-keyboard] text=${JSON.stringify(text)}`);
   await callTool('keyboard', { udid, text }, ['run', 'keyboard', '--udid', udid, '--text', text]);
 }
 
 export async function pressKey(udid: string, keyName: string): Promise<void> {
-  trace(`[argent-keyboard] key=${keyName}`);
+  trace(`[hid-keyboard] key=${keyName}`);
   await callTool('keyboard', { udid, key: keyName }, [
     'run',
     'keyboard',

@@ -344,9 +344,18 @@ static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
         ![NSStringFromClass([v class]) hasPrefix:@"RCTParagraph"]) {
         return v;
     }
+    // Cap promotion by area: don't return an ancestor whose window-
+    // space area is more than 6× the matched view's area. Without
+    // this, an outer drag-gesture container (e.g. a bottom-sheet's
+    // pan-to-dismiss RNGestureHandlerButton wrapping all rows) wins
+    // over the per-row Pressable, and the tap lands on the row whose
+    // current y intersects the cached center — usually the wrong one.
+    CGFloat baseArea = viewWindowArea(v);
+    CGFloat areaCap = (baseArea > 0 && baseArea < CGFLOAT_MAX) ? baseArea * 6.0 : CGFLOAT_MAX;
     UIView *cur = v.superview;
     for (int hop = 0; hop < 6 && cur; hop++, cur = cur.superview) {
         if (!cur.userInteractionEnabled) continue;
+        if (viewWindowArea(cur) > areaCap) return v;
         if ([cur isKindOfClass:UIControl.class]) return cur;
         if ([cur isKindOfClass:UIButton.class]) return cur;
         for (UIGestureRecognizer *g in cur.gestureRecognizers) {
@@ -501,7 +510,7 @@ static UIView *_Nullable walkAllWindows(BOOL (^matcher)(UIView *)) {
 // content's accessibilityLabel / accessibilityFrame as if they were
 // regular UIKit elements. A subview-only walk misses them; this walk
 // matches Maestro / XCUITest in coverage without spawning a runner
-// process or talking to argent for discovery.
+// process or invoking an external tool for discovery.
 //
 // Walks both accessibilityElements (when overridden, e.g. UILabel
 // returns the View itself) and accessibilityElementAtIndex: (used by
