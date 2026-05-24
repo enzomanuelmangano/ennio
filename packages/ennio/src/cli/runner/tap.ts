@@ -105,6 +105,21 @@ export async function execTapOn(
           `[ennio] post-scroll rect id="${sel.id}" rect=(${refresh.x.toFixed(0)},${refresh.y.toFixed(0)},${refresh.w.toFixed(0)},${refresh.h.toFixed(0)})\n`,
         );
       }
+      // After auto-scroll the target sits at the screen edge, where
+      // sibling Pressables (image overlay, parent card) often share
+      // overlapping hit regions. iOS hit-test routes the touch to
+      // the deepest visible interactive view, which may NOT be the
+      // testID's own onPress — adding the product instead navigates
+      // to its detail screen. Drive activate_testid directly: it
+      // calls the target view's _accessibilityHandleUserTouchActivate
+      // (and matching gesture-recogniser action), bypassing coord
+      // hit-test entirely. Safe to fire here because we just
+      // confirmed the target was off-viewport — no normal user tap
+      // could have hit it, so we're not double-firing.
+      const r = await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
+      const ok = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
+      process.stderr.write(`[ennio] activate_testid id="${sel.id}" ok=${ok}\n`);
+      if (ok) return;
     }
   }
   // Hidden test-only controls: some apps expose 1×1 px elements
