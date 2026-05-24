@@ -125,6 +125,14 @@ jobs:
           npm pkg set "dependencies.@reactiive/ennio=file:$GITHUB_WORKSPACE/packages/ennio"
           npm pkg set "devDependencies.@reactiive/ennio-expo-plugin=file:$GITHUB_WORKSPACE/packages/ennio-expo-plugin"
           npm install --legacy-peer-deps --no-audit --no-fund
+          # EnnioCore.podspec requires iOS 17.0. Expo's default is lower.
+          node -e "
+            const fs=require('fs');
+            const j=JSON.parse(fs.readFileSync('app.json'));
+            j.expo.ios = j.expo.ios || {};
+            j.expo.ios.deploymentTarget = '17.0';
+            fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
+          "
           # Stamp a unique bundle id. The default `com.anonymous.scratch`
           # collides with a published App Store app, which makes
           # `expo prebuild` prompt interactively and fail in CI.
@@ -139,8 +147,9 @@ jobs:
           "
           npx expo prebuild --platform ios --clean --non-interactive
           cd ios
+          WORKSPACE=$(ls -d *.xcworkspace | head -1)
           xcodebuild \
-            -workspace *.xcworkspace \
+            -workspace "$WORKSPACE" \
             -scheme "$(node -e "console.log(require('../app.json').expo.name)")" \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
