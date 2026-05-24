@@ -493,43 +493,31 @@ async function runCommand(
         return ts.ts || since + (data.elapsedMs ?? 0);
       };
       const committed = await timedAsync(ctx, 'tap.postWaitReactCommit', async () => {
-        // Poll hash post-tap. The dylib's wait_react_commit observer
-        // routinely misses commits under iOS 26's native nav
-        // transition (UIKit swaps VCs natively before RN's
-        // mount-method swizzle fires), so a wait_react_commit alone
-        // burns its 600 ms cap on every tap.
-        //
-        // Two-phase poll:
-        //   1. Wait until hash differs from preTapHash (max 600 ms).
-        //      A tap that lands SOMETHING always bumps the hash —
-        //      RN render OR even just iOS's press-feedback layer
-        //      animation on a button.
-        //   2. CONFIRM the change is durable — sample again 60 ms
-        //      later; if hash returned to preTapHash, the tap was
-        //      rejected by the target view (gesture recogniser not
-        //      armed, or the view's hit-test forwarded to a parent
-        //      that does nothing). iOS 26 liquid-glass tab bar
-        //      reliably reproduces this when tapped during/just
-        //      after another transition: visual press feedback
-        //      bumps the hash, no tab swap follows, hash reverts.
-        //      Treat as committed=false → caller retap path fires.
-        const deadline = Date.now() + 600;
-        let firstChangeTs = 0;
+        // Signal-based post-tap wait. Two coupled signals:
+        //   1. Frame hash must DIFFER from preTapHash (something
+        //      changed on screen — press handler ran, layer
+        //      repainted, or modal dismissed).
+        //   2. UIViewController.transitionCoordinator must be nil
+        //      (no animation in flight).
+        // Both must be true to return committed=true. Cap 1500 ms —
+        // covers modal-dismiss tails after `router.dismiss()`-style
+        // calls that don't trigger React commits.
+        const deadline = Date.now() + 1500;
         while (Date.now() < deadline) {
           const cur = await captureHash(ctx);
           if (cur !== preTapHash) {
-            firstChangeTs = Date.now();
-            break;
+            const animR = await ctx.client.call('animations_active').catch(() => undefined);
+            const animActive =
+              !!(animR && animR.ok && animR.data && (animR.data as { active?: boolean }).active);
+            if (!animActive) {
+              if (nextEditsField) {
+                await waitOneCommit(preReact.ts, 250);
+              }
+              return true;
+            }
           }
         }
-        if (!firstChangeTs) return false;
-        await sleep(60);
-        const settledHash = await captureHash(ctx);
-        if (settledHash === preTapHash) return false;
-        if (nextEditsField) {
-          await waitOneCommit(preReact.ts, 250);
-        }
-        return true;
+        return false;
       });
       if (!committed) {
         // No commit fired — likely a no-op tap, fall back to the
@@ -1157,7 +1145,12 @@ async function runCommand(
     let lastChange = Date.now();
     while (Date.now() < deadline) {
       const animR = await ctx.client.call('animations_active').catch(() => undefined);
-      const animActive = !!(animR && animR.ok && animR.data && (animR.data as { active?: boolean }).active);
+      const animActive = !!(
+        animR &&
+        animR.ok &&
+        animR.data &&
+        (animR.data as { active?: boolean }).active
+      );
       const hashR = await ctx.client.call('frame_hash').catch(() => undefined);
       const curHash = (hashR?.data as { hash?: string })?.hash ?? '';
       if (curHash !== prevHash) {
