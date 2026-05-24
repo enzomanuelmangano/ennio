@@ -133,20 +133,36 @@ export class IdbGrpcClient {
     y2: number,
     durationSec: number = 0.25,
   ): Promise<void> {
-    const stream = await this.ensureStream();
+    // Fresh stream per swipe — same rationale as tap(). Long-lived
+    // streams leave idb_companion's CoreSimulator HID injector in a
+    // half-committed state on iOS 26, so the NEXT tap on a fresh
+    // stream is dropped (companion still believes the previous touch
+    // session is mid-flight). Closing the stream forces a flush.
+    const stream = await this.openFreshStream();
     const writeOne = (msg: object) =>
       new Promise<void>((res, rej) => {
         const ok = stream.write(msg, (err?: Error) => (err ? rej(err) : res()));
         if (!ok) stream.once('drain', () => res());
       });
-    await writeOne({
-      swipe: {
-        start: { x: x1, y: y1 },
-        end: { x: x2, y: y2 },
-        delta: 0,
-        duration: durationSec,
-      },
-    });
+    try {
+      await writeOne({
+        swipe: {
+          start: { x: x1, y: y1 },
+          end: { x: x2, y: y2 },
+          delta: 0,
+          duration: durationSec,
+        },
+      });
+      // Wait for the duration so companion finishes injecting before
+      // we close the stream (closing mid-injection cancels the swipe).
+      await new Promise((res) => setTimeout(res, durationSec * 1000 + 50));
+    } finally {
+      try {
+        stream.end();
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   /** Type literal text by mapping each char to a HID keycode press. */
