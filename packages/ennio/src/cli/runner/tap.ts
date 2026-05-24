@@ -98,6 +98,14 @@ export async function execTapOn(
         (scrollResp.data as { scrolled?: boolean }).scrolled
       );
       process.stderr.write(`[ennio] scroll_to id="${sel.id}" scrolled=${scrolled}\n`);
+      // After scrollRectToVisible the carousel snaps, but React
+      // Fabric in Release mode mounts virtualized items lazily —
+      // the target view exists in the UIView tree (its testID
+      // resolves to a rect) yet its Pressability onPress handler
+      // hasn't been wired by the JS thread yet. Tapping in this
+      // window fires the coord but no handler responds.
+      // Wait for one React commit before re-resolving + tapping.
+      await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 600 }).catch(() => undefined);
       const refresh = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
       if (refresh) {
         rect = refresh;
@@ -105,17 +113,10 @@ export async function execTapOn(
           `[ennio] post-scroll rect id="${sel.id}" rect=(${refresh.x.toFixed(0)},${refresh.y.toFixed(0)},${refresh.w.toFixed(0)},${refresh.h.toFixed(0)})\n`,
         );
       }
-      // After auto-scroll the target sits at the screen edge, where
-      // sibling Pressables (image overlay, parent card) often share
-      // overlapping hit regions. iOS hit-test routes the touch to
-      // the deepest visible interactive view, which may NOT be the
-      // testID's own onPress — adding the product instead navigates
-      // to its detail screen. Drive activate_testid directly: it
-      // calls the target view's _accessibilityHandleUserTouchActivate
-      // (and matching gesture-recogniser action), bypassing coord
-      // hit-test entirely. Safe to fire here because we just
-      // confirmed the target was off-viewport — no normal user tap
-      // could have hit it, so we're not double-firing.
+      // Activate path bypasses hit-test entirely. Works on RN
+      // Pressable in most archs; returns false on Fabric Release
+      // where Pressability's handler isn't reachable via the public
+      // accessibility chain — fall through to HID tap in that case.
       const r = await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
       const ok = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
       process.stderr.write(`[ennio] activate_testid id="${sel.id}" ok=${ok}\n`);
