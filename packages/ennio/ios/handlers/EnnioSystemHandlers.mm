@@ -168,11 +168,8 @@ void RegisterEnnioSystemHandlers(void) {
     });
 
     EnnioControlSocket::registerHandler("back", [](const std::string &) -> std::string {
-        // backGesture must NOT be wrapped in EnnioOnMainVoid — it
-        // dispatches its own main-queue work and blocks on the
-        // transition coordinator's completion, which would deadlock
-        // if invoked synchronously from the main thread.
-        BOOL ok = [EnnioOps backGesture];
+        BOOL ok = NO;
+        EnnioOnMainVoid([&]() { ok = [EnnioOps backGesture]; });
         return std::string("{\"popped\":") + (ok ? "true" : "false") + "}";
     });
 

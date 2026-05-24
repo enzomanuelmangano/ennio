@@ -743,10 +743,19 @@ async function runCommand(
     return;
   }
   if ('back' in cmd) {
-    // Dylib blocks on transitionCoordinator's completion callback —
-    // returns at the exact end of the pop animation, no client-side
-    // polling or sleep required.
     await ctx.client.call('back');
+    // Poll animations_active until the pop transition ends.
+    // popViewControllerAnimated's CAAnimation registers on UIKit's
+    // transitionCoordinator immediately; the poll exits as soon as
+    // no VC in the chain is transitioning. Capped at 800 ms for
+    // custom transitions that exceed the default ~250 ms.
+    const deadline = Date.now() + 800;
+    while (Date.now() < deadline) {
+      const r = await ctx.client.call('animations_active').catch(() => undefined);
+      const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
+      if (!active) break;
+      await sleep(20);
+    }
     return;
   }
   if ('hideKeyboard' in cmd) {

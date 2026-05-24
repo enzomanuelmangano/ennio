@@ -252,6 +252,47 @@ jobs:
           test -d "$APP" || { echo "Cached .app missing at $APP"; exit 1; }
           xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP"
 
+      # Ennio drives every HID tap / swipe through idb_companion's
+      # gRPC unix socket (/tmp/idb/<UDID>_companion.sock). Without
+      # this daemon running, every write to the socket fails silently
+      # and the tap never reaches CoreSimulator's digitizer — every
+      # flow then times out at the first assertVisible. Local devs
+      # leave the daemon running across sessions; CI has to spawn
+      # it explicitly.
+      - name: Start idb_companion
+        run: |
+          set -uxo pipefail
+          UDID="${{ steps.sim.outputs.udid }}"
+          mkdir -p /tmp/idb
+          SOCK="/tmp/idb/${UDID}_companion.sock"
+          # Retry-loop the daemon itself: idb_companion's Aug 2022
+          # brew build occasionally races against the simulator's
+          # device state on cold-boot runners and exits without
+          # creating the socket. Up to 3 launches × 45 s each.
+          for attempt in 1 2 3; do
+            echo "idb_companion attempt $attempt"
+            rm -f "$SOCK"
+            nohup idb_companion --udid "$UDID" --grpc-domain-sock "$SOCK" \
+              > "/tmp/idb-companion-$attempt.log" 2>&1 &
+            COMPANION_PID=$!
+            for i in $(seq 1 45); do
+              [ -S "$SOCK" ] && break
+              sleep 1
+            done
+            if [ -S "$SOCK" ]; then
+              echo "idb_companion listening on $SOCK (pid $COMPANION_PID, attempt $attempt)"
+              exit 0
+            fi
+            echo "Attempt $attempt failed — companion log tail:"
+            tail -50 "/tmp/idb-companion-$attempt.log" || true
+            kill -9 $COMPANION_PID 2>/dev/null || true
+            # Give CoreSimulator a moment to release device state
+            # before the next attempt.
+            sleep 5
+          done
+          echo "idb_companion failed to start after 3 attempts" >&2
+          exit 1
+
       # -------------------------------------------------------------
       # Build ennio CLI (TS → dist/cli.js) so `bunx ennio test` works.
       # -------------------------------------------------------------
@@ -273,7 +314,8 @@ jobs:
           ENNIO_DYLIB_PATH: ${{ github.workspace }}/packages/ennio/prebuilt/libennio-rn${{ steps.rn.outputs.version }}-sim.dylib
         run: |
           mkdir -p /tmp/ennio-logs
-          PASS=0; FAIL=0
+          PASS=0; FAIL=0; CONSEC_FAIL=0
+          ABORTED=0
           for f in maestro-e2e/*.yaml; do
             base=$(basename "$f")
             [[ "$base" == _* ]] && continue
@@ -281,14 +323,27 @@ jobs:
             if gtimeout 240 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
               echo "PASS  $base"
               PASS=$((PASS+1))
+              CONSEC_FAIL=0
             else
               echo "FAIL  $base"
               FAIL=$((FAIL+1))
+              CONSEC_FAIL=$((CONSEC_FAIL+1))
+              # Bail early when two flows fail in a row — almost always
+              # a setup / dylib / sim issue affecting every subsequent
+              # flow too, so keeping the runner busy for another
+              # 15-20 minutes is wasted time. Reviewer still gets logs
+              # for the first two fails via the artifact upload.
+              if [ "$CONSEC_FAIL" -ge 2 ]; then
+                echo ""
+                echo "Aborting suite: 2 consecutive failures. Likely environment-level."
+                ABORTED=1
+                break
+              fi
             fi
           done
           echo ""
-          echo "Pass: $PASS  Fail: $FAIL"
-          [ "$FAIL" -eq 0 ]
+          echo "Pass: $PASS  Fail: $FAIL  Aborted: $ABORTED"
+          [ "$FAIL" -eq 0 ] && [ "$ABORTED" -eq 0 ]
 
       # -------------------------------------------------------------
       # Always upload artifacts so reviewers can debug from the PR.

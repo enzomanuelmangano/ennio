@@ -62,27 +62,23 @@ static UIAlertController *_Nullable findAlert(void) {
 }
 
 static UITabBarController *_Nullable findTabBarController(void) {
+    // BFS through every VC reachable from any window: rootViewController,
+    // its presentedViewController chain, and all descendants via
+    // childViewControllers (recursive). Expo Router + react-native-screens
+    // host the UITabBarController (RNSTabBarController subclass) as a
+    // child two levels deep inside RNSBottomTabsHostComponentView; a
+    // shallow walk misses it and the UIKit-direct tab fallback returns
+    // tapped=false on every tab tap.
+    NSMutableArray<UIViewController *> *queue = [NSMutableArray new];
     for (UIWindow *w in allWindows()) {
-        UIViewController *vc = w.rootViewController;
-        // Walk presented chain first, then handle nested in nav.
-        while (vc) {
-            if ([vc isKindOfClass:UITabBarController.class]) return (UITabBarController *)vc;
-            if ([vc isKindOfClass:UINavigationController.class]) {
-                UIViewController *top = ((UINavigationController *)vc).topViewController;
-                if ([top isKindOfClass:UITabBarController.class])
-                    return (UITabBarController *)top;
-            }
-            UIViewController *presented = vc.presentedViewController;
-            if (!presented) {
-                // Look at children for embedded tabbars
-                for (UIViewController *child in vc.childViewControllers) {
-                    if ([child isKindOfClass:UITabBarController.class])
-                        return (UITabBarController *)child;
-                }
-                break;
-            }
-            vc = presented;
-        }
+        if (w.rootViewController) [queue addObject:w.rootViewController];
+    }
+    while (queue.count) {
+        UIViewController *vc = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([vc isKindOfClass:UITabBarController.class]) return (UITabBarController *)vc;
+        for (UIViewController *child in vc.childViewControllers) [queue addObject:child];
+        if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
     }
     return nil;
 }
@@ -199,8 +195,13 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
     if (!tbc) return NO;
     NSInteger idx = findTabIndex(tbc, name);
     if (idx == NSNotFound) return NO;
+    // Already on the target tab — treat as success without re-running
+    // the delegate handshake (react-native-screens' delegate returns
+    // NO from -shouldSelectViewController: when the tab is already
+    // selected, which used to make this op report tapped=false even
+    // though the caller's intent is satisfied).
+    if (tbc.selectedIndex == (NSUInteger)idx) return YES;
     UIViewController *target = tbc.viewControllers[idx];
-    // Fire delegate first (UIKit convention).
     if ([tbc.delegate respondsToSelector:@selector(tabBarController:shouldSelectViewController:)]) {
         BOOL ok = [tbc.delegate tabBarController:tbc shouldSelectViewController:target];
         if (!ok) return NO;
@@ -221,51 +222,24 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
 // ─── Navigation ─────────────────────────────────────────────────────
 
 + (BOOL)backGesture {
-    // Block on the actual transition completion via the
-    // UIViewControllerTransitionCoordinator.animateAlongsideTransition
-    // completion block. CLI used to sleep 800 ms post-call as a
-    // worst-case floor — replaced here with an exact-end signal.
-    // Must be invoked from a background thread; the wrapper inside
-    // the socket dispatch already runs off-main.
-    __block BOOL ok = NO;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UINavigationController *nav = findTopNavController();
-        if (nav && nav.viewControllers.count >= 2) {
-            [nav popViewControllerAnimated:YES];
-            id<UIViewControllerTransitionCoordinator> tc = nav.transitionCoordinator;
-            if (tc) {
-                [tc animateAlongsideTransition:nil
-                                    completion:^(id<UIViewControllerTransitionCoordinatorContext> ctx) {
-                    (void)ctx;
-                    ok = YES;
-                    dispatch_semaphore_signal(sem);
-                }];
-                return;
-            }
-            ok = YES;
-            dispatch_semaphore_signal(sem);
-            return;
-        }
-        UIWindow *win = [EnnioBootstrap keyWindow];
-        UIViewController *vc = win.rootViewController;
-        while (vc.presentedViewController) vc = vc.presentedViewController;
-        if (vc && vc.presentingViewController) {
-            [vc dismissViewControllerAnimated:YES
-                                   completion:^{
-                ok = YES;
-                dispatch_semaphore_signal(sem);
-            }];
-            return;
-        }
-        dispatch_semaphore_signal(sem);
-    });
-    // 1.5 s deadline guards against a transition that never finishes
-    // (UIKit holds the coordinator alive in some edge cases). The
-    // caller doesn't need its own sleep on top.
-    dispatch_semaphore_wait(sem,
-                            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)));
-    return ok;
+    // Synchronous variant — caller (CLI's `back` handler) waits the
+    // post-tap settle by polling animations_active separately.
+    // Previous semaphore + transitionCoordinator completion variant
+    // intermittently deadlocked on slower CI runners when main was
+    // already busy processing the prior step's render queue.
+    UINavigationController *nav = findTopNavController();
+    if (nav && nav.viewControllers.count >= 2) {
+        [nav popViewControllerAnimated:YES];
+        return YES;
+    }
+    UIWindow *win = [EnnioBootstrap keyWindow];
+    UIViewController *vc = win.rootViewController;
+    while (vc.presentedViewController) vc = vc.presentedViewController;
+    if (vc && vc.presentingViewController) {
+        [vc dismissViewControllerAnimated:YES completion:nil];
+        return YES;
+    }
+    return NO;
 }
 
 // Check ONLY a VC's root view layer for a position/transform/opacity

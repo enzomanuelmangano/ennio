@@ -301,7 +301,15 @@ export async function execTapOn(
     const finalHc = await ctx.client
       .call('wait_hash_change', { sinceHash: baseHash, maxMs: 80 })
       .catch(() => undefined);
-    const finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
+    let finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
+    // For testID taps only: confirm the hash change DIDN'T revert
+    // to baseline within ~80 ms. iOS press-feedback bumps the hash
+    // transiently even when onPress never fires; a single
+    // wait_hash_change returns true on that transient bump and the
+    // activate_testid recovery is then skipped. CI runners hit this
+    // on slow-handler buttons (next-btn → submit, add-to-cart → API
+    // round-trip). Text-only taps stay on the original gate — they
+    // already get the unconditional tap_tab fallback below.
     if (!finalChanged) {
       if (sel.id) {
         await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
@@ -316,6 +324,19 @@ export async function execTapOn(
         // wires to the React-side onPress.
         await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
       }
+    }
+    // Tab-bar resilience: iOS 26's liquid-glass tab bar drops HID
+    // taps when the host is mid-transition (slow CI runners reproduce
+    // this on roughly every nav-after-state-transition pattern). The
+    // press-feedback layer still bumps the frame hash so the
+    // !finalChanged gate above doesn't fire; meanwhile the tab never
+    // actually swaps and the next assertVisible times out. Always
+    // probe tap_tab when the selector is a bare text name — the
+    // dylib op no-ops if the name doesn't resolve to a UITabBarItem,
+    // and if it DOES resolve UIKit's setSelectedIndex is idempotent
+    // (no-op when the target tab is already selected).
+    if (sel.text && !sel.id) {
+      await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
     }
   }
 }
