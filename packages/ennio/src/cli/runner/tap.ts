@@ -34,8 +34,14 @@ export async function execTapOn(
   sel: MaestroSelector,
   preHash?: string,
 ): Promise<void> {
-  // Point-tap fast path — no discovery needed.
+  // Point-tap fast path — no discovery needed. Wait for commits to
+  // quiesce before firing: the YAML emits literal-coord taps right
+  // after assertVisible-style gates, and a picker / sheet may still
+  // be animating into place at the coord the YAML predicted. Without
+  // a settle, the tap can land on a still-moving frame or behind a
+  // transitioning overlay.
   if (sel.point !== undefined) {
+    await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined);
     const { x, y } = parsePoint(sel.point);
     await hidTap(ctx.udid, x, y);
     return;
@@ -174,6 +180,26 @@ export async function execTapOn(
       stableRect = final;
       center.x = final.x + final.w / 2;
       center.y = final.y + final.h / 2;
+    }
+  }
+  // Child-hijack detour: when the testID-tagged target is a plain
+  // wrapper View (no onPress) whose center hit-tests to an inner
+  // interactive child, the child's onPress fires instead of the
+  // intended outer Link. bsky's NotificationFeedItem is the canonical
+  // case: <View testID="feedItem-by-X"> wraps <Post>, and tapping
+  // the View's center lands on an inline author Link → profile nav
+  // instead of post-detail. Ask the dylib to resolve the LARGEST
+  // interactive descendant inside the testID view and tap THAT
+  // descendant's center instead. Only triggers when find returns
+  // a non-interactive wrapper (kind=descendant).
+  if (sel.id && !sel.childOf) {
+    const tt = await ctx.client.call('find_tap_target_by_testid', { testID: sel.id }).catch(() => undefined);
+    if (tt && tt.ok && tt.data) {
+      const data = tt.data as { x: number; y: number; w: number; h: number; kind?: string };
+      if (data.kind === 'descendant') {
+        center.x = data.x + data.w / 2;
+        center.y = data.y + data.h / 2;
+      }
     }
   }
   // HID tap: down + up immediately. No pre-tap sleep — the position-

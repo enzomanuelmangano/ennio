@@ -37,6 +37,7 @@ void RegisterEnnioFindHandlers(void) {
         if (!testID.length && !text.length) throw std::runtime_error("missing selector");
         BOOL exposed = NO;
         BOOL found = NO;
+        BOOL childHijack = NO;
         EnnioOnMainVoid([&]() {
             UIView *target = testID.length
                 ? [EnnioFinder findViewByTestID:testID]
@@ -55,12 +56,35 @@ void RegisterEnnioFindHandlers(void) {
                 if (cursor == target) { exposed = YES; break; }
                 cursor = cursor.superview;
             }
+            // childHijack: hit-test landed on an interactive descendant
+            // BEFORE reaching target. iOS dispatches touchesBegan to
+            // the deepest interactive view, so the descendant's own
+            // onPress fires — not target's. Common shape: feedItem
+            // container with an inner avatar/link that opens profile
+            // instead of post detail. Caller can use this signal to
+            // prefer accessibilityActivate (which invokes target's
+            // own handler bypassing hit-test).
+            if (exposed && hit && hit != target) {
+                for (UIView *c = hit; c && c != target; c = c.superview) {
+                    BOOL inter = NO;
+                    if ([c isKindOfClass:UIControl.class]) inter = YES;
+                    else if ((c.accessibilityTraits & UIAccessibilityTraitButton) ||
+                             (c.accessibilityTraits & UIAccessibilityTraitLink)) inter = YES;
+                    else {
+                        for (UIGestureRecognizer *g in c.gestureRecognizers) {
+                            if (g.isEnabled) { inter = YES; break; }
+                        }
+                    }
+                    if (inter) { childHijack = YES; break; }
+                }
+            }
         });
-        char buf[64];
+        char buf[128];
         std::snprintf(buf, sizeof(buf),
-                      "{\"found\":%s,\"exposed\":%s}",
+                      "{\"found\":%s,\"exposed\":%s,\"childHijack\":%s}",
                       found ? "true" : "false",
-                      exposed ? "true" : "false");
+                      exposed ? "true" : "false",
+                      childHijack ? "true" : "false");
         return std::string(buf);
     });
 
@@ -140,6 +164,88 @@ void RegisterEnnioFindHandlers(void) {
         });
         if (!found) throw std::runtime_error("testID not found");
         return EnnioRectJson(rect);
+    });
+
+    // Variant of find_by_testid that returns the LARGEST interactive
+    // descendant's rect when the testID view itself is a plain
+    // (non-interactive) container. Used for tap-target disambiguation
+    // when a YAML's `tapOn: id: X` resolves to a wrapper View whose
+    // visual center coincidentally lands on a child link (e.g. bsky's
+    // NotificationFeedItem wraps Post in a plain <View testID=...>;
+    // tap at center hits the inner author Link → wrong nav). When the
+    // testID view IS interactive, returns its own rect (same as
+    // find_by_testid). When no interactive descendant exists, also
+    // returns its own rect — caller can decide via the `kind` field.
+    EnnioControlSocket::registerHandler("find_tap_target_by_testid", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = EnnioArgString(a, @"testID");
+        if (!testID.length) throw std::runtime_error("missing testID");
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
+        const char *kindCStr = "self";
+        EnnioOnMainVoid([&]() {
+            NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+            UIView *target = nil;
+            for (UIView *cand in all) {
+                if ([EnnioFinder isOnScreen:cand]) { target = cand; break; }
+            }
+            if (!target) target = [EnnioFinder findViewByTestID:testID];
+            if (!target || ![EnnioFinder isOnScreen:target]) return;
+            found = YES;
+            BOOL targetInteractive = NO;
+            if ([target isKindOfClass:UIControl.class]) targetInteractive = YES;
+            else if ((target.accessibilityTraits & UIAccessibilityTraitButton) ||
+                     (target.accessibilityTraits & UIAccessibilityTraitLink)) targetInteractive = YES;
+            else {
+                for (UIGestureRecognizer *g in target.gestureRecognizers) {
+                    if (g.isEnabled) { targetInteractive = YES; break; }
+                }
+            }
+            if (targetInteractive) {
+                rect = [EnnioFinder windowRectFor:target];
+                return;
+            }
+            // Walk descendants — pick the largest interactive view by
+            // window-space area. Constrains hit-test to land on a
+            // single, dominant onPress target (the post-detail Link
+            // wrapping the post body) rather than a small inner
+            // child link (author / avatar).
+            UIView *best = nil;
+            CGFloat bestArea = 0;
+            NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:target];
+            while (stack.count) {
+                UIView *v = stack.lastObject;
+                [stack removeLastObject];
+                BOOL inter = NO;
+                if ([v isKindOfClass:UIControl.class]) inter = YES;
+                else if ((v.accessibilityTraits & UIAccessibilityTraitButton) ||
+                         (v.accessibilityTraits & UIAccessibilityTraitLink)) inter = YES;
+                else {
+                    for (UIGestureRecognizer *g in v.gestureRecognizers) {
+                        if (g.isEnabled) { inter = YES; break; }
+                    }
+                }
+                if (inter && v != target && v.window) {
+                    CGRect wr = [v.window convertRect:v.bounds fromView:v];
+                    CGFloat area = wr.size.width * wr.size.height;
+                    if (area > bestArea) { bestArea = area; best = v; }
+                }
+                for (UIView *sub in v.subviews) [stack addObject:sub];
+            }
+            if (best) {
+                rect = [EnnioFinder windowRectFor:best];
+                kindCStr = "descendant";
+            } else {
+                rect = [EnnioFinder windowRectFor:target];
+            }
+        });
+        if (!found) throw std::runtime_error("testID not found");
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"x\":%.2f,\"y\":%.2f,\"w\":%.2f,\"h\":%.2f,\"kind\":\"%s\"}",
+                      rect.x, rect.y, rect.w, rect.h, kindCStr);
+        return std::string(buf);
     });
 
     EnnioControlSocket::registerHandler("find_by_text", [](const std::string &args) -> std::string {

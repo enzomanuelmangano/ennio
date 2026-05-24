@@ -459,7 +459,7 @@ async function runCommand(
         });
       }
       await timedAsync(ctx, 'tap.postWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 80 }).catch(() => undefined),
+        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined),
       );
     } else {
       // Event-driven post-tap settle. Replaces fixed POST_TAP_SETTLE_MS
