@@ -221,26 +221,51 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
 // ─── Navigation ─────────────────────────────────────────────────────
 
 + (BOOL)backGesture {
-    // First try popping a navigation stack — covers the common Stack
-    // back-button case.
-    UINavigationController *nav = findTopNavController();
-    if (nav && nav.viewControllers.count >= 2) {
-        [nav popViewControllerAnimated:YES];
-        return YES;
-    }
-    // Fall back to dismissing the topmost presented modal (sheet,
-    // formSheet, fullScreen). React Navigation's modal stack and
-    // expo-router's modals both surface here. Without this, a YAML
-    // `back` after presenting a modal goes nowhere and subsequent
-    // tab taps land on the still-visible sheet.
-    UIWindow *win = [EnnioBootstrap keyWindow];
-    UIViewController *vc = win.rootViewController;
-    while (vc.presentedViewController) vc = vc.presentedViewController;
-    if (vc && vc.presentingViewController) {
-        [vc dismissViewControllerAnimated:YES completion:nil];
-        return YES;
-    }
-    return NO;
+    // Block on the actual transition completion via the
+    // UIViewControllerTransitionCoordinator.animateAlongsideTransition
+    // completion block. CLI used to sleep 800 ms post-call as a
+    // worst-case floor — replaced here with an exact-end signal.
+    // Must be invoked from a background thread; the wrapper inside
+    // the socket dispatch already runs off-main.
+    __block BOOL ok = NO;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UINavigationController *nav = findTopNavController();
+        if (nav && nav.viewControllers.count >= 2) {
+            [nav popViewControllerAnimated:YES];
+            id<UIViewControllerTransitionCoordinator> tc = nav.transitionCoordinator;
+            if (tc) {
+                [tc animateAlongsideTransition:nil
+                                    completion:^(id<UIViewControllerTransitionCoordinatorContext> ctx) {
+                    (void)ctx;
+                    ok = YES;
+                    dispatch_semaphore_signal(sem);
+                }];
+                return;
+            }
+            ok = YES;
+            dispatch_semaphore_signal(sem);
+            return;
+        }
+        UIWindow *win = [EnnioBootstrap keyWindow];
+        UIViewController *vc = win.rootViewController;
+        while (vc.presentedViewController) vc = vc.presentedViewController;
+        if (vc && vc.presentingViewController) {
+            [vc dismissViewControllerAnimated:YES
+                                   completion:^{
+                ok = YES;
+                dispatch_semaphore_signal(sem);
+            }];
+            return;
+        }
+        dispatch_semaphore_signal(sem);
+    });
+    // 1.5 s deadline guards against a transition that never finishes
+    // (UIKit holds the coordinator alive in some edge cases). The
+    // caller doesn't need its own sleep on top.
+    dispatch_semaphore_wait(sem,
+                            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)));
+    return ok;
 }
 
 // Check ONLY a VC's root view layer for a position/transform/opacity

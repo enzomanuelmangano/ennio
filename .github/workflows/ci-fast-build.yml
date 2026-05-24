@@ -13,7 +13,7 @@
 #   4. example DerivedData                        (keyed on fingerprint + example native source SHAs)
 #   5. ccache                                     (keyed on fingerprint + commit SHA)
 #
-# Cold (first PR on a clean cache pool): ~25 min.
+# Cold (first PR on a clean cache pool): ~20 min.
 # Warm (same fingerprint + same ennio source): ~5 min (mostly suite runtime).
 name: ci-fast-build
 

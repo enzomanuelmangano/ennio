@@ -423,9 +423,23 @@ async function runCommand(
       // two saves ~450 ms / tap on average — curate-lists 97-step
       // run drops ~25 s. Generous maxMs gives slow async submits
       // room; stableMs floor keeps the average low.
-      await timedAsync(ctx, 'tap.preWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 150 }).catch(() => undefined),
-      );
+      await timedAsync(ctx, 'tap.preWaitCommit', async () => {
+        // Wait for any UIKit transition (modal dismiss, nav push/pop)
+        // to fully end before tapping. Signal-based: polls
+        // animations_active (checks UIViewController.transitionCoordinator
+        // across the VC chain). No magic-number stable-quiet window —
+        // we wait until the system itself reports no transition in
+        // flight. Cap at 1500 ms for safety; the cap is reached only
+        // when a custom transition holds the coordinator open past the
+        // visible animation end.
+        const deadline = Date.now() + 1500;
+        while (Date.now() < deadline) {
+          const r = await ctx.client.call('animations_active').catch(() => undefined);
+          const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
+          if (!active) break;
+          await sleep(20);
+        }
+      });
     }
     const preTapHash = await captureHash(ctx);
     const preReact = await captureReactTs(ctx);
@@ -479,30 +493,39 @@ async function runCommand(
         return ts.ts || since + (data.elapsedMs ?? 0);
       };
       const committed = await timedAsync(ctx, 'tap.postWaitReactCommit', async () => {
-        // Poll hash + react-commit briefly. The dylib's
-        // wait_react_commit observer routinely misses commits under
-        // iOS 26's native nav transition (UIKit swaps VCs natively
-        // before RN's mount-method swizzle fires), burning the full
-        // 600ms cap on EVERY tap. Poll captureHash directly with a
-        // short cap and return as soon as the screen changes — that
-        // proves the press handler ran. Login.yml regression (typing
-        // before keyboard mount commit) handled by the nextEditsField
-        // branch below.
-        const deadline = Date.now() + 300;
-        let hashChanged = false;
+        // Poll hash post-tap. The dylib's wait_react_commit observer
+        // routinely misses commits under iOS 26's native nav
+        // transition (UIKit swaps VCs natively before RN's
+        // mount-method swizzle fires), so a wait_react_commit alone
+        // burns its 600 ms cap on every tap.
+        //
+        // Two-phase poll:
+        //   1. Wait until hash differs from preTapHash (max 600 ms).
+        //      A tap that lands SOMETHING always bumps the hash —
+        //      RN render OR even just iOS's press-feedback layer
+        //      animation on a button.
+        //   2. CONFIRM the change is durable — sample again 60 ms
+        //      later; if hash returned to preTapHash, the tap was
+        //      rejected by the target view (gesture recogniser not
+        //      armed, or the view's hit-test forwarded to a parent
+        //      that does nothing). iOS 26 liquid-glass tab bar
+        //      reliably reproduces this when tapped during/just
+        //      after another transition: visual press feedback
+        //      bumps the hash, no tab swap follows, hash reverts.
+        //      Treat as committed=false → caller retap path fires.
+        const deadline = Date.now() + 600;
+        let firstChangeTs = 0;
         while (Date.now() < deadline) {
           const cur = await captureHash(ctx);
           if (cur !== preTapHash) {
-            hashChanged = true;
-            break;
-          }
-          const after = await waitOneCommit(preReact.ts, 30);
-          if (after) {
-            hashChanged = true;
+            firstChangeTs = Date.now();
             break;
           }
         }
-        if (!hashChanged) return false;
+        if (!firstChangeTs) return false;
+        await sleep(60);
+        const settledHash = await captureHash(ctx);
+        if (settledHash === preTapHash) return false;
         if (nextEditsField) {
           await waitOneCommit(preReact.ts, 250);
         }
@@ -728,8 +751,10 @@ async function runCommand(
     return;
   }
   if ('back' in cmd) {
+    // Dylib blocks on transitionCoordinator's completion callback —
+    // returns at the exact end of the pop animation, no client-side
+    // polling or sleep required.
     await ctx.client.call('back');
-    await sleep(POST_TAP_SETTLE_MS);
     return;
   }
   if ('hideKeyboard' in cmd) {
@@ -1010,8 +1035,8 @@ async function runCommand(
     // mid-mount when the swipe Down event arrived; the recogniser
     // received only the Up event after attaching, which it dropped
     // as a no-op.
-    await ctx.client.call('wait_commit', { maxMs: 1200, stableMs: 200 }).catch(() => undefined);
-    await ctx.client.call('wait_presentation_idle', { maxMs: 400 }).catch(() => undefined);
+    await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 350 }).catch(() => undefined);
+    await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
     // Maestro default swipe duration is 400 ms (verified with
     // `maestro test` on a swipe-only flow: "Swipe ... in 400 ms").
     // We previously defaulted to 250 ms which was fast enough for
@@ -1116,18 +1141,37 @@ async function runCommand(
   }
   if ('waitForAnimationToEnd' in cmd) {
     const timeout =
-      cmd.waitForAnimationToEnd === true ? 1500 : (cmd.waitForAnimationToEnd.timeout ?? 1500);
-    // In-process: React-commit quiet. Catches RN-side animations
-    // ending (sheet animateOut, navigation transition). 1.5s cap is
-    // enough for any typical RN animation (300-500ms); the previous
-    // 3s cap was burned on background re-renders that never settle.
-    await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 100 });
+      cmd.waitForAnimationToEnd === true ? 600 : (cmd.waitForAnimationToEnd.timeout ?? 600);
+    // Race two signals:
+    //   - UIViewController.transitionCoordinator (animations_active)
+    //   - frame_hash quiet for 80 ms
+    // Either green-light returns. iOS 26 navigation occasionally
+    // holds the transition coordinator open past the visible
+    // animation end (custom presentation chain on liquid-glass tab
+    // bar) so transitionCoordinator alone hits the cap. Hash-quiet
+    // catches that case — the screen visibly stops changing well
+    // before transitionCoordinator releases.
+    const deadline = Date.now() + timeout;
+    let prevR = await ctx.client.call('frame_hash').catch(() => undefined);
+    let prevHash = (prevR?.data as { hash?: string })?.hash ?? '';
+    let lastChange = Date.now();
+    while (Date.now() < deadline) {
+      const animR = await ctx.client.call('animations_active').catch(() => undefined);
+      const animActive = !!(animR && animR.ok && animR.data && (animR.data as { active?: boolean }).active);
+      const hashR = await ctx.client.call('frame_hash').catch(() => undefined);
+      const curHash = (hashR?.data as { hash?: string })?.hash ?? '';
+      if (curHash !== prevHash) {
+        prevHash = curHash;
+        lastChange = Date.now();
+      }
+      const hashQuiet = Date.now() - lastChange >= 80;
+      if (!animActive || hashQuiet) break;
+      await sleep(20);
+    }
     // Cross-process safety: PHPicker / share sheet / document picker
-    // dismiss in another XPC process — wait_commit is blind to that.
-    // Poll the in-process VC chain until no cross-process picker VC
-    // is presented. ~10 ms per poll (one socket round-trip), and we
-    // bail the instant the picker is gone, so cost is negligible on
-    // RN-only screens.
+    // dismiss in another XPC process — the animations_active check
+    // above is blind to those because their views live in a remote
+    // process. Bail the instant the picker leaves the VC chain.
     const dismissDeadline = Date.now() + 2500;
     while (Date.now() < dismissDeadline) {
       const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
@@ -1142,57 +1186,6 @@ async function runCommand(
           cls.includes('UIDocumentPickerViewController'),
       );
       if (!hasCrossProcess) break;
-      await sleep(80);
-    }
-    // Tail-end: also wait for any UIKit modal transition currently
-    // in flight (Bluesky's Edit-modal dismiss, RN-Navigation push/pop
-    // animations) by polling for VC-chain stability. Picks up
-    // transitions that don't fire React commits (UIKit-driven
-    // dismiss without RN state change).
-    //
-    // Two phases:
-    //   1. Wait for the chain to CHANGE (new VC presented or current
-    //      VC dismissed) — up to 3.5 s. Bluesky's Mantis crop tool is
-    //      a native UIViewController presented from a JS callback;
-    //      the call-out to the file system + crop UI init takes
-    //      ~3 s on cold launch, so the chain doesn't grow for several
-    //      seconds after the trigger tap. Without this phase we exit
-    //      while the modal is still spinning up.
-    //   2. After observing a change, wait for stability (3 stable
-    //      polls = 240 ms of no further change) for up to 5 s.
-    //
-    // If no change ever happens within phase 1, the screen was static
-    // — return early so static taps don't pay the full timeout.
-    const baselineR = await ctx.client.call('top_vc_chain').catch(() => undefined);
-    const baselineChain = JSON.stringify(
-      ((baselineR?.data as { chain?: string[] })?.chain ?? []) as string[],
-    );
-    let observedChange = false;
-    let lastChain = baselineChain;
-    const changeDeadline = Date.now() + 1500;
-    while (Date.now() < changeDeadline) {
-      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-      const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
-      if (cur !== baselineChain) {
-        observedChange = true;
-        lastChain = cur;
-        break;
-      }
-      await sleep(80);
-    }
-    if (!observedChange) return;
-    let stableCount = 0;
-    const stableDeadline = Date.now() + 5000;
-    while (Date.now() < stableDeadline) {
-      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-      const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
-      if (cur === lastChain) {
-        stableCount++;
-        if (stableCount >= 3) break;
-      } else {
-        stableCount = 0;
-        lastChain = cur;
-      }
       await sleep(80);
     }
     return;
@@ -1239,9 +1232,17 @@ async function runCommand(
       const subFlow = parseMaestroFile(subPath);
       const prevPath = ctx.flowPath;
       ctx.flowPath = subPath;
+      const trace = !!process.env.ENNIO_PHASE_TRACE;
       try {
-        for (let i = 0; i < subFlow.commands.length; i++)
+        for (let i = 0; i < subFlow.commands.length; i++) {
+          const t = Date.now();
           await runCommand(ctx, subFlow.commands[i], subFlow.commands[i + 1]);
+          if (trace) {
+            process.stderr.write(
+              `[sub] ${sub.file} #${i + 1} ${Date.now() - t}ms ${describeCommand(subFlow.commands[i])}\n`,
+            );
+          }
+        }
       } finally {
         ctx.flowPath = prevPath;
       }
