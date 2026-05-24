@@ -102,10 +102,7 @@ interface CustomEvent {
   delayMs?: number;
 }
 
-async function dispatchGestureCustom(
-  udid: string,
-  events: CustomEvent[],
-): Promise<void> {
+async function dispatchGestureCustom(udid: string, events: CustomEvent[]): Promise<void> {
   const { w, h } = await getScreenSize(udid);
   const idb = getIdb(udid);
   const downs = events.filter((e) => e.type === 'Down');
@@ -130,7 +127,9 @@ async function dispatchGestureCustom(
     await idb.swipe(d.x * w, d.y * h, u.x * w, u.y * h, dur / 1000);
     return;
   }
-  throw new Error(`gesture-custom shape not supported (down=${downs.length} up=${ups.length} move=${moves.length})`);
+  throw new Error(
+    `gesture-custom shape not supported (down=${downs.length} up=${ups.length} move=${moves.length})`,
+  );
 }
 
 // USB HID usage codes the dylib's `hardware_key` op accepts. Mirror
@@ -226,7 +225,9 @@ async function callTool(
     const toY = (payload.toY as number) * h;
     const durationMs = payload.durationMs as number;
     const idb = getIdb(udid);
-    trace(`[hid] swipe (${fromX.toFixed(0)},${fromY.toFixed(0)})→(${toX.toFixed(0)},${toY.toFixed(0)}) dur=${durationMs}`);
+    trace(
+      `[hid] swipe (${fromX.toFixed(0)},${fromY.toFixed(0)})→(${toX.toFixed(0)},${toY.toFixed(0)}) dur=${durationMs}`,
+    );
     await idb.swipe(fromX, fromY, toX, toY, (durationMs ?? 250) / 1000);
     return;
   }
@@ -257,9 +258,7 @@ export async function tap(udid: string, x: number, y: number): Promise<void> {
   const { w, h } = await getScreenSize(udid);
   const nx = Math.max(0, Math.min(1, x / w));
   const ny = Math.max(0, Math.min(1, y / h));
-  trace(
-    `[hid-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`,
-  );
+  trace(`[hid-tap] px=(${x.toFixed(1)},${y.toFixed(1)}) norm=(${nx.toFixed(4)},${ny.toFixed(4)})`);
   await callTool('gesture-tap', { udid, x: nx, y: ny }, [
     'run',
     'gesture-tap',
