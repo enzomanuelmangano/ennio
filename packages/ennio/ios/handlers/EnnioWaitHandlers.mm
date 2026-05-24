@@ -33,8 +33,8 @@ void RegisterEnnioWaitHandlers(void) {
         // non-nil for the exact duration of any nav stack push/pop
         // and any modal present/dismiss. Walks the full VC chain so
         // a transition deep in the presented-modal stack is caught.
-        __block BOOL active = NO;
-        EnnioOnMainVoid([&]() {
+        BOOL active = NO;
+        EnnioOnMainVoid([&active]() {
             for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
                 if (![scene isKindOfClass:UIWindowScene.class]) continue;
                 for (UIWindow *w in ((UIWindowScene *)scene).windows) {
