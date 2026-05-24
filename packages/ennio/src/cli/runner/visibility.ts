@@ -64,17 +64,15 @@ export async function waitUntilVisible(
   throw new Error(`assertVisible/waitFor timeout: ${JSON.stringify(sel)}`);
 }
 
-async function dumpFailureState(
-  ctx: RunContext,
-  sel: MaestroSelector,
-  op: string,
-): Promise<void> {
+async function dumpFailureState(ctx: RunContext, sel: MaestroSelector, op: string): Promise<void> {
   try {
     const probe = sel.id
       ? await ctx.client.call('finder_probe', { testID: sel.id }).catch(() => undefined)
       : null;
     if (probe) {
-      process.stderr.write(`[ennio:diag] ${op} ${JSON.stringify(sel)} probe=${JSON.stringify(probe.data)}\n`);
+      process.stderr.write(
+        `[ennio:diag] ${op} ${JSON.stringify(sel)} probe=${JSON.stringify(probe.data)}\n`,
+      );
     }
     const chain = await ctx.client.call('top_vc_chain').catch(() => undefined);
     if (chain && chain.ok) {
@@ -89,6 +87,26 @@ async function dumpFailureState(
           process.stderr.write(`[ennio:diag]   ${v}\n`);
         }
       }
+    }
+    // Snapshot the simulator screen — uploaded with the rest of the
+    // ennio logs as a CI artifact so a reviewer can visually verify
+    // the state at failure without re-running anything. Filename
+    // encodes the selector so multi-fail runs don't collide.
+    try {
+      const shotsDir = '/tmp/ennio-shots';
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require('node:fs');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const child = require('node:child_process');
+      fs.mkdirSync(shotsDir, { recursive: true });
+      const tag = (sel.id ?? sel.text ?? 'sel').toString().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+      const path = `${shotsDir}/fail-${Date.now()}-${tag}.png`;
+      child.execFileSync('xcrun', ['simctl', 'io', ctx.udid, 'screenshot', path], {
+        stdio: 'pipe',
+      });
+      process.stderr.write(`[ennio:diag] screenshot=${path}\n`);
+    } catch {
+      /* screenshot best-effort */
     }
   } catch {
     /* diagnostic failure shouldn't mask the original error */
