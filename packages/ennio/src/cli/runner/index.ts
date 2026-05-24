@@ -423,9 +423,23 @@ async function runCommand(
       // two saves ~450 ms / tap on average — curate-lists 97-step
       // run drops ~25 s. Generous maxMs gives slow async submits
       // room; stableMs floor keeps the average low.
-      await timedAsync(ctx, 'tap.preWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 150 }).catch(() => undefined),
-      );
+      await timedAsync(ctx, 'tap.preWaitCommit', async () => {
+        // Wait for any UIKit transition (modal dismiss, nav push/pop)
+        // to fully end before tapping. Signal-based: polls
+        // animations_active (checks UIViewController.transitionCoordinator
+        // across the VC chain). No magic-number stable-quiet window —
+        // we wait until the system itself reports no transition in
+        // flight. Cap at 1500 ms for safety; the cap is reached only
+        // when a custom transition holds the coordinator open past the
+        // visible animation end.
+        const deadline = Date.now() + 1500;
+        while (Date.now() < deadline) {
+          const r = await ctx.client.call('animations_active').catch(() => undefined);
+          const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
+          if (!active) break;
+          await sleep(20);
+        }
+      });
     }
     const preTapHash = await captureHash(ctx);
     const preReact = await captureReactTs(ctx);
@@ -479,10 +493,31 @@ async function runCommand(
         return ts.ts || since + (data.elapsedMs ?? 0);
       };
       const committed = await timedAsync(ctx, 'tap.postWaitReactCommit', async () => {
-        const after1 = await waitOneCommit(preReact.ts, 600);
-        if (!after1) return false;
-        await waitOneCommit(after1, 250);
-        return true;
+        // Signal-based post-tap wait. Two coupled signals:
+        //   1. Frame hash must DIFFER from preTapHash (something
+        //      changed on screen — press handler ran, layer
+        //      repainted, or modal dismissed).
+        //   2. UIViewController.transitionCoordinator must be nil
+        //      (no animation in flight).
+        // Both must be true to return committed=true. Cap 1500 ms —
+        // covers modal-dismiss tails after `router.dismiss()`-style
+        // calls that don't trigger React commits.
+        const deadline = Date.now() + 1500;
+        while (Date.now() < deadline) {
+          const cur = await captureHash(ctx);
+          if (cur !== preTapHash) {
+            const animR = await ctx.client.call('animations_active').catch(() => undefined);
+            const animActive =
+              !!(animR && animR.ok && animR.data && (animR.data as { active?: boolean }).active);
+            if (!animActive) {
+              if (nextEditsField) {
+                await waitOneCommit(preReact.ts, 250);
+              }
+              return true;
+            }
+          }
+        }
+        return false;
       });
       if (!committed) {
         // No commit fired — likely a no-op tap, fall back to the
@@ -704,8 +739,10 @@ async function runCommand(
     return;
   }
   if ('back' in cmd) {
+    // Dylib blocks on transitionCoordinator's completion callback —
+    // returns at the exact end of the pop animation, no client-side
+    // polling or sleep required.
     await ctx.client.call('back');
-    await sleep(POST_TAP_SETTLE_MS);
     return;
   }
   if ('hideKeyboard' in cmd) {
@@ -1092,16 +1129,42 @@ async function runCommand(
   }
   if ('waitForAnimationToEnd' in cmd) {
     const timeout =
-      cmd.waitForAnimationToEnd === true ? 3000 : (cmd.waitForAnimationToEnd.timeout ?? 3000);
-    // In-process: React-commit quiet. Catches RN-side animations
-    // ending (sheet animateOut, navigation transition).
-    await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 150 });
+      cmd.waitForAnimationToEnd === true ? 600 : (cmd.waitForAnimationToEnd.timeout ?? 600);
+    // Race two signals:
+    //   - UIViewController.transitionCoordinator (animations_active)
+    //   - frame_hash quiet for 80 ms
+    // Either green-light returns. iOS 26 navigation occasionally
+    // holds the transition coordinator open past the visible
+    // animation end (custom presentation chain on liquid-glass tab
+    // bar) so transitionCoordinator alone hits the cap. Hash-quiet
+    // catches that case — the screen visibly stops changing well
+    // before transitionCoordinator releases.
+    const deadline = Date.now() + timeout;
+    let prevR = await ctx.client.call('frame_hash').catch(() => undefined);
+    let prevHash = (prevR?.data as { hash?: string })?.hash ?? '';
+    let lastChange = Date.now();
+    while (Date.now() < deadline) {
+      const animR = await ctx.client.call('animations_active').catch(() => undefined);
+      const animActive = !!(
+        animR &&
+        animR.ok &&
+        animR.data &&
+        (animR.data as { active?: boolean }).active
+      );
+      const hashR = await ctx.client.call('frame_hash').catch(() => undefined);
+      const curHash = (hashR?.data as { hash?: string })?.hash ?? '';
+      if (curHash !== prevHash) {
+        prevHash = curHash;
+        lastChange = Date.now();
+      }
+      const hashQuiet = Date.now() - lastChange >= 80;
+      if (!animActive || hashQuiet) break;
+      await sleep(20);
+    }
     // Cross-process safety: PHPicker / share sheet / document picker
-    // dismiss in another XPC process — wait_commit is blind to that.
-    // Poll the in-process VC chain until no cross-process picker VC
-    // is presented. ~10 ms per poll (one socket round-trip), and we
-    // bail the instant the picker is gone, so cost is negligible on
-    // RN-only screens.
+    // dismiss in another XPC process — the animations_active check
+    // above is blind to those because their views live in a remote
+    // process. Bail the instant the picker leaves the VC chain.
     const dismissDeadline = Date.now() + 2500;
     while (Date.now() < dismissDeadline) {
       const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
@@ -1116,57 +1179,6 @@ async function runCommand(
           cls.includes('UIDocumentPickerViewController'),
       );
       if (!hasCrossProcess) break;
-      await sleep(80);
-    }
-    // Tail-end: also wait for any UIKit modal transition currently
-    // in flight (Bluesky's Edit-modal dismiss, RN-Navigation push/pop
-    // animations) by polling for VC-chain stability. Picks up
-    // transitions that don't fire React commits (UIKit-driven
-    // dismiss without RN state change).
-    //
-    // Two phases:
-    //   1. Wait for the chain to CHANGE (new VC presented or current
-    //      VC dismissed) — up to 3.5 s. Bluesky's Mantis crop tool is
-    //      a native UIViewController presented from a JS callback;
-    //      the call-out to the file system + crop UI init takes
-    //      ~3 s on cold launch, so the chain doesn't grow for several
-    //      seconds after the trigger tap. Without this phase we exit
-    //      while the modal is still spinning up.
-    //   2. After observing a change, wait for stability (3 stable
-    //      polls = 240 ms of no further change) for up to 5 s.
-    //
-    // If no change ever happens within phase 1, the screen was static
-    // — return early so static taps don't pay the full timeout.
-    const baselineR = await ctx.client.call('top_vc_chain').catch(() => undefined);
-    const baselineChain = JSON.stringify(
-      ((baselineR?.data as { chain?: string[] })?.chain ?? []) as string[],
-    );
-    let observedChange = false;
-    let lastChain = baselineChain;
-    const changeDeadline = Date.now() + 1500;
-    while (Date.now() < changeDeadline) {
-      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-      const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
-      if (cur !== baselineChain) {
-        observedChange = true;
-        lastChain = cur;
-        break;
-      }
-      await sleep(80);
-    }
-    if (!observedChange) return;
-    let stableCount = 0;
-    const stableDeadline = Date.now() + 5000;
-    while (Date.now() < stableDeadline) {
-      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-      const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
-      if (cur === lastChain) {
-        stableCount++;
-        if (stableCount >= 3) break;
-      } else {
-        stableCount = 0;
-        lastChain = cur;
-      }
       await sleep(80);
     }
     return;
@@ -1213,9 +1225,17 @@ async function runCommand(
       const subFlow = parseMaestroFile(subPath);
       const prevPath = ctx.flowPath;
       ctx.flowPath = subPath;
+      const trace = !!process.env.ENNIO_PHASE_TRACE;
       try {
-        for (let i = 0; i < subFlow.commands.length; i++)
+        for (let i = 0; i < subFlow.commands.length; i++) {
+          const t = Date.now();
           await runCommand(ctx, subFlow.commands[i], subFlow.commands[i + 1]);
+          if (trace) {
+            process.stderr.write(
+              `[sub] ${sub.file} #${i + 1} ${Date.now() - t}ms ${describeCommand(subFlow.commands[i])}\n`,
+            );
+          }
+        }
       } finally {
         ctx.flowPath = prevPath;
       }

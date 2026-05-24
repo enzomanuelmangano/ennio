@@ -19,6 +19,55 @@
 void RegisterEnnioWaitHandlers(void) {
     using namespace ennio;
 
+    // CALayer-level animation introspection. Frame-hash polling can
+    // get stuck on background re-renders (RN idle work, scroll
+    // momentum, image decoding) and burns the full cap on every
+    // `back` / `waitForAnimationToEnd` call. UIKit transitions
+    // (UINavigationController push/pop, modal present/dismiss, tab
+    // switch) drive CAAnimations on the host VC's outer view layer
+    // or its container view. Limit the check to those host layers —
+    // descendant continuous animations (TextInput caret blink,
+    // activity indicator spin, loading spinners) are noise.
+    EnnioControlSocket::registerHandler("animations_active", [](const std::string &) -> std::string {
+        // Use UIViewController.transitionCoordinator — public API,
+        // non-nil for the exact duration of any nav stack push/pop
+        // and any modal present/dismiss. Walks the full VC chain so
+        // a transition deep in the presented-modal stack is caught.
+        __block BOOL active = NO;
+        EnnioOnMainVoid([&]() {
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    UIViewController *vc = w.rootViewController;
+                    while (vc) {
+                        if (vc.transitionCoordinator) { active = YES; return; }
+                        if (vc.isBeingPresented || vc.isBeingDismissed) {
+                            active = YES; return;
+                        }
+                        if (vc.presentedViewController) {
+                            vc = vc.presentedViewController;
+                        } else if (vc.childViewControllers.count) {
+                            // Walk all children — UITabBarController has
+                            // one child per tab; UINavigationController
+                            // exposes the currently-visible VC last.
+                            BOOL childHit = NO;
+                            for (UIViewController *child in vc.childViewControllers) {
+                                if (child.transitionCoordinator) {
+                                    active = YES; return;
+                                }
+                            }
+                            (void)childHit;
+                            vc = vc.childViewControllers.lastObject;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        return std::string("{\"active\":") + (active ? "true" : "false") + "}";
+    });
+
     EnnioControlSocket::registerHandler("wait_idle", [](const std::string &args) -> std::string {
         NSDictionary *a = EnnioParseArgs(args);
         uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 5000);
