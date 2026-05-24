@@ -61,9 +61,51 @@ export async function execTapOn(
       /* fall through to normal find */
     }
   }
-  const rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+  let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
   if (!rect) {
     throw new Error(`element not found: ${JSON.stringify(sel)}`);
+  }
+  // Off-viewport auto-scroll: the testID resolved, but the rect
+  // sits outside the window's visible bounds — common when a YAML
+  // `swipe` doesn't fully snap a horizontal carousel to the target
+  // page (gesture velocity is hardware-dependent: a swipe that
+  // page-snaps on M-series local hardware can land short on slower
+  // CI runners, leaving the target one page to the right of the
+  // viewport). Tapping that off-screen coord lands on whatever's
+  // visible at that pixel and the user's onPress never fires.
+  // Drive the enclosing UIScrollView directly via scroll_to — its
+  // scrollRectToVisible: is deterministic and ignores gesture
+  // velocity entirely.
+  if (sel.id) {
+    const sz = await ctx.client.call('window_size').catch(() => undefined);
+    const wd = (sz?.data as { w?: number; h?: number }) ?? {};
+    const winW = wd.w ?? 402;
+    const winH = wd.h ?? 874;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    const offViewport = cx < 0 || cx > winW || cy < 0 || cy > winH;
+    if (offViewport) {
+      process.stderr.write(
+        `[ennio] off-viewport id="${sel.id}" rect=(${rect.x.toFixed(0)},${rect.y.toFixed(0)},${rect.w.toFixed(0)},${rect.h.toFixed(0)}) center=(${cx.toFixed(0)},${cy.toFixed(0)}) win=(${winW.toFixed(0)},${winH.toFixed(0)}) → scroll_to\n`,
+      );
+      const scrollResp = await ctx.client
+        .call('scroll_to', { elementTestID: sel.id })
+        .catch(() => undefined);
+      const scrolled = !!(
+        scrollResp &&
+        scrollResp.ok &&
+        scrollResp.data &&
+        (scrollResp.data as { scrolled?: boolean }).scrolled
+      );
+      process.stderr.write(`[ennio] scroll_to id="${sel.id}" scrolled=${scrolled}\n`);
+      const refresh = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+      if (refresh) {
+        rect = refresh;
+        process.stderr.write(
+          `[ennio] post-scroll rect id="${sel.id}" rect=(${refresh.x.toFixed(0)},${refresh.y.toFixed(0)},${refresh.w.toFixed(0)},${refresh.h.toFixed(0)})\n`,
+        );
+      }
+    }
   }
   // Hidden test-only controls: some apps expose 1×1 px elements
   // (TextInput and Pressable variants) as side-channels for e2e
