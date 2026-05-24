@@ -227,7 +227,7 @@ jobs:
           rsync -a --delete "$APP/" /tmp/ennio-app-cache/EnnioExample.app/
 
       - name: Cache built .app (save)
-        if: always() && steps.app-cache.outputs.cache-hit != 'true' && hashFiles('/tmp/ennio-app-cache/EnnioExample.app/**') != ''
+        if: always() && steps.app-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: /tmp/ennio-app-cache
