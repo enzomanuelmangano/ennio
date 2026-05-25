@@ -461,18 +461,24 @@ async function runCommand(
       !!nextRawCmd &&
       typeof nextRawCmd === 'object' &&
       ('inputText' in nextRawCmd || 'eraseText' in nextRawCmd || 'clearText' in nextRawCmd);
+    let focusedViaTestId = false;
     if (sel.id && nextEditsField) {
-      // Call focus_testid for ANY testID-targeted tap that precedes
-      // an inputText/eraseText. Was previously gated on testID
-      // matching /Input$/, which excluded fields named
-      // payment-card-number / shipping-zip / etc. On slow CI those
-      // taps occasionally don't make the field firstResponder by
-      // the time inputText runs, so the chars land in whichever
-      // field WAS focused — usually the previous one — and the
-      // form ends up with the wrong text in the wrong field.
-      // becomeFirstResponder is deterministic; safe to invoke ahead
-      // of the regular HID tap (which still fires as belt-and-braces).
-      await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
+      // Focus the field in-process via becomeFirstResponder. This is
+      // deterministic and avoids the race where a fresh form's first
+      // TextInput tap lands before RN has wired up the press handler.
+      const r = await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
+      focusedViaTestId = !!(r && r.ok);
+    }
+    if (focusedViaTestId) {
+      // Field is already firstResponder — skip the redundant HID tap.
+      // The keyboard is animating up and the tap coordinates (computed
+      // from the pre-keyboard layout) may now land on the keyboard
+      // itself, injecting a ghost keypress (observed: "tbanana"
+      // instead of "banana" when the tap hit the "t" key).
+      await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 200 }).catch(() => undefined);
+      ctx.lastTapKey = tapKey;
+      ctx.lastTapTestID = sel.id;
+      return;
     }
     await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
     if (isRepeatTap || nextIsSameTap) {
@@ -855,9 +861,7 @@ async function runCommand(
       // animation is still in-flight and UIKit hasn't laid out the final
       // frame positions yet, so the visibility check returns false even
       // when the element IS on screen.
-      await ctx.client
-        .call('wait_commit', { maxMs: 2000, stableMs: 300 })
-        .catch(() => undefined);
+      await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 300 }).catch(() => undefined);
     }
     throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
   }
