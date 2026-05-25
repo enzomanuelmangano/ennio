@@ -20,8 +20,6 @@ jobs:
     name: Build dylib + example (Release)
     runs-on: macos-15
     timeout-minutes: 30
-    outputs:
-      rn-version: ${{ steps.rn.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -50,18 +48,12 @@ jobs:
       - name: Install JS deps
         run: bun install --frozen-lockfile
 
-      - name: Detect example RN version
-        id: rn
-        run: |
-          RN=$(jq -r '.dependencies."react-native"' example/package.json | sed 's/[\^~]//g')
-          echo "version=$RN" >> "$GITHUB_OUTPUT"
-
       - name: Cache ennio prebuilt dylibs (restore)
         id: dylib-cache
         uses: actions/cache/restore@v4
         with:
           path: packages/ennio/prebuilt
-          key: ennio-dylib-${{ runner.os }}-rn${{ steps.rn.outputs.version }}-${{ hashFiles('packages/ennio/cpp/**', 'packages/ennio/ios/**', 'packages/ennio/native-shim/**', 'packages/ennio/scripts/**', 'packages/ennio/nitrogen/**', 'packages/ennio/EnnioCore.podspec', 'packages/ennio-expo-plugin/src/**') }}
+          key: ennio-dylib-${{ runner.os }}-${{ hashFiles('packages/ennio/cpp/**', 'packages/ennio/ios/**', 'packages/ennio/native-shim/**', 'packages/ennio/scripts/**', 'packages/ennio/EnnioCore.podspec') }}
 
       - name: Compile EnnioCore + link dylib (cache miss)
         if: steps.dylib-cache.outputs.cache-hit != 'true'
@@ -83,7 +75,7 @@ jobs:
             xcrun clang++ $CFLAGS -c "$f" -o "$OBJ_DIR/$(basename "$f" .mm).o"
           done
           bash "$ENNIO/scripts/build-shim.sh"
-          ENNIO_OBJECTS_DIR="$OBJ_DIR" bash "$ENNIO/scripts/build-dylib.sh" "${{ steps.rn.outputs.version }}"
+          ENNIO_OBJECTS_DIR="$OBJ_DIR" bash "$ENNIO/scripts/build-dylib.sh"
           bash "$ENNIO/scripts/regen-manifest.sh"
 
       - name: Cache ennio prebuilt dylibs (save)
@@ -287,7 +279,7 @@ jobs:
         id: suite
         env:
           ENNIO_UDID: ${{ steps.sim.outputs.udid }}
-          ENNIO_DYLIB_PATH: ${{ github.workspace }}/packages/ennio/prebuilt/libennio-rn${{ needs.build.outputs.rn-version }}-sim.dylib
+          ENNIO_DYLIB_PATH: ${{ github.workspace }}/packages/ennio/prebuilt/libennio.dylib
         run: |
           mkdir -p /tmp/ennio-logs
           PASS=0; FAIL=0
