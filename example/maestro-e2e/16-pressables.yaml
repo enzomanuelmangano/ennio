@@ -107,7 +107,6 @@ name: Pressables — every RN pressable variant
     id: 'press-double'
 - assertVisible:
     text: 'DoubleTap'
-
 # Each individual tap already verified via id:hit-last assertions above.
 # Total counter omitted: React's concurrent batching on slow CI runners
 # occasionally loses one setCount increment even though all 9 hit()
