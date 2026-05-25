@@ -1,0 +1,13 @@
+appId: com.ennio.example
+name: 'clearState then tap'
+
+---
+- launchApp:
+    clearState: true
+
+- assertVisible:
+    text: 'Cart'
+    timeout: 10000
+
+- tapOn:
+    text: 'Home'

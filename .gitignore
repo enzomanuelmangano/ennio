@@ -12,6 +12,13 @@ lib/
 dist/
 *.tsbuildinfo
 
+# Ennio prebuilt dylibs — produced by CI on tag push, shipped in the npm
+# tarball, never committed. Local devs run packages/ennio/scripts/build-shim.sh
+# + packages/ennio/scripts/build-dylib.sh to regenerate; manifest.json is
+# refreshed by scripts/regen-manifest.sh.
+packages/ennio/prebuilt/*.dylib
+packages/ennio/prebuilt/manifest.json
+
 drivers
 reports
 

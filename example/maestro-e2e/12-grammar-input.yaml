@@ -1,7 +1,8 @@
 appId: com.ennio.example
 name: Grammar — input commands (text, random, erase, clear, paste, key)
 ---
-- launchApp
+- launchApp:
+    clearState: true
 - tapOn:
     text: 'Gauntlet'
 - scrollUntilVisible:

@@ -11,6 +11,8 @@ name: Navigation — formSheet, pageSheet, transparentModal, stacked modal
     direction: DOWN
 - tapOn:
     id: 'g-playground'
+- assertVisible:
+    id: 'playground-scroll'
 - scrollUntilVisible:
     element:
       text: 'Navigation patterns'

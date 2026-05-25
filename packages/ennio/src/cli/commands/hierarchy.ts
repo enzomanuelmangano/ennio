@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { getBootedSimulatorId } from '../maestro-runner';
+import { getTargetUdid as getBootedSimulatorId } from '../sim';
 import type { Flags } from '../cli/args';
 
 export function runHierarchyCommand(_positional: string[], _flags: Flags): number {
