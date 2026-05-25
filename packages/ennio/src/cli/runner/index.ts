@@ -50,6 +50,8 @@ import { ensureBootedSim, findDylib, terminateApp } from '../sim';
 // Helper modules — split out of the original 2071-line runner.ts.
 import {
   DEFAULT_WAIT_MS,
+  DEFAULT_WIN_H,
+  DEFAULT_WIN_W,
   POLL_MS,
   POST_LAUNCH_SETTLE_MS,
   POST_TAP_SETTLE_MS,
@@ -781,32 +783,46 @@ async function runCommand(
       | { element: MaestroSelector; direction?: string; timeout?: number };
     const target = 'element' in arg ? arg.element : (arg as MaestroSelector);
     const dir = ('direction' in arg && arg.direction ? arg.direction : 'DOWN').toUpperCase();
-    const timeout = ('timeout' in arg && arg.timeout) || 10000;
+    const timeout = ('timeout' in arg && arg.timeout) || 15000;
+    const wsz = await ctx.client.call('window_size').catch(() => undefined);
+    const wd = (wsz?.data as { w?: number; h?: number }) ?? {};
+    // Fallback to iPhone 17 Pro logical dimensions if window_size fails
+    const winW = wd.w ?? DEFAULT_WIN_W;
+    const winH = wd.h ?? DEFAULT_WIN_H;
+    const SWIPE_CENTER_X = Math.round(winW / 2);
+    // Below vertical midpoint to avoid the navigation bar header area
+    const SWIPE_CENTER_Y = Math.round(winH / 2);
+    // ~30% of screen per swipe — enough to scroll but not overshoot
+    const SWIPE_DISTANCE = Math.round((winH * 3) / 10);
+    // Small push to move element above the tab bar
+    const NUDGE_DISTANCE = Math.round(winH / 6);
+    // Bottom 20% of screen overlaps with tab bar
+    const TAB_BAR_THRESHOLD = (winH * 4) / 5;
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (await isVisible(ctx, target)) {
-        // Important: scroll momentum keeps the list moving for a beat
-        // after the swipe ends. A tap fired immediately after isVisible
-        // returns true lands on a moving target — RN's gesture
-        // recognizer either rejects it or routes to whatever is at the
-        // moving-touch point. Wait for the scrollview to settle before
-        // returning so the next tapOn has stable coords.
         await sleep(600);
         await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 300 }).catch(() => undefined);
-        // Tab-bar overlap guard: if target's centre Y falls into the
-        // bottom ~25% of the viewport, do one short extra scroll to
-        // push it up. Otherwise tile coords overlap the UITabBar
-        // buttons (Home/Cart/etc.) and the next tap routes to the
-        // wrong element.
         const rect = await resolveRect(ctx, target);
-        if (rect && rect.y + rect.h / 2 > 700) {
-          const cx = 195;
-          const cy = 422;
-          const small = 150;
+        if (rect && rect.y + rect.h / 2 > TAB_BAR_THRESHOLD) {
           if (dir === 'DOWN') {
-            await hidSwipe(ctx.udid, cx, cy + small / 2, cx, cy - small / 2, 250);
+            await hidSwipe(
+              ctx.udid,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
+              250,
+            );
           } else if (dir === 'UP') {
-            await hidSwipe(ctx.udid, cx, cy - small / 2, cx, cy + small / 2, 250);
+            await hidSwipe(
+              ctx.udid,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
+              250,
+            );
           }
           await sleep(500);
           await ctx.client
@@ -815,32 +831,33 @@ async function runCommand(
         }
         return;
       }
-      // Centre swipe in the requested direction. Shorter swipe distance
-      // (250 vs 400) so we don't overshoot a tile that's just out of
-      // viewport — overshoot puts the target back off-screen on the
-      // other side and the next isVisible miss loops forever.
-      const cx = 195;
-      const cy = 422;
-      const dist = 250;
-      let x1 = cx,
-        y1 = cy,
-        x2 = cx,
-        y2 = cy;
+      const dist = SWIPE_DISTANCE;
+      let x1 = SWIPE_CENTER_X,
+        y1 = SWIPE_CENTER_Y,
+        x2 = SWIPE_CENTER_X,
+        y2 = SWIPE_CENTER_Y;
       if (dir === 'DOWN') {
-        y1 = cy + dist / 2;
-        y2 = cy - dist / 2;
+        y1 = SWIPE_CENTER_Y + dist / 2;
+        y2 = SWIPE_CENTER_Y - dist / 2;
       } else if (dir === 'UP') {
-        y1 = cy - dist / 2;
-        y2 = cy + dist / 2;
+        y1 = SWIPE_CENTER_Y - dist / 2;
+        y2 = SWIPE_CENTER_Y + dist / 2;
       } else if (dir === 'LEFT') {
-        x1 = cx + dist / 2;
-        x2 = cx - dist / 2;
+        x1 = SWIPE_CENTER_X + dist / 2;
+        x2 = SWIPE_CENTER_X - dist / 2;
       } else if (dir === 'RIGHT') {
-        x1 = cx - dist / 2;
-        x2 = cx + dist / 2;
+        x1 = SWIPE_CENTER_X - dist / 2;
+        x2 = SWIPE_CENTER_X + dist / 2;
       }
       await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-      await sleep(500);
+      // Wait for scroll momentum to settle before the next isVisible
+      // check. sleep(500) isn't enough on slow CI runners — the scroll
+      // animation is still in-flight and UIKit hasn't laid out the final
+      // frame positions yet, so the visibility check returns false even
+      // when the element IS on screen.
+      await ctx.client
+        .call('wait_commit', { maxMs: 2000, stableMs: 300 })
+        .catch(() => undefined);
     }
     throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
   }

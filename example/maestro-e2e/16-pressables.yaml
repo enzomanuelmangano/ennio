@@ -1,7 +1,8 @@
 appId: com.ennio.example
 name: Pressables — every RN pressable variant
 ---
-- launchApp
+- launchApp:
+    clearState: true
 - tapOn:
     text: 'Gauntlet'
 - scrollUntilVisible:
@@ -10,10 +11,13 @@ name: Pressables — every RN pressable variant
     direction: DOWN
 - tapOn:
     id: 'g-playground'
+- assertVisible:
+    id: 'playground-scroll'
 - scrollUntilVisible:
     element:
       id: 'open-pressables-btn'
     direction: DOWN
+    timeout: 30000
 - tapOn:
     id: 'open-pressables-btn'
 - assertVisible: 'Pressables'

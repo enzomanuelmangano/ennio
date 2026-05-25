@@ -195,12 +195,34 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
     if (!tbc) return NO;
     NSInteger idx = findTabIndex(tbc, name);
     if (idx == NSNotFound) return NO;
-    // Already on the target tab — treat as success without re-running
-    // the delegate handshake (react-native-screens' delegate returns
-    // NO from -shouldSelectViewController: when the tab is already
-    // selected, which used to make this op report tapped=false even
-    // though the caller's intent is satisfied).
-    if (tbc.selectedIndex == (NSUInteger)idx) return YES;
+    // Already on the target tab — pop to root (same as a real tab bar
+    // re-tap) so the caller lands on the tab's index screen, not deep
+    // inside a pushed route left over from a previous flow.
+    if (tbc.selectedIndex == (NSUInteger)idx) {
+        UIViewController *vc = tbc.viewControllers[idx];
+        // Direct UINavigationController
+        if ([vc isKindOfClass:UINavigationController.class]) {
+            [(UINavigationController *)vc popToRootViewControllerAnimated:NO];
+        } else {
+            // Expo-router wraps tabs in container VCs — BFS for a
+            // UINavigationController child and pop that.
+            NSMutableArray<UIViewController *> *q = [NSMutableArray arrayWithObject:vc];
+            while (q.count) {
+                UIViewController *c = q.firstObject;
+                [q removeObjectAtIndex:0];
+                if ([c isKindOfClass:UINavigationController.class]) {
+                    [(UINavigationController *)c popToRootViewControllerAnimated:NO];
+                    break;
+                }
+                [q addObjectsFromArray:c.childViewControllers];
+            }
+        }
+        // Dismiss any modally presented VC on this tab too.
+        if (vc.presentedViewController) {
+            [vc dismissViewControllerAnimated:NO completion:nil];
+        }
+        return YES;
+    }
     UIViewController *target = tbc.viewControllers[idx];
     if ([tbc.delegate respondsToSelector:@selector(tabBarController:shouldSelectViewController:)]) {
         BOOL ok = [tbc.delegate tabBarController:tbc shouldSelectViewController:target];

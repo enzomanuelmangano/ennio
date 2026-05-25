@@ -1,7 +1,8 @@
 appId: com.ennio.example
 name: Grammar — flow control (waitFor, repeat, retry, runFlow when, assertTrue, evalScript)
 ---
-- launchApp
+- launchApp:
+    clearState: true
 - tapOn:
     text: 'Gauntlet'
 - scrollUntilVisible:

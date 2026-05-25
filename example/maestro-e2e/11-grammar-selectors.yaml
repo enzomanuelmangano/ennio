@@ -1,7 +1,8 @@
 appId: com.ennio.example
 name: Grammar — selectors (id, text, label, index, relational, state)
 ---
-- launchApp
+- launchApp:
+    clearState: true
 - tapOn: 'Gauntlet'
 - scrollUntilVisible:
     element:
