@@ -373,6 +373,7 @@ static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
     for (int hop = 0; hop < 6 && cur; hop++, cur = cur.superview) {
         if (!cur.userInteractionEnabled) continue;
         if (viewWindowArea(cur) > areaCap) return v;
+        if ([cur isKindOfClass:UISegmentedControl.class]) return v;
         if ([cur isKindOfClass:UIControl.class]) return cur;
         if ([cur isKindOfClass:UIButton.class]) return cur;
         for (UIGestureRecognizer *g in cur.gestureRecognizers) {

@@ -35,36 +35,42 @@ name: Pressables — every RN pressable variant
 - tapOn:
     id: 'press-touchable-opacity'
 - assertVisible:
+    id: 'hit-last'
     text: 'TouchableOpacity'
 
 # TouchableHighlight
 - tapOn:
     id: 'press-touchable-highlight'
 - assertVisible:
+    id: 'hit-last'
     text: 'TouchableHighlight'
 
 # TouchableWithoutFeedback
 - tapOn:
     id: 'press-touchable-without-feedback'
 - assertVisible:
+    id: 'hit-last'
     text: 'TouchableWithoutFeedback'
 
 # PressableScale (pressto)
 - tapOn:
     id: 'press-pressable-scale'
 - assertVisible:
+    id: 'hit-last'
     text: 'PressableScale'
 
 # PressableOpacity (pressto)
 - tapOn:
     id: 'press-pressable-opacity-pressto'
 - assertVisible:
+    id: 'hit-last'
     text: 'PressableOpacity'
 
 # GestureDetector (RNGH Tap)
 - tapOn:
     id: 'press-gesture-detector'
 - assertVisible:
+    id: 'hit-last'
     text: 'GestureDetector'
 
 # Switch (toggle) — Ennio gap: idb tap on RCTSwitch doesn't fire
