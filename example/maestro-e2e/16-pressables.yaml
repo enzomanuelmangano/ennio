@@ -108,6 +108,12 @@ name: Pressables — every RN pressable variant
 - assertVisible:
     text: 'DoubleTap'
 
+# Scroll back up so the Total counter at the top is visible again
+- scrollUntilVisible:
+    element:
+      id: 'hit-last'
+    direction: UP
+
 # Verify total count = 9 hits (Switch test currently disabled)
 - assertVisible:
     text: 'Total: 9'
