@@ -1,40 +1,26 @@
 #!/usr/bin/env bash
-# Build a per-RN-version ennio dylib for the iOS simulator.
+# Build the ennio dylib for the iOS simulator.
 #
-# Strategy: re-use whatever Xcode DerivedData already contains a freshly-built
-# EnnioCore pod target (typically from the consumer app — example/ in this
-# repo, or any project that has ennio in its Pods). Link the produced .o files
-# as a dynamic library with `-undefined dynamic_lookup` so React Native /
-# Hermes / Folly symbols resolve from the host process at load time.
-#
-# This is the production build path: CI calls this script once per supported
-# RN version (matrix job), uploads each slice as a release artifact, and the
-# CLI picks the right slice at test time based on the host app's embedded RN
-# version.
+# The dylib uses -undefined dynamic_lookup so all React Native / Hermes /
+# Folly symbols resolve from the host process at load time. A single
+# universal binary works across all RN versions (New Architecture, 0.73+).
 #
 # Usage:
-#   build-dylib.sh <rn-version>
+#   build-dylib.sh
 #
 # Required environment:
 #   ENNIO_OBJECTS_DIR  Absolute path to a directory containing freshly-built
-#                      EnnioCore object files (e.g. DerivedData/.../EnnioCore.build/Objects-normal/arm64).
-#                      If unset, the script tries to autodiscover one under
-#                      ~/Library/Developer/Xcode/DerivedData.
+#                      EnnioCore object files (e.g. from clang++ compilation
+#                      of the ios/ source files). If unset, the script tries
+#                      to autodiscover one under ~/Library/Developer/Xcode/DerivedData.
 #
-# Output: packages/ennio/prebuilt/libennio-rn<version>-sim.dylib
+# Output: packages/ennio/prebuilt/libennio.dylib
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <rn-version>" >&2
-    echo "Example: $0 0.83.6" >&2
-    exit 64
-fi
-
-RN_VERSION="$1"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 OUT_DIR="$ROOT/prebuilt"
-OUT="$OUT_DIR/libennio-rn${RN_VERSION}-sim.dylib"
+OUT="$OUT_DIR/libennio.dylib"
 
 mkdir -p "$OUT_DIR"
 
@@ -67,8 +53,6 @@ fi
 echo "Linking $OBJ_COUNT objects from $OBJ_DIR"
 
 SDK_PATH="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-# Match the pod's deployment target (15.1). Bumping above the host app's
-# deployment target loads fine; bumping below would fail.
 TARGET="arm64-apple-ios15.1-simulator"
 
 xcrun --sdk iphonesimulator clang++ \

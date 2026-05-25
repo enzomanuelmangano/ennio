@@ -7,11 +7,11 @@
 
 Maestro-compatible E2E test runner for React Native iOS.
 
-The CLI drives the in-app runtime through Metro's Hermes Inspector (CDP)
-and actuates real CoreSimulator touches via a persistent `idb` HID
-daemon. No XCTest helper, no `xcodebuild` cold-start, no synthetic
-UITouch that half-fires recognizers — the gesture goes through the same
-path a finger would.
+The CLI injects a prebuilt ObjC dylib into your simulator app via
+`DYLD_INSERT_LIBRARIES` and drives it through a Unix socket. Real
+CoreSimulator touches are dispatched via `idb` gRPC HID — the gesture
+goes through the same path a finger would. No XCTest, no CDP, no
+companion driver.
 
 ```bash
 bun add -D @reactiive/ennio          # or npm install --save-dev
@@ -20,80 +20,64 @@ bunx ennio test e2e/01-auth-flow.yaml      # one flow
 bunx ennio test e2e/                       # every *.yaml in the directory
 ```
 
-That's it. No config plugin to add, no `expo prebuild`, no pod
-install. Ennio ships per-RN-version prebuilt dylibs in the npm
-tarball; the CLI `DYLD_INSERT_LIBRARIES`-injects the matching slice
-into your existing Debug build at simulator launch time.
-
-Verify install integrity with `npm audit signatures` (CI publishes
-with Sigstore provenance).
+No config plugin, no `expo prebuild`, no pod install. Ennio ships
+per-RN-version prebuilt dylibs in the npm tarball; the CLI injects
+the matching slice at simulator launch time.
 
 ## Requirements
 
-- Expo app on React Native ≥ 0.81 (New Architecture, Fabric)
+- React Native ≥ 0.83 (New Architecture, Fabric)
 - iOS 17+ simulator
 - Xcode 16+, Node 18+
-- Facebook's `idb` toolchain — gRPC server + Python client (the
-  HID daemon imports the `idb` python package):
+- Facebook's `idb` toolchain:
 
   ```bash
   brew install facebook/fb/idb-companion
   pip3 install fb-idb
   ```
 
-## How injection works
+## How it works
 
 The CLI sets `DYLD_INSERT_LIBRARIES` on the simulator's launchctl env
-to a tiny RN-agnostic shim (`libennio-shim.dylib`, ~30 KB). The shim
-loads into every process on the sim but gates on three checks:
+to a tiny RN-agnostic shim (`libennio-shim.dylib`, ~50 KB). The shim
+loads into every process on the sim but only activates when:
 
-1. **`RCTInstance` class present** — catches non-RN apps + system daemons.
-2. **Bundle id matches `ENNIO_TARGET_BUNDLE_ID`** — catches stale env
-   leaking into a different RN app on the same sim.
-3. **No App Store receipt** — catches accidental real-device install.
+1. `RCTInstance` class is present (skips non-RN apps + system daemons)
+2. Bundle id matches `ENNIO_TARGET_BUNDLE_ID` (skips other RN apps)
+3. No App Store receipt (prevents accidental device injection)
 
 When all three pass, the shim `dlopen`s the per-RN-version slice
-(`libennio-rn<X.Y.Z>-sim.dylib`, ~3 MB). The slice's `+load` swizzles
-`RCTHost.start`, captures the live `jsi::Runtime`, and installs the
-`__ennioDispatch` JSI host function the CLI drives via Hermes
-Inspector CDP. Identical surface + performance to the pod-based
-install — different load mechanism.
+(`libennio-rn<X.Y.Z>-sim.dylib`, ~530 KB). The slice's `+load`
+bootstraps a Unix socket server, swizzles `setAccessibilityIdentifier:`
+for O(1) testID lookup, and installs React commit observers for
+frame-level settle detection.
 
 The CLI verifies each dylib's SHA-256 against `prebuilt/manifest.json`
-before arming the env; a mismatch refuses injection.
+before injection; a mismatch refuses to proceed.
 
-## Alternative: pod-based install
+### Discovery
 
-If you'd rather link Ennio statically into your Debug build:
+Element discovery uses UIKit accessibility — no fiber walking, no
+shadow tree traversal. The swizzled testID index provides O(1) lookup
+by `accessibilityIdentifier`. Text-based finds walk the view hierarchy
+with on-screen filtering, topmost-VC scoping, and interactive-ancestor
+promotion.
 
-```bash
-bun add @reactiive/ennio react-native-nitro-modules
-bun add -d @reactiive/ennio-expo-plugin
-```
+### Touch delivery
 
-Add the plugin to `app.json`:
+Touches go through `idb_companion`'s gRPC HID service, which
+synthesizes `IOHIDEvent`s at the CoreSimulator level. Same touch
+pipeline as a physical finger — UIKit gesture recognizers, React
+Native's responder system, and RNGH all see a real touch.
 
-```json
-{
-  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
-}
-```
+## Supported Maestro commands
 
-Rebuild (`npx expo prebuild --clean && npx expo run:ios`). The plugin
-tags the pod as `:configurations => ['Debug']` so Release binaries are
-unaffected.
-
-To make sure the CLI doesn't double-up runtime injection on top of
-the pod-linked symbols:
-
-```bash
-ENNIO_DISABLE_DYLIB=1 npx ennio test e2e/
-```
-
-## Docs
-
-Full architecture notes, security model, supported Maestro commands, and
-example flows live in the [monorepo README](https://github.com/enzomanuelmangano/ennio#readme).
+`launchApp`, `clearState`, `tapOn`, `longPressOn`, `doubleTapOn`,
+`swipe`, `scrollUntilVisible`, `inputText`, `eraseText`, `pressKey`,
+`inputRandomText`, `inputRandomNumber`, `assertVisible`,
+`assertNotVisible`, `hideKeyboard`, `back`, `takeScreenshot`,
+`setClipboard`, `pasteText`, `runFlow`, `runScript`,
+`extendedWaitUntil`
 
 ## License
 

@@ -1,6 +1,6 @@
 {
   "name": "@reactiive/ennio",
-  "version": "0.1.0-rc.0",
+  "version": "0.0.6-beta.2",
   "repository": {
     "type": "git",
     "url": "https://github.com/enzomanuelmangano/ennio.git",
@@ -24,6 +24,14 @@
     "react": "*",
     "react-native": "*"
   },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    }
+  },
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
@@ -39,19 +47,22 @@
     "dist/",
     "src/index.ts",
     "cpp/",
-    "ios/*.h",
-    "ios/*.mm",
-    "ios/*.m",
+    "ios/bootstrap/",
+    "ios/finders/",
+    "ios/handlers/",
+    "ios/observers/",
+    "ios/ops/",
+    "ios/PrivateAPI/",
     "EnnioCore.podspec",
     "react-native.config.js",
     "LICENSE",
     "README.md",
-    "ARCHITECTURE.md",
     "prebuilt/",
     "scripts/build-shim.sh",
     "scripts/build-dylib.sh",
     "scripts/regen-manifest.sh",
-    "native-shim/"
+    "native-shim/",
+    "proto/"
   ],
   "keywords": [
     "react-native",

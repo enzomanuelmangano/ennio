@@ -10,13 +10,19 @@ Pod::Spec.new do |s|
   s.license      = package['license']
   s.authors      = { 'Ennio' => 'hello@ennio.dev' }
   s.platforms    = { :ios => '17.0' }
-  s.source       = { :git => package['repository']['url'], :tag => "v#{s.version}" }
+  s.source       = { :git => package['repository']['url'], :tag => "ennio@#{s.version}" }
 
   # Pure ObjC + a tiny C++ socket primitive. No Fabric headers, no
   # nitrogen-generated bindings, no React Native private surface.
   s.source_files = [
     'cpp/**/*.{h,hpp,c,cpp}',
-    'ios/**/*.{h,hpp,mm,m}',
+    'ios/bootstrap/**/*.{h,mm}',
+    'ios/finders/**/*.{h,mm}',
+    'ios/handlers/**/*.{h,mm}',
+    'ios/observers/**/*.{h,mm}',
+    'ios/ops/**/*.{h,mm}',
+    'ios/PrivateAPI/**/*.{h,mm}',
+    'native-shim/**/*.{h,m}',
   ]
 
   s.compiler_flags = '-fno-objc-arc-exceptions'
