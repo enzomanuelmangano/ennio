@@ -1,30 +1,19 @@
 # Ennio
 
 > [!WARNING]
-> **Experimental.** Ennio is at an early experimental stage. APIs,
-> package names, internals, and behavior may change without notice.
-> iOS only. Expect rough edges; do not rely on it for production-
-> critical test suites yet.
+> **Experimental.** APIs, package names, internals, and behavior may
+> change without notice. iOS only. Expect rough edges; do not rely on
+> it for production-critical test suites yet.
 
-Maestro-compatible E2E test runner for React Native iOS. The CLI drives
-the in-app runtime through Metro's Hermes Inspector (CDP). Two-phase
-model for every interaction:
+Maestro-compatible E2E test runner for React Native iOS. The CLI
+injects a prebuilt ObjC dylib into your simulator app via
+`DYLD_INSERT_LIBRARIES` and drives it through a Unix socket. Real
+CoreSimulator touches are dispatched via `idb` gRPC HID — the gesture
+goes through the same path a finger would.
 
-1. **JSI discovery** — a `prepareTap` JSI host function walks the Fabric
-   shadow tree, finds the element by `testID`, runs an auto-scroll +
-   on-screen + hit-test check, and returns its window-coord center in
-   one CDP round trip.
-2. **idb HID actuation** — a real `UITouch` is delivered at those
-   coords via `idb_companion` (CoreSimulator's IOHID layer). The
-   gesture goes through the same path a finger would — exercising
-   `UIControl`, RNGH state machines, `PressableScale` animations, and
-   any other recognizer the app is using.
+No XCTest, no CDP, no Metro required, no companion driver.
 
-No XCTest helper, no `xcodebuild` cold-start, no UITouch synthesis that
-half-fires recognizers. JSI handles the read side too: shadow-tree
-existence, visibility, text, layout, alert introspection.
-
-```
+```bash
 npx ennio test e2e/01-auth-flow.yaml      # one flow
 npx ennio test e2e/                       # every *.yaml in the directory
 ```
@@ -33,33 +22,24 @@ https://github.com/user-attachments/assets/97a32505-e4d2-4661-8ed6-7915c0ced1f8
 
 ## Getting started
 
-Requires an Expo app on RN ≥ 0.81 (New Architecture, Fabric), iOS 17+
-simulator, Xcode 16+, Node 18+, and Facebook's `idb` toolchain (both
-the gRPC `idb_companion` server and the Python client used by Ennio's
-HID daemon):
+Requires a React Native app (New Architecture, Fabric), iOS 17+
+simulator, Xcode 16+, Node 18+, and Facebook's `idb` toolchain:
 
 ```bash
 brew install facebook/fb/idb-companion
 pip3 install fb-idb
 ```
 
-### Install (zero-install path — recommended)
+### Install
 
 ```bash
 bun add -D @reactiive/ennio          # or npm install --save-dev
 ```
 
-That's it. No config plugin to add, no `npx expo prebuild`, no pod
-install, no rebuild of your app. Ennio ships per-RN-version prebuilt
-dylibs in the npm tarball; the CLI `DYLD_INSERT_LIBRARIES`-injects the
-matching slice into your existing Debug build at simulator launch
-time. First `ennio test` is the same speed as the second.
-
-Verify what got installed:
-
-```bash
-npm audit signatures              # confirms npm provenance (Sigstore)
-```
+No config plugin, no `npx expo prebuild`, no pod install, no rebuild.
+Ennio ships a universal prebuilt dylib in the npm tarball; the CLI
+injects it at simulator launch time. Works across all New Architecture
+RN versions.
 
 **Write a Maestro YAML flow** (`e2e/login.yaml`):
 
@@ -84,69 +64,87 @@ npx ennio test e2e/login.yaml
 
 The CLI:
 
-1. Reads the host app's RN version from the installed bundle.
-2. Picks the matching dylib from `node_modules/@reactiive/ennio/prebuilt/`.
-3. Verifies its SHA-256 against `prebuilt/manifest.json` (refuses on
+1. Picks the dylib from `node_modules/@reactiive/ennio/prebuilt/`.
+2. Verifies its SHA-256 against `prebuilt/manifest.json` (refuses on
    mismatch — see [Security](#security)).
-4. Sets `DYLD_INSERT_LIBRARIES`, `ENNIO_DYLIB_PATH`, and
-   `ENNIO_TARGET_BUNDLE_ID` on the simulator's launchctl env.
-5. Launches your app (via `simctl` or expo-dev-client deep-link).
-6. The shim dylib gates on bundle-id + RN-app presence and dlopens
-   the real slice only inside your targeted app.
-7. Clears the launchctl env on CLI exit (signal handlers + process
-   exit hook) so the simulator is left clean.
+3. Sets `DYLD_INSERT_LIBRARIES` and `ENNIO_TARGET_BUNDLE_ID` on the
+   simulator's launchctl env.
+4. Launches your app via `simctl`.
+5. The shim dylib gates on bundle-id + RN-app presence and dlopens
+   the real dylib only inside your targeted app.
+6. The dylib bootstraps a Unix socket server, the CLI connects and
+   drives the test flow.
+7. Clears the launchctl env on exit so the simulator is left clean.
 
-If the host's RN version isn't in the prebuilt set, the CLI falls back
-to a local build:
+## How it works
 
-```bash
-bash node_modules/@reactiive/ennio/scripts/build-dylib.sh <rn-version>
+### Discovery
+
+Element discovery uses UIKit accessibility — no fiber walking, no
+shadow tree traversal. A swizzled `setAccessibilityIdentifier:` hook
+provides O(1) testID lookup. Text-based finds walk the view hierarchy
+with on-screen filtering, topmost-VC scoping, and interactive-ancestor
+promotion.
+
+### Touch delivery
+
+Touches go through `idb_companion`'s gRPC HID service, which
+synthesizes `IOHIDEvent`s at the CoreSimulator level. Same touch
+pipeline as a physical finger — UIKit gesture recognizers, React
+Native's responder system, and RNGH all see a real touch.
+
+Three special cases bypass HID — tab-bar taps, native-alert button
+taps, and the iOS back gesture — because driving those through UIKit
+selectors is more deterministic than a gesture.
+
+### Settle detection
+
+The dylib observes React commits via swizzled mount methods and tracks
+view-tree stability via a CADisplayLink frame-hash ticker. The CLI
+uses these signals (`wait_commit`, `wait_react_commit`) to know when
+a tap's side effects have settled before proceeding to the next step.
+
+## Architecture
+
+```
++-- host machine -------------------------------------------+
+|  ennio CLI (Node)                                         |
+|    Unix socket client ---- gRPC ---> idb_companion        |
++-------------------------------|---------------------------+
+                                |
+                   +-- iOS Simulator --+
+                   |                   |
+                   |  CoreSim IOHID    |
+                   |  (real UITouch)   |
+                   |       |           |
+                   |       v           |
+                   |  Your RN App      |
+                   |    +----------+   |
+                   |    | ennio    |   |
+                   |    | dylib    |   |
+                   |    |          |   |
+                   |    | Unix     |   |
+                   |    | socket   |<--+-- CLI commands
+                   |    | server   |   |
+                   |    |          |   |
+                   |    | a11y     |   |
+                   |    | finders  |   |
+                   |    |          |   |
+                   |    | React    |   |
+                   |    | observer |   |
+                   |    +----------+   |
+                   +-------------------+
 ```
 
-That takes a few minutes once and caches the slice locally.
+Two channels:
 
-### Install (pod-based path — alternative)
-
-The legacy install path links Ennio as a CocoaPod at build time. Useful
-if you want a single statically-linked Debug binary instead of runtime
-injection, or are pinning a specific Ennio version to your Debug build
-via lockfile guarantees.
-
-```bash
-bun add @reactiive/ennio react-native-nitro-modules
-bun add -d @reactiive/ennio-expo-plugin
-```
-
-Register the plugin in `app.json`:
-
-```json
-{
-  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
-}
-```
-
-Rebuild:
-
-```bash
-npx expo prebuild --clean
-npx expo run:ios
-```
-
-The plugin tags the pod as `:configurations => ['Debug']`, so Ennio
-is compiled + linked **only** for Debug builds. Release archives carry
-zero Ennio code, symbols, or `+load` hooks. To disable runtime
-injection when both paths are present:
-
-```bash
-ENNIO_DISABLE_DYLIB=1 npx ennio test e2e/
-```
-
-(Optional: a red diagonal **E2E** ribbon paints top-right of every
-screen if you set `showRibbon: true` in the plugin options — useful
-for QA artifact identification or demo videos. Off by default.)
-
-See [Build gating](#build-gating) for plugin options and how Ennio
-stays out of Release builds.
+- **Unix socket — discovery, reads, coordination.** The CLI sends
+  JSON-envelope commands (`find_by_testid`, `visible`, `wait_commit`,
+  `insert_text`, etc.) over a Unix domain socket to the in-process
+  dylib. Responses are synchronous per-request.
+- **idb gRPC HID — touch actuation.** Every tap, long-press, swipe,
+  and type delivers a real `IOHIDEvent` through the simulator's HID
+  layer. One persistent gRPC channel; calls cost ~5 ms.
 
 ## Security
 
@@ -154,286 +152,57 @@ Runtime injection runs ennio's code in your app's process. The model
 that keeps it safe:
 
 1. **Sim-only.** Real-device codesigning blocks DYLD injection.
-   Distribution gate in the dylib refuses to install JSI hooks unless
-   the binary is signed as `EnnioDistDev` (no App Store receipt, no
-   provisioning profile mismatch). Production builds never run ennio.
-2. **Three-layer shim gate.** The tiny shim dylib set globally on the
-   sim's `DYLD_INSERT_LIBRARIES` only `dlopen`s the real slice when:
-   (a) the host process is a React Native app (`RCTInstance` class
-   present), (b) the host's bundle id matches `ENNIO_TARGET_BUNDLE_ID`,
-   and (c) no App Store receipt is present. Other apps on the same
-   simulator — including unrelated RN apps — load the shim, fall
-   through the gate, and exit. Nothing is loaded into them.
-3. **SHA-256 manifest.** Every dylib shipped in the npm tarball has
-   its hash recorded in `prebuilt/manifest.json`. The CLI verifies
-   each slice + the shim before arming `DYLD_INSERT_LIBRARIES`; a
-   mismatch refuses injection. Catches local tampering between
-   `npm install` and `ennio test`.
-4. **NPM provenance.** Releases are published from CI with
-   `npm publish --provenance` (Sigstore signatures linked to the GH
-   Actions workflow that built the tarball). Verify with
-   `npm audit signatures`.
-5. **Pinned Xcode + reproducible builds.** The CI matrix
-   (`.github/workflows/build-dylibs.yml`) pins Xcode and clang flags
-   so any tag can be independently rebuilt from source and the SHA-256
-   matches what was published.
-6. **Clean-up on exit.** The CLI clears the simulator's launchctl env
-   on `process.on('exit')`, `SIGINT`, `SIGTERM`, and `uncaughtException`.
-   A crash mid-test never leaves a stale injection that could leak
-   into your next dev session.
-7. **Symbol-surface diff in CI.** Each release diffs the dylib's
-   external symbol list against an allowlist. A patch that introduces
-   a network library or arbitrary syscalls fails CI loudly.
-
-## Production dylib build pipeline
-
-[`scripts/build-shim.sh`](packages/ennio/scripts/build-shim.sh) builds
-the RN-agnostic shim;
-[`scripts/build-dylib.sh`](packages/ennio/scripts/build-dylib.sh) links
-a per-RN-version slice from already-built EnnioCore object files;
-[`scripts/regen-manifest.sh`](packages/ennio/scripts/regen-manifest.sh)
-refreshes `prebuilt/manifest.json` after a local rebuild.
-
-CI ([`.github/workflows/build-dylibs.yml`](.github/workflows/build-dylibs.yml))
-is the only path that publishes to npm:
-
-```
-push tag v*  ──►  matrix job per RN version:
-                   1. scaffold scratch Expo+RN@<rn> app
-                   2. xcodebuild EnnioCore target
-                   3. build-dylib.sh → libennio-rn<rn>-sim.dylib
-                   4. symbol-surface diff vs allowlist
-                   5. smoke: boot sim + run a flow via injected dylib
-                   6. upload artifact
-              ──►  publish job:
-                   1. download all slices + shim
-                   2. regen-manifest.sh
-                   3. npm publish --provenance
-                   4. attach dylibs to GH Release
-```
-
-The support window is the most recent ~3 RN minors. Older versions
-fall back to the local-build path documented above.
-
-## Architecture
-
-```
-┌─ host machine ─────────────────────────────────────────┐
-│  ennio CLI (Node)                                      │
-│    CDP client ──ws localhost:8081/inspector──┐         │
-│                                              │         │
-│    idb HID daemon (Python, Unix socket)──┐   │         │
-│      └─ gRPC ─► idb_companion ──HID──┐   │   │         │
-└──────────────────────────────────────┼───┼───┼─────────┘
-                                       │   │   │
-                              ┌────────┘   │   │
-                              │            │   │
-                              ▼            │   │
-                  ┌─ CoreSim IOHID ──┐     │   │
-                  │ real UITouch     │     │   │
-                  │ injected into…   │     │   │
-                  └────────┬─────────┘     │   │
-                           │      ┌────────┘   │
-                           │      ▼            │
-                           │  Metro (host) ◄───┘
-                           │   Hermes Inspector proxy
-                           │            │ (CDP / WebSocket)
-                           │            ▼
-                           ▼  ┌─────────────────────────────┐
-                              │ iOS sim / device — app      │
-                              │  Hermes runtime             │
-                              │   globalThis.__ennioDispatch│
-                              │   (JSI host fn installed    │
-                              │    at +load swizzle time)   │
-                              │            │                │
-                              │            ▼                │
-                              │  HybridEnnio (C++)          │
-                              │   • Fabric ShadowTreeTraverser │
-                              │   • UIKit frame queries     │
-                              │   • UIAlertController intro │
-                              │   • prepareTap (find+coord) │
-                              │                             │
-                              │  Special UIKit selectors:   │
-                              │   • UITabBarController      │
-                              │     delegate + selectedIdx  │
-                              │   • UIAlertController       │
-                              │     action invocation       │
-                              │   • UINavigationController  │
-                              │     popViewController       │
-                              └─────────────────────────────┘
-```
-
-Two channels, separate jobs:
-
-- **CDP via Hermes Inspector — discovery & reads.** The CLI sends
-  `Runtime.evaluate` calls that invoke
-  `__ennioDispatch(type, payloadJson, token)` on `globalThis`.
-  Dispatch is non-blocking: the host function queues the work on a
-  background worker and returns a token immediately so the JS thread
-  is never held. The CLI polls the result via a follow-up
-  `Runtime.evaluate` against a result slot. The worker schedules the
-  actual work (shadow-tree walk, hit-test, frame computation) back
-  onto the JS thread when it's ready. This is how every
-  `assertVisible`, `getText`, `prepareTap`, and layout query flows.
-- **idb HID — actuation.** Every tap, long-press, swipe, and
-  `typeText` delivers a real `UITouch` / key event through
-  CoreSimulator's IOHID layer. A persistent Python daemon keeps one
-  gRPC channel warm to `idb_companion`; calls cost ~5 ms instead of
-  the ~250 ms per-spawn `idb ui tap` baseline. Falls back to
-  spawning `idb` directly if the daemon dies. Three special cases
-  bypass HID entirely — tab-bar taps, native-alert button taps, and
-  the iOS back gesture — because driving those through UIKit
-  selectors (`UITabBarController` delegate, `UIAlertController`
-  action invocation, `UINavigationController popViewController`) is
-  more deterministic than a gesture.
-
-## How taps work
-
-https://github.com/user-attachments/assets/42c38084-551f-41c0-90c3-02e62c13e617
-
-One CDP round trip for discovery, one HID delivery for the touch. Why
-not invoke `onPress` directly via JSI (the old design)? Two reasons:
-
-- **RNGH state machines.** Components wrapped in
-  `react-native-gesture-handler` (the default for most modern RN
-  apps — `Pressable` with `pressRetentionOffset`, `PressableScale`,
-  `BaseButton`) don't expose a plain `onPress` on the matched fiber.
-  The gesture handler owns the press state and only fires through a
-  real touch sequence.
-- **Layout-bug masking.** Calling `onPress` directly worked even when
-  the view was off-screen, behind a modal, or covered by an overlay.
-  That let flows pass which a real user could never have completed —
-  silently. Maestro / XCUI both refuse off-screen taps; matching that
-  behavior catches real layout regressions.
-
-JSI is still the fast path for discovery (one round trip beats N) and
-for everything read-only. Actuation lives on idb.
-
-`typeText`, `pressKey`, and `swipe` go straight to idb too — no
-`prepareTap` step needed.
+   Production builds never run ennio.
+2. **Three-layer shim gate.** The shim dylib set on the sim's
+   `DYLD_INSERT_LIBRARIES` only dlopens the real dylib when:
+   (a) `RCTInstance` class is present, (b) bundle id matches
+   `ENNIO_TARGET_BUNDLE_ID`, and (c) no App Store receipt is present.
+   Other apps on the same simulator are unaffected.
+3. **SHA-256 manifest.** The CLI verifies each dylib's hash against
+   `prebuilt/manifest.json` before arming injection. A mismatch
+   refuses to proceed.
+4. **Clean-up on exit.** The CLI clears the simulator's launchctl env
+   on `process.on('exit')`, `SIGINT`, `SIGTERM`, and
+   `uncaughtException`. A crash mid-test never leaves stale injection.
 
 ## CLI
 
 ```bash
 ennio test <flow.yaml>            # one flow
-ennio test e2e/                   # every *.yaml under the directory, in order
-ennio test --verbose e2e/         # log every step + RPC
-ennio test --trace e2e/           # per-step state snapshot
+ennio test e2e/                   # every *.yaml under the directory
+ennio test --verbose e2e/         # log every step + timing
 ```
 
 `ENNIO_UDID=<udid>` pins to a specific simulator when multiple are
-booted. `ENNIO_DEBUG_IDB=1` logs every HID call.
-
-The app must already be running on the simulator **with Metro
-attached**. The CLI reaches the app through Metro's Hermes Inspector
-channel; without Metro there is no transport. Ennio does not launch
-the app itself — use `npx expo run:ios` or run from Xcode with Metro
-started separately.
+booted.
 
 ### Test independence
 
 Each flow that begins with `launchApp { clearState: true }` is fully
-independent: Ennio terminates the app, wipes its `Library/`,
-`Documents/`, and `tmp/` directories, resets privacy permissions, then
-re-launches. The CDP channel reconnects through Hermes Inspector
-automatically once the fresh app process attaches to Metro.
-
-For `ennio test e2e/`, flows run sequentially, each carrying its own
-`clearState`, so cross-flow leakage is impossible if the YAML opts in.
-A flow that omits `launchApp` inherits the previous flow's state by
-design — used for split flows that share auth setup.
-
-```bash
-# Same flow back-to-back — rules out sim quirks
-for i in 1 2 3; do npx ennio test e2e/03-cart.yaml; done
-
-# Verbose, just the tail
-npx ennio test --verbose e2e/03-cart.yaml | tail -50
-```
+independent: Ennio terminates the app, wipes its data directories,
+then re-launches. The Unix socket reconnects automatically once the
+fresh app process starts.
 
 ## Maestro flow support
 
 The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
 
-- `tapOn`, `doubleTapOn`, `longPress`
-- `inputText`, `clearText`, `eraseText`, `pressKey`
-- `assertVisible`, `assertNotVisible`, `waitFor`, `assertAnyVisible`
-- `scroll`, `scrollUntilVisible`, `swipe`, `back`, `hideKeyboard`
-- `runFlow` (subflows + `when` conditionals + inline `commands`)
-- `runScript`, `evalScript`, top-level `env:`, `${VAR}` interpolation
-- `tapOn: { point: "X%,Y%" }`
-- `tapOn: { label: "..." }` (alias for `text:`)
-- bare-string `tapOn: "Some Text"` → text match
+- `tapOn`, `doubleTapOn`, `longPressOn`
+- `inputText`, `eraseText`, `pressKey`, `inputRandomText`,
+  `inputRandomNumber`
+- `assertVisible`, `assertNotVisible`, `extendedWaitUntil`
+- `scrollUntilVisible`, `swipe`, `back`, `hideKeyboard`
+- `runFlow` (subflows), `runScript`
+- `setClipboard`, `pasteText`, `takeScreenshot`
 - `launchApp: { clearState: true }`
-- `repeat`, `retry`
-- Native alerts: `tapAlertButton`, `dismissAlert`. `assertVisible: text:`
-  also matches alert titles + button labels.
-
-## Build gating
-
-`@reactiive/ennio-expo-plugin` writes a single `pod 'EnnioCore'` line
-into the generated `Podfile`, tagged with `:configurations => ['Debug']`.
-CocoaPods compiles + links the pod **only** for the listed Xcode
-build configurations:
-
-| Xcode configuration            | Ennio in binary?                               |
-| ------------------------------ | ---------------------------------------------- |
-| `Debug`                        | Yes                                            |
-| `Release`                      | **No** (zero code, zero symbols, zero `+load`) |
-| Custom config (e.g. `Staging`) | Only if listed in plugin options               |
-
-No env var. No prebuild discipline. Release archives can't carry
-Ennio even if someone tries — CocoaPods literally skips the source.
-**Safe to keep `@reactiive/ennio-expo-plugin` in `app.json` for
-production-shipping apps.**
-
-Plugin options (all optional):
-
-```json
-{
-  "plugins": [
-    [
-      "@reactiive/ennio-expo-plugin",
-      {
-        "configurations": ["Debug", "Staging"],
-        "showRibbon": true,
-        "enabled": true
-      }
-    ]
-  ]
-}
-```
-
-| Option           | Default     | What it does                                                                                                |
-| ---------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
-| `configurations` | `["Debug"]` | Xcode build configurations to link EnnioCore into. Extend for custom configs (e.g. `Staging`).              |
-| `showRibbon`     | `false`     | Paint the red diagonal **E2E** ribbon on every screen. Useful for QA artifact identification / demo videos. |
-| `enabled`        | `true`      | Set to `false` to skip the plugin entirely.                                                                 |
-
-CI sanity check before signing a release artifact (should always
-pass):
-
-```bash
-nm -gU build/Build/Products/Release-iphoneos/YourApp.app/YourApp \
-  2>/dev/null \
-  | grep -E "_OBJC_CLASS_\$_EnnioAutoInit|EnnioCore|__ennioDispatch" \
-  && { echo "FAIL: Ennio symbols in release build"; exit 1; } \
-  || echo "OK: no Ennio in release"
-```
+- bare-string `tapOn: "Some Text"` (text match)
+- `tapOn: { id: "..." }` (testID match)
 
 ## Limitations
 
-- **Android not yet supported.** Some scaffolding exists in the source
-  tree (CMake, Gradle, nitrogen Android codegen) but no runtime: no
-  `+load`-equivalent bootstrap, no JNI hook, no JS-thread executor.
-  The plugin is iOS-only — adding `@reactiive/ennio-expo-plugin` to an
-  Android-only build is a no-op.
-- **Requires Metro.** With no Metro running, there is no Hermes
-  Inspector to connect to. The CLI errors out immediately. Tests can't
-  run against a standalone simulator build that has no host attached.
-- **Bridgeless / Fabric only.** Old-architecture RN is not supported;
-  the shadow-tree traverser and the React-commit hook assume the new
-  arch.
+- **iOS only.** No Android support.
+- **New Architecture only.** Old-architecture RN (Bridge mode) is
+  not supported.
 
 ## License
 
