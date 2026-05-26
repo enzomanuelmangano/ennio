@@ -26,7 +26,7 @@ export default function PanScreen() {
     });
 
   const style = useAnimatedStyle(() => ({
-    transform: [{ translateX: x.value }, { translateY: y.value }],
+    transform: [{ translateX: x.value }, { translateY: y.value }] as const,
   }));
 
   return (
