@@ -136,8 +136,8 @@ export async function clearStateAndRelaunch(
   }
 
   // Re-grant permissions wiped by the uninstall. simctl privacy grant
-  // covers most services, but iOS 26's Photo Library "full access"
-  // requires a direct TCC insert for kTCCServicePhotoLibrary.
+  // sets most permissions, but grants photo access as "limited" (auth=3)
+  // on iOS 26. Override via TCC sqlite AFTER simctl to force full access.
   try {
     execFileSync('xcrun', ['simctl', 'privacy', ctx.udid, 'grant', 'all', ctx.bundleId], {
       stdio: 'pipe',
@@ -145,6 +145,9 @@ export async function clearStateAndRelaunch(
   } catch {
     /* privacy grant not available on older Xcode */
   }
+  await sleep(300);
+  // Override photo access to full (auth_value=2). simctl grants limited
+  // (auth_value=3) on iOS 26 which shows a "Limited Access" picker.
   try {
     const homePath = process.env.HOME || '';
     const dbPath = join(

@@ -1203,7 +1203,10 @@ async function runCommand(
     // proceeding — the default 1.5s sleep isn't enough for cold Metro.
     if (link.includes('expo-development-client')) {
       await ctx.client
-        .call('wait_react_commit', { sinceMs: 0, maxMs: 15000 })
+        .call('wait_react_commit', { sinceMs: 0, maxMs: 20000 })
+        .catch(() => undefined);
+      await ctx.client
+        .call('wait_commit', { maxMs: 5000, stableMs: 500 })
         .catch(() => undefined);
     }
     await sleep(POST_LAUNCH_SETTLE_MS);
