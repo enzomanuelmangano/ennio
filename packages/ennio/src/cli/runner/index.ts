@@ -1201,7 +1201,9 @@ async function runCommand(
     // load. Wait for the React tree to mount (react_commit fires) before
     // proceeding — the default 1.5s sleep isn't enough for cold Metro.
     if (link.includes('expo-development-client')) {
-      await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 15000 }).catch(() => undefined);
+      await ctx.client
+        .call('wait_react_commit', { sinceMs: 0, maxMs: 15000 })
+        .catch(() => undefined);
     }
     await sleep(POST_LAUNCH_SETTLE_MS);
     return;

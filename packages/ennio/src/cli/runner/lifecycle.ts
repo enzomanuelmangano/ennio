@@ -131,6 +131,17 @@ export async function clearStateAndRelaunch(
     await sleep(1000);
   }
 
+  // Re-grant permissions that were wiped by the uninstall. Without this,
+  // system dialogs (photo library, camera, notifications) block the flow
+  // and ennio's dylib can't dismiss them.
+  try {
+    execFileSync('xcrun', ['simctl', 'privacy', ctx.udid, 'grant', 'all', ctx.bundleId], {
+      stdio: 'pipe',
+    });
+  } catch {
+    /* privacy grant not available on older Xcode */
+  }
+
   if (!ctx.dylibPath) {
     const auto = findDylib();
     if (!auto) {
