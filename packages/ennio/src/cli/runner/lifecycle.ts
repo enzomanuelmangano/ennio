@@ -7,7 +7,9 @@
 // pass completes before the next command tries to find anything.
 
 import { execFileSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { findDylib, getAppContainer, terminateApp } from '../sim';
 import { EnnioSocketClient } from '../socket-client';
@@ -81,23 +83,54 @@ export async function clearStateAndRelaunch(
   ctx: RunContext,
   launchArgs: string[] = [],
 ): Promise<void> {
-  // Wipe the app's data container (Library, Documents, tmp, Caches)
-  // without uninstalling. Preserves the app binary + entitlements so
-  // the Metro dev-client connection survives the relaunch. Matches
-  // Maestro's clearState behavior on iOS.
+  // Full app reset: copy .app → idb uninstall → simctl install → launch.
+  // idb uninstall goes through idb_companion's CoreSimulator API which
+  // does a proper OS-level app removal (Keychain, UserDefaults, caches,
+  // group containers). Plain simctl container wipe or simctl uninstall
+  // leaves residual state that causes Expo dev-client apps to hang
+  // permanently after login (React navigation stuck in loading state).
   ctx.client.close();
-  terminateApp(ctx.udid, ctx.bundleId);
-  await sleep(300);
-  const container = getAppContainer(ctx.udid, ctx.bundleId);
-  if (container) {
-    for (const dir of ['Library', 'Documents', 'tmp', 'Caches']) {
-      try {
-        rmSync(`${container}/${dir}`, { recursive: true, force: true });
-      } catch {
-        /* ok */
-      }
-    }
+  // Remove stale socket so the new process binds cleanly.
+  try { rmSync('/tmp/ennio-control.sock', { force: true }); } catch { /* ok */ }
+
+  // Grab the installed .app bundle path BEFORE uninstalling.
+  let appBundle: string | null = null;
+  try {
+    appBundle = execFileSync(
+      'xcrun',
+      ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'app'],
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+  } catch {
+    /* app not installed */
   }
+
+  // Terminate via idb (goes through idb_companion).
+  try {
+    execFileSync('idb', ['terminate', ctx.bundleId, '--udid', ctx.udid], { stdio: 'pipe' });
+  } catch {
+    // App may not be running.
+    terminateApp(ctx.udid, ctx.bundleId);
+  }
+
+  if (appBundle) {
+    const tmp = mkdtempSync(join(tmpdir(), 'ennio-cs-'));
+    const copy = join(tmp, 'App.app');
+    cpSync(appBundle, copy, { recursive: true });
+
+    // Uninstall via idb for a proper OS-level reset.
+    try {
+      execFileSync('idb', ['uninstall', ctx.bundleId, '--udid', ctx.udid], { stdio: 'pipe' });
+    } catch {
+      execFileSync('xcrun', ['simctl', 'uninstall', ctx.udid, ctx.bundleId], { stdio: 'pipe' });
+    }
+    await sleep(1000);
+
+    // Reinstall via simctl.
+    execFileSync('xcrun', ['simctl', 'install', ctx.udid, copy], { stdio: 'pipe' });
+    await sleep(1000);
+  }
+
   if (!ctx.dylibPath) {
     const auto = findDylib();
     if (!auto) {
