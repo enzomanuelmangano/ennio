@@ -1412,16 +1412,19 @@ async function runCommand(
     }
     return;
   }
-  // evalScript + assertTrue
+  // evalScript + assertTrue — Maestro wraps expressions in ${...}.
+  // Strip the wrapper so the JS VM sees raw code, not a template literal.
   if ('evalScript' in cmd) {
-    const expr = String(cmd.evalScript);
+    let expr = String(cmd.evalScript);
+    if (expr.startsWith('${') && expr.endsWith('}')) expr = expr.slice(2, -1);
     const sandbox = { output: ctx.outputs };
     const vmCtx = createContext(sandbox);
     runInContext(expr, vmCtx, { timeout: 5000 });
     return;
   }
   if ('assertTrue' in cmd) {
-    const expr = String(cmd.assertTrue);
+    let expr = String(cmd.assertTrue);
+    if (expr.startsWith('${') && expr.endsWith('}')) expr = expr.slice(2, -1);
     const sandbox = { output: ctx.outputs };
     const vmCtx = createContext(sandbox);
     const result = runInContext(expr, vmCtx, { timeout: 5000 });
