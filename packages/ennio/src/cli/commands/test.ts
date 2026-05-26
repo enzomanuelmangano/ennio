@@ -30,7 +30,7 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
   for (const pattern of patterns) {
     const resolved = resolve(pattern);
     if (existsSync(resolved) && statSync(resolved).isDirectory()) {
-      const yamlMatches = await glob(join(pattern, '**/*.yaml'));
+      const yamlMatches = await glob(join(pattern, '**/*.{yaml,yml}'));
       files.push(
         ...yamlMatches
           .filter((f) => isMaestroFile(f) && !f.includes('/subflows/') && !isSubflowFile(f))

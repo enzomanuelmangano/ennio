@@ -253,10 +253,11 @@ void RegisterEnnioFindHandlers(void) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *text = EnnioArgString(a, @"text");
         if (!text.length) throw std::runtime_error("missing text");
+        BOOL relaxed = [a[@"relaxed"] boolValue];
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
         EnnioOnMainVoid([&]() {
-            UIView *v = [EnnioFinder findViewByText:text];
+            UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed];
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;

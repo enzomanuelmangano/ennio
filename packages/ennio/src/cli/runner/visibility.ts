@@ -16,7 +16,7 @@ export async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<
     if (r.ok && r.data && (r.data as { visible: boolean }).visible) return true;
   }
   if (sel.text) {
-    const r = await ctx.client.call('find_by_text', { text: sel.text });
+    const r = await ctx.client.call('find_by_text', { text: sel.text, relaxed: true });
     if (r.ok) return true;
     // UIAlertController titles/messages/buttons sit outside the React
     // tree, so find_by_text misses them. Check the alert layer too.

@@ -7,6 +7,7 @@
 // pass completes before the next command tries to find anything.
 
 import { execFileSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
 
 import { findDylib, getAppContainer, terminateApp } from '../sim';
 import { EnnioSocketClient } from '../socket-client';
@@ -80,13 +81,19 @@ export async function clearStateAndRelaunch(
   ctx: RunContext,
   launchArgs: string[] = [],
 ): Promise<void> {
-  // In-process wipe of Library/Documents/tmp.
-  await ctx.client.call('clear_state').catch(() => undefined);
-  // Hard relaunch — close socket so the reconnect picks up the new
-  // process's socket binding.
+  // Wipe the app's data container (Library, Documents, tmp, Caches)
+  // without uninstalling. Preserves the app binary + entitlements so
+  // the Metro dev-client connection survives the relaunch. Matches
+  // Maestro's clearState behavior on iOS.
   ctx.client.close();
   terminateApp(ctx.udid, ctx.bundleId);
   await sleep(300);
+  const container = getAppContainer(ctx.udid, ctx.bundleId);
+  if (container) {
+    for (const dir of ['Library', 'Documents', 'tmp', 'Caches']) {
+      try { rmSync(`${container}/${dir}`, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  }
   if (!ctx.dylibPath) {
     const auto = findDylib();
     if (!auto) {

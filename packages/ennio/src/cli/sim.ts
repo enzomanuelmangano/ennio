@@ -76,6 +76,25 @@ export function launchApp(udid: string, bundleId: string): void {
   });
 }
 
+export function uninstallApp(udid: string, bundleId: string): void {
+  try {
+    execFileSync('xcrun', ['simctl', 'uninstall', udid, bundleId], { stdio: 'pipe' });
+  } catch {
+    // App may not be installed.
+  }
+}
+
+export function getAppBundlePath(udid: string, bundleId: string): string | null {
+  try {
+    const out = execFileSync('xcrun', ['simctl', 'get_app_container', udid, bundleId, 'app'], {
+      encoding: 'utf-8',
+    });
+    return out.trim();
+  } catch {
+    return null;
+  }
+}
+
 export function getAppContainer(udid: string, bundleId: string): string | null {
   try {
     const out = execFileSync('xcrun', ['simctl', 'get_app_container', udid, bundleId, 'data'], {
