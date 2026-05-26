@@ -1205,9 +1205,7 @@ async function runCommand(
       await ctx.client
         .call('wait_react_commit', { sinceMs: 0, maxMs: 20000 })
         .catch(() => undefined);
-      await ctx.client
-        .call('wait_commit', { maxMs: 5000, stableMs: 500 })
-        .catch(() => undefined);
+      await ctx.client.call('wait_commit', { maxMs: 5000, stableMs: 500 }).catch(() => undefined);
     }
     await sleep(POST_LAUNCH_SETTLE_MS);
     return;
