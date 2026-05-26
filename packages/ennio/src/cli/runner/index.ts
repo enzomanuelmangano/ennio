@@ -1366,8 +1366,9 @@ async function runCommand(
     return;
   }
   if ('inputRandomEmail' in cmd) {
-    const user = Array.from({ length: 8 }, () =>
-      'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)],
+    const user = Array.from(
+      { length: 8 },
+      () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)],
     ).join('');
     await runCommand(ctx, { inputText: `${user}@test.com` } as MaestroCommand, undefined);
     return;
@@ -1382,11 +1383,16 @@ async function runCommand(
   // Clipboard operations
   if ('setClipboard' in cmd) {
     const text = String((cmd as { setClipboard: string }).setClipboard);
-    execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], { input: text, stdio: ['pipe', 'pipe', 'pipe'] });
+    execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], {
+      input: text,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     return;
   }
   if ('pasteText' in cmd) {
-    const text = execFileSync('xcrun', ['simctl', 'pbpaste', ctx.udid], { encoding: 'utf-8' }).trim();
+    const text = execFileSync('xcrun', ['simctl', 'pbpaste', ctx.udid], {
+      encoding: 'utf-8',
+    }).trim();
     if (text) {
       await runCommand(ctx, { inputText: text } as MaestroCommand, undefined);
     }
@@ -1394,10 +1400,15 @@ async function runCommand(
   }
   if ('copyTextFrom' in cmd) {
     const sel = normalizeSelector((cmd as { copyTextFrom: unknown }).copyTextFrom as any);
-    const r = await ctx.client.call('get_text', { testID: sel.id, text: sel.text }).catch(() => undefined);
+    const r = await ctx.client
+      .call('get_text', { testID: sel.id, text: sel.text })
+      .catch(() => undefined);
     if (r && r.ok && r.data) {
       const text = String((r.data as { text: string }).text);
-      execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], { input: text, stdio: ['pipe', 'pipe', 'pipe'] });
+      execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], {
+        input: text,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
     }
     return;
   }
