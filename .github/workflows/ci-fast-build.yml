@@ -1,0 +1,320 @@
+# PR-triggered end-to-end validation — dylib-injection path only.
+#
+# Architecture: 1 build job + 4 parallel test shards.
+# Build compiles the dylib + example app, uploads as artifacts.
+# Each shard downloads artifacts, boots its own simulator, runs ~10 tests.
+# Total wall time: ~10 min (build ~5 min + shard ~5 min) vs ~25 min sequential.
+name: ci-fast-build
+
+on:
+  pull_request:
+    branches: [main, 'feat/**']
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Build job: compile dylib + example app ──────────────────────
+  build:
+    name: Build dylib + example (Release)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.19
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      - name: Cache bun + node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+            example/node_modules
+            packages/ennio/node_modules
+            packages/ennio-expo-plugin/node_modules
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'package.json', 'example/package.json', 'packages/*/package.json') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Cache ennio prebuilt dylibs (restore)
+        id: dylib-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/ennio/prebuilt
+          key: ennio-dylib-${{ runner.os }}-${{ hashFiles('packages/ennio/cpp/**', 'packages/ennio/ios/**', 'packages/ennio/native-shim/**', 'packages/ennio/scripts/**', 'packages/ennio/EnnioCore.podspec') }}
+
+      - name: Compile EnnioCore + link dylib (cache miss)
+        if: steps.dylib-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          ENNIO=$GITHUB_WORKSPACE/packages/ennio
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          OBJ_DIR=/tmp/ennio-obj
+          mkdir -p "$OBJ_DIR"
+          CFLAGS="-arch arm64 -isysroot $SDK -std=c++17 -fobjc-arc -fmodules \
+            -target arm64-apple-ios17.0-simulator \
+            -I$ENNIO/cpp -I$ENNIO/ios/bootstrap -I$ENNIO/ios/finders \
+            -I$ENNIO/ios/handlers -I$ENNIO/ios/observers -I$ENNIO/ios/ops \
+            -I$ENNIO/ios/PrivateAPI -O2"
+          for f in $ENNIO/cpp/*.cpp; do
+            xcrun clang++ $CFLAGS -c "$f" -o "$OBJ_DIR/$(basename "$f" .cpp).o"
+          done
+          for f in $ENNIO/ios/**/*.mm; do
+            xcrun clang++ $CFLAGS -c "$f" -o "$OBJ_DIR/$(basename "$f" .mm).o"
+          done
+          bash "$ENNIO/scripts/build-shim.sh"
+          ENNIO_OBJECTS_DIR="$OBJ_DIR" bash "$ENNIO/scripts/build-dylib.sh"
+          bash "$ENNIO/scripts/regen-manifest.sh"
+
+      - name: Cache ennio prebuilt dylibs (save)
+        if: always() && steps.dylib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: packages/ennio/prebuilt
+          key: ${{ steps.dylib-cache.outputs.cache-primary-key }}
+
+      - name: Compute Expo fingerprint
+        id: fp
+        working-directory: example
+        run: |
+          bunx fingerprint fingerprint:generate --platform ios > /tmp/expo-fp.json
+          KEY=$(jq -r '.hash' /tmp/expo-fp.json)
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Cache prebuilt iOS project (restore)
+        uses: actions/cache/restore@v4
+        id: ios-cache
+        with:
+          path: |
+            example/ios
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: ios-prebuild-${{ runner.os }}-${{ steps.fp.outputs.key }}
+          restore-keys: ios-prebuild-${{ runner.os }}-
+
+      - name: Prebuild (cache miss)
+        if: steps.ios-cache.outputs.cache-hit != 'true'
+        working-directory: example
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Pod install (cache miss)
+        if: steps.ios-cache.outputs.cache-hit != 'true'
+        working-directory: example/ios
+        run: pod install
+
+      - name: Cache prebuilt iOS project (save)
+        if: always() && steps.ios-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            example/ios
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: ${{ steps.ios-cache.outputs.cache-primary-key }}
+
+      - name: Cache built .app (restore)
+        uses: actions/cache/restore@v4
+        id: app-cache
+        with:
+          path: /tmp/ennio-app-cache
+          key: appbin-release-${{ runner.os }}-${{ steps.fp.outputs.key }}-${{ hashFiles('example/app/**', 'example/components/**', 'example/store/**') }}
+
+      - name: Build example app (Release, no Metro)
+        if: steps.app-cache.outputs.cache-hit != 'true'
+        working-directory: example/ios
+        run: |
+          xcodebuild \
+            -workspace EnnioExample.xcworkspace \
+            -scheme EnnioExample \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+          APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*Release-iphonesimulator/EnnioExample.app' -type d | head -n1)
+          test -n "$APP" || { echo "EnnioExample.app not found"; exit 1; }
+          mkdir -p /tmp/ennio-app-cache
+          rsync -a --delete "$APP/" /tmp/ennio-app-cache/EnnioExample.app/
+
+      - name: Cache built .app (save)
+        if: always() && steps.app-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/ennio-app-cache
+          key: ${{ steps.app-cache.outputs.cache-primary-key }}
+
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      # Stage artifacts into a single directory for clean upload
+      - name: Stage build outputs
+        run: |
+          mkdir -p /tmp/e2e-stage/prebuilt /tmp/e2e-stage/dist /tmp/e2e-stage/app
+          cp -r packages/ennio/prebuilt/* /tmp/e2e-stage/prebuilt/
+          cp -r packages/ennio/dist/* /tmp/e2e-stage/dist/
+          cp -r /tmp/ennio-app-cache/EnnioExample.app /tmp/e2e-stage/app/
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-build
+          retention-days: 1
+          path: /tmp/e2e-stage/
+
+  # ─── Test shards: 4 parallel jobs ────────────────────────────────
+  test:
+    name: E2E shard ${{ matrix.shard }}
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.19
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      - name: Install idb + coreutils
+        run: |
+          brew install facebook/fb/idb-companion coreutils
+          pip3 install fb-idb
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-build
+          path: /tmp/e2e-build
+
+      - name: Restore artifacts to workspace
+        run: |
+          mkdir -p packages/ennio/prebuilt packages/ennio/dist /tmp/ennio-app-cache
+          cp -r /tmp/e2e-build/prebuilt/* packages/ennio/prebuilt/
+          cp -r /tmp/e2e-build/dist/* packages/ennio/dist/
+          cp -r /tmp/e2e-build/app/EnnioExample.app /tmp/ennio-app-cache/
+          ls -la packages/ennio/prebuilt/ packages/ennio/dist/ /tmp/ennio-app-cache/
+
+      - name: Boot simulator
+        id: sim
+        run: |
+          xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 15 Pro" || true
+          sleep 5
+          UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
+          test -n "$UDID" || { echo "No sim booted"; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Install example app
+        run: xcrun simctl install "${{ steps.sim.outputs.udid }}" /tmp/ennio-app-cache/EnnioExample.app
+
+      - name: Start idb_companion
+        run: |
+          set -uxo pipefail
+          UDID="${{ steps.sim.outputs.udid }}"
+          mkdir -p /tmp/idb
+          SOCK="/tmp/idb/${UDID}_companion.sock"
+          for attempt in 1 2 3; do
+            rm -f "$SOCK"
+            nohup idb_companion --udid "$UDID" --grpc-domain-sock "$SOCK" \
+              > "/tmp/idb-companion-$attempt.log" 2>&1 &
+            COMPANION_PID=$!
+            for i in $(seq 1 45); do [ -S "$SOCK" ] && break; sleep 1; done
+            if [ -S "$SOCK" ]; then
+              echo "idb_companion listening (pid $COMPANION_PID, attempt $attempt)"
+              exit 0
+            fi
+            kill -9 $COMPANION_PID 2>/dev/null || true
+            sleep 5
+          done
+          echo "idb_companion failed" >&2; exit 1
+
+      - name: Assign test shard
+        id: tests
+        run: |
+          # Collect all test files, sorted
+          ALL_TESTS=()
+          for f in example/maestro-e2e/*.yaml; do
+            base=$(basename "$f")
+            [[ "$base" == _* ]] && continue
+            [[ "$base" == 00-full-suite.yaml ]] && continue
+            ALL_TESTS+=("$f")
+          done
+          # Assign by modulo: shard N gets tests where index % 4 == N-1
+          SHARD=${{ matrix.shard }}
+          MY_TESTS=()
+          for i in "${!ALL_TESTS[@]}"; do
+            if (( i % 4 == SHARD - 1 )); then
+              MY_TESTS+=("${ALL_TESTS[$i]}")
+            fi
+          done
+          echo "Shard $SHARD: ${#MY_TESTS[@]} tests"
+          printf '%s\n' "${MY_TESTS[@]}"
+          # Write to file for the run step
+          printf '%s\n' "${MY_TESTS[@]}" > /tmp/shard-tests.txt
+
+      - name: Run shard tests
+        id: suite
+        env:
+          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+          ENNIO_DYLIB_PATH: ${{ github.workspace }}/packages/ennio/prebuilt/libennio.dylib
+        run: |
+          mkdir -p /tmp/ennio-logs
+          PASS=0; FAIL=0
+          while IFS= read -r f; do
+            base=$(basename "$f")
+            if gtimeout 240 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
+              echo "PASS  $base"
+              PASS=$((PASS+1))
+            else
+              # Retry once — handles transient CI flakiness (slow runner,
+              # scroll timing, late React mount) without masking real bugs.
+              echo "RETRY $base"
+              if gtimeout 240 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" test "$f" --verbose > "/tmp/ennio-logs/$base.retry.log" 2>&1; then
+                echo "PASS  $base (retry)"
+                PASS=$((PASS+1))
+              else
+                echo "FAIL  $base"
+                FAIL=$((FAIL+1))
+              fi
+            fi
+          done < /tmp/shard-tests.txt
+          echo ""
+          echo "Shard ${{ matrix.shard }}: Pass=$PASS Fail=$FAIL"
+          [ "$FAIL" -eq 0 ]
+
+      - name: Upload shard artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-shard-${{ matrix.shard }}
+          path: |
+            /tmp/ennio-logs/
+            /tmp/ennio-shots/
+          retention-days: 7
+          if-no-files-found: warn

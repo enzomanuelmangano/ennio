@@ -1,0 +1,22 @@
+appId: com.ennio.example
+name: 'auth debug'
+
+---
+- launchApp:
+    clearState: true
+
+- tapOn:
+    text: 'Home'
+
+- assertVisible:
+    id: 'home-screen'
+
+- takeScreenshot: /tmp/before-signin.png
+
+- tapOn:
+    id: 'home-signin-btn'
+
+- takeScreenshot: /tmp/after-signin.png
+
+- assertVisible:
+    id: 'login-screen'

@@ -1,0 +1,29 @@
+# Exercise tapOn + idb HID + post-tap settle + assertVisible.
+#
+# Cart screen has a tab bar with Home / Products / Cart / Profile /
+# Gauntlet. Tap on Home, then assert we're on the Home screen via a
+# visible text.
+
+appId: com.ennio.example
+name: 'tap smoke'
+
+---
+- assertVisible:
+    text: 'Cart'
+
+# Tap the Home tab via its accessibility label
+- tapOn:
+    text: 'Home'
+
+- waitFor:
+    text: 'Featured'
+    timeout: 4000
+
+- assertVisible:
+    text: 'Trending Now'
+
+- tapOn:
+    text: 'Cart'
+
+- assertVisible:
+    text: 'Mechanical Keyboard'

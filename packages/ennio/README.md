@@ -7,54 +7,77 @@
 
 Maestro-compatible E2E test runner for React Native iOS.
 
-The CLI drives the in-app runtime through Metro's Hermes Inspector (CDP)
-and actuates real CoreSimulator touches via a persistent `idb` HID
-daemon. No XCTest helper, no `xcodebuild` cold-start, no synthetic
-UITouch that half-fires recognizers — the gesture goes through the same
-path a finger would.
+The CLI injects a prebuilt ObjC dylib into your simulator app via
+`DYLD_INSERT_LIBRARIES` and drives it through a Unix socket. Real
+CoreSimulator touches are dispatched via `idb` gRPC HID — the gesture
+goes through the same path a finger would. No XCTest, no CDP, no
+companion driver.
 
 ```bash
-bun add @reactiive/ennio react-native-nitro-modules
-bun add -d @reactiive/ennio-expo-plugin
+bun add -D @reactiive/ennio          # or npm install --save-dev
 
 bunx ennio test e2e/01-auth-flow.yaml      # one flow
 bunx ennio test e2e/                       # every *.yaml in the directory
 ```
 
-(Or use the equivalent `npm install` / `yarn add` — `ennio-expo-plugin`
-is a build-time config plugin, so it belongs in `devDependencies`.)
+No config plugin, no `expo prebuild`, no pod install. Ennio ships
+per-RN-version prebuilt dylibs in the npm tarball; the CLI injects
+the matching slice at simulator launch time.
 
 ## Requirements
 
-- Expo app on React Native ≥ 0.81 (New Architecture, Fabric)
+- React Native ≥ 0.83 (New Architecture, Fabric)
 - iOS 17+ simulator
 - Xcode 16+, Node 18+
-- Facebook's `idb` toolchain — gRPC server + Python client (the
-  HID daemon imports the `idb` python package):
+- Facebook's `idb` toolchain:
 
   ```bash
   brew install facebook/fb/idb-companion
   pip3 install fb-idb
   ```
 
-## Setup
+## How it works
 
-The accompanying [`@reactiive/ennio-expo-plugin`](https://www.npmjs.com/package/@reactiive/ennio-expo-plugin)
-links the native runtime into **Debug builds only** via CocoaPods
-`:configurations`. Add it to `app.json`:
+The CLI sets `DYLD_INSERT_LIBRARIES` on the simulator's launchctl env
+to a tiny RN-agnostic shim (`libennio-shim.dylib`, ~50 KB). The shim
+loads into every process on the sim but only activates when:
 
-```json
-{
-  "plugins": ["expo-router", "@reactiive/ennio-expo-plugin"]
-}
-```
+1. `RCTInstance` class is present (skips non-RN apps + system daemons)
+2. Bundle id matches `ENNIO_TARGET_BUNDLE_ID` (skips other RN apps)
+3. No App Store receipt (prevents accidental device injection)
 
-Then rebuild your app (`npx expo prebuild --clean && npx expo run:ios`).
+When all three pass, the shim `dlopen`s the per-RN-version slice
+(`libennio-rn<X.Y.Z>-sim.dylib`, ~530 KB). The slice's `+load`
+bootstraps a Unix socket server, swizzles `setAccessibilityIdentifier:`
+for O(1) testID lookup, and installs React commit observers for
+frame-level settle detection.
 
-## Docs
+The CLI verifies each dylib's SHA-256 against `prebuilt/manifest.json`
+before injection; a mismatch refuses to proceed.
 
-Full architecture notes, security model, supported Maestro commands, and
-example flows live in the [monorepo README](https://github.com/enzomanuelmangano/ennio#readme).
+### Discovery
+
+Element discovery uses UIKit accessibility — no fiber walking, no
+shadow tree traversal. The swizzled testID index provides O(1) lookup
+by `accessibilityIdentifier`. Text-based finds walk the view hierarchy
+with on-screen filtering, topmost-VC scoping, and interactive-ancestor
+promotion.
+
+### Touch delivery
+
+Touches go through `idb_companion`'s gRPC HID service, which
+synthesizes `IOHIDEvent`s at the CoreSimulator level. Same touch
+pipeline as a physical finger — UIKit gesture recognizers, React
+Native's responder system, and RNGH all see a real touch.
+
+## Supported Maestro commands
+
+`launchApp`, `clearState`, `tapOn`, `longPressOn`, `doubleTapOn`,
+`swipe`, `scrollUntilVisible`, `inputText`, `eraseText`, `pressKey`,
+`inputRandomText`, `inputRandomNumber`, `assertVisible`,
+`assertNotVisible`, `hideKeyboard`, `back`, `takeScreenshot`,
+`setClipboard`, `pasteText`, `runFlow`, `runScript`,
+`extendedWaitUntil`
 
 ## License
 

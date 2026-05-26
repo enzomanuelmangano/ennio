@@ -1,72 +1,21 @@
-import { NitroModules } from 'react-native-nitro-modules';
-import type {
-  Ennio,
-  ExtendedElementInfo,
-  LayoutMetrics,
-  Selector,
-  TextMatcher,
-  TextMatchMode,
-  Point,
-  Trait,
-  ScrollDirection,
-} from './Ennio.nitro';
+// JS-side entry for the @reactiive/ennio package.
+//
+// v2 architecture: the in-app dylib (libennio) talks to the CLI over a
+// Unix-domain socket, NOT JSI. Apps don't import this module — the
+// dylib does all the work via +load and UIKit / Foundation APIs.
+//
+// This file exists so the npm tarball has a valid `main` entry and so
+// the package can be `require()`'d without throwing. Returns trivial
+// stubs to keep older code paths that imported `isNativeModuleAvailable`
+// or `getEnnioModule` compiling.
 
-export type {
-  Ennio,
-  ExtendedElementInfo,
-  LayoutMetrics,
-  Selector,
-  TextMatcher,
-  TextMatchMode,
-  Point,
-  Trait,
-  ScrollDirection,
-};
-
-let _ennioModule: Ennio | null = null;
-let _initError: Error | null = null;
-
-/**
- * Get the Ennio HybridObject instance. Auto-init happens at app start
- * (EnnioAutoInit swizzles RCTHost.start) — this is just a stable
- * handle for callers that want to introspect from JS.
- */
-export function getEnnioModule(): Ennio | null {
-  if (_ennioModule) {
-    return _ennioModule;
-  }
-
-  if (_initError) {
-    return null;
-  }
-
-  try {
-    _ennioModule = NitroModules.createHybridObject<Ennio>('Ennio');
-    return _ennioModule;
-  } catch (error) {
-    _initError = error instanceof Error ? error : new Error(String(error));
-    if (__DEV__) {
-      console.warn('[Ennio] Native module not available:', _initError.message);
-      console.warn('[Ennio] E2E testing features will be disabled');
-    }
-    return null;
-  }
-}
-
-/**
- * Returns true when the Ennio JSI surface is reachable. The runtime
- * dispatch surface (`__ennioDispatch` + commit signal) is installed
- * automatically by the pod's `+load` hook — this only exposes the
- * Nitro module to JS callers that want to read state directly.
- */
 export function isNativeModuleAvailable(): boolean {
-  return getEnnioModule() !== null;
+  // v2 doesn't expose a Nitro module to JS. The dylib is in-process but
+  // unreachable from JS — the CLI talks to it via Unix socket from
+  // outside the app.
+  return false;
 }
 
-// No JS-side bootstrap. `ennio` autolinks via Pod, and the iOS
-// `EnnioAutoInit` swizzle installs the JSI dispatch surface (commit
-// signal + `__ennioDispatch` host function) natively, on the JS
-// thread, the moment RCTHost finishes booting. The user's app never
-// imports this package; it lands purely through `npm install ennio`.
-// The external CLI drives the runtime via Hermes Inspector
-// (`Runtime.evaluate('__ennioDispatch(...)')`).
+export function getEnnioModule(): null {
+  return null;
+}

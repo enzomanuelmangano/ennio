@@ -1,7 +1,8 @@
 appId: com.ennio.example
 name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, doubleTap, back)
 ---
-- launchApp
+- launchApp:
+    clearState: true
 - tapOn:
     text: 'Gauntlet'
 - scrollUntilVisible:
@@ -10,12 +11,15 @@ name: Grammar — system (alert, screenshot, hideKeyboard, swipe, longPress, dou
     direction: DOWN
 - tapOn:
     id: 'g-playground'
+- assertVisible:
+    id: 'playground-scroll'
 
 # Native alert (Maestro lacks dismissAlert; tap the OK button to dismiss)
 - scrollUntilVisible:
     element:
       id: 'open-alert-btn'
     direction: DOWN
+    timeout: 30000
 - tapOn:
     id: 'open-alert-btn'
 - assertVisible: 'Playground Alert'

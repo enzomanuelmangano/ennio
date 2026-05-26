@@ -1,0 +1,152 @@
+// Simulator orchestration helpers for the v2 architecture.
+//
+// Four jobs:
+//   1. Pick the active iOS Simulator UDID (env override or first booted;
+//      auto-boot the first sim if none is booted).
+//   2. Resolve a bundle id's data container.
+//   3. Launch / terminate apps with `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES`
+//      so the libennio.dylib is injected at attach time.
+//   4. Locate the prebuilt libennio.dylib that ships with the package.
+//
+// No XCTest, no WebDriverAgent, no Hermes Inspector page-discovery.
+
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
+
+export function getTargetUdid(): string | null {
+  if (process.env.ENNIO_UDID) return process.env.ENNIO_UDID;
+  try {
+    const json = execFileSync('xcrun', ['simctl', 'list', 'devices', 'booted', '-j'], {
+      encoding: 'utf-8',
+    });
+    const data = JSON.parse(json) as {
+      devices?: Record<string, { udid: string; state: string }[]>;
+    };
+    const buckets = data.devices ?? {};
+    for (const key of Object.keys(buckets)) {
+      for (const d of buckets[key]) {
+        if (d.state === 'Booted') return d.udid;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+export function terminateApp(udid: string, bundleId: string): void {
+  try {
+    execFileSync('xcrun', ['simctl', 'terminate', udid, bundleId], { stdio: 'pipe' });
+  } catch {
+    // App may not be running — that's OK.
+  }
+}
+
+export function installApp(udid: string, appPath: string): void {
+  execFileSync('xcrun', ['simctl', 'install', udid, appPath], { stdio: 'inherit' });
+}
+
+/**
+ * Launch an app with DYLD_INSERT_LIBRARIES set on the child process only
+ * (via SIMCTL_CHILD_*). Avoids polluting launchctl's global env, which
+ * would attach the dylib to every subsequent process spawned through
+ * launchctl on the sim — including non-iOS-app helpers like
+ * proactiveeventtrackerd.
+ */
+export function launchAppWithDylib(udid: string, bundleId: string, dylibPath: string): void {
+  const env = {
+    ...process.env,
+    SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylibPath,
+  };
+  execFileSync('xcrun', ['simctl', 'launch', '--terminate-running-process', udid, bundleId], {
+    env,
+    stdio: 'pipe',
+  });
+}
+
+/**
+ * Cold-launch the app without injection — used after a sandbox wipe
+ * when we want to verify the app boots cleanly on its own. Not used
+ * in the normal flow but handy for diagnostics.
+ */
+export function launchApp(udid: string, bundleId: string): void {
+  execFileSync('xcrun', ['simctl', 'launch', '--terminate-running-process', udid, bundleId], {
+    stdio: 'pipe',
+  });
+}
+
+export function getAppContainer(udid: string, bundleId: string): string | null {
+  try {
+    const out = execFileSync('xcrun', ['simctl', 'get_app_container', udid, bundleId, 'data'], {
+      encoding: 'utf-8',
+    });
+    return out.trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Locate the libennio.dylib that ships with the package. Search order:
+ *   1. ENNIO_DYLIB_PATH env var (explicit override)
+ *   2. /tmp/ennio-build/libennio.dylib (local dev build)
+ *   3. <package>/prebuilt/libennio.dylib (npm tarball)
+ *   4. <package>/dist/libennio.dylib (alternative install)
+ *
+ * Returns null if nothing is found — caller surfaces an actionable
+ * message to the user.
+ */
+export function findDylib(): string | null {
+  if (process.env.ENNIO_DYLIB_PATH) {
+    return existsSync(process.env.ENNIO_DYLIB_PATH) ? process.env.ENNIO_DYLIB_PATH : null;
+  }
+  const candidates: string[] = [
+    '/tmp/ennio-build/libennio.dylib',
+    // The CLI is bundled to dist/cli.js, so __dirname at runtime is the
+    // dist directory. Walk up to package root.
+    resolve(dirname(__filename), '..', 'prebuilt', 'libennio.dylib'),
+    resolve(dirname(__filename), '..', 'libennio.dylib'),
+    resolve(dirname(__filename), 'libennio.dylib'),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * Boot the first non-booted iOS Simulator if none is currently booted.
+ * Used so users don't have to manually `xcrun simctl boot ...` before
+ * running tests. Returns the UDID of the booted (or already-booted)
+ * device, or null if no sims exist.
+ */
+export function ensureBootedSim(): string | null {
+  const already = getTargetUdid();
+  if (already) return already;
+  try {
+    const json = execFileSync('xcrun', ['simctl', 'list', 'devices', 'available', '-j'], {
+      encoding: 'utf-8',
+    });
+    const data = JSON.parse(json) as {
+      devices?: Record<string, { udid: string; state: string; name: string }[]>;
+    };
+    const buckets = data.devices ?? {};
+    // Prefer iPhone runtimes from the latest iOS available.
+    const runtimes = Object.keys(buckets).sort().reverse();
+    for (const r of runtimes) {
+      for (const d of buckets[r]) {
+        if (d.name.startsWith('iPhone') && d.state !== 'Booted') {
+          execFileSync('xcrun', ['simctl', 'boot', d.udid], { stdio: 'pipe' });
+          return d.udid;
+        }
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+// Silence unused-import warning for the alternate path resolver.
+void join;

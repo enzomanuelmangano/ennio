@@ -1,0 +1,21 @@
+# Smoke test for the v2 architecture.
+#
+# Pure Maestro YAML — runnable in maestro/maestro-runner against the
+# same app. With ennio v0.1 (socket + idb), we verify:
+#   - launchApp (no clearState — app is already booted via outer harness)
+#   - assertVisible by text on the Cart screen
+#   - tap a tab
+#   - assertVisible again on the new screen
+
+appId: com.ennio.example
+name: 'v2 arch smoke'
+
+---
+- assertVisible:
+    text: 'Cart'
+
+- assertVisible:
+    text: '1 ITEM'
+
+- assertVisible:
+    text: 'Mechanical Keyboard'
