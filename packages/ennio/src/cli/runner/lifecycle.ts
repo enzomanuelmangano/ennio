@@ -17,7 +17,9 @@ export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void
   await client.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);
   // Wait for the first React commit instead of a fixed 2s sleep.
   // Falls back to 2s if no React observer is attached.
-  const r = await client.call('wait_react_commit', { sinceMs: 0, maxMs: 2000 }).catch(() => undefined);
+  const r = await client
+    .call('wait_react_commit', { sinceMs: 0, maxMs: 2000 })
+    .catch(() => undefined);
   const committed = !!(r && r.ok && r.data && (r.data as { ok: boolean }).ok);
   if (!committed) {
     await sleep(2000);

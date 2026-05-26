@@ -47,7 +47,10 @@ export async function execTapOn(
     const ws = await ctx.client.call('window_size').catch(() => undefined);
     if (ws && ws.ok && ws.data) {
       const d = ws.data as { w: number; h: number };
-      if (d.w > 0 && d.h > 0) { winW = d.w; winH = d.h; }
+      if (d.w > 0 && d.h > 0) {
+        winW = d.w;
+        winH = d.h;
+      }
     }
     const { x, y } = parsePoint(sel.point, winW, winH);
     await hidTap(ctx.udid, x, y);

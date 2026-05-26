@@ -197,7 +197,10 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   const wsR = await ctx.client.call('window_size').catch(() => undefined);
   if (wsR && wsR.ok && wsR.data) {
     const d = wsR.data as { w: number; h: number };
-    if (d.w > 0 && d.h > 0) { scrW = d.w; scrH = d.h; }
+    if (d.w > 0 && d.h > 0) {
+      scrW = d.w;
+      scrH = d.h;
+    }
   }
   const cx = Math.round(scrW / 2);
   const cy = Math.round(scrH / 2);

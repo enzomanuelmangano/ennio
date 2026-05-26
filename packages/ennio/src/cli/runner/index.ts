@@ -574,7 +574,10 @@ async function runCommand(
         // waiting for).
         const animR = await ctx.client.call('animations_active').catch(() => undefined);
         const animActive = !!(
-          animR && animR.ok && animR.data && (animR.data as { active?: boolean }).active
+          animR &&
+          animR.ok &&
+          animR.data &&
+          (animR.data as { active?: boolean }).active
         );
         const settleMs = animActive ? POST_TAP_SETTLE_MS : Math.min(POST_TAP_SETTLE_MS, 400);
         await timedAsync(ctx, 'tap.postSleep', () => sleep(settleMs));
