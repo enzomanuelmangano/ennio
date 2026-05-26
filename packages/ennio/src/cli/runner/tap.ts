@@ -61,9 +61,67 @@ export async function execTapOn(
       /* fall through to normal find */
     }
   }
-  const rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+  let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
   if (!rect) {
     throw new Error(`element not found: ${JSON.stringify(sel)}`);
+  }
+  // Off-viewport auto-scroll: the testID resolved, but the rect
+  // sits outside the window's visible bounds — common when a YAML
+  // `swipe` doesn't fully snap a horizontal carousel to the target
+  // page (gesture velocity is hardware-dependent: a swipe that
+  // page-snaps on M-series local hardware can land short on slower
+  // CI runners, leaving the target one page to the right of the
+  // viewport). Tapping that off-screen coord lands on whatever's
+  // visible at that pixel and the user's onPress never fires.
+  // Drive the enclosing UIScrollView directly via scroll_to — its
+  // scrollRectToVisible: is deterministic and ignores gesture
+  // velocity entirely.
+  if (sel.id) {
+    const sz = await ctx.client.call('window_size').catch(() => undefined);
+    const wd = (sz?.data as { w?: number; h?: number }) ?? {};
+    const winW = wd.w ?? 402;
+    const winH = wd.h ?? 874;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    const offViewport = cx < 0 || cx > winW || cy < 0 || cy > winH;
+    if (offViewport) {
+      process.stderr.write(
+        `[ennio] off-viewport id="${sel.id}" rect=(${rect.x.toFixed(0)},${rect.y.toFixed(0)},${rect.w.toFixed(0)},${rect.h.toFixed(0)}) center=(${cx.toFixed(0)},${cy.toFixed(0)}) win=(${winW.toFixed(0)},${winH.toFixed(0)}) → scroll_to\n`,
+      );
+      const scrollResp = await ctx.client
+        .call('scroll_to', { elementTestID: sel.id })
+        .catch(() => undefined);
+      const scrolled = !!(
+        scrollResp &&
+        scrollResp.ok &&
+        scrollResp.data &&
+        (scrollResp.data as { scrolled?: boolean }).scrolled
+      );
+      process.stderr.write(`[ennio] scroll_to id="${sel.id}" scrolled=${scrolled}\n`);
+      // After scrollRectToVisible the carousel snaps, but React
+      // Fabric in Release mode mounts virtualized items lazily —
+      // the target view exists in the UIView tree (its testID
+      // resolves to a rect) yet its Pressability onPress handler
+      // hasn't been wired by the JS thread yet. Tapping in this
+      // window fires the coord but no handler responds.
+      // Wait for one React commit before re-resolving + tapping.
+      await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 600 }).catch(() => undefined);
+      const refresh = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+      if (refresh) {
+        rect = refresh;
+        process.stderr.write(
+          `[ennio] post-scroll rect id="${sel.id}" rect=(${refresh.x.toFixed(0)},${refresh.y.toFixed(0)},${refresh.w.toFixed(0)},${refresh.h.toFixed(0)})\n`,
+        );
+      }
+      // Activate path bypasses hit-test entirely. Works on RN
+      // Pressable in most archs; returns false on Fabric Release
+      // where Pressability's handler isn't reachable via the public
+      // accessibility chain — fall through to HID tap in that case.
+      const r = await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
+      const ok = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
+      process.stderr.write(`[ennio] activate_testid id="${sel.id}" ok=${ok}\n`);
+      if (ok) return;
+    }
   }
   // Hidden test-only controls: some apps expose 1×1 px elements
   // (TextInput and Pressable variants) as side-channels for e2e
@@ -301,7 +359,15 @@ export async function execTapOn(
     const finalHc = await ctx.client
       .call('wait_hash_change', { sinceHash: baseHash, maxMs: 80 })
       .catch(() => undefined);
-    const finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
+    let finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
+    // For testID taps only: confirm the hash change DIDN'T revert
+    // to baseline within ~80 ms. iOS press-feedback bumps the hash
+    // transiently even when onPress never fires; a single
+    // wait_hash_change returns true on that transient bump and the
+    // activate_testid recovery is then skipped. CI runners hit this
+    // on slow-handler buttons (next-btn → submit, add-to-cart → API
+    // round-trip). Text-only taps stay on the original gate — they
+    // already get the unconditional tap_tab fallback below.
     if (!finalChanged) {
       if (sel.id) {
         await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
@@ -316,6 +382,19 @@ export async function execTapOn(
         // wires to the React-side onPress.
         await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
       }
+    }
+    // Tab-bar resilience: iOS 26's liquid-glass tab bar drops HID
+    // taps when the host is mid-transition (slow CI runners reproduce
+    // this on roughly every nav-after-state-transition pattern). The
+    // press-feedback layer still bumps the frame hash so the
+    // !finalChanged gate above doesn't fire; meanwhile the tab never
+    // actually swaps and the next assertVisible times out. Always
+    // probe tap_tab when the selector is a bare text name — the
+    // dylib op no-ops if the name doesn't resolve to a UITabBarItem,
+    // and if it DOES resolve UIKit's setSelectedIndex is idempotent
+    // (no-op when the target tab is already selected).
+    if (sel.text && !sel.id) {
+      await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
     }
   }
 }

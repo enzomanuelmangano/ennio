@@ -180,6 +180,8 @@ tags:
 # Enable dark mode
 - tapOn:
     id: 'quick-action-settings'
+- assertVisible:
+    id: 'settings-screen'
 - tapOn:
     id: 'toggle-dark-mode'
 
@@ -209,6 +211,9 @@ tags:
 
 - tapOn:
     id: 'quick-action-settings'
+
+- assertVisible:
+    id: 'settings-screen'
 
 - tapOn:
     id: 'toggle-dark-mode'

@@ -69,21 +69,34 @@ static UIView *_Nullable walkByID(UIView *root, NSString *testID) {
 // UIButton, has a tap recognizer, or is an accessibility button trait.
 // Used to break ties when multiple views match the same text: a tab
 // bar item beats a header label.
+static BOOL isInsideNavigationBar(UIView *v) {
+    for (UIView *a = v.superview; a; a = a.superview) {
+        if ([a isKindOfClass:UINavigationBar.class]) return YES;
+    }
+    return NO;
+}
+
 static BOOL isInteractive(UIView *v) {
     if (!v) return NO;
+    // Views inside UINavigationBar are not user-tap targets. iOS 26
+    // wraps the title in UINavigationBarTitleControl (a UIControl) and
+    // private subviews carry GRs/traits for scroll-to-top, large-title
+    // collapse etc. Suppress ALL interactive signals except UIButton —
+    // actual bar-button items (Back, right items) are UIButton
+    // subclasses and must stay interactive.
+    BOOL inNavBar = isInsideNavigationBar(v);
     UIView *cur = v;
     for (int hop = 0; hop < 4 && cur; hop++, cur = cur.superview) {
         if (cur.userInteractionEnabled) {
-            if ([cur isKindOfClass:UIControl.class]) return YES;
             if ([cur isKindOfClass:UIButton.class]) return YES;
-            for (UIGestureRecognizer *g in cur.gestureRecognizers) {
-                if (g.isEnabled) return YES;
+            if (!inNavBar && [cur isKindOfClass:UIControl.class]) return YES;
+            if (!inNavBar) {
+                for (UIGestureRecognizer *g in cur.gestureRecognizers) {
+                    if (g.isEnabled) return YES;
+                }
+                UIAccessibilityTraits t = cur.accessibilityTraits;
+                if ((t & UIAccessibilityTraitButton) || (t & UIAccessibilityTraitLink)) return YES;
             }
-            UIAccessibilityTraits t = cur.accessibilityTraits;
-            if ((t & UIAccessibilityTraitButton) || (t & UIAccessibilityTraitLink)) return YES;
-            // RNGH wraps every Pressable in a view class that ends in
-            // "GestureHandlerButton" — it accepts taps but doesn't
-            // subclass UIControl. Detect by class name suffix.
             NSString *cls = NSStringFromClass([cur class]);
             if ([cls hasSuffix:@"GestureHandlerButton"]) return YES;
             if ([cls hasSuffix:@"RCTSinglelineTextInputView"]) return YES;
@@ -360,6 +373,7 @@ static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
     for (int hop = 0; hop < 6 && cur; hop++, cur = cur.superview) {
         if (!cur.userInteractionEnabled) continue;
         if (viewWindowArea(cur) > areaCap) return v;
+        if ([cur isKindOfClass:UISegmentedControl.class]) return v;
         if ([cur isKindOfClass:UIControl.class]) return cur;
         if ([cur isKindOfClass:UIButton.class]) return cur;
         for (UIGestureRecognizer *g in cur.gestureRecognizers) {

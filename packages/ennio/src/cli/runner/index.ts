@@ -50,6 +50,8 @@ import { ensureBootedSim, findDylib, terminateApp } from '../sim';
 // Helper modules — split out of the original 2071-line runner.ts.
 import {
   DEFAULT_WAIT_MS,
+  DEFAULT_WIN_H,
+  DEFAULT_WIN_W,
   POLL_MS,
   POST_LAUNCH_SETTLE_MS,
   POST_TAP_SETTLE_MS,
@@ -423,9 +425,23 @@ async function runCommand(
       // two saves ~450 ms / tap on average — curate-lists 97-step
       // run drops ~25 s. Generous maxMs gives slow async submits
       // room; stableMs floor keeps the average low.
-      await timedAsync(ctx, 'tap.preWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 150 }).catch(() => undefined),
-      );
+      await timedAsync(ctx, 'tap.preWaitCommit', async () => {
+        // Wait for any UIKit transition (modal dismiss, nav push/pop)
+        // to fully end before tapping. Signal-based: polls
+        // animations_active (checks UIViewController.transitionCoordinator
+        // across the VC chain). No magic-number stable-quiet window —
+        // we wait until the system itself reports no transition in
+        // flight. Cap at 1500 ms for safety; the cap is reached only
+        // when a custom transition holds the coordinator open past the
+        // visible animation end.
+        const deadline = Date.now() + 1500;
+        while (Date.now() < deadline) {
+          const r = await ctx.client.call('animations_active').catch(() => undefined);
+          const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
+          if (!active) break;
+          await sleep(20);
+        }
+      });
     }
     const preTapHash = await captureHash(ctx);
     const preReact = await captureReactTs(ctx);
@@ -445,8 +461,24 @@ async function runCommand(
       !!nextRawCmd &&
       typeof nextRawCmd === 'object' &&
       ('inputText' in nextRawCmd || 'eraseText' in nextRawCmd || 'clearText' in nextRawCmd);
-    if (sel.id && /Input$/i.test(sel.id) && nextEditsField) {
-      await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
+    let focusedViaTestId = false;
+    if (sel.id && nextEditsField) {
+      // Focus the field in-process via becomeFirstResponder. This is
+      // deterministic and avoids the race where a fresh form's first
+      // TextInput tap lands before RN has wired up the press handler.
+      const r = await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
+      focusedViaTestId = !!(r && r.ok);
+    }
+    if (focusedViaTestId) {
+      // Field is already firstResponder — skip the redundant HID tap.
+      // The keyboard is animating up and the tap coordinates (computed
+      // from the pre-keyboard layout) may now land on the keyboard
+      // itself, injecting a ghost keypress (observed: "tbanana"
+      // instead of "banana" when the tap hit the "t" key).
+      await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 200 }).catch(() => undefined);
+      ctx.lastTapKey = tapKey;
+      ctx.lastTapTestID = sel.id;
+      return;
     }
     await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
     if (isRepeatTap || nextIsSameTap) {
@@ -479,10 +511,35 @@ async function runCommand(
         return ts.ts || since + (data.elapsedMs ?? 0);
       };
       const committed = await timedAsync(ctx, 'tap.postWaitReactCommit', async () => {
-        const after1 = await waitOneCommit(preReact.ts, 600);
-        if (!after1) return false;
-        await waitOneCommit(after1, 250);
-        return true;
+        // Signal-based post-tap wait. Two coupled signals:
+        //   1. Frame hash must DIFFER from preTapHash (something
+        //      changed on screen — press handler ran, layer
+        //      repainted, or modal dismissed).
+        //   2. UIViewController.transitionCoordinator must be nil
+        //      (no animation in flight).
+        // Both must be true to return committed=true. Cap 1500 ms —
+        // covers modal-dismiss tails after `router.dismiss()`-style
+        // calls that don't trigger React commits.
+        const deadline = Date.now() + 1500;
+        while (Date.now() < deadline) {
+          const cur = await captureHash(ctx);
+          if (cur !== preTapHash) {
+            const animR = await ctx.client.call('animations_active').catch(() => undefined);
+            const animActive = !!(
+              animR &&
+              animR.ok &&
+              animR.data &&
+              (animR.data as { active?: boolean }).active
+            );
+            if (!animActive) {
+              if (nextEditsField) {
+                await waitOneCommit(preReact.ts, 250);
+              }
+              return true;
+            }
+          }
+        }
+        return false;
       });
       if (!committed) {
         // No commit fired — likely a no-op tap, fall back to the
@@ -705,7 +762,18 @@ async function runCommand(
   }
   if ('back' in cmd) {
     await ctx.client.call('back');
-    await sleep(POST_TAP_SETTLE_MS);
+    // Poll animations_active until the pop transition ends.
+    // popViewControllerAnimated's CAAnimation registers on UIKit's
+    // transitionCoordinator immediately; the poll exits as soon as
+    // no VC in the chain is transitioning. Capped at 800 ms for
+    // custom transitions that exceed the default ~250 ms.
+    const deadline = Date.now() + 800;
+    while (Date.now() < deadline) {
+      const r = await ctx.client.call('animations_active').catch(() => undefined);
+      const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
+      if (!active) break;
+      await sleep(20);
+    }
     return;
   }
   if ('hideKeyboard' in cmd) {
@@ -721,32 +789,46 @@ async function runCommand(
       | { element: MaestroSelector; direction?: string; timeout?: number };
     const target = 'element' in arg ? arg.element : (arg as MaestroSelector);
     const dir = ('direction' in arg && arg.direction ? arg.direction : 'DOWN').toUpperCase();
-    const timeout = ('timeout' in arg && arg.timeout) || 10000;
+    const timeout = ('timeout' in arg && arg.timeout) || 15000;
+    const wsz = await ctx.client.call('window_size').catch(() => undefined);
+    const wd = (wsz?.data as { w?: number; h?: number }) ?? {};
+    // Fallback to iPhone 17 Pro logical dimensions if window_size fails
+    const winW = wd.w ?? DEFAULT_WIN_W;
+    const winH = wd.h ?? DEFAULT_WIN_H;
+    const SWIPE_CENTER_X = Math.round(winW / 2);
+    // Below vertical midpoint to avoid the navigation bar header area
+    const SWIPE_CENTER_Y = Math.round(winH / 2);
+    // ~30% of screen per swipe — enough to scroll but not overshoot
+    const SWIPE_DISTANCE = Math.round((winH * 3) / 10);
+    // Small push to move element above the tab bar
+    const NUDGE_DISTANCE = Math.round(winH / 6);
+    // Bottom 20% of screen overlaps with tab bar
+    const TAB_BAR_THRESHOLD = (winH * 4) / 5;
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (await isVisible(ctx, target)) {
-        // Important: scroll momentum keeps the list moving for a beat
-        // after the swipe ends. A tap fired immediately after isVisible
-        // returns true lands on a moving target — RN's gesture
-        // recognizer either rejects it or routes to whatever is at the
-        // moving-touch point. Wait for the scrollview to settle before
-        // returning so the next tapOn has stable coords.
         await sleep(600);
         await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 300 }).catch(() => undefined);
-        // Tab-bar overlap guard: if target's centre Y falls into the
-        // bottom ~25% of the viewport, do one short extra scroll to
-        // push it up. Otherwise tile coords overlap the UITabBar
-        // buttons (Home/Cart/etc.) and the next tap routes to the
-        // wrong element.
         const rect = await resolveRect(ctx, target);
-        if (rect && rect.y + rect.h / 2 > 700) {
-          const cx = 195;
-          const cy = 422;
-          const small = 150;
+        if (rect && rect.y + rect.h / 2 > TAB_BAR_THRESHOLD) {
           if (dir === 'DOWN') {
-            await hidSwipe(ctx.udid, cx, cy + small / 2, cx, cy - small / 2, 250);
+            await hidSwipe(
+              ctx.udid,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
+              250,
+            );
           } else if (dir === 'UP') {
-            await hidSwipe(ctx.udid, cx, cy - small / 2, cx, cy + small / 2, 250);
+            await hidSwipe(
+              ctx.udid,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
+              250,
+            );
           }
           await sleep(500);
           await ctx.client
@@ -755,32 +837,31 @@ async function runCommand(
         }
         return;
       }
-      // Centre swipe in the requested direction. Shorter swipe distance
-      // (250 vs 400) so we don't overshoot a tile that's just out of
-      // viewport — overshoot puts the target back off-screen on the
-      // other side and the next isVisible miss loops forever.
-      const cx = 195;
-      const cy = 422;
-      const dist = 250;
-      let x1 = cx,
-        y1 = cy,
-        x2 = cx,
-        y2 = cy;
+      const dist = SWIPE_DISTANCE;
+      let x1 = SWIPE_CENTER_X,
+        y1 = SWIPE_CENTER_Y,
+        x2 = SWIPE_CENTER_X,
+        y2 = SWIPE_CENTER_Y;
       if (dir === 'DOWN') {
-        y1 = cy + dist / 2;
-        y2 = cy - dist / 2;
+        y1 = SWIPE_CENTER_Y + dist / 2;
+        y2 = SWIPE_CENTER_Y - dist / 2;
       } else if (dir === 'UP') {
-        y1 = cy - dist / 2;
-        y2 = cy + dist / 2;
+        y1 = SWIPE_CENTER_Y - dist / 2;
+        y2 = SWIPE_CENTER_Y + dist / 2;
       } else if (dir === 'LEFT') {
-        x1 = cx + dist / 2;
-        x2 = cx - dist / 2;
+        x1 = SWIPE_CENTER_X + dist / 2;
+        x2 = SWIPE_CENTER_X - dist / 2;
       } else if (dir === 'RIGHT') {
-        x1 = cx - dist / 2;
-        x2 = cx + dist / 2;
+        x1 = SWIPE_CENTER_X - dist / 2;
+        x2 = SWIPE_CENTER_X + dist / 2;
       }
       await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-      await sleep(500);
+      // Wait for scroll momentum to settle before the next isVisible
+      // check. sleep(500) isn't enough on slow CI runners — the scroll
+      // animation is still in-flight and UIKit hasn't laid out the final
+      // frame positions yet, so the visibility check returns false even
+      // when the element IS on screen.
+      await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 300 }).catch(() => undefined);
     }
     throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
   }
@@ -1092,16 +1173,42 @@ async function runCommand(
   }
   if ('waitForAnimationToEnd' in cmd) {
     const timeout =
-      cmd.waitForAnimationToEnd === true ? 3000 : (cmd.waitForAnimationToEnd.timeout ?? 3000);
-    // In-process: React-commit quiet. Catches RN-side animations
-    // ending (sheet animateOut, navigation transition).
-    await ctx.client.call('wait_commit', { maxMs: timeout, stableMs: 150 });
+      cmd.waitForAnimationToEnd === true ? 600 : (cmd.waitForAnimationToEnd.timeout ?? 600);
+    // Race two signals:
+    //   - UIViewController.transitionCoordinator (animations_active)
+    //   - frame_hash quiet for 80 ms
+    // Either green-light returns. iOS 26 navigation occasionally
+    // holds the transition coordinator open past the visible
+    // animation end (custom presentation chain on liquid-glass tab
+    // bar) so transitionCoordinator alone hits the cap. Hash-quiet
+    // catches that case — the screen visibly stops changing well
+    // before transitionCoordinator releases.
+    const deadline = Date.now() + timeout;
+    let prevR = await ctx.client.call('frame_hash').catch(() => undefined);
+    let prevHash = (prevR?.data as { hash?: string })?.hash ?? '';
+    let lastChange = Date.now();
+    while (Date.now() < deadline) {
+      const animR = await ctx.client.call('animations_active').catch(() => undefined);
+      const animActive = !!(
+        animR &&
+        animR.ok &&
+        animR.data &&
+        (animR.data as { active?: boolean }).active
+      );
+      const hashR = await ctx.client.call('frame_hash').catch(() => undefined);
+      const curHash = (hashR?.data as { hash?: string })?.hash ?? '';
+      if (curHash !== prevHash) {
+        prevHash = curHash;
+        lastChange = Date.now();
+      }
+      const hashQuiet = Date.now() - lastChange >= 80;
+      if (!animActive || hashQuiet) break;
+      await sleep(20);
+    }
     // Cross-process safety: PHPicker / share sheet / document picker
-    // dismiss in another XPC process — wait_commit is blind to that.
-    // Poll the in-process VC chain until no cross-process picker VC
-    // is presented. ~10 ms per poll (one socket round-trip), and we
-    // bail the instant the picker is gone, so cost is negligible on
-    // RN-only screens.
+    // dismiss in another XPC process — the animations_active check
+    // above is blind to those because their views live in a remote
+    // process. Bail the instant the picker leaves the VC chain.
     const dismissDeadline = Date.now() + 2500;
     while (Date.now() < dismissDeadline) {
       const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
@@ -1116,57 +1223,6 @@ async function runCommand(
           cls.includes('UIDocumentPickerViewController'),
       );
       if (!hasCrossProcess) break;
-      await sleep(80);
-    }
-    // Tail-end: also wait for any UIKit modal transition currently
-    // in flight (Bluesky's Edit-modal dismiss, RN-Navigation push/pop
-    // animations) by polling for VC-chain stability. Picks up
-    // transitions that don't fire React commits (UIKit-driven
-    // dismiss without RN state change).
-    //
-    // Two phases:
-    //   1. Wait for the chain to CHANGE (new VC presented or current
-    //      VC dismissed) — up to 3.5 s. Bluesky's Mantis crop tool is
-    //      a native UIViewController presented from a JS callback;
-    //      the call-out to the file system + crop UI init takes
-    //      ~3 s on cold launch, so the chain doesn't grow for several
-    //      seconds after the trigger tap. Without this phase we exit
-    //      while the modal is still spinning up.
-    //   2. After observing a change, wait for stability (3 stable
-    //      polls = 240 ms of no further change) for up to 5 s.
-    //
-    // If no change ever happens within phase 1, the screen was static
-    // — return early so static taps don't pay the full timeout.
-    const baselineR = await ctx.client.call('top_vc_chain').catch(() => undefined);
-    const baselineChain = JSON.stringify(
-      ((baselineR?.data as { chain?: string[] })?.chain ?? []) as string[],
-    );
-    let observedChange = false;
-    let lastChain = baselineChain;
-    const changeDeadline = Date.now() + 1500;
-    while (Date.now() < changeDeadline) {
-      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-      const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
-      if (cur !== baselineChain) {
-        observedChange = true;
-        lastChain = cur;
-        break;
-      }
-      await sleep(80);
-    }
-    if (!observedChange) return;
-    let stableCount = 0;
-    const stableDeadline = Date.now() + 5000;
-    while (Date.now() < stableDeadline) {
-      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-      const cur = JSON.stringify(((r?.data as { chain?: string[] })?.chain ?? []) as string[]);
-      if (cur === lastChain) {
-        stableCount++;
-        if (stableCount >= 3) break;
-      } else {
-        stableCount = 0;
-        lastChain = cur;
-      }
       await sleep(80);
     }
     return;
@@ -1213,9 +1269,17 @@ async function runCommand(
       const subFlow = parseMaestroFile(subPath);
       const prevPath = ctx.flowPath;
       ctx.flowPath = subPath;
+      const trace = !!process.env.ENNIO_PHASE_TRACE;
       try {
-        for (let i = 0; i < subFlow.commands.length; i++)
+        for (let i = 0; i < subFlow.commands.length; i++) {
+          const t = Date.now();
           await runCommand(ctx, subFlow.commands[i], subFlow.commands[i + 1]);
+          if (trace) {
+            process.stderr.write(
+              `[sub] ${sub.file} #${i + 1} ${Date.now() - t}ms ${describeCommand(subFlow.commands[i])}\n`,
+            );
+          }
+        }
       } finally {
         ctx.flowPath = prevPath;
       }

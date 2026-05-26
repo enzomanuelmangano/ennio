@@ -32,6 +32,10 @@ export const POLL_MS = 100;
 /// simulator photos without making bona-fide negative findings drag.
 export const FIND_DEADLINE_DEFAULT_MS = 4000;
 
+/// Fallback screen dimensions when window_size() fails (iPhone 17 Pro logical points).
+export const DEFAULT_WIN_W = 402;
+export const DEFAULT_WIN_H = 874;
+
 /// Bridge wait — gives JS thread time to fire onPress → setState →
 /// React commit before wait_commit observes the screen. The frame-hash
 /// hasn't changed yet immediately post-tap, so without this buffer
@@ -139,7 +143,11 @@ export async function timedAsync<T>(
   try {
     return await fn();
   } finally {
-    recordPhase(ctx, name, Date.now() - t);
+    const dt = Date.now() - t;
+    recordPhase(ctx, name, dt);
+    if (process.env.ENNIO_PHASE_TRACE) {
+      process.stderr.write(`[phase] ${name} ${dt}ms\n`);
+    }
   }
 }
 

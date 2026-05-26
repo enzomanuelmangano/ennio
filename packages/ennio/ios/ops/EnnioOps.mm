@@ -62,27 +62,23 @@ static UIAlertController *_Nullable findAlert(void) {
 }
 
 static UITabBarController *_Nullable findTabBarController(void) {
+    // BFS through every VC reachable from any window: rootViewController,
+    // its presentedViewController chain, and all descendants via
+    // childViewControllers (recursive). Expo Router + react-native-screens
+    // host the UITabBarController (RNSTabBarController subclass) as a
+    // child two levels deep inside RNSBottomTabsHostComponentView; a
+    // shallow walk misses it and the UIKit-direct tab fallback returns
+    // tapped=false on every tab tap.
+    NSMutableArray<UIViewController *> *queue = [NSMutableArray new];
     for (UIWindow *w in allWindows()) {
-        UIViewController *vc = w.rootViewController;
-        // Walk presented chain first, then handle nested in nav.
-        while (vc) {
-            if ([vc isKindOfClass:UITabBarController.class]) return (UITabBarController *)vc;
-            if ([vc isKindOfClass:UINavigationController.class]) {
-                UIViewController *top = ((UINavigationController *)vc).topViewController;
-                if ([top isKindOfClass:UITabBarController.class])
-                    return (UITabBarController *)top;
-            }
-            UIViewController *presented = vc.presentedViewController;
-            if (!presented) {
-                // Look at children for embedded tabbars
-                for (UIViewController *child in vc.childViewControllers) {
-                    if ([child isKindOfClass:UITabBarController.class])
-                        return (UITabBarController *)child;
-                }
-                break;
-            }
-            vc = presented;
-        }
+        if (w.rootViewController) [queue addObject:w.rootViewController];
+    }
+    while (queue.count) {
+        UIViewController *vc = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([vc isKindOfClass:UITabBarController.class]) return (UITabBarController *)vc;
+        for (UIViewController *child in vc.childViewControllers) [queue addObject:child];
+        if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
     }
     return nil;
 }
@@ -199,8 +195,35 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
     if (!tbc) return NO;
     NSInteger idx = findTabIndex(tbc, name);
     if (idx == NSNotFound) return NO;
+    // Already on the target tab — pop to root (same as a real tab bar
+    // re-tap) so the caller lands on the tab's index screen, not deep
+    // inside a pushed route left over from a previous flow.
+    if (tbc.selectedIndex == (NSUInteger)idx) {
+        UIViewController *vc = tbc.viewControllers[idx];
+        // Direct UINavigationController
+        if ([vc isKindOfClass:UINavigationController.class]) {
+            [(UINavigationController *)vc popToRootViewControllerAnimated:NO];
+        } else {
+            // Expo-router wraps tabs in container VCs — BFS for a
+            // UINavigationController child and pop that.
+            NSMutableArray<UIViewController *> *q = [NSMutableArray arrayWithObject:vc];
+            while (q.count) {
+                UIViewController *c = q.firstObject;
+                [q removeObjectAtIndex:0];
+                if ([c isKindOfClass:UINavigationController.class]) {
+                    [(UINavigationController *)c popToRootViewControllerAnimated:NO];
+                    break;
+                }
+                [q addObjectsFromArray:c.childViewControllers];
+            }
+        }
+        // Dismiss any modally presented VC on this tab too.
+        if (vc.presentedViewController) {
+            [vc dismissViewControllerAnimated:NO completion:nil];
+        }
+        return YES;
+    }
     UIViewController *target = tbc.viewControllers[idx];
-    // Fire delegate first (UIKit convention).
     if ([tbc.delegate respondsToSelector:@selector(tabBarController:shouldSelectViewController:)]) {
         BOOL ok = [tbc.delegate tabBarController:tbc shouldSelectViewController:target];
         if (!ok) return NO;
@@ -221,18 +244,16 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
 // ─── Navigation ─────────────────────────────────────────────────────
 
 + (BOOL)backGesture {
-    // First try popping a navigation stack — covers the common Stack
-    // back-button case.
+    // Synchronous variant — caller (CLI's `back` handler) waits the
+    // post-tap settle by polling animations_active separately.
+    // Previous semaphore + transitionCoordinator completion variant
+    // intermittently deadlocked on slower CI runners when main was
+    // already busy processing the prior step's render queue.
     UINavigationController *nav = findTopNavController();
     if (nav && nav.viewControllers.count >= 2) {
         [nav popViewControllerAnimated:YES];
         return YES;
     }
-    // Fall back to dismissing the topmost presented modal (sheet,
-    // formSheet, fullScreen). React Navigation's modal stack and
-    // expo-router's modals both surface here. Without this, a YAML
-    // `back` after presenting a modal goes nowhere and subsequent
-    // tab taps land on the still-visible sheet.
     UIWindow *win = [EnnioBootstrap keyWindow];
     UIViewController *vc = win.rootViewController;
     while (vc.presentedViewController) vc = vc.presentedViewController;
@@ -459,21 +480,24 @@ static BOOL anyVCInTransition(UIViewController *root) {
     // synthesized touch + hit-test indirection. UIView's default
     // accessibilityActivate synthesizes a tap at the view's
     // activation point and re-hit-tests; for stacked 1×1 px e2e
-    // controls (Bluesky), this can resolve to the wrong sibling.
+    // controls or sibling Pressables sharing a hit region, this
+    // can resolve to the wrong target.
     SEL tap = NSSelectorFromString(@"_accessibilityHandleUserTouchActivate");
     if ([v respondsToSelector:tap]) {
-        // Private but stable since iOS 10.
         IMP imp = [v methodForSelector:tap];
         ((void (*)(id, SEL))imp)(v, tap);
         return YES;
     }
-    // Find the first UIGestureRecognizer in the view's chain whose
-    // target action looks like a Pressable / TouchableX onPress and
-    // invoke it via the recognizer's _handleAction selector.
+    // Try the public accessibilityActivate first now — RN Fabric's
+    // Pressable wires `onPress` through this by setting an
+    // accessibility-activation block on the view. Cheaper and more
+    // reliable on Fabric than the gesture-recogniser walk.
+    if ([v accessibilityActivate]) return YES;
+    // Walk ancestor chain for any UITapGestureRecognizer that
+    // exposes _handleAction (TouchableX / RNGH GestureHandlerButton).
     for (UIView *cur = v; cur; cur = cur.superview) {
         for (UIGestureRecognizer *g in cur.gestureRecognizers) {
             if (!g.isEnabled) continue;
-            // RNGH's GestureHandlerButton uses UITapGestureRecognizer.
             if ([g isKindOfClass:UITapGestureRecognizer.class]) {
                 SEL fire = NSSelectorFromString(@"_handleAction");
                 if ([g respondsToSelector:fire]) {
@@ -484,9 +508,26 @@ static BOOL anyVCInTransition(UIViewController *root) {
             }
         }
     }
-    // Last resort: the original accessibilityActivate, in case the
-    // view has overridden it usefully.
-    if ([v accessibilityActivate]) return YES;
+    // Subview walk — RN Pressable in Fabric occasionally hosts the
+    // tap recogniser on a child responder view (RCTSurfaceTouchHandler
+    // adapter / RCTPressabilityProxy). Try them all before giving up.
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:v];
+    while (stack.count) {
+        UIView *cur = stack.lastObject;
+        [stack removeLastObject];
+        for (UIGestureRecognizer *g in cur.gestureRecognizers) {
+            if (!g.isEnabled) continue;
+            if ([g isKindOfClass:UITapGestureRecognizer.class]) {
+                SEL fire = NSSelectorFromString(@"_handleAction");
+                if ([g respondsToSelector:fire]) {
+                    IMP imp = [g methodForSelector:fire];
+                    ((void (*)(id, SEL))imp)(g, fire);
+                    return YES;
+                }
+            }
+        }
+        for (UIView *sub in cur.subviews) [stack addObject:sub];
+    }
     return NO;
 }
 

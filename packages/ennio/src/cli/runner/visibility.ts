@@ -57,7 +57,63 @@ export async function waitUntilVisible(
     if (await isVisible(ctx, sel)) return;
     await sleep(POLL_MS);
   }
+  // Dump diagnostic state to stderr so a CI-side failure log
+  // includes what was actually on screen at the timeout. Without
+  // this we'd only see "assertVisible timeout" and have to guess.
+  await dumpFailureState(ctx, sel, 'assertVisible');
   throw new Error(`assertVisible/waitFor timeout: ${JSON.stringify(sel)}`);
+}
+
+async function dumpFailureState(ctx: RunContext, sel: MaestroSelector, op: string): Promise<void> {
+  try {
+    const probe = sel.id
+      ? await ctx.client.call('finder_probe', { testID: sel.id }).catch(() => undefined)
+      : null;
+    if (probe) {
+      process.stderr.write(
+        `[ennio:diag] ${op} ${JSON.stringify(sel)} probe=${JSON.stringify(probe.data)}\n`,
+      );
+    }
+    const chain = await ctx.client.call('top_vc_chain').catch(() => undefined);
+    if (chain && chain.ok) {
+      process.stderr.write(`[ennio:diag] top_vc_chain=${JSON.stringify(chain.data)}\n`);
+    }
+    const dump = await ctx.client.call('dump_views').catch(() => undefined);
+    if (dump && dump.ok) {
+      const views = dump.data as string[] | undefined;
+      if (Array.isArray(views)) {
+        process.stderr.write(`[ennio:diag] dump_views count=${views.length}\n`);
+        for (const v of views.slice(0, 50)) {
+          process.stderr.write(`[ennio:diag]   ${v}\n`);
+        }
+      }
+    }
+    // Snapshot the simulator screen — uploaded with the rest of the
+    // ennio logs as a CI artifact so a reviewer can visually verify
+    // the state at failure without re-running anything. Filename
+    // encodes the selector so multi-fail runs don't collide.
+    try {
+      const shotsDir = '/tmp/ennio-shots';
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require('node:fs');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const child = require('node:child_process');
+      fs.mkdirSync(shotsDir, { recursive: true });
+      const tag = (sel.id ?? sel.text ?? 'sel')
+        .toString()
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 60);
+      const path = `${shotsDir}/fail-${Date.now()}-${tag}.png`;
+      child.execFileSync('xcrun', ['simctl', 'io', ctx.udid, 'screenshot', path], {
+        stdio: 'pipe',
+      });
+      process.stderr.write(`[ennio:diag] screenshot=${path}\n`);
+    } catch {
+      /* screenshot best-effort */
+    }
+  } catch {
+    /* diagnostic failure shouldn't mask the original error */
+  }
 }
 
 export async function waitUntilNotVisible(

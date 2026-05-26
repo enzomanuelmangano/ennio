@@ -8,6 +8,9 @@ name: ci-fast-build
 
 on:
   pull_request:
+    branches: [main, 'feat/**']
+  push:
+    branches: [main]
   workflow_dispatch: {}
 
 concurrency:
