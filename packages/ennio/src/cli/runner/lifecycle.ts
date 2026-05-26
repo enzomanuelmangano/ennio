@@ -91,7 +91,11 @@ export async function clearStateAndRelaunch(
   // permanently after login (React navigation stuck in loading state).
   ctx.client.close();
   // Remove stale socket so the new process binds cleanly.
-  try { rmSync('/tmp/ennio-control.sock', { force: true }); } catch { /* ok */ }
+  try {
+    rmSync('/tmp/ennio-control.sock', { force: true });
+  } catch {
+    /* ok */
+  }
 
   // Grab the installed .app bundle path BEFORE uninstalling.
   let appBundle: string | null = null;
@@ -131,15 +135,43 @@ export async function clearStateAndRelaunch(
     await sleep(1000);
   }
 
-  // Re-grant permissions that were wiped by the uninstall. Without this,
-  // system dialogs (photo library, camera, notifications) block the flow
-  // and ennio's dylib can't dismiss them.
+  // Re-grant permissions wiped by the uninstall. simctl privacy grant
+  // covers most services, but iOS 26's Photo Library "full access"
+  // requires a direct TCC insert for kTCCServicePhotoLibrary.
   try {
     execFileSync('xcrun', ['simctl', 'privacy', ctx.udid, 'grant', 'all', ctx.bundleId], {
       stdio: 'pipe',
     });
   } catch {
     /* privacy grant not available on older Xcode */
+  }
+  try {
+    const homePath = process.env.HOME || '';
+    const dbPath = join(
+      homePath,
+      'Library/Developer/CoreSimulator/Devices',
+      ctx.udid,
+      'data/Library/TCC/TCC.db',
+    );
+    const services = [
+      'kTCCServicePhotoLibrary',
+      'kTCCServicePhotos',
+      'kTCCServicePhotosAdd',
+      'kTCCServiceCamera',
+      'kTCCServiceMicrophone',
+    ];
+    for (const svc of services) {
+      execFileSync(
+        'sqlite3',
+        [
+          dbPath,
+          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('${svc}', '${ctx.bundleId}', 0, 2, 4, 1, 0);`,
+        ],
+        { stdio: 'pipe' },
+      );
+    }
+  } catch {
+    /* TCC direct grant failed */
   }
 
   if (!ctx.dylibPath) {

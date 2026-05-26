@@ -434,6 +434,7 @@ async function runCommand(
     const tapIsIntoInput = sel.id && /Input$/i.test(sel.id);
     if (ctx.lastWasTextInput && !tapIsIntoInput) {
       await ctx.client.call('hide_keyboard').catch(() => undefined);
+      await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
     }
     ctx.lastWasTextInput = false;
     if (!isRepeatTap) {
