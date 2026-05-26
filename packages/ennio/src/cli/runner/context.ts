@@ -43,7 +43,7 @@ export const DEFAULT_WIN_H = 874;
 /// the empirical sweet spot — shorter values let wait_commit return
 /// on the unchanged pre-commit frame and pass stability through to the
 /// next find; longer values bloat suite runtime without measurable gain.
-export const POST_TAP_SETTLE_MS = 800;
+export const POST_TAP_SETTLE_MS = Number(process.env.ENNIO_TAP_SETTLE_MS) || 800;
 export const POST_LAUNCH_SETTLE_MS = 1500;
 
 // =====================================================================

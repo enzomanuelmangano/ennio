@@ -13,6 +13,18 @@ import { EnnioSocketClient } from '../socket-client';
 
 import { RunContext, sleep } from './context';
 
+export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void> {
+  await client.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);
+  // Wait for the first React commit instead of a fixed 2s sleep.
+  // Falls back to 2s if no React observer is attached.
+  const r = await client.call('wait_react_commit', { sinceMs: 0, maxMs: 2000 }).catch(() => undefined);
+  const committed = !!(r && r.ok && r.data && (r.data as { ok: boolean }).ok);
+  if (!committed) {
+    await sleep(2000);
+  }
+  await client.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
+}
+
 /// Re-launch the app with DYLD inject and re-open the control socket.
 /// Used after a stopApp/killApp followed by launchApp — the original
 /// process is dead, but the YAML expects a fresh app instance.
@@ -59,9 +71,7 @@ export async function relaunchAndReconnect(
     }
     await sleep(100);
   }
-  await reopen.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);
-  await sleep(2000);
-  await reopen.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
+  await waitForFirstPaint(reopen);
 }
 
 export async function clearStateAndRelaunch(
@@ -112,13 +122,7 @@ export async function clearStateAndRelaunch(
     }
     await sleep(100);
   }
-  // Past bootstrap=ready, but React Native + view layout pass needs a
-  // beat to populate the first frame. wait_commit returns "stable"
-  // even on a blank screen, so couple it with a minimum sleep that
-  // covers the RN bridge boot + first paint (~2 s typical on iOS 26).
-  await reopen.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);
-  await sleep(2000);
-  await reopen.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
+  await waitForFirstPaint(reopen);
   // Discard the app-data path cache — sandbox UUID may have rotated.
   getAppContainer(ctx.udid, ctx.bundleId);
 }

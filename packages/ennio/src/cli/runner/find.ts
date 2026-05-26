@@ -190,9 +190,18 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     return null;
   }
   // Last-chance fallback: auto-scroll. Try DOWN×4, then UP×4.
-  const cx = 195;
-  const cy = 422;
-  const dist = 300;
+  // Derive scroll center from actual window size so this works on
+  // any device, not just iPhone 17 Pro.
+  let scrW = DEFAULT_WIN_W;
+  let scrH = DEFAULT_WIN_H;
+  const wsR = await ctx.client.call('window_size').catch(() => undefined);
+  if (wsR && wsR.ok && wsR.data) {
+    const d = wsR.data as { w: number; h: number };
+    if (d.w > 0 && d.h > 0) { scrW = d.w; scrH = d.h; }
+  }
+  const cx = Math.round(scrW / 2);
+  const cy = Math.round(scrH / 2);
+  const dist = Math.round(scrH * 0.34);
   for (const dir of ['DOWN', 'UP'] as const) {
     for (let i = 0; i < 4; i++) {
       if (dir === 'DOWN') await hidSwipe(ctx.udid, cx, cy + dist / 2, cx, cy - dist / 2, 250);

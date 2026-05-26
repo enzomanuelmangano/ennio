@@ -65,7 +65,7 @@ import {
 import { captureHash, captureReactTs, findOnce, resolveCenter, resolveRect } from './find';
 import { execTapOn } from './tap';
 import { isVisible, waitUntilNotVisible, waitUntilVisible } from './visibility';
-import { clearStateAndRelaunch, relaunchAndReconnect } from './lifecycle';
+import { clearStateAndRelaunch, relaunchAndReconnect, waitForFirstPaint } from './lifecycle';
 
 // =====================================================================
 // runScript — Maestro JS sandbox
@@ -157,12 +157,7 @@ export async function runFlow(
       }
       await sleep(100);
     }
-    // Same first-paint settle as clearStateAndRelaunch — wait_commit
-    // reports stable immediately on a blank screen, so couple it with
-    // a minimum sleep that covers RN bridge boot + first paint.
-    await client.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);
-    await sleep(2000);
-    await client.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
+    await waitForFirstPaint(client);
   }
 
   // Expose the runner's dylib socket connection to hid.ts so its
@@ -571,10 +566,18 @@ async function runCommand(
         return !!(r && r.ok && r.data && (r.data as { ok: boolean }).ok);
       });
       if (!changed) {
-        // Likely a no-op tap, OR the JS bridge hasn't fired its
-        // commit yet. Pay the legacy fixed-sleep budget so we don't
-        // race the next find on slow Hermes mounts.
-        await timedAsync(ctx, 'tap.postSleep', () => sleep(POST_TAP_SETTLE_MS));
+        // No hash change — likely a no-op tap, OR the JS bridge
+        // hasn't fired its commit yet. Check animations_active: if
+        // UIKit reports idle, halve the sleep since the screen is
+        // genuinely static. Full budget only when animations are
+        // in-flight (a transition may be producing the commit we're
+        // waiting for).
+        const animR = await ctx.client.call('animations_active').catch(() => undefined);
+        const animActive = !!(
+          animR && animR.ok && animR.data && (animR.data as { active?: boolean }).active
+        );
+        const settleMs = animActive ? POST_TAP_SETTLE_MS : Math.min(POST_TAP_SETTLE_MS, 400);
+        await timedAsync(ctx, 'tap.postSleep', () => sleep(settleMs));
       }
       // 350 ms of commit-quiet outlasts setState batching, RN-Nav
       // pop animations, list re-layouts. Below ~300 ms we race the
@@ -1361,7 +1364,7 @@ function maestroHttpSync(
   let last = maestroHttpSyncOnce(method, url, opts);
   for (let i = 0; i < 4 && (last.status >= 500 || last.body.trim() === ''); i++) {
     const sleepMs = 500 * (i + 1);
-    spawnSync('sleep', [(sleepMs / 1000).toString()]);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, sleepMs);
     last = maestroHttpSyncOnce(method, url, opts);
   }
   return last;
