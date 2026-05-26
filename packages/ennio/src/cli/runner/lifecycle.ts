@@ -91,7 +91,11 @@ export async function clearStateAndRelaunch(
   const container = getAppContainer(ctx.udid, ctx.bundleId);
   if (container) {
     for (const dir of ['Library', 'Documents', 'tmp', 'Caches']) {
-      try { rmSync(`${container}/${dir}`, { recursive: true, force: true }); } catch { /* ok */ }
+      try {
+        rmSync(`${container}/${dir}`, { recursive: true, force: true });
+      } catch {
+        /* ok */
+      }
     }
   }
   if (!ctx.dylibPath) {
@@ -111,27 +115,10 @@ export async function clearStateAndRelaunch(
       stdio: 'pipe',
     },
   );
-  // Re-open the socket against the new process.
   const reopen = new EnnioSocketClient();
   if (!(await reopen.connectWithRetry(15_000))) {
     throw new Error('socket reconnect failed after clearState relaunch');
   }
   ctx.client = reopen;
-  // Wait for the new process's UIApplicationDidFinishLaunchingNotification
-  // observer to fire — bootstrap=ready means the key UIWindow has been
-  // captured and discovery handlers will see real UIViews.
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    try {
-      const r = await reopen.call('ping');
-      const ready = r.ok && r.data && (r.data as { bootstrap?: string }).bootstrap === 'ready';
-      if (ready) break;
-    } catch {
-      /* try again */
-    }
-    await sleep(100);
-  }
-  await waitForFirstPaint(reopen);
-  // Discard the app-data path cache — sandbox UUID may have rotated.
   getAppContainer(ctx.udid, ctx.bundleId);
 }
