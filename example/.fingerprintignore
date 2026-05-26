@@ -1,0 +1,8 @@
+# Ennio CLI source — TypeScript-only, does not affect the native build.
+# Prevents cache busts when only CLI logic changes.
+packages/ennio/src/cli/**
+packages/ennio/dist/**
+packages/ennio/proto/**
+packages/ennio/e2e-smoke/**
+packages/ennio/scripts/**
+packages/ennio/README.md
