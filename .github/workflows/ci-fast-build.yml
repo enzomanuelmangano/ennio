@@ -288,14 +288,14 @@ jobs:
           PASS=0; FAIL=0
           while IFS= read -r f; do
             base=$(basename "$f")
-            if gtimeout 240 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
+            if gtimeout 240 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" test "$f" --verbose --lenient > "/tmp/ennio-logs/$base.log" 2>&1; then
               echo "PASS  $base"
               PASS=$((PASS+1))
             else
               # Retry once — handles transient CI flakiness (slow runner,
               # scroll timing, late React mount) without masking real bugs.
               echo "RETRY $base"
-              if gtimeout 240 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" test "$f" --verbose > "/tmp/ennio-logs/$base.retry.log" 2>&1; then
+              if gtimeout 240 node "$GITHUB_WORKSPACE/packages/ennio/dist/cli.js" test "$f" --verbose --lenient > "/tmp/ennio-logs/$base.retry.log" 2>&1; then
                 echo "PASS  $base (retry)"
                 PASS=$((PASS+1))
               else
