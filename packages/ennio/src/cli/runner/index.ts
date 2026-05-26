@@ -179,6 +179,13 @@ export async function runFlow(
 
   log(ctx, `▶ ${flow.name || flow.filePath} (${flow.commands.length} steps)`);
 
+  // onFlowStart hook — failures abort the flow.
+  if (flow.onFlowStart) {
+    for (const cmd of flow.onFlowStart) {
+      await runCommand(ctx, cmd, undefined);
+    }
+  }
+
   let stepsPassed = 0;
   const stepTimings: { step: number; ms: number; cmd: string }[] = [];
   let lastTapCmd: unknown = undefined;
@@ -247,6 +254,7 @@ export async function runFlow(
       stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
       logStep(ctx, i + 1, dt, describeCommand(cmd));
       setDylibClient(null);
+      await runOnFlowComplete(ctx, flow);
       client.close();
       printSlowSteps(stepTimings);
       printPhaseTotals(ctx);
@@ -262,10 +270,24 @@ export async function runFlow(
       };
     }
   }
+  await runOnFlowComplete(ctx, flow);
   client.close();
   printSlowSteps(stepTimings);
   printPhaseTotals(ctx);
   return { passed: true, stepsRun: flow.commands.length, stepsPassed };
+}
+
+async function runOnFlowComplete(ctx: RunContext, flow: MaestroFlow): Promise<void> {
+  if (!flow.onFlowComplete) return;
+  for (const cmd of flow.onFlowComplete) {
+    try {
+      await runCommand(ctx, cmd, undefined);
+    } catch (e) {
+      process.stderr.write(
+        `[onFlowComplete] ${describeCommand(cmd)} failed: ${e instanceof Error ? e.message : String(e)}\n`,
+      );
+    }
+  }
 }
 
 // Always print the top-5 slowest steps so the suite log surfaces
@@ -1314,6 +1336,91 @@ async function runCommand(
       }
     }
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
+  // inputRandom* family — generate random text and type it into the
+  // currently focused field.
+  if ('inputRandomText' in cmd) {
+    const len =
+      cmd.inputRandomText === true || cmd.inputRandomText === undefined
+        ? 8
+        : typeof cmd.inputRandomText === 'object' && 'length' in cmd.inputRandomText
+          ? (cmd.inputRandomText as { length: number }).length
+          : 8;
+    const chars = 'abcdefghijklmnopqrstuvwxyz';
+    let text = '';
+    for (let i = 0; i < len; i++) text += chars[Math.floor(Math.random() * chars.length)];
+    await runCommand(ctx, { inputText: text } as MaestroCommand, undefined);
+    return;
+  }
+  if ('inputRandomNumber' in cmd) {
+    const len =
+      cmd.inputRandomNumber === true || cmd.inputRandomNumber === undefined
+        ? 6
+        : typeof cmd.inputRandomNumber === 'object' && 'length' in cmd.inputRandomNumber
+          ? (cmd.inputRandomNumber as { length: number }).length
+          : 6;
+    let text = '';
+    for (let i = 0; i < len; i++) text += Math.floor(Math.random() * 10).toString();
+    await runCommand(ctx, { inputText: text } as MaestroCommand, undefined);
+    return;
+  }
+  if ('inputRandomEmail' in cmd) {
+    const user = Array.from({ length: 8 }, () =>
+      'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)],
+    ).join('');
+    await runCommand(ctx, { inputText: `${user}@test.com` } as MaestroCommand, undefined);
+    return;
+  }
+  if ('inputRandomPersonName' in cmd) {
+    const first = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank'];
+    const last = ['Smith', 'Jones', 'Brown', 'Wilson', 'Taylor', 'Clark'];
+    const name = `${first[Math.floor(Math.random() * first.length)]} ${last[Math.floor(Math.random() * last.length)]}`;
+    await runCommand(ctx, { inputText: name } as MaestroCommand, undefined);
+    return;
+  }
+  // Clipboard operations
+  if ('setClipboard' in cmd) {
+    const text = String((cmd as { setClipboard: string }).setClipboard);
+    execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], { input: text, stdio: ['pipe', 'pipe', 'pipe'] });
+    return;
+  }
+  if ('pasteText' in cmd) {
+    const text = execFileSync('xcrun', ['simctl', 'pbpaste', ctx.udid], { encoding: 'utf-8' }).trim();
+    if (text) {
+      await runCommand(ctx, { inputText: text } as MaestroCommand, undefined);
+    }
+    return;
+  }
+  if ('copyTextFrom' in cmd) {
+    const sel = normalizeSelector((cmd as { copyTextFrom: unknown }).copyTextFrom as any);
+    const r = await ctx.client.call('get_text', { testID: sel.id, text: sel.text }).catch(() => undefined);
+    if (r && r.ok && r.data) {
+      const text = String((r.data as { text: string }).text);
+      execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], { input: text, stdio: ['pipe', 'pipe', 'pipe'] });
+    }
+    return;
+  }
+  // evalScript + assertTrue
+  if ('evalScript' in cmd) {
+    const expr = String(cmd.evalScript);
+    const sandbox = { output: ctx.outputs };
+    const vmCtx = createContext(sandbox);
+    runInContext(expr, vmCtx, { timeout: 5000 });
+    return;
+  }
+  if ('assertTrue' in cmd) {
+    const expr = String(cmd.assertTrue);
+    const sandbox = { output: ctx.outputs };
+    const vmCtx = createContext(sandbox);
+    const result = runInContext(expr, vmCtx, { timeout: 5000 });
+    if (!result) throw new Error(`assertTrue failed: ${expr}`);
+    return;
+  }
+  // clearKeychain — wipe Keychain items for the booted sim
+  if ('clearKeychain' in cmd) {
+    execFileSync('xcrun', ['simctl', 'keychain', ctx.udid, 'reset'], { stdio: 'pipe' });
+    return;
   }
 
   // Unknown/unsupported command. Default: fail so YAML typos don't
