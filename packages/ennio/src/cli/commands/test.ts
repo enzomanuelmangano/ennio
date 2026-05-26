@@ -50,6 +50,7 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
 
 export async function runTestCommand(positional: string[], flags: Flags): Promise<number> {
   const verbose = flags.verbose ?? false;
+  const lenient = flags.lenient ?? false;
   const dylibPath = process.env.ENNIO_DYLIB_PATH || null;
 
   if (positional.length === 0) {
@@ -76,7 +77,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     const flow = parseMaestroFile(file);
     console.log(`▸ ${basename(file)}`);
     try {
-      const result = await runFlow(flow, { dylibPath: dylibPath ?? undefined, verbose });
+      const result = await runFlow(flow, { dylibPath: dylibPath ?? undefined, verbose, lenient });
       if (result.passed) {
         console.log(`  [PASS] ${result.stepsRun} steps\n`);
         totalPass++;

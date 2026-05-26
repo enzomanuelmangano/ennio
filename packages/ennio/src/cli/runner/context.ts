@@ -57,6 +57,9 @@ export interface RunContext {
   /** dylib path; only used for clearState relaunch */
   dylibPath: string | null;
   verbose: boolean;
+  /** When true, unknown/unsupported commands are skipped with a warning
+   *  instead of failing the flow. Useful during incremental Maestro migration. */
+  lenient: boolean;
   /** Path to the currently-executing flow file. Used for runFlow
    *  subflow path resolution. */
   flowPath: string;

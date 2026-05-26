@@ -14,6 +14,8 @@ import { axQueryByText, swipe as hidSwipe } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
 import {
+  DEFAULT_WIN_H,
+  DEFAULT_WIN_W,
   FIND_DEADLINE_DEFAULT_MS,
   POLL_MS,
   POST_TAP_SETTLE_MS,
@@ -241,9 +243,11 @@ export async function resolveCenter(
 // form factors, but if they did we'd query the device size first.
 // =====================================================================
 
-export function parsePoint(p: MaestroSelector['point']): { x: number; y: number } {
-  const winW = 402;
-  const winH = 874;
+export function parsePoint(
+  p: MaestroSelector['point'],
+  winW: number = DEFAULT_WIN_W,
+  winH: number = DEFAULT_WIN_H,
+): { x: number; y: number } {
   const parseAxis = (s: string, max: number): number => {
     const t = s.trim();
     if (t.endsWith('%')) return (parseFloat(t.slice(0, -1)) / 100) * max;

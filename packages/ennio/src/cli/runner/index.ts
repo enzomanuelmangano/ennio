@@ -103,7 +103,7 @@ export { recordPhase };
 
 export async function runFlow(
   flow: MaestroFlow,
-  options: { udid?: string; dylibPath?: string; verbose?: boolean } = {},
+  options: { udid?: string; dylibPath?: string; verbose?: boolean; lenient?: boolean } = {},
 ): Promise<RunResult> {
   const udid = options.udid || ensureBootedSim();
   if (!udid) {
@@ -177,6 +177,7 @@ export async function runFlow(
     bundleId: flow.appId,
     dylibPath: options.dylibPath ?? null,
     verbose: options.verbose ?? false,
+    lenient: options.lenient ?? false,
     flowPath: flow.filePath,
     outputs: {},
   };
@@ -231,7 +232,9 @@ export async function runFlow(
         ('tapOn' in cmd || 'assertVisible' in cmd || 'waitFor' in cmd);
       if (lastTapCmd && isFindMiss && isFindableStep) {
         try {
-          log(ctx, `↻ retrying previous tap before step ${i + 1}`);
+          process.stderr.write(
+            `[retry] re-firing previous tap (${describeCommand(lastTapCmd as MaestroCommand)}) before step ${i + 1}\n`,
+          );
           await runCommand(ctx, lastTapCmd as any, cmd);
           await sleep(150);
           await runCommand(ctx, cmd, nextCmd);
@@ -596,9 +599,7 @@ async function runCommand(
   if ('doubleTapOn' in cmd) {
     const sel = normalizeSelector(cmd.doubleTapOn);
     const { x, y } = await resolveCenter(ctx, sel);
-    await hidTap(ctx.udid, x, y);
-    await sleep(80);
-    await hidTap(ctx.udid, x, y);
+    await hidDoubleTap(ctx.udid, x, y);
     await sleep(POST_TAP_SETTLE_MS);
     return;
   }
@@ -1309,10 +1310,14 @@ async function runCommand(
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 
-  // Anything else: warn and skip rather than fail loudly. v0.1 covers
-  // ~80% of common Maestro grammar; unsupported ops are documented as
-  // such in ARCHITECTURE.md.
-  log(ctx, `  (unsupported in v0.1, skipped: ${describeCommand(cmd)})`);
+  // Unknown/unsupported command. Default: fail so YAML typos don't
+  // silently pass. --lenient mode skips with a warning instead.
+  const desc = describeCommand(cmd);
+  if (ctx.lenient) {
+    log(ctx, `  (unsupported, skipped: ${desc})`);
+    return;
+  }
+  throw new Error(`unsupported command: ${desc}`);
 }
 
 function maestroHttpSyncOnce(

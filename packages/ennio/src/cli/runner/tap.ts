@@ -26,7 +26,7 @@ import {
 } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
-import { Rect, RunContext, sleep, timedAsync } from './context';
+import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, parsePoint, resolveRect } from './find';
 
 export async function execTapOn(
@@ -42,7 +42,14 @@ export async function execTapOn(
   // transitioning overlay.
   if (sel.point !== undefined) {
     await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined);
-    const { x, y } = parsePoint(sel.point);
+    let winW = DEFAULT_WIN_W;
+    let winH = DEFAULT_WIN_H;
+    const ws = await ctx.client.call('window_size').catch(() => undefined);
+    if (ws && ws.ok && ws.data) {
+      const d = ws.data as { w: number; h: number };
+      if (d.w > 0 && d.h > 0) { winW = d.w; winH = d.h; }
+    }
+    const { x, y } = parsePoint(sel.point, winW, winH);
     await hidTap(ctx.udid, x, y);
     return;
   }
