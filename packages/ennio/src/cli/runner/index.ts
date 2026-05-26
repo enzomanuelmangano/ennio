@@ -1197,6 +1197,12 @@ async function runCommand(
   if ('openLink' in cmd) {
     const link = typeof cmd.openLink === 'string' ? cmd.openLink : cmd.openLink.link;
     execFileSync('xcrun', ['simctl', 'openurl', ctx.udid, link]);
+    // Dev-client deep links trigger a Metro connection + full JS bundle
+    // load. Wait for the React tree to mount (react_commit fires) before
+    // proceeding — the default 1.5s sleep isn't enough for cold Metro.
+    if (link.includes('expo-development-client')) {
+      await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 15000 }).catch(() => undefined);
+    }
     await sleep(POST_LAUNCH_SETTLE_MS);
     return;
   }
