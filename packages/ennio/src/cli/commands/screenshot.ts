@@ -6,7 +6,7 @@
  * somewhere predictable.
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { dirname } from 'path';
 import { mkdirSync } from 'fs';
 import { getTargetUdid as getBootedSimulatorId } from '../sim';
@@ -21,7 +21,9 @@ export function runScreenshotCommand(positional: string[], _flags: Flags): numbe
   const out = positional[0] || '/tmp/ennio-shot.png';
   try {
     mkdirSync(dirname(out), { recursive: true });
-    execSync(`xcrun simctl io ${udid} screenshot "${out}"`, { stdio: 'pipe' });
+    // execFileSync (argv, no shell) so a UDID or path containing shell
+    // metacharacters can't inject a command.
+    execFileSync('xcrun', ['simctl', 'io', udid, 'screenshot', out], { stdio: 'pipe' });
     console.log(out);
     return 0;
   } catch (e) {

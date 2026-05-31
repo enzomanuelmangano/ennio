@@ -163,12 +163,18 @@ export async function clearStateAndRelaunch(
       'kTCCServiceCamera',
       'kTCCServiceMicrophone',
     ];
+    // SQLite string-literal escaping: double any single quote. bundleId
+    // is attacker-controllable in principle (it comes from the flow's
+    // appId), so escape it rather than interpolate raw — otherwise a
+    // crafted appId could break out of the literal into arbitrary SQL.
+    const sqlLiteral = (s: string) => `'${s.replace(/'/g, "''")}'`;
+    const client = sqlLiteral(ctx.bundleId);
     for (const svc of services) {
       execFileSync(
         'sqlite3',
         [
           dbPath,
-          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('${svc}', '${ctx.bundleId}', 0, 2, 4, 1, 0);`,
+          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES (${sqlLiteral(svc)}, ${client}, 0, 2, 4, 1, 0);`,
         ],
         { stdio: 'pipe' },
       );
