@@ -65,7 +65,7 @@ function checkIdb(udid: string | null): Result {
       name: 'idb',
       severity: 'fail',
       detail:
-        'not on PATH — install with `brew tap facebook/fb && brew install idb-companion` + `pipx install fb-idb`',
+        'not on PATH — `ennio test` offers to install it; or: `brew install facebook/fb/idb-companion` + `pipx install fb-idb`',
     };
   }
   // idb is present → actuation backend exists. Target reachability is
