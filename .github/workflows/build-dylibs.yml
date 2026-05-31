@@ -144,11 +144,3 @@ jobs:
           esac
           echo "Publishing $VERSION to dist-tag: $DIST_TAG"
           npm publish --provenance --access public --tag "$DIST_TAG"
-
-      - name: Attach dylibs to GH Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            packages/ennio/prebuilt/libennio-shim.dylib
-            packages/ennio/prebuilt/libennio.dylib
-            packages/ennio/prebuilt/manifest.json
