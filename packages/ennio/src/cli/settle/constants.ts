@@ -7,6 +7,8 @@
 // fallbacks, …) still live in runner/context.ts and are re-exported
 // here so callers have one import for all settle timing.
 
+import { POST_TAP_SETTLE_MS } from '../runner/context';
+
 export {
   DEFAULT_WAIT_MS,
   POLL_MS,
@@ -16,8 +18,6 @@ export {
   POST_TAP_SETTLE_MS,
   POST_LAUNCH_SETTLE_MS,
 } from '../runner/context';
-
-import { POST_TAP_SETTLE_MS } from '../runner/context';
 
 /**
  * Policy-level settle constants. Values are byte-identical to the inline

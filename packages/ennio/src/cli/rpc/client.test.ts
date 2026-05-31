@@ -59,7 +59,9 @@ describe('TypedRpcClient.call', () => {
   });
 
   it('maps an unknown-op error to infra-error', async () => {
-    const rpc = new TypedRpcClient(fakeSocket(() => ({ id: 'r1', ok: false, err: 'unknown op: x' })));
+    const rpc = new TypedRpcClient(
+      fakeSocket(() => ({ id: 'r1', ok: false, err: 'unknown op: x' })),
+    );
     expect((await rpc.call('find_by_testid', { testID: 'a' })).kind).toBe('infra-error');
   });
 
@@ -77,7 +79,9 @@ describe('TypedRpcClient.call', () => {
 
 describe('TypedRpcClient.tryData', () => {
   it('returns data on ok', async () => {
-    const rpc = new TypedRpcClient(fakeSocket(() => ({ id: 'r', ok: true, data: { hash: 'abc' } })));
+    const rpc = new TypedRpcClient(
+      fakeSocket(() => ({ id: 'r', ok: true, data: { hash: 'abc' } })),
+    );
     expect(await rpc.tryData('frame_hash', {})).toEqual({ hash: 'abc' });
   });
 
@@ -113,7 +117,10 @@ describe('TypedRpcClient.bestEffort', () => {
 
   it('does not log on a clean not-found', async () => {
     const onInfra = vi.fn();
-    const rpc = new TypedRpcClient(fakeSocket(() => ({ id: 'r', ok: false, err: 'not found' })), onInfra);
+    const rpc = new TypedRpcClient(
+      fakeSocket(() => ({ id: 'r', ok: false, err: 'not found' })),
+      onInfra,
+    );
     await rpc.bestEffort('visible', { testID: 'a' });
     expect(onInfra).not.toHaveBeenCalled();
   });

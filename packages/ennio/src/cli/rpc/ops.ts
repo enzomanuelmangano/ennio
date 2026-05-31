@@ -63,7 +63,10 @@ export interface RpcOps {
   insert_text: { args: { text: string }; result: { ok: boolean } };
   hardware_key: { args: { keyCode: number }; result: { ok: boolean } };
   hide_keyboard: { args: Record<string, never>; result: { hidden: boolean } };
-  scroll_to: { args: { elementTestID: string; scrollViewTestID?: string }; result: { scrolled: boolean } };
+  scroll_to: {
+    args: { elementTestID: string; scrollViewTestID?: string };
+    result: { scrolled: boolean };
+  };
   tap_tab: { args: { name: string }; result: { tapped: boolean } };
   back: { args: Record<string, never>; result: { popped: boolean } };
 
@@ -78,7 +81,10 @@ export interface RpcOps {
   is_refreshing: { args: { x: number; y: number }; result: { refreshing: boolean } };
 
   // ---- diagnostics / lifecycle ----------------------------------------
-  ping: { args: Record<string, never>; result: { pong?: boolean; bootstrap?: 'ready' | 'pending' } };
+  ping: {
+    args: Record<string, never>;
+    result: { pong?: boolean; bootstrap?: 'ready' | 'pending' };
+  };
   window_size: { args: Record<string, never>; result: { w: number; h: number } };
   top_vc_chain: { args: Record<string, never>; result: { chain: string[] } };
   finder_probe: { args: { testID: string }; result: { index: boolean; uiview: boolean } };

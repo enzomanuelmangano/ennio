@@ -69,7 +69,10 @@ export async function afterTap(rpc: TypedRpcClient, input: SettleInput = {}): Pr
       if (cur !== preTapHash) {
         if (!(await animationsActive(rpc))) {
           if (nextEditsField) {
-            await waitReactCommit(rpc, { sinceMs: reactSinceMs, maxMs: C.nextEditsFieldCommitMaxMs });
+            await waitReactCommit(rpc, {
+              sinceMs: reactSinceMs,
+              maxMs: C.nextEditsFieldCommitMaxMs,
+            });
           }
           committed = true;
           break;

@@ -70,7 +70,13 @@ describe('toEnnioSelector — spatial / hierarchical recursion', () => {
   });
 
   it('forwards state + dimension selectors', () => {
-    const out = toEnnioSelector({ id: 'a', enabled: true, checked: false, width: 10, tolerance: 2 });
+    const out = toEnnioSelector({
+      id: 'a',
+      enabled: true,
+      checked: false,
+      width: 10,
+      tolerance: 2,
+    });
     expect(out).toMatchObject({ id: 'a', enabled: true, checked: false, width: 10, tolerance: 2 });
   });
 });
@@ -93,7 +99,17 @@ describe('parseMaestroFile', () => {
   it('parses the standard metadata + commands two-document shape', () => {
     const p = write(
       'flow.yaml',
-      ['appId: com.ennio.example', 'name: My Flow', 'tags:', '  - smoke', '---', '- tapOn: Home', '- assertVisible:', '    id: home-screen', ''].join('\n'),
+      [
+        'appId: com.ennio.example',
+        'name: My Flow',
+        'tags:',
+        '  - smoke',
+        '---',
+        '- tapOn: Home',
+        '- assertVisible:',
+        '    id: home-screen',
+        '',
+      ].join('\n'),
     );
     const flow = parseMaestroFile(p);
     expect(flow.appId).toBe('com.ennio.example');

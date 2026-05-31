@@ -62,19 +62,34 @@ function defaultResponder(op: OpName): RpcOutcome<unknown> {
 describe('afterTap — React-observer-attached branch', () => {
   it('commits on hash-diff + no animation, no extra wait when next does not edit a field', async () => {
     const rpc = new MockRpc(defaultResponder);
-    await afterTap(rpc.asClient(), { preTapHash: 'H1', reactAttach: 'fabric', nextEditsField: false });
+    await afterTap(rpc.asClient(), {
+      preTapHash: 'H1',
+      reactAttach: 'fabric',
+      nextEditsField: false,
+    });
     expect(rpc.ops()).toEqual(['frame_hash', 'animations_active', 'wait_commit']);
   });
 
   it('adds a react-commit wait when the next command edits a field', async () => {
     const rpc = new MockRpc(defaultResponder);
-    await afterTap(rpc.asClient(), { preTapHash: 'H1', reactAttach: 'fabric', nextEditsField: true });
-    expect(rpc.ops()).toEqual(['frame_hash', 'animations_active', 'wait_react_commit', 'wait_commit']);
+    await afterTap(rpc.asClient(), {
+      preTapHash: 'H1',
+      reactAttach: 'fabric',
+      nextEditsField: true,
+    });
+    expect(rpc.ops()).toEqual([
+      'frame_hash',
+      'animations_active',
+      'wait_react_commit',
+      'wait_commit',
+    ]);
   });
 
   it('falls back to wait_hash_change when no commit is observed', async () => {
     // Hash never differs from preTapHash → loop never commits → fallback.
-    const rpc = new MockRpc((op) => (op === 'frame_hash' ? ok({ hash: 'H1' }) : defaultResponder(op)));
+    const rpc = new MockRpc((op) =>
+      op === 'frame_hash' ? ok({ hash: 'H1' }) : defaultResponder(op),
+    );
     await afterTap(rpc.asClient(), { preTapHash: 'H1', reactAttach: 'paper' });
     const ops = rpc.ops();
     // ends with the fallback hash-change then the final commit
