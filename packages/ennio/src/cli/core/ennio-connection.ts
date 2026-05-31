@@ -5,12 +5,14 @@
 // to all in-app capabilities (find / tap / settle / system ops), and
 // cleans up its sockets + gRPC streams on close().
 //
-// Construction is cheap; open() is the async step. Pair with a
-// try/finally so resources are always released.
+// hid.ts now reads from the active-connections registry that this
+// class populates on open() and drains on close(). hid.ts itself
+// holds zero mutable state.
 
 import { IdbGrpcClient } from '../idb-grpc';
-import { setDylibClient } from '../hid';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
+
+import { registerConnection, unregisterConnection } from './active-connections';
 
 export interface EnnioConnectionOptions {
   udid: string;
@@ -40,9 +42,7 @@ export class EnnioConnection {
     const ok = await this.socket.connectWithRetry(maxWaitMs);
     if (ok) {
       this.opened = true;
-      // Bridge to legacy hid.ts globals until those callers are
-      // migrated to use this connection directly.
-      setDylibClient(this.socket);
+      registerConnection(this);
     }
     return ok;
   }
@@ -67,6 +67,7 @@ export class EnnioConnection {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    unregisterConnection(this);
     try {
       this.socket.close();
     } catch {
@@ -80,7 +81,6 @@ export class EnnioConnection {
       }
     }
     this.idbClients.clear();
-    setDylibClient(null);
   }
 
   isOpen(): boolean {

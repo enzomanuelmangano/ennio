@@ -114,9 +114,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           x2 = SWIPE_CENTER_X + dist / 2;
         }
         await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-        await ctx.client
-          .call('wait_commit', { maxMs: 2000, stableMs: 300 })
-          .catch(() => undefined);
+        await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 300 }).catch(() => undefined);
       }
       throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
     },

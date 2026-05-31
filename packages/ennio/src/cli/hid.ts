@@ -3,60 +3,24 @@
 // dylib socket — no external tool-server, no subprocess.
 //
 // The dylib runs inside the target app (injected via DYLD_INSERT)
-// and listens on `/tmp/ennio-control.sock`. The runner opens that
-// socket once and shares it with this module via `setDylibClient`.
-// Each call here turns into one short JSON request on that same
-// connection.
+// and listens on a per-UDID Unix socket. EnnioConnection owns that
+// socket + the idb gRPC pool and registers itself in
+// core/active-connections so the helpers below can look up the right
+// connection by UDID.
 //
-// The public surface (tap / swipe / press / typeText / pressKey /
-// longPressDrag) is unchanged so callers don't need to migrate; only
-// the underlying `callTool` dispatch has been swapped out.
+// hid.ts itself holds no mutable state — every call route is a pure
+// function of (udid, params).
 
+import { getActiveConnection } from './core/active-connections';
 import type { EnnioSocketClient } from './socket-client';
-import { IdbGrpcClient } from './idb-grpc';
+import type { IdbGrpcClient } from './idb-grpc';
 
-// =====================================================================
-// Shared dylib socket client. Set by the runner once per flow run via
-// `setDylibClient`. Every helper below pulls this connection — never
-// opens its own — so requests serialise correctly behind any in-flight
-// `find_by_*` / `wait_*` calls the runner itself is making.
-// =====================================================================
-
-let sharedClient: EnnioSocketClient | null = null;
-
-export function setDylibClient(c: EnnioSocketClient | null): void {
-  sharedClient = c;
+function getDylibClient(udid: string): EnnioSocketClient {
+  return getActiveConnection(udid).socket;
 }
-
-function getDylibClient(): EnnioSocketClient {
-  if (!sharedClient) throw new Error('ennio dylib socket not connected');
-  return sharedClient;
-}
-
-// idb_companion gRPC client, lazy per-UDID. Single persistent
-// connection for the CLI's lifetime; the `tap` op internally opens
-// a fresh hid stream each call (idb_companion buffers per-session,
-// so reusing one stream silently swallows events on iOS 26).
-const idbClients = new Map<string, IdbGrpcClient>();
 
 function getIdb(udid: string): IdbGrpcClient {
-  let c = idbClients.get(udid);
-  if (!c) {
-    c = new IdbGrpcClient(udid);
-    idbClients.set(udid, c);
-  }
-  return c;
-}
-
-export function closeAllIdbClients(): void {
-  for (const c of idbClients.values()) {
-    try {
-      c.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  idbClients.clear();
+  return getActiveConnection(udid).idb();
 }
 
 const screenSizeCache = new Map<string, { w: number; h: number }>();
@@ -65,7 +29,7 @@ async function getScreenSize(udid: string): Promise<{ w: number; h: number }> {
   const cached = screenSizeCache.get(udid);
   if (cached) return cached;
   try {
-    const c = getDylibClient();
+    const c = getDylibClient(udid);
     const r = await c.call('window_size').catch(() => undefined);
     if (r && r.ok && r.data) {
       const d = r.data as { w: number; h: number };
@@ -158,8 +122,7 @@ export interface AXMatchRect {
  * compatible with `tap`/`hidTap` callers.
  */
 export async function axTreeSnapshot(udid: string): Promise<string> {
-  void udid;
-  const c = getDylibClient();
+  const c = getDylibClient(udid);
   try {
     const r = await c.call('ax_tree_snapshot');
     if (!r.ok || !r.data) return '';
@@ -171,12 +134,11 @@ export async function axTreeSnapshot(udid: string): Promise<string> {
 }
 
 export async function axQueryByText(udid: string, text: string): Promise<AXMatchRect | null> {
-  void udid;
   // Single dylib roundtrip — the in-process AX walk is already fast
   // (sub-millisecond). One short retry covers the case where the
   // target's frame is still mid-transition.
   const deadline = Date.now() + 1500;
-  const c = getDylibClient();
+  const c = getDylibClient(udid);
   while (Date.now() < deadline) {
     try {
       const r = await c.call('find_ax_by_text', { text });
@@ -209,7 +171,7 @@ async function callTool(
   _cliArgs: string[],
 ): Promise<void> {
   const udid = payload.udid as string;
-  const dy = getDylibClient();
+  const dy = getDylibClient(udid);
   if (toolName === 'gesture-tap') {
     const { w, h } = await getScreenSize(udid);
     const nx = payload.x as number;
