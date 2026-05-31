@@ -7,6 +7,7 @@
  *   --flag=value     → string value
  *   --flag value     → string value (next arg consumed)
  *   -v               → alias for --verbose
+ *   -V / --version   → print version
  *   -h / --help      → help flag
  */
 
@@ -15,6 +16,7 @@ export type Flags = {
   verbose?: boolean;
   trace?: boolean;
   help?: boolean;
+  version?: boolean;
   output?: string;
   lenient?: boolean;
   reporter?: string;
@@ -27,7 +29,7 @@ export type ParsedArgs = {
 };
 
 const STRING_FLAGS = new Set(['port', 'output', 'reporter']);
-const BOOL_FLAGS = new Set(['verbose', 'trace', 'help', 'lenient']);
+const BOOL_FLAGS = new Set(['verbose', 'trace', 'help', 'lenient', 'version']);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
@@ -36,6 +38,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
     const a = argv[i];
     if (a === '-v') {
       flags.verbose = true;
+      continue;
+    }
+    // -V is the conventional short version flag. -v stays --verbose for
+    // back-compat (flows/CI already pass it), so version takes the capital.
+    if (a === '-V') {
+      flags.version = true;
       continue;
     }
     if (a === '-h') {
