@@ -9,12 +9,12 @@ Usage:
   ennio test <yaml | dir>       run flows
   ennio hierarchy               dump the in-app shadow tree as JSON
   ennio screenshot [path]       grab the simulator screen
-  ennio doctor                  diagnose simulator + app + WebSocket
+  ennio doctor                  diagnose Node, Xcode, idb, dylib + app socket
   ennio version                 print version
   ennio help [command]          this message, or per-command help
 
 Common options:
-  --port=<n>     WebSocket port (default 9876)
+  --version, -V  print version and exit
   --verbose, -v  detailed command execution
   --trace        emit a trace marker between commands
 
@@ -41,7 +41,8 @@ Options: --port`,
 Grabs the booted simulator's screen. Defaults to /tmp/ennio-shot.png.`,
   doctor: `ennio doctor
 
-Sanity check: booted sim, app installed, WS reachable.`,
+Pre-flight check. FAIL rows block a run (Node ≥ 18, Xcode/simctl, idb,
+libennio.dylib); WARN rows don't (booted sim, app socket). Exit 1 on any FAIL.`,
 };
 
 export function runHelpCommand(positional: string[]): number {
