@@ -57,8 +57,20 @@ export async function dismissPermissionDialogs(udid: string): Promise<boolean> {
       out = execFileSync('idb', ['ui', 'describe-all', '--udid', udid], {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
-        maxBuffer: 32 * 1024 * 1024,
+        // 128 MB: deep view trees (Bluesky thread screen with 200+
+        // reply rows + nav + tab bar) can hit ~40 MB. Previous 32 MB
+        // cap silently truncated and we'd miss permission sheets
+        // sitting at the end of the buffer.
+        maxBuffer: 128 * 1024 * 1024,
       });
+      // Detect truncation by checking the tail. `idb ui describe-all`
+      // outputs valid JSON; a truncated buffer ends mid-token. If parse
+      // fails the catch below returns — log so the user knows.
+      if (out.length >= 128 * 1024 * 1024 - 1024) {
+        process.stderr.write(
+          '   ⚠ idb describe-all output near maxBuffer cap — view tree may be truncated\n',
+        );
+      }
     } catch {
       return dismissedAny;
     }
