@@ -17,6 +17,7 @@ export type Flags = {
   help?: boolean;
   output?: string;
   lenient?: boolean;
+  reporter?: string;
 };
 
 export type ParsedArgs = {
@@ -25,7 +26,7 @@ export type ParsedArgs = {
   flags: Flags;
 };
 
-const STRING_FLAGS = new Set(['port', 'output']);
+const STRING_FLAGS = new Set(['port', 'output', 'reporter']);
 const BOOL_FLAGS = new Set(['verbose', 'trace', 'help', 'lenient']);
 
 export function parseArgs(argv: string[]): ParsedArgs {

@@ -378,7 +378,7 @@ function printPhaseTotals(ctx: RunContext): void {
 // Per-command dispatch
 // =====================================================================
 
-async function runCommand(
+export async function runCommand(
   ctx: RunContext,
   rawCmd: MaestroCommand,
   nextRawCmd?: MaestroCommand,
@@ -1588,7 +1588,7 @@ async function runMaestroScript(
   runInContext(src, vmCtx, { filename: scriptPath, timeout: 30_000 });
 }
 
-function describeCommand(cmd: MaestroCommand): string {
+export function describeCommand(cmd: MaestroCommand): string {
   const key = Object.keys(cmd)[0];
   const value = (cmd as Record<string, unknown>)[key];
   if (typeof value === 'string') return `${key}: ${value}`;

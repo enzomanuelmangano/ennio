@@ -1,0 +1,218 @@
+// Runs a single Maestro flow against an open EnnioConnection.
+//
+// Owns the step loop, retry policy, and Reporter notifications.
+// Command dispatch goes through the CommandRegistry (currently
+// delegates to the legacy runCommand monolith via a fallback handler
+// — new handlers can be registered to override piecemeal).
+//
+// FlowExecutor does NOT manage the simulator or the connection
+// lifecycle. The caller (EnnioRunner) opens the connection, hands it
+// in, and closes it afterwards. This keeps the executor easy to test
+// against a mock connection.
+
+import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
+import type { RunContext } from '../runner/context';
+import { describeCommand, runCommand } from '../runner/index';
+
+import { CommandRegistry } from './command-registry';
+import type { EnnioConnection } from './ennio-connection';
+import type { FlowResult, Reporter } from '../reporters';
+import type { SimulatorSession } from './simulator-session';
+
+export interface FlowExecutorOptions {
+  session: SimulatorSession;
+  connection: EnnioConnection;
+  reporter: Reporter;
+  registry?: CommandRegistry;
+  verbose?: boolean;
+  lenient?: boolean;
+}
+
+interface StepTiming {
+  step: number;
+  ms: number;
+  cmd: string;
+}
+
+export class FlowExecutor {
+  private session: SimulatorSession;
+  private connection: EnnioConnection;
+  private reporter: Reporter;
+  private registry: CommandRegistry;
+  private verbose: boolean;
+  private lenient: boolean;
+
+  constructor(opts: FlowExecutorOptions) {
+    this.session = opts.session;
+    this.connection = opts.connection;
+    this.reporter = opts.reporter;
+    this.verbose = opts.verbose ?? false;
+    this.lenient = opts.lenient ?? false;
+    this.registry =
+      opts.registry ??
+      new CommandRegistry({
+        // Legacy fallback: any command not handled by a registered
+        // matcher falls through to runner/index.ts's runCommand
+        // monolith. As commands migrate out, the registry handles
+        // them directly and runCommand shrinks. Once empty, drop
+        // this fallback.
+        onUnknown: async (cmd, dctx) => {
+          await runCommand(dctx.ctx, cmd, dctx.nextCmd);
+        },
+      });
+  }
+
+  async run(flow: MaestroFlow): Promise<FlowResult> {
+    if (!flow.appId) {
+      throw new Error(`Flow ${flow.filePath} is missing top-level appId`);
+    }
+
+    const ctx: RunContext = {
+      client: this.connection.socket,
+      udid: this.session.udid,
+      bundleId: this.session.bundleId,
+      dylibPath: this.session.dylibPath,
+      verbose: this.verbose,
+      lenient: this.lenient,
+      flowPath: flow.filePath,
+      outputs: {},
+    };
+
+    this.reporter.flowStart(flow);
+    const flowStart = Date.now();
+
+    // onFlowStart hook — failures abort the flow before the main loop.
+    if (flow.onFlowStart) {
+      for (const cmd of flow.onFlowStart) {
+        await this.registry.dispatch(cmd, { ctx, nextCmd: undefined });
+      }
+    }
+
+    const stepTimings: StepTiming[] = [];
+    let stepsPassed = 0;
+    let lastTapCmd: MaestroCommand | undefined;
+    let failure: FlowResult['failure'];
+
+    for (let i = 0; i < flow.commands.length; i++) {
+      const cmd = flow.commands[i];
+      const nextCmd = flow.commands[i + 1];
+      const t0 = Date.now();
+
+      try {
+        await this.registry.dispatch(cmd, { ctx, nextCmd });
+
+        // Handle collapsed double-tap: runCommand can mark the next
+        // command consumed (two same-target taps → one doubleTap).
+        if (ctx.skipNextCmd) {
+          ctx.skipNextCmd = false;
+          if (i + 1 < flow.commands.length) {
+            const consumed = flow.commands[i + 1];
+            stepsPassed++;
+            stepTimings.push({
+              step: i + 2,
+              ms: 0,
+              cmd: describeCommand(consumed) + ' (collapsed)',
+            });
+            this.reporter.stepPass(i + 2, consumed, 0);
+            i++;
+          }
+        }
+
+        const dt = Date.now() - t0;
+        stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
+        this.reporter.stepPass(i + 1, cmd, dt);
+        stepsPassed++;
+        lastTapCmd = cmdIsTap(cmd) ? cmd : undefined;
+      } catch (err) {
+        // Step-level retry: if a find-failure follows a tapOn, re-fire
+        // the previous tap once and retry the current step.
+        const msg = err instanceof Error ? err.message : String(err);
+        const isFindMiss = /element not found|assertVisible\/waitFor timeout/i.test(msg);
+        const isFindableStep = cmdIsFindable(cmd);
+
+        if (lastTapCmd && isFindMiss && isFindableStep) {
+          try {
+            this.reporter.stepRetry?.(
+              i + 1,
+              `re-firing previous tap (${describeCommand(lastTapCmd)})`,
+            );
+            await this.registry.dispatch(lastTapCmd, { ctx, nextCmd: cmd });
+            await sleep(150);
+            await this.registry.dispatch(cmd, { ctx, nextCmd });
+            const dt = Date.now() - t0;
+            stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
+            this.reporter.stepPass(i + 1, cmd, dt);
+            stepsPassed++;
+            lastTapCmd = cmdIsTap(cmd) ? cmd : undefined;
+            continue;
+          } catch {
+            /* fall through to fail */
+          }
+        }
+
+        const dt = Date.now() - t0;
+        stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
+        this.reporter.stepFail(i + 1, cmd, err as Error, dt);
+        failure = {
+          step: i + 1,
+          command: describeCommand(cmd),
+          reason: msg,
+        };
+
+        await this.runOnFlowComplete(flow, ctx);
+        const result: FlowResult = {
+          flow,
+          passed: false,
+          stepsRun: i + 1,
+          stepsPassed,
+          durationMs: Date.now() - flowStart,
+          failure,
+          stepTimings,
+        };
+        this.reporter.flowEnd(result);
+        return result;
+      }
+    }
+
+    await this.runOnFlowComplete(flow, ctx);
+    const result: FlowResult = {
+      flow,
+      passed: true,
+      stepsRun: flow.commands.length,
+      stepsPassed,
+      durationMs: Date.now() - flowStart,
+      stepTimings,
+    };
+    this.reporter.flowEnd(result);
+    return result;
+  }
+
+  private async runOnFlowComplete(flow: MaestroFlow, ctx: RunContext): Promise<void> {
+    if (!flow.onFlowComplete) return;
+    for (const cmd of flow.onFlowComplete) {
+      try {
+        await this.registry.dispatch(cmd, { ctx, nextCmd: undefined });
+      } catch (e) {
+        this.reporter.warn?.(
+          `onFlowComplete: ${describeCommand(cmd)} failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+  }
+}
+
+function cmdIsTap(cmd: MaestroCommand): boolean {
+  return typeof cmd === 'object' && cmd !== null && 'tapOn' in cmd;
+}
+
+function cmdIsFindable(cmd: MaestroCommand): boolean {
+  return (
+    typeof cmd === 'object' &&
+    cmd !== null &&
+    ('tapOn' in cmd || 'assertVisible' in cmd || 'waitFor' in cmd)
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
