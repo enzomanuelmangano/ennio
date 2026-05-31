@@ -1229,12 +1229,8 @@ export async function runCommand(
     terminateApp(ctx.udid, ctx.bundleId);
     return;
   }
-  if ('takeScreenshot' in cmd) {
-    const path =
-      typeof cmd.takeScreenshot === 'string' ? cmd.takeScreenshot : cmd.takeScreenshot.path;
-    execFileSync('xcrun', ['simctl', 'io', ctx.udid, 'screenshot', path]);
-    return;
-  }
+  // takeScreenshot: migrated to commands/handlers/system.ts.
+  // Legacy fallback removed.
   if ('dismissAlert' in cmd) {
     await ctx.client.call('alert_dismiss');
     return;
@@ -1496,11 +1492,8 @@ export async function runCommand(
     if (!result) throw new Error(`assertTrue failed: ${expr}`);
     return;
   }
-  // clearKeychain — wipe Keychain items for the booted sim
-  if ('clearKeychain' in cmd) {
-    execFileSync('xcrun', ['simctl', 'keychain', ctx.udid, 'reset'], { stdio: 'pipe' });
-    return;
-  }
+  // clearKeychain: migrated to commands/handlers/system.ts.
+  // Legacy fallback removed.
 
   // Unknown/unsupported command. Default: fail so YAML typos don't
   // silently pass. --lenient mode skips with a warning printed

@@ -10,6 +10,7 @@
 // in, and closes it afterwards. This keeps the executor easy to test
 // against a mock connection.
 
+import { registerAllHandlers } from '../commands/handlers';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
 import type { RunContext } from '../runner/context';
 import { describeCommand, runCommand } from '../runner/index';
@@ -60,6 +61,8 @@ export class FlowExecutor {
           await runCommand(dctx.ctx, cmd, dctx.nextCmd);
         },
       });
+    // Register migrated handlers — they win over the legacy fallback.
+    registerAllHandlers(this.registry);
   }
 
   async run(flow: MaestroFlow): Promise<FlowResult> {
