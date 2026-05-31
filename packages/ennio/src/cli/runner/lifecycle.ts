@@ -11,10 +11,88 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { tap as hidTap } from '../hid';
 import { findDylib, getAppContainer, terminateApp } from '../sim';
 import { EnnioSocketClient } from '../socket-client';
 
 import { RunContext, sleep } from './context';
+
+// Grant buttons, most-permissive first. We tap the FIRST that exists.
+const PERMISSION_GRANT_LABELS = [
+  'Allow Full Access',
+  'Allow While Using App',
+  'Allow Once',
+  'Allow',
+  'OK',
+];
+// Distinctly-system button labels — their presence alone confirms a
+// system permission sheet (so we don't misfire on an app's own "Allow").
+const SYSTEM_DIALOG_MARKERS = [
+  'Allow Full Access',
+  'Keep Add Only',
+  'Limit Access…',
+  'Allow While Using App',
+  "Don't Allow",
+];
+
+interface IdbAxNode {
+  AXLabel?: string;
+  title?: string;
+  frame?: { x: number; y: number; width: number; height: number };
+}
+
+/**
+ * Dismiss native system permission sheets (Photo Library, notifications,
+ * tracking, location). They render in a SEPARATE process, so the in-app
+ * dylib is blind to them (find_by_text / top_vc_chain / alert_present
+ * all miss). idb's accessibility describe DOES see cross-process windows;
+ * we tap the grant button by its frame center via HID (process-agnostic).
+ * Returns true if it dismissed at least one. Safe no-op when none present.
+ */
+export async function dismissPermissionDialogs(udid: string): Promise<boolean> {
+  let dismissedAny = false;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let out = '';
+    try {
+      out = execFileSync('idb', ['ui', 'describe-all', '--udid', udid], {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        maxBuffer: 32 * 1024 * 1024,
+      });
+    } catch {
+      return dismissedAny;
+    }
+    let els: IdbAxNode[];
+    try {
+      els = JSON.parse(out) as IdbAxNode[];
+    } catch {
+      return dismissedAny;
+    }
+    const labelOf = (e: IdbAxNode) => e.AXLabel ?? e.title ?? '';
+    const labels = els.map(labelOf);
+    // Only act when this really is a system permission sheet: either a
+    // request-prompt string or a distinctly-system button is present.
+    const looksLikePermission =
+      labels.some((l) => /requesting|would like|access to your|access your/i.test(l)) ||
+      labels.some((l) => SYSTEM_DIALOG_MARKERS.includes(l));
+    if (!looksLikePermission) return dismissedAny;
+
+    let target: { x: number; y: number } | null = null;
+    for (const want of PERMISSION_GRANT_LABELS) {
+      const el = els.find((e) => labelOf(e) === want && e.frame);
+      if (el?.frame) {
+        target = { x: el.frame.x + el.frame.width / 2, y: el.frame.y + el.frame.height / 2 };
+        break;
+      }
+    }
+    if (!target) return dismissedAny;
+    process.stderr.write(`[ennio] dismissing system permission dialog → tap (${Math.round(target.x)},${Math.round(target.y)})\n`);
+    await hidTap(udid, target.x, target.y);
+    dismissedAny = true;
+    await sleep(700); // let it dismiss; loop catches a second stacked sheet
+  }
+  return dismissedAny;
+}
 
 export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void> {
   await client.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);

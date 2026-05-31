@@ -18,7 +18,6 @@ import {
   DEFAULT_WIN_W,
   FIND_DEADLINE_DEFAULT_MS,
   POLL_MS,
-  POST_TAP_SETTLE_MS,
   Rect,
   RunContext,
   sleep,
@@ -59,25 +58,6 @@ export async function captureReactTs(
     /* observer op unavailable on older dylibs */
   }
   return { ts: 0, attach: 'none' };
-}
-
-// Retained for future post-tap settle experiments.
-async function _waitForHashChange(
-  ctx: RunContext,
-  baseline: string,
-  maxMs: number,
-): Promise<boolean> {
-  if (!baseline) {
-    await sleep(POST_TAP_SETTLE_MS);
-    return true;
-  }
-  const deadline = Date.now() + maxMs;
-  while (Date.now() < deadline) {
-    await sleep(60);
-    const cur = await captureHash(ctx);
-    if (cur && cur !== baseline) return true;
-  }
-  return false;
 }
 
 // =====================================================================
@@ -148,11 +128,22 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     );
     if (r && r.ok && r.data) return r.data as Rect;
   }
-  // Match Maestro's implicit-wait semantics on tapOn: keep retrying
-  // the find for ~7 s before giving up. Layout passes after a
-  // clearState relaunch, RNGH bottom-sheet expansion, React-Nav push
-  // each take 1-3 s to settle.
-  const deadline = Date.now() + 7000;
+  // In-process accessibility match — tried EARLY, right after the
+  // UIView fast-path misses. UIKit text lives in UILabels (caught by
+  // findOnce above), but SwiftUI / drawn text exposes itself only
+  // through the accessibility tree. Walking it in-process
+  // (find_ax_by_text, ~50ms) here means a SwiftUI control (e.g. an iOS
+  // Settings row) is found immediately — NOT after a 2.5 s poll the
+  // UIView walk can never satisfy, nor ~10 s of blind scrolling.
+  // On-screen only, so a still-mounting / off-screen target falls
+  // through to the poll + scroll below. Skipped for childOf (own path).
+  if (sel.text && !sel.childOf) {
+    const ax = await ctx.client.call('find_ax_by_text', { text: sel.text }).catch(() => undefined);
+    if (ax && ax.ok && ax.data) return ax.data as Rect;
+  }
+  // CLI-side implicit-wait top-up for elements that are mounting (RN
+  // commit lag, React-Nav push tail) — re-poll the UIView/index finder.
+  const deadline = Date.now() + 2500;
   while (Date.now() < deadline) {
     const r = await findOnce(ctx, sel);
     if (r) return r;
@@ -189,7 +180,13 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     }
     return null;
   }
-  // Last-chance fallback: auto-scroll. Try DOWN×4, then UP×4.
+  // Last-chance fallback: auto-scroll. Try DOWN then UP, but STOP the
+  // moment a swipe doesn't move content (frame hash unchanged = end of
+  // the scroll view, or nothing scrollable here). The old code swiped
+  // 4× each way unconditionally, so a find for an element that simply
+  // isn't on this screen burned ~10-16 s of blind scrolling and left
+  // the screen at a random offset. Now a non-scrollable / short screen
+  // bails after one swipe per direction.
   // Derive scroll center from actual window size so this works on
   // any device, not just iPhone 17 Pro.
   let scrW = DEFAULT_WIN_W;
@@ -207,19 +204,26 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   const dist = Math.round(scrH * 0.34);
   for (const dir of ['DOWN', 'UP'] as const) {
     for (let i = 0; i < 4; i++) {
+      const beforeHash = await captureHash(ctx);
       if (dir === 'DOWN') await hidSwipe(ctx.udid, cx, cy + dist / 2, cx, cy - dist / 2, 250);
       else await hidSwipe(ctx.udid, cx, cy - dist / 2, cx, cy + dist / 2, 250);
-      await sleep(500);
-      await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
+      await sleep(300);
+      await ctx.client.call('wait_commit', { maxMs: 1200, stableMs: 200 }).catch(() => undefined);
       const found = await findOnce(ctx, sel);
-      if (!found) continue;
-      // Scroll inertia keeps the contentOffset moving for ~400-800 ms
-      // after the swipe gesture ends. Wait for the list to fully
-      // settle, then re-find to get the current coords.
-      await sleep(700);
-      await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 350 }).catch(() => undefined);
-      const stable = await findOnce(ctx, sel);
-      return stable ?? found;
+      if (found) {
+        // Scroll inertia keeps the contentOffset moving for ~400-800 ms
+        // after the swipe gesture ends. Wait for the list to fully
+        // settle, then re-find to get the current coords.
+        await sleep(500);
+        await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 350 }).catch(() => undefined);
+        const stable = await findOnce(ctx, sel);
+        return stable ?? found;
+      }
+      // Content didn't move → reached the end of the scroll view (or
+      // nothing here scrolls). Stop swiping this direction instead of
+      // firing the remaining blind swipes.
+      const afterHash = await captureHash(ctx);
+      if (afterHash && beforeHash && afterHash === beforeHash) break;
     }
   }
 

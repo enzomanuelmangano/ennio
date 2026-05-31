@@ -5,6 +5,7 @@
 import { MaestroSelector } from '../maestro-parser';
 
 import { POLL_MS, RunContext, sleep } from './context';
+import { dismissPermissionDialogs } from './lifecycle';
 
 /// Returns `true` if the selector resolves to any visible view —
 /// testID-indexed, text-walked, or surfaced via the UIAlertController
@@ -53,8 +54,22 @@ export async function waitUntilVisible(
   timeoutMs: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  // Don't probe for a blocking permission sheet on the first few seconds
+  // — most targets appear quickly and the idb describe is ~1-2s. Only
+  // pay it once the wait is genuinely stalling.
+  let lastPermCheck = Date.now();
   while (Date.now() < deadline) {
     if (await isVisible(ctx, sel)) return;
+    const now = Date.now();
+    if (now - lastPermCheck > 3000) {
+      lastPermCheck = now;
+      // A native system permission sheet (Photo Library, notifications,
+      // tracking) renders in another process and floats over the app,
+      // swallowing every touch — the in-app dylib can't see it, so a
+      // wait would otherwise spin to timeout. Clear it via idb, then
+      // re-check immediately.
+      if (await dismissPermissionDialogs(ctx.udid).catch(() => false)) continue;
+    }
     await sleep(POLL_MS);
   }
   // Dump diagnostic state to stderr so a CI-side failure log

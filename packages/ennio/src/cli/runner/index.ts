@@ -45,7 +45,7 @@ import {
   typeText as hidType,
   setDylibClient,
 } from '../hid';
-import { ensureBootedSim, findDylib, terminateApp } from '../sim';
+import { enableAccessibility, ensureBootedSim, findDylib, terminateApp } from '../sim';
 
 // Helper modules — split out of the original 2071-line runner.ts.
 import {
@@ -65,7 +65,12 @@ import {
 import { captureHash, captureReactTs, findOnce, resolveCenter, resolveRect } from './find';
 import { execTapOn } from './tap';
 import { isVisible, waitUntilNotVisible, waitUntilVisible } from './visibility';
-import { clearStateAndRelaunch, relaunchAndReconnect, waitForFirstPaint } from './lifecycle';
+import {
+  clearStateAndRelaunch,
+  dismissPermissionDialogs,
+  relaunchAndReconnect,
+  waitForFirstPaint,
+} from './lifecycle';
 
 // =====================================================================
 // runScript — Maestro JS sandbox
@@ -112,6 +117,11 @@ export async function runFlow(
   if (!flow.appId) {
     throw new Error(`Flow ${flow.filePath} is missing top-level appId`);
   }
+
+  // Make SwiftUI / native apps readable by ennio's in-process AX walk.
+  // Off by default, SwiftUI builds no accessibility tree, so a screen
+  // like iOS Settings is invisible to find_ax_by_text. One-time, cheap.
+  enableAccessibility(udid);
 
   const client = new EnnioSocketClient();
   if (!(await client.connect())) {
@@ -177,7 +187,10 @@ export async function runFlow(
     outputs: {},
   };
 
-  log(ctx, `▶ ${flow.name || flow.filePath} (${flow.commands.length} steps)`);
+  // Header printed by caller (test.ts) — flow name + step count.
+  if (ctx.verbose) {
+    process.stderr.write(`   ${flow.name || ''} (${flow.commands.length} steps)\n`);
+  }
 
   // onFlowStart hook — failures abort the flow.
   if (flow.onFlowStart) {
@@ -194,7 +207,6 @@ export async function runFlow(
     const nextCmd = flow.commands[i + 1];
     const t0 = Date.now();
     try {
-      process.stderr.write(`[step ${i + 1}] ${describeCommand(cmd)}\n`);
       await runCommand(ctx, cmd, nextCmd);
       // A step (typically tapOn collapsing with its same-target peer
       // into a single double-tap) can mark the next command consumed.
@@ -203,15 +215,15 @@ export async function runFlow(
         ctx.skipNextCmd = false;
         if (i + 1 < flow.commands.length) {
           const consumed = flow.commands[i + 1];
-          process.stderr.write(`[step ${i + 2}] ${describeCommand(consumed)} (collapsed)\n`);
           stepsPassed++;
           stepTimings.push({ step: i + 2, ms: 0, cmd: describeCommand(consumed) + ' (collapsed)' });
+          logStep(ctx, i + 2, 0, describeCommand(consumed) + ' (collapsed)', true);
           i++;
         }
       }
       const dt = Date.now() - t0;
       stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
-      logStep(ctx, i + 1, dt, describeCommand(cmd));
+      logStep(ctx, i + 1, dt, describeCommand(cmd), true);
       stepsPassed++;
       if (typeof cmd === 'object' && cmd && 'tapOn' in cmd) {
         lastTapCmd = cmd;
@@ -234,15 +246,17 @@ export async function runFlow(
         ('tapOn' in cmd || 'assertVisible' in cmd || 'waitFor' in cmd);
       if (lastTapCmd && isFindMiss && isFindableStep) {
         try {
-          process.stderr.write(
-            `[retry] re-firing previous tap (${describeCommand(lastTapCmd as MaestroCommand)}) before step ${i + 1}\n`,
-          );
+          if (ctx.verbose) {
+            process.stderr.write(
+              `   ↻  re-firing previous tap (${describeCommand(lastTapCmd as MaestroCommand)})\n`,
+            );
+          }
           await runCommand(ctx, lastTapCmd as any, cmd);
           await sleep(150);
           await runCommand(ctx, cmd, nextCmd);
           const dt = Date.now() - t0;
           stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
-          logStep(ctx, i + 1, dt, describeCommand(cmd));
+          logStep(ctx, i + 1, dt, describeCommand(cmd), true);
           stepsPassed++;
           lastTapCmd = typeof cmd === 'object' && cmd && 'tapOn' in cmd ? cmd : undefined;
           continue;
@@ -252,7 +266,7 @@ export async function runFlow(
       }
       const dt = Date.now() - t0;
       stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
-      logStep(ctx, i + 1, dt, describeCommand(cmd));
+      logStep(ctx, i + 1, dt, describeCommand(cmd), false);
       setDylibClient(null);
       await runOnFlowComplete(ctx, flow);
       client.close();
@@ -290,27 +304,29 @@ async function runOnFlowComplete(ctx: RunContext, flow: MaestroFlow): Promise<vo
   }
 }
 
-// Always print the top-5 slowest steps so the suite log surfaces
-// bottlenecks per-flow without verbose mode.
+// One-line summary: total time + step count + outliers (if any).
+// Always shown, regardless of verbose. Outliers (steps ≥3× avg or
+// ≥1.5s) are surfaced as bullets so slow steps stand out without
+// dumping the full timing table.
 function printSlowSteps(timings: { step: number; ms: number; cmd: string }[]): void {
   const total = timings.reduce((s, t) => s + t.ms, 0);
-  process.stderr.write(`[ennio] total ${total}ms across ${timings.length} steps:\n`);
-  // Full per-step dump (in execution order). Outliers are easier to
-  // spot than from a top-5 — a single 8 s step amid 30 fast ones
-  // shows up as a vertical bar of zeros around it.
   const avg = total / Math.max(timings.length, 1);
-  for (const t of timings) {
-    const flag = t.ms >= Math.max(avg * 3, 1500) ? '  ⚠ outlier' : '';
-    process.stderr.write(
-      `[ennio]   ${String(t.ms).padStart(6)}ms  step ${String(t.step).padStart(2)}: ${t.cmd}${flag}\n`,
-    );
+  const outliers = timings.filter((t) => t.ms >= Math.max(avg * 3, 1500));
+  process.stderr.write(`   total ${total}ms across ${timings.length} steps\n`);
+  if (outliers.length > 0) {
+    for (const t of outliers) {
+      process.stderr.write(
+        `   ⚠ slow  step ${String(t.step).padStart(2)}  ${String(t.ms).padStart(6)}ms  ${t.cmd}\n`,
+      );
+    }
   }
 }
 
-// Aggregate per-phase totals across the flow so the bottleneck is
-// obvious: e.g. "tap.postSleep took 32s across 40 taps" tells us the
-// 800 ms POST_TAP_SETTLE_MS is the dominant cost.
+// Per-phase timing breakdown (e.g. "tap.postWaitCommit took 32s
+// across 40 taps"). Useful for runtime tuning but noisy for typical
+// users — gated on ENNIO_PHASE_TRACE.
 function printPhaseTotals(ctx: RunContext): void {
+  if (!process.env.ENNIO_PHASE_TRACE) return;
   if (!ctx.phaseTotals || ctx.phaseTotals.size === 0) return;
   const entries = [...ctx.phaseTotals.entries()].map(([name, total]) => ({
     name,
@@ -318,11 +334,11 @@ function printPhaseTotals(ctx: RunContext): void {
     count: ctx.phaseCounts?.get(name) ?? 0,
   }));
   entries.sort((a, b) => b.total - a.total);
-  process.stderr.write(`[ennio] phase totals (sorted by ms):\n`);
+  process.stderr.write(`   phase totals:\n`);
   for (const e of entries) {
     const avg = e.count > 0 ? Math.round(e.total / e.count) : 0;
     process.stderr.write(
-      `[ennio]   ${String(e.total).padStart(6)}ms  ` +
+      `     ${String(e.total).padStart(6)}ms  ` +
         `${String(e.count).padStart(4)}x  ` +
         `${String(avg).padStart(4)}ms/call  ` +
         `${e.name}\n`,
@@ -1206,6 +1222,17 @@ async function runCommand(
         .call('wait_react_commit', { sinceMs: 0, maxMs: 20000 })
         .catch(() => undefined);
       await ctx.client.call('wait_commit', { maxMs: 5000, stableMs: 500 }).catch(() => undefined);
+      // Apps often request a system permission (Photo Library, etc.) as
+      // they finish booting the e2e bundle. That sheet renders in another
+      // process, floats over the app, and silently eats the next tap
+      // (e.g. the hidden e2e sign-in control) — leaving the flow stuck
+      // logged-out. Poll briefly for it here, BEFORE the flow's first
+      // real interaction, and grant it. The dylib can't see it; idb can.
+      const permDeadline = Date.now() + 8000;
+      while (Date.now() < permDeadline) {
+        if (await dismissPermissionDialogs(ctx.udid).catch(() => false)) break;
+        await sleep(1000);
+      }
     }
     await sleep(POST_LAUNCH_SETTLE_MS);
     return;
@@ -1547,11 +1574,14 @@ function log(ctx: RunContext, msg: string): void {
   }
 }
 
-// One-line per-step trace. Always shown under --verbose so timing is
-// inline with the action that produced it — no separate "(Xms)" line.
-function logStep(ctx: RunContext, step: number, ms: number, cmd: string): void {
+// One-line per-step trace under --verbose. Format:
+//   ✓   3   5230ms  launchApp: {clearState: true}
+//   ✗   8   1234ms  tapOn: Submit
+// Pass/fail glyph + step number + duration + command summary.
+function logStep(ctx: RunContext, step: number, ms: number, cmd: string, ok: boolean): void {
   if (!ctx.verbose) return;
+  const glyph = ok ? '✓' : '✗';
   const stepStr = String(step).padStart(3);
-  const msStr = String(ms).padStart(5);
-  process.stderr.write(`[ennio] ${stepStr}  ${msStr}ms  ${cmd}\n`);
+  const msStr = String(ms).padStart(6);
+  process.stderr.write(`   ${glyph}  ${stepStr}  ${msStr}ms  ${cmd}\n`);
 }

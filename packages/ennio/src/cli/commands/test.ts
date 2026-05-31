@@ -76,26 +76,30 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   for (const file of files) {
     const flow = parseMaestroFile(file);
     console.log(`▸ ${basename(file)}`);
+    const flowStart = Date.now();
     try {
       const result = await runFlow(flow, { dylibPath: dylibPath ?? undefined, verbose, lenient });
+      const flowMs = Date.now() - flowStart;
       if (result.passed) {
-        console.log(`  [PASS] ${result.stepsRun} steps\n`);
+        console.log(`  ✓ PASS  ${result.stepsRun} steps  ${flowMs}ms\n`);
         totalPass++;
       } else {
         totalFail++;
         const f = result.failure!;
         console.log(
-          `  [FAIL] step ${f.step} (${f.command}): ${f.reason}\n` +
-            `         ran ${result.stepsPassed}/${result.stepsRun} steps before failure\n`,
+          `  ✗ FAIL  step ${f.step}/${result.stepsRun}  ${flowMs}ms\n` +
+            `         ${f.command}\n` +
+            `         ${f.reason}\n`,
         );
       }
     } catch (err) {
       totalFail++;
-      console.log(`  [ERROR] ${err instanceof Error ? err.message : String(err)}\n`);
+      console.log(`  ✗ ERROR  ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
 
   console.log('─'.repeat(40));
-  console.log(`Total: ${totalPass} passed, ${totalFail} failed`);
+  const n = totalPass + totalFail;
+  console.log(`${n} flow${n === 1 ? '' : 's'} · ${totalPass} passed · ${totalFail} failed`);
   return totalFail > 0 ? 1 : 0;
 }
