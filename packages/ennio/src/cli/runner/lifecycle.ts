@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { tap as hidTap } from '../hid';
 import { findDylib, getAppContainer, terminateApp } from '../sim';
-import { EnnioSocketClient } from '../socket-client';
+import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 
 import { RunContext, sleep } from './context';
 
@@ -136,11 +136,15 @@ export async function relaunchAndReconnect(
     'xcrun',
     ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
     {
-      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
+      env: {
+        ...process.env,
+        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath,
+        SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(ctx.udid),
+      },
       stdio: 'pipe',
     },
   );
-  const reopen = new EnnioSocketClient();
+  const reopen = new EnnioSocketClient(ctx.udid);
   if (!(await reopen.connectWithRetry(15_000))) {
     throw new Error('socket reconnect failed after launchApp');
   }
@@ -172,7 +176,7 @@ export async function clearStateAndRelaunch(
   ctx.client.close();
   // Remove stale socket so the new process binds cleanly.
   try {
-    rmSync('/tmp/ennio-control.sock', { force: true });
+    rmSync(ennioSocketPath(ctx.udid), { force: true });
   } catch {
     /* ok */
   }
@@ -276,11 +280,15 @@ export async function clearStateAndRelaunch(
     'xcrun',
     ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
     {
-      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
+      env: {
+        ...process.env,
+        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath,
+        SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(ctx.udid),
+      },
       stdio: 'pipe',
     },
   );
-  const reopen = new EnnioSocketClient();
+  const reopen = new EnnioSocketClient(ctx.udid);
   if (!(await reopen.connectWithRetry(15_000))) {
     throw new Error('socket reconnect failed after clearState relaunch');
   }
