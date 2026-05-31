@@ -145,12 +145,18 @@ export async function runFlow(
     } catch {
       /* not running */
     }
+    // Set ENNIO_SOCKET_PATH on the simulator's launchctl env so the
+    // dylib reads it via getenv() at +load time. SIMCTL_CHILD_* only
+    // forwards DYLD_* / CFNETWORK_* and a few other known prefixes —
+    // arbitrary names are dropped silently. Setting via launchctl
+    // setenv is sim-wide but harmless: per-UDID path, not a secret.
+    execFileSync(
+      'xcrun',
+      ['simctl', 'spawn', udid, 'launchctl', 'setenv', 'ENNIO_SOCKET_PATH', ennioSocketPath(udid)],
+      { stdio: 'pipe' },
+    );
     execFileSync('xcrun', ['simctl', 'launch', '--terminate-running-process', udid, flow.appId], {
-      env: {
-        ...process.env,
-        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib,
-        SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(udid),
-      },
+      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib },
       stdio: 'pipe',
     });
     if (!(await client.connectWithRetry(15_000))) {

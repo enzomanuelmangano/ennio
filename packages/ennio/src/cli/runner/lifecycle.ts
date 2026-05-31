@@ -132,15 +132,27 @@ export async function relaunchAndReconnect(
     }
     ctx.dylibPath = auto;
   }
+  // Set ENNIO_SOCKET_PATH on the simulator launchctl env (SIMCTL_CHILD_*
+  // only forwards DYLD_* and a few known prefixes; arbitrary names are
+  // dropped). Per-UDID path, sim-wide scope, not a secret.
+  execFileSync(
+    'xcrun',
+    [
+      'simctl',
+      'spawn',
+      ctx.udid,
+      'launchctl',
+      'setenv',
+      'ENNIO_SOCKET_PATH',
+      ennioSocketPath(ctx.udid),
+    ],
+    { stdio: 'pipe' },
+  );
   execFileSync(
     'xcrun',
     ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
     {
-      env: {
-        ...process.env,
-        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath,
-        SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(ctx.udid),
-      },
+      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
       stdio: 'pipe',
     },
   );
@@ -276,15 +288,27 @@ export async function clearStateAndRelaunch(
     }
     ctx.dylibPath = auto;
   }
+  // Set ENNIO_SOCKET_PATH on the simulator launchctl env (SIMCTL_CHILD_*
+  // only forwards DYLD_* and a few known prefixes; arbitrary names are
+  // dropped). Per-UDID path, sim-wide scope, not a secret.
+  execFileSync(
+    'xcrun',
+    [
+      'simctl',
+      'spawn',
+      ctx.udid,
+      'launchctl',
+      'setenv',
+      'ENNIO_SOCKET_PATH',
+      ennioSocketPath(ctx.udid),
+    ],
+    { stdio: 'pipe' },
+  );
   execFileSync(
     'xcrun',
     ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
     {
-      env: {
-        ...process.env,
-        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath,
-        SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(ctx.udid),
-      },
+      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
       stdio: 'pipe',
     },
   );
