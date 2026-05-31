@@ -25,6 +25,13 @@ import { runDoctorCommand } from './commands/doctor';
 async function main() {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
 
+  // Global --version / -V → print version, exit 0. Checked before the
+  // no-args/help short-circuits so `ennio --version` works standalone and
+  // takes precedence over any (ignored) trailing command.
+  if (flags.version) {
+    return runVersionCommand();
+  }
+
   // No args at all → top-level help, exit 0.
   if (!command && positional.length === 0) {
     return runHelpCommand([]);
