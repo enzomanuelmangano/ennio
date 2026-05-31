@@ -55,13 +55,21 @@ export function planInstall(status: IdbStatus, pipx: boolean): InstallStep[] {
   const steps: InstallStep[] = [];
   if (!status.companion) {
     // Fully-qualified formula auto-taps facebook/fb, no separate tap step.
-    steps.push({ label: 'idb_companion (Homebrew)', cmd: 'brew', args: ['install', 'facebook/fb/idb-companion'] });
+    steps.push({
+      label: 'idb_companion (Homebrew)',
+      cmd: 'brew',
+      args: ['install', 'facebook/fb/idb-companion'],
+    });
   }
   if (!status.cli) {
     steps.push(
       pipx
         ? { label: 'fb-idb (pipx)', cmd: 'pipx', args: ['install', 'fb-idb'] }
-        : { label: 'fb-idb (pip)', cmd: 'python3', args: ['-m', 'pip', 'install', '--user', 'fb-idb'] },
+        : {
+            label: 'fb-idb (pip)',
+            cmd: 'python3',
+            args: ['-m', 'pip', 'install', '--user', 'fb-idb'],
+          },
     );
   }
   return steps;

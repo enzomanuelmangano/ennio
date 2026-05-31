@@ -102,7 +102,9 @@ describe('ensureIdb', () => {
   it('throws if binaries still missing after a "successful" install', async () => {
     const runInstall = vi.fn(); // pretends to succeed but PATH never updates
     await expect(
-      ensureIdb(makeDeps({ env: { ENNIO_AUTO_INSTALL_IDB: '1' }, onPath: pathWith([]), runInstall })),
+      ensureIdb(
+        makeDeps({ env: { ENNIO_AUTO_INSTALL_IDB: '1' }, onPath: pathWith([]), runInstall }),
+      ),
     ).rejects.toThrow(/still not on PATH/);
   });
 
