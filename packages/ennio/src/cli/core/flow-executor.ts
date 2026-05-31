@@ -97,8 +97,14 @@ export class FlowExecutor {
     let failure: FlowResult['failure'];
 
     for (let i = 0; i < flow.commands.length; i++) {
-      const cmd = flow.commands[i];
-      const nextCmd = flow.commands[i + 1];
+      const rawCmd = flow.commands[i];
+      const rawNext = flow.commands[i + 1];
+      // Maestro lets some commands be bare strings: `- hideKeyboard`,
+      // `- back`, `- launchApp`. js-yaml parses those as plain
+      // strings. Normalise to `{op: true}` so registry matchers using
+      // `'op' in cmd` work uniformly.
+      const cmd = normalizeBareString(rawCmd);
+      const nextCmd = rawNext === undefined ? undefined : normalizeBareString(rawNext);
       const t0 = Date.now();
 
       try {
@@ -219,6 +225,13 @@ function cmdIsFindable(cmd: MaestroCommand): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function normalizeBareString(cmd: MaestroCommand | string): MaestroCommand {
+  if (typeof cmd === 'string') {
+    return { [cmd]: true } as unknown as MaestroCommand;
+  }
+  return cmd;
 }
 
 /**

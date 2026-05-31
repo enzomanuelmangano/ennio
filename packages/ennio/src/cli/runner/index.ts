@@ -834,27 +834,7 @@ export async function runCommand(
     await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
     return;
   }
-  if ('back' in cmd) {
-    await ctx.client.call('back');
-    // Poll animations_active until the pop transition ends.
-    // popViewControllerAnimated's CAAnimation registers on UIKit's
-    // transitionCoordinator immediately; the poll exits as soon as
-    // no VC in the chain is transitioning. Capped at 800 ms for
-    // custom transitions that exceed the default ~250 ms.
-    const deadline = Date.now() + 800;
-    while (Date.now() < deadline) {
-      const r = await ctx.client.call('animations_active').catch(() => undefined);
-      const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
-      if (!active) break;
-      await sleep(20);
-    }
-    return;
-  }
-  if ('hideKeyboard' in cmd) {
-    await ctx.client.call('hide_keyboard');
-    await sleep(150);
-    return;
-  }
+  // back, hideKeyboard: migrated to commands/handlers/system.ts.
   if ('scrollUntilVisible' in cmd) {
     // Resolve the target selector. Maestro accepts either a bare
     // selector or { element: ..., direction, timeout }.
@@ -1231,10 +1211,7 @@ export async function runCommand(
   }
   // takeScreenshot: migrated to commands/handlers/system.ts.
   // Legacy fallback removed.
-  if ('dismissAlert' in cmd) {
-    await ctx.client.call('alert_dismiss');
-    return;
-  }
+  // dismissAlert: migrated to commands/handlers/system.ts.
   if ('openLink' in cmd) {
     const link = typeof cmd.openLink === 'string' ? cmd.openLink : cmd.openLink.link;
     execFileSync('xcrun', ['simctl', 'openurl', ctx.udid, link]);
@@ -1442,14 +1419,7 @@ export async function runCommand(
     return;
   }
   // Clipboard operations
-  if ('setClipboard' in cmd) {
-    const text = String((cmd as { setClipboard: string }).setClipboard);
-    execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], {
-      input: text,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return;
-  }
+  // setClipboard: migrated to commands/handlers/system.ts.
   if ('pasteText' in cmd) {
     const text = execFileSync('xcrun', ['simctl', 'pbpaste', ctx.udid], {
       encoding: 'utf-8',
