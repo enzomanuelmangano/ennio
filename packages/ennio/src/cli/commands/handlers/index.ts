@@ -8,6 +8,7 @@ import { registerControlFlowHandlers } from './control-flow';
 import { registerInputHandlers } from './input';
 import { registerLifecycleHandlers } from './lifecycle';
 import { registerRandomInputHandlers } from './random-input';
+import { registerScrollHandlers } from './scroll';
 import { registerSystemHandlers } from './system';
 import { registerTapHandlers } from './tap';
 
@@ -19,6 +20,5 @@ export function registerAllHandlers(registry: CommandRegistry): void {
   registerControlFlowHandlers(registry);
   registerTapHandlers(registry);
   registerInputHandlers(registry);
-  // Future handler groups (scroll) register themselves here as they
-  // migrate out of runner/index.ts.
+  registerScrollHandlers(registry);
 }

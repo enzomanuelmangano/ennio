@@ -13,7 +13,7 @@
 import { registerAllHandlers } from '../commands/handlers';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
 import type { RunContext } from '../runner/context';
-import { describeCommand, runCommand } from '../runner/index';
+import { describeCommand } from '../runner/index';
 
 import { CommandRegistry } from './command-registry';
 import type { EnnioConnection } from './ennio-connection';
@@ -52,16 +52,17 @@ export class FlowExecutor {
     this.registry =
       opts.registry ??
       new CommandRegistry({
-        // Legacy fallback: any command not handled by a registered
-        // matcher falls through to runner/index.ts's runCommand
-        // monolith. As commands migrate out, the registry handles
-        // them directly and runCommand shrinks. Once empty, drop
-        // this fallback.
-        onUnknown: async (cmd, dctx) => {
-          await runCommand(dctx.ctx, cmd, dctx.nextCmd);
+        // Unknown command: --lenient skips with a warning; default
+        // fails so YAML typos don't silently pass.
+        onUnknown: async (cmd, { ctx }) => {
+          const desc = describeCommand(cmd);
+          if (ctx.lenient) {
+            this.reporter.warn?.(`skipped (unsupported command): ${desc}`);
+            return;
+          }
+          throw new Error(`unsupported command: ${desc}`);
         },
       });
-    // Register migrated handlers — they win over the legacy fallback.
     registerAllHandlers(this.registry);
   }
 
