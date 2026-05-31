@@ -19,6 +19,10 @@ on:
         description: 'npm dist-tag (latest | beta)'
         required: false
         default: 'latest'
+      dry_run:
+        description: 'Dry run — build/test/pack only, no real publish'
+        type: boolean
+        default: true
 
 jobs:
   publish:
@@ -60,6 +64,12 @@ jobs:
 
       - name: Publish (with provenance)
         working-directory: packages/ennio
-        run: npm publish --provenance --access public --tag "${{ github.event.inputs.tag || 'latest' }}"
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "DRY RUN — packing only, not publishing"
+            npm publish --dry-run --access public
+          else
+            npm publish --provenance --access public --tag "${{ github.event.inputs.tag || 'latest' }}"
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
