@@ -50,10 +50,8 @@ import { enableAccessibility, ensureBootedSim, findDylib, terminateApp } from '.
 
 // Helper modules — split out of the original 2071-line runner.ts.
 import {
-  DEFAULT_WAIT_MS,
   DEFAULT_WIN_H,
   DEFAULT_WIN_W,
-  POLL_MS,
   POST_LAUNCH_SETTLE_MS,
   POST_TAP_SETTLE_MS,
   RunContext,
@@ -65,7 +63,7 @@ import {
 } from './context';
 import { captureHash, captureReactTs, findOnce, resolveCenter, resolveRect } from './find';
 import { execTapOn } from './tap';
-import { isVisible, waitUntilNotVisible, waitUntilVisible } from './visibility';
+import { isVisible } from './visibility';
 import {
   clearStateAndRelaunch,
   dismissPermissionDialogs,
@@ -685,49 +683,8 @@ export async function runCommand(
     await sleep(POST_TAP_SETTLE_MS);
     return;
   }
-  if ('assertVisible' in cmd) {
-    const sel = normalizeSelector(cmd.assertVisible);
-    const timeout = cmd.assertVisible.timeout ?? DEFAULT_WAIT_MS;
-    await waitUntilVisible(ctx, sel, timeout);
-    return;
-  }
-  if ('assertNotVisible' in cmd) {
-    const sel = normalizeSelector(cmd.assertNotVisible);
-    const timeout = cmd.assertNotVisible.timeout ?? DEFAULT_WAIT_MS;
-    await waitUntilNotVisible(ctx, sel, timeout);
-    return;
-  }
-  if ('waitFor' in cmd) {
-    const sel = normalizeSelector(cmd.waitFor);
-    const timeout = cmd.waitFor.timeout ?? DEFAULT_WAIT_MS;
-    await waitUntilVisible(ctx, sel, timeout);
-    return;
-  }
-  if ('assertAnyVisible' in cmd) {
-    const timeout = DEFAULT_WAIT_MS;
-    const selectors = cmd.assertAnyVisible.anyOf.map(normalizeSelector);
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      for (const s of selectors) {
-        if (await isVisible(ctx, s)) return;
-      }
-      await sleep(POLL_MS);
-    }
-    throw new Error(`assertAnyVisible: none of the ${selectors.length} selectors became visible`);
-  }
-  if ('extendedWaitUntil' in cmd) {
-    // Maestro's extendedWaitUntil is meant for slow async data
-    // fetches that the regular 10s implicit wait can't cover. We
-    // use 60s default — Bluesky's home feed on a cold sign-in via
-    // mock PDS routinely takes 30-40s to render its first post.
-    const timeout = cmd.extendedWaitUntil.timeout ?? 60000;
-    if (cmd.extendedWaitUntil.visible) {
-      await waitUntilVisible(ctx, normalizeSelector(cmd.extendedWaitUntil.visible), timeout);
-    } else if (cmd.extendedWaitUntil.notVisible) {
-      await waitUntilNotVisible(ctx, normalizeSelector(cmd.extendedWaitUntil.notVisible), timeout);
-    }
-    return;
-  }
+  // assertVisible, assertNotVisible, waitFor, assertAnyVisible,
+  // extendedWaitUntil: migrated to commands/handlers/assert.ts.
   if ('inputText' in cmd) {
     // Wait for ANY view to be the firstResponder before typing.
     // Without this, a previous tap that opens a composer / modal
