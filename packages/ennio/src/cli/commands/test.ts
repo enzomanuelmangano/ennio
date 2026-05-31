@@ -2,10 +2,9 @@
  * `ennio test <flow.yaml | dir | glob>` — run one or more Maestro YAML
  * flows.
  *
- * v0.1 socket-first runner. Assumes the in-app dylib (libennio) is
- * already loaded into a running iOS Sim app — i.e. the app was launched
- * with `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=<dylib>` (zero-install path)
- * or the app links EnnioCore via the Pod plugin.
+ * Thin wrapper around EnnioRunner. All orchestration, lifecycle, and
+ * reporting lives in core/. This file only handles arg expansion and
+ * the process exit code.
  */
 
 import { existsSync, statSync } from 'fs';
@@ -14,8 +13,7 @@ import { basename, join, resolve } from 'path';
 import { glob } from 'glob';
 
 import type { Flags } from '../cli/args';
-import { parseMaestroFile } from '../maestro-parser';
-import { runFlow } from '../runner';
+import { EnnioRunner } from '../core';
 
 function isMaestroFile(filePath: string): boolean {
   return filePath.endsWith('.yaml') || filePath.endsWith('.yml');
@@ -49,12 +47,13 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
 }
 
 export async function runTestCommand(positional: string[], flags: Flags): Promise<number> {
-  const verbose = flags.verbose ?? false;
-  const lenient = flags.lenient ?? false;
-  const dylibPath = process.env.ENNIO_DYLIB_PATH || null;
-
   if (positional.length === 0) {
     console.error('Usage: ennio test <flow.yaml | dir | glob> [options]');
+    console.error('');
+    console.error('Options:');
+    console.error('  --verbose             Per-step inline output');
+    console.error('  --lenient             Skip unknown commands with a warning');
+    console.error('  --reporter=<kind>     pretty (default) | json');
     console.error('');
     console.error('Auto-detection:');
     console.error('  - booted iOS simulator (or auto-boots one)');
@@ -69,37 +68,20 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     return 1;
   }
 
-  console.log('\n🧪 Ennio\n');
+  const reporterKind = (flags.reporter as 'pretty' | 'json' | undefined) ?? 'pretty';
+  const runner = new EnnioRunner({
+    udid: process.env.ENNIO_UDID,
+    dylibPath: process.env.ENNIO_DYLIB_PATH || undefined,
+    reporterKind,
+    verbose: flags.verbose ?? false,
+    lenient: flags.lenient ?? false,
+  });
 
-  let totalPass = 0;
-  let totalFail = 0;
-  for (const file of files) {
-    const flow = parseMaestroFile(file);
-    console.log(`▸ ${basename(file)}`);
-    const flowStart = Date.now();
-    try {
-      const result = await runFlow(flow, { dylibPath: dylibPath ?? undefined, verbose, lenient });
-      const flowMs = Date.now() - flowStart;
-      if (result.passed) {
-        console.log(`  ✓ PASS  ${result.stepsRun} steps  ${flowMs}ms\n`);
-        totalPass++;
-      } else {
-        totalFail++;
-        const f = result.failure!;
-        console.log(
-          `  ✗ FAIL  step ${f.step}/${result.stepsRun}  ${flowMs}ms\n` +
-            `         ${f.command}\n` +
-            `         ${f.reason}\n`,
-        );
-      }
-    } catch (err) {
-      totalFail++;
-      console.log(`  ✗ ERROR  ${err instanceof Error ? err.message : String(err)}\n`);
-    }
+  try {
+    const result = await runner.run(files);
+    return result.passed ? 0 : 1;
+  } catch (err) {
+    console.error(`✗ ERROR  ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
   }
-
-  console.log('─'.repeat(40));
-  const n = totalPass + totalFail;
-  console.log(`${n} flow${n === 1 ? '' : 's'} · ${totalPass} passed · ${totalFail} failed`);
-  return totalFail > 0 ? 1 : 0;
 }
