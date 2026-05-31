@@ -14,8 +14,7 @@ Email **hello@reactiive.io** with:
 
 - A short description of the issue.
 - Steps to reproduce (minimal repro preferred).
-- The version of `@reactiive/ennio` (and `@reactiive/ennio-expo-plugin`
-  if relevant) where you observed it.
+- The version of `@reactiive/ennio` where you observed it.
 - Any known mitigations or workarounds.
 
 You should receive an initial acknowledgment within 7 days. If you
