@@ -293,12 +293,17 @@ export async function execTapOn(
   await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
   // Tiny ≤5 px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx
   // stack of 1×1 px Pressables at top:100 right:0 zIndex:100): integer
-  // rounding misses the hit-box ~30 % of taps, so we fire pure DOWN+UP
-  // three times unconditionally. No exp-backoff loop — the controls
-  // don't disappear after a press and there's no reliable stop signal.
+  // rounding misses the hit-box ~30 % of taps. Fire pure DOWN+UP and
+  // re-fire only if the view-tree hash didn't change. Previously
+  // unconditional 3× — wasted ~160 ms per tiny-control tap and risked
+  // dismissing sibling controls when the first tap succeeded.
   if (rect.w <= 5 && rect.h <= 5) {
-    for (let i = 0; i < 3; i++) {
-      if (i > 0) await sleep(80);
+    const baseHash = preHash ?? (await captureHash(ctx));
+    await hidTapPureFast(ctx.udid, center.x, center.y);
+    for (let i = 1; i < 3; i++) {
+      await sleep(80);
+      const h = await captureHash(ctx);
+      if (h !== baseHash) return;
       await hidTapPureFast(ctx.udid, center.x, center.y);
     }
     return;

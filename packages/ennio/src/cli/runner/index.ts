@@ -1503,10 +1503,13 @@ async function runCommand(
   }
 
   // Unknown/unsupported command. Default: fail so YAML typos don't
-  // silently pass. --lenient mode skips with a warning instead.
+  // silently pass. --lenient mode skips with a warning printed
+  // regardless of --verbose, since a silent skip in lenient mode is
+  // exactly the misuse case (typo in command name produces a green
+  // run instead of a clear error).
   const desc = describeCommand(cmd);
   if (ctx.lenient) {
-    log(ctx, `  (unsupported, skipped: ${desc})`);
+    process.stderr.write(`   ⚠ skipped (unsupported command): ${desc}\n`);
     return;
   }
   throw new Error(`unsupported command: ${desc}`);
@@ -1594,12 +1597,6 @@ function describeCommand(cmd: MaestroCommand): string {
     return `${key}: ${JSON.stringify(value)}`;
   }
   return key;
-}
-
-function log(ctx: RunContext, msg: string): void {
-  if (ctx.verbose || msg.startsWith('▶') || msg.startsWith('FAIL')) {
-    process.stderr.write(`[ennio] ${msg}\n`);
-  }
 }
 
 // One-line per-step trace under --verbose. Format:
