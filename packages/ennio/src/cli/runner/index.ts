@@ -1378,90 +1378,9 @@ export async function runCommand(
 
   // inputRandom* family — generate random text and type it into the
   // currently focused field.
-  if ('inputRandomText' in cmd) {
-    const len =
-      cmd.inputRandomText === true || cmd.inputRandomText === undefined
-        ? 8
-        : typeof cmd.inputRandomText === 'object' && 'length' in cmd.inputRandomText
-          ? (cmd.inputRandomText as { length: number }).length
-          : 8;
-    const chars = 'abcdefghijklmnopqrstuvwxyz';
-    let text = '';
-    for (let i = 0; i < len; i++) text += chars[Math.floor(Math.random() * chars.length)];
-    await runCommand(ctx, { inputText: text } as MaestroCommand, undefined);
-    return;
-  }
-  if ('inputRandomNumber' in cmd) {
-    const len =
-      cmd.inputRandomNumber === true || cmd.inputRandomNumber === undefined
-        ? 6
-        : typeof cmd.inputRandomNumber === 'object' && 'length' in cmd.inputRandomNumber
-          ? (cmd.inputRandomNumber as { length: number }).length
-          : 6;
-    let text = '';
-    for (let i = 0; i < len; i++) text += Math.floor(Math.random() * 10).toString();
-    await runCommand(ctx, { inputText: text } as MaestroCommand, undefined);
-    return;
-  }
-  if ('inputRandomEmail' in cmd) {
-    const user = Array.from(
-      { length: 8 },
-      () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)],
-    ).join('');
-    await runCommand(ctx, { inputText: `${user}@test.com` } as MaestroCommand, undefined);
-    return;
-  }
-  if ('inputRandomPersonName' in cmd) {
-    const first = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank'];
-    const last = ['Smith', 'Jones', 'Brown', 'Wilson', 'Taylor', 'Clark'];
-    const name = `${first[Math.floor(Math.random() * first.length)]} ${last[Math.floor(Math.random() * last.length)]}`;
-    await runCommand(ctx, { inputText: name } as MaestroCommand, undefined);
-    return;
-  }
-  // Clipboard operations
-  // setClipboard: migrated to commands/handlers/system.ts.
-  if ('pasteText' in cmd) {
-    const text = execFileSync('xcrun', ['simctl', 'pbpaste', ctx.udid], {
-      encoding: 'utf-8',
-    }).trim();
-    if (text) {
-      await runCommand(ctx, { inputText: text } as MaestroCommand, undefined);
-    }
-    return;
-  }
-  if ('copyTextFrom' in cmd) {
-    const sel = normalizeSelector((cmd as { copyTextFrom: unknown }).copyTextFrom as any);
-    const r = await ctx.client
-      .call('get_text', { testID: sel.id, text: sel.text })
-      .catch(() => undefined);
-    if (r && r.ok && r.data) {
-      const text = String((r.data as { text: string }).text);
-      execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], {
-        input: text,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    }
-    return;
-  }
-  // evalScript + assertTrue — Maestro wraps expressions in ${...}.
-  // Strip the wrapper so the JS VM sees raw code, not a template literal.
-  if ('evalScript' in cmd) {
-    let expr = String(cmd.evalScript);
-    if (expr.startsWith('${') && expr.endsWith('}')) expr = expr.slice(2, -1);
-    const sandbox = { output: ctx.outputs };
-    const vmCtx = createContext(sandbox);
-    runInContext(expr, vmCtx, { timeout: 5000 });
-    return;
-  }
-  if ('assertTrue' in cmd) {
-    let expr = String(cmd.assertTrue);
-    if (expr.startsWith('${') && expr.endsWith('}')) expr = expr.slice(2, -1);
-    const sandbox = { output: ctx.outputs };
-    const vmCtx = createContext(sandbox);
-    const result = runInContext(expr, vmCtx, { timeout: 5000 });
-    if (!result) throw new Error(`assertTrue failed: ${expr}`);
-    return;
-  }
+  // inputRandomText, inputRandomNumber, inputRandomEmail,
+  // inputRandomPersonName, pasteText, copyTextFrom, evalScript,
+  // assertTrue: migrated to commands/handlers/random-input.ts.
   // clearKeychain: migrated to commands/handlers/system.ts.
   // Legacy fallback removed.
 

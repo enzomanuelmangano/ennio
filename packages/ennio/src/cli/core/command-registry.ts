@@ -17,6 +17,12 @@ export type CommandMatcher<T extends MaestroCommand = MaestroCommand> = (
 export interface DispatchContext {
   ctx: RunContext;
   nextCmd: MaestroCommand | undefined;
+  /**
+   * Re-enter dispatch. Handlers use this to chain commands —
+   * e.g. inputRandomText composes a string then dispatches inputText.
+   * Bound to the same registry that called the handler.
+   */
+  dispatch: (cmd: MaestroCommand) => Promise<void>;
 }
 
 export type CommandHandler<T extends MaestroCommand = MaestroCommand> = (

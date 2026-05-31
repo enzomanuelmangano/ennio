@@ -84,10 +84,18 @@ export class FlowExecutor {
     this.reporter.flowStart(flow);
     const flowStart = Date.now();
 
+    const buildDctx = (nextCmd: MaestroCommand | undefined) => ({
+      ctx,
+      nextCmd,
+      dispatch: (c: MaestroCommand) =>
+        this.registry.dispatch(normalizeBareString(c), buildDctx(undefined)),
+    });
+
     // onFlowStart hook — failures abort the flow before the main loop.
     if (flow.onFlowStart) {
-      for (const cmd of flow.onFlowStart) {
-        await this.registry.dispatch(cmd, { ctx, nextCmd: undefined });
+      for (const rawHookCmd of flow.onFlowStart) {
+        const hookCmd = normalizeBareString(rawHookCmd);
+        await this.registry.dispatch(hookCmd, buildDctx(undefined));
       }
     }
 
@@ -108,7 +116,7 @@ export class FlowExecutor {
       const t0 = Date.now();
 
       try {
-        await this.registry.dispatch(cmd, { ctx, nextCmd });
+        await this.registry.dispatch(cmd, buildDctx(nextCmd));
 
         // Handle collapsed double-tap: runCommand can mark the next
         // command consumed (two same-target taps → one doubleTap).
@@ -145,9 +153,9 @@ export class FlowExecutor {
               i + 1,
               `re-firing previous tap (${describeCommand(lastTapCmd)})`,
             );
-            await this.registry.dispatch(lastTapCmd, { ctx, nextCmd: cmd });
+            await this.registry.dispatch(lastTapCmd, buildDctx(cmd));
             await sleep(150);
-            await this.registry.dispatch(cmd, { ctx, nextCmd });
+            await this.registry.dispatch(cmd, buildDctx(nextCmd));
             const dt = Date.now() - t0;
             stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
             this.reporter.stepPass(i + 1, cmd, dt);
@@ -199,12 +207,19 @@ export class FlowExecutor {
 
   private async runOnFlowComplete(flow: MaestroFlow, ctx: RunContext): Promise<void> {
     if (!flow.onFlowComplete) return;
-    for (const cmd of flow.onFlowComplete) {
+    const buildDctx = (nextCmd: MaestroCommand | undefined) => ({
+      ctx,
+      nextCmd,
+      dispatch: (c: MaestroCommand) =>
+        this.registry.dispatch(normalizeBareString(c), buildDctx(undefined)),
+    });
+    for (const rawHookCmd of flow.onFlowComplete) {
+      const hookCmd = normalizeBareString(rawHookCmd);
       try {
-        await this.registry.dispatch(cmd, { ctx, nextCmd: undefined });
+        await this.registry.dispatch(hookCmd, buildDctx(undefined));
       } catch (e) {
         this.reporter.warn?.(
-          `onFlowComplete: ${describeCommand(cmd)} failed: ${e instanceof Error ? e.message : String(e)}`,
+          `onFlowComplete: ${describeCommand(hookCmd)} failed: ${e instanceof Error ? e.message : String(e)}`,
         );
       }
     }
