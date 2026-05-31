@@ -4,6 +4,8 @@
 import type { CommandRegistry } from '../../core/command-registry';
 
 import { registerAssertHandlers } from './assert';
+import { registerControlFlowHandlers } from './control-flow';
+import { registerLifecycleHandlers } from './lifecycle';
 import { registerRandomInputHandlers } from './random-input';
 import { registerSystemHandlers } from './system';
 
@@ -11,6 +13,8 @@ export function registerAllHandlers(registry: CommandRegistry): void {
   registerSystemHandlers(registry);
   registerRandomInputHandlers(registry);
   registerAssertHandlers(registry);
-  // Future handler groups (tap, input, scroll, lifecycle)
-  // register themselves here as they migrate out of runner/index.ts.
+  registerLifecycleHandlers(registry);
+  registerControlFlowHandlers(registry);
+  // Future handler groups (tap, input, scroll) register themselves
+  // here as they migrate out of runner/index.ts.
 }

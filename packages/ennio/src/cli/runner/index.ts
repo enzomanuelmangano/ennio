@@ -28,13 +28,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 
 import { dirname, resolve } from 'node:path';
 
-import {
-  MaestroCommand,
-  MaestroFlow,
-  MaestroSelector,
-  normalizeSelector,
-  parseMaestroFile,
-} from '../maestro-parser';
+import { MaestroCommand, MaestroFlow, MaestroSelector, normalizeSelector } from '../maestro-parser';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 import {
   tap as hidTap,
@@ -52,7 +46,6 @@ import { enableAccessibility, ensureBootedSim, findDylib, terminateApp } from '.
 import {
   DEFAULT_WIN_H,
   DEFAULT_WIN_W,
-  POST_LAUNCH_SETTLE_MS,
   POST_TAP_SETTLE_MS,
   RunContext,
   RunResult,
@@ -64,12 +57,7 @@ import {
 import { captureHash, captureReactTs, findOnce, resolveCenter, resolveRect } from './find';
 import { execTapOn } from './tap';
 import { isVisible } from './visibility';
-import {
-  clearStateAndRelaunch,
-  dismissPermissionDialogs,
-  relaunchAndReconnect,
-  waitForFirstPaint,
-} from './lifecycle';
+import { waitForFirstPaint } from './lifecycle';
 
 // =====================================================================
 // runScript — Maestro JS sandbox
@@ -1119,219 +1107,13 @@ export async function runCommand(
     await sleep(400);
     return;
   }
-  if ('launchApp' in cmd) {
-    const opts =
-      cmd.launchApp === true
-        ? { clearState: false }
-        : (cmd.launchApp as {
-            clearState?: boolean;
-            arguments?: Record<string, string | boolean | number>;
-          });
-    // Convert Maestro's `arguments:` map into a flat list passed to
-    // `simctl launch` after the bundle id. iOS NSUserDefaults launch
-    // arguments require a key+value pair (`-Key Value`) — emitting
-    // just the key is silently ignored, which surfaced as Bluesky's
-    // Expo dev-menu onboarding sheet popping up despite the
-    // `-EXDevMenuIsOnboardingFinished true` argument in setupApp.yml.
-    // Stringify booleans the way iOS expects ("YES"/"NO").
-    const launchArgs: string[] = [];
-    if (opts.arguments) {
-      for (const [k, v] of Object.entries(opts.arguments)) {
-        launchArgs.push(k);
-        if (v === true) launchArgs.push('YES');
-        else if (v === false) launchArgs.push('NO');
-        else launchArgs.push(String(v));
-      }
-    }
-    if (opts.clearState) {
-      await clearStateAndRelaunch(ctx, launchArgs);
-    } else if (!ctx.client.isConnected()) {
-      // Socket dropped — app was killed (stopApp/killApp) or crashed.
-      // Re-launch with DYLD inject so the dylib reattaches.
-      await relaunchAndReconnect(ctx, launchArgs);
-    }
-    await sleep(POST_LAUNCH_SETTLE_MS);
-    return;
-  }
-  if ('clearState' in cmd) {
-    await clearStateAndRelaunch(ctx);
-    await sleep(POST_LAUNCH_SETTLE_MS);
-    return;
-  }
-  if ('stopApp' in cmd || 'killApp' in cmd) {
-    // Close the socket BEFORE killing the app — otherwise the socket
-    // FIN from the dying process races our next isConnected() check
-    // and the following launchApp incorrectly skips the relaunch.
-    ctx.client.close();
-    terminateApp(ctx.udid, ctx.bundleId);
-    return;
-  }
+  // launchApp, clearState, stopApp, killApp: migrated to
+  // commands/handlers/lifecycle.ts.
   // takeScreenshot: migrated to commands/handlers/system.ts.
   // Legacy fallback removed.
   // dismissAlert: migrated to commands/handlers/system.ts.
-  if ('openLink' in cmd) {
-    const link = typeof cmd.openLink === 'string' ? cmd.openLink : cmd.openLink.link;
-    execFileSync('xcrun', ['simctl', 'openurl', ctx.udid, link]);
-    // Dev-client deep links trigger a Metro connection + full JS bundle
-    // load. Wait for the React tree to mount (react_commit fires) before
-    // proceeding — the default 1.5s sleep isn't enough for cold Metro.
-    if (link.includes('expo-development-client')) {
-      await ctx.client
-        .call('wait_react_commit', { sinceMs: 0, maxMs: 20000 })
-        .catch(() => undefined);
-      await ctx.client.call('wait_commit', { maxMs: 5000, stableMs: 500 }).catch(() => undefined);
-      // Apps often request a system permission (Photo Library, etc.) as
-      // they finish booting the e2e bundle. That sheet renders in another
-      // process, floats over the app, and silently eats the next tap
-      // (e.g. the hidden e2e sign-in control) — leaving the flow stuck
-      // logged-out. Poll briefly for it here, BEFORE the flow's first
-      // real interaction, and grant it. The dylib can't see it; idb can.
-      const permDeadline = Date.now() + 8000;
-      while (Date.now() < permDeadline) {
-        if (await dismissPermissionDialogs(ctx.udid).catch(() => false)) break;
-        await sleep(1000);
-      }
-    }
-    await sleep(POST_LAUNCH_SETTLE_MS);
-    return;
-  }
-  if ('waitForAnimationToEnd' in cmd) {
-    const timeout =
-      cmd.waitForAnimationToEnd === true ? 600 : (cmd.waitForAnimationToEnd.timeout ?? 600);
-    // Race two signals:
-    //   - UIViewController.transitionCoordinator (animations_active)
-    //   - frame_hash quiet for 80 ms
-    // Either green-light returns. iOS 26 navigation occasionally
-    // holds the transition coordinator open past the visible
-    // animation end (custom presentation chain on liquid-glass tab
-    // bar) so transitionCoordinator alone hits the cap. Hash-quiet
-    // catches that case — the screen visibly stops changing well
-    // before transitionCoordinator releases.
-    const deadline = Date.now() + timeout;
-    let prevR = await ctx.client.call('frame_hash').catch(() => undefined);
-    let prevHash = (prevR?.data as { hash?: string })?.hash ?? '';
-    let lastChange = Date.now();
-    while (Date.now() < deadline) {
-      const animR = await ctx.client.call('animations_active').catch(() => undefined);
-      const animActive = !!(
-        animR &&
-        animR.ok &&
-        animR.data &&
-        (animR.data as { active?: boolean }).active
-      );
-      const hashR = await ctx.client.call('frame_hash').catch(() => undefined);
-      const curHash = (hashR?.data as { hash?: string })?.hash ?? '';
-      if (curHash !== prevHash) {
-        prevHash = curHash;
-        lastChange = Date.now();
-      }
-      const hashQuiet = Date.now() - lastChange >= 80;
-      if (!animActive || hashQuiet) break;
-      await sleep(20);
-    }
-    // Cross-process safety: PHPicker / share sheet / document picker
-    // dismiss in another XPC process — the animations_active check
-    // above is blind to those because their views live in a remote
-    // process. Bail the instant the picker leaves the VC chain.
-    const dismissDeadline = Date.now() + 2500;
-    while (Date.now() < dismissDeadline) {
-      const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
-      if (!r || !r.ok) break;
-      const chain = (r.data as { chain?: string[] })?.chain ?? [];
-      const hasCrossProcess = chain.some(
-        (cls) =>
-          cls.includes('PHPicker') ||
-          cls.includes('PhotoPicker') ||
-          cls.includes('PHImagePicker') ||
-          cls.includes('UIActivityViewController') ||
-          cls.includes('UIDocumentPickerViewController'),
-      );
-      if (!hasCrossProcess) break;
-      await sleep(80);
-    }
-    return;
-  }
-  if ('runScript' in cmd) {
-    const scriptCmd = (cmd as { runScript: { file: string; env?: Record<string, string> } })
-      .runScript;
-    await runMaestroScript(ctx, scriptCmd);
-    return;
-  }
-  if ('runFlow' in cmd) {
-    const sub = cmd.runFlow;
-    // `when:` clause — evaluate the predicate against current screen.
-    // If false, skip the subflow entirely.
-    if (sub.when) {
-      const w = sub.when as {
-        visible?: unknown;
-        notVisible?: unknown;
-        platform?: string;
-      };
-      let satisfied = true;
-      if (w.platform) {
-        // Maestro platform gate: iOS / Android. We're an iOS-only
-        // runner, so the iOS branch always runs and the Android one
-        // is skipped.
-        satisfied = String(w.platform).toLowerCase() === 'ios';
-      }
-      if (satisfied && w.visible) {
-        satisfied = await isVisible(ctx, normalizeSelector(w.visible));
-      } else if (satisfied && w.notVisible) {
-        satisfied = !(await isVisible(ctx, normalizeSelector(w.notVisible)));
-      }
-      if (!satisfied) return;
-    }
-    // Inline commands form: { runFlow: { when?: ..., commands: [...] } }
-    if (sub.commands && Array.isArray(sub.commands)) {
-      for (let i = 0; i < sub.commands.length; i++)
-        await runCommand(ctx, sub.commands[i], sub.commands[i + 1]);
-      return;
-    }
-    // File form: { runFlow: { file: "subflows/foo.yaml" } }
-    if (sub.file) {
-      const subPath = resolve(dirname(ctx.flowPath), sub.file);
-      const subFlow = parseMaestroFile(subPath);
-      const prevPath = ctx.flowPath;
-      ctx.flowPath = subPath;
-      const trace = !!process.env.ENNIO_PHASE_TRACE;
-      try {
-        for (let i = 0; i < subFlow.commands.length; i++) {
-          const t = Date.now();
-          await runCommand(ctx, subFlow.commands[i], subFlow.commands[i + 1]);
-          if (trace) {
-            process.stderr.write(
-              `[sub] ${sub.file} #${i + 1} ${Date.now() - t}ms ${describeCommand(subFlow.commands[i])}\n`,
-            );
-          }
-        }
-      } finally {
-        ctx.flowPath = prevPath;
-      }
-      return;
-    }
-    return;
-  }
-  if ('repeat' in cmd) {
-    for (let i = 0; i < cmd.repeat.times; i++) {
-      for (let i = 0; i < cmd.repeat.commands.length; i++)
-        await runCommand(ctx, cmd.repeat.commands[i], cmd.repeat.commands[i + 1]);
-    }
-    return;
-  }
-  if ('retry' in cmd) {
-    const maxRetries = cmd.retry.maxRetries ?? 3;
-    let lastErr: unknown;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        for (let i = 0; i < cmd.retry.commands.length; i++)
-          await runCommand(ctx, cmd.retry.commands[i], cmd.retry.commands[i + 1]);
-        return;
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
-  }
+  // openLink, waitForAnimationToEnd: migrated to commands/handlers/lifecycle.ts.
+  // runScript, runFlow, repeat, retry: migrated to commands/handlers/control-flow.ts.
 
   // inputRandom* family — generate random text and type it into the
   // currently focused field.
@@ -1401,7 +1183,7 @@ function maestroHttpSync(
   return last;
 }
 
-async function runMaestroScript(
+export async function runMaestroScript(
   ctx: RunContext,
   script: { file: string; env?: Record<string, string> },
 ): Promise<void> {
