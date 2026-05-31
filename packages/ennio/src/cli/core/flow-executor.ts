@@ -113,6 +113,11 @@ export class FlowExecutor {
       // `'op' in cmd` work uniformly.
       const cmd = normalizeBareString(rawCmd);
       const nextCmd = rawNext === undefined ? undefined : normalizeBareString(rawNext);
+      // Any non-tapOn command breaks the repeat-tap chain — the next
+      // tapOn should NOT see the previous tapOn as its "last tap".
+      if (typeof cmd !== 'object' || cmd === null || !('tapOn' in cmd)) {
+        ctx.lastTapKey = undefined;
+      }
       const t0 = Date.now();
 
       try {

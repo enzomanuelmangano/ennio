@@ -31,9 +31,7 @@ import { dirname, resolve } from 'node:path';
 import { MaestroCommand, MaestroFlow, MaestroSelector, normalizeSelector } from '../maestro-parser';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 import {
-  tap as hidTap,
   tapFast as hidTapFast,
-  doubleTap as hidDoubleTap,
   swipe as hidSwipe,
   longPressDrag as hidLongPressDrag,
   typeText as hidType,
@@ -46,16 +44,13 @@ import { enableAccessibility, ensureBootedSim, findDylib, terminateApp } from '.
 import {
   DEFAULT_WIN_H,
   DEFAULT_WIN_W,
-  POST_TAP_SETTLE_MS,
   RunContext,
   RunResult,
   interpolate,
   recordPhase,
   sleep,
-  timedAsync,
 } from './context';
-import { captureHash, captureReactTs, findOnce, resolveCenter, resolveRect } from './find';
-import { execTapOn } from './tap';
+import { resolveRect } from './find';
 import { isVisible } from './visibility';
 import { waitForFirstPaint } from './lifecycle';
 
@@ -367,7 +362,7 @@ function printPhaseTotals(ctx: RunContext): void {
 export async function runCommand(
   ctx: RunContext,
   rawCmd: MaestroCommand,
-  nextRawCmd?: MaestroCommand,
+  _nextRawCmd?: MaestroCommand,
 ): Promise<void> {
   // Maestro lets some commands be bare strings: `- hideKeyboard`,
   // `- back`, `- launchApp`, etc. js-yaml parses those as plain strings,
@@ -377,300 +372,12 @@ export async function runCommand(
     typeof rawCmd === 'string' ? ({ [rawCmd]: true } as unknown as MaestroCommand) : rawCmd;
 
   // Reset repeat-tap tracking unless this command itself is a tapOn.
+  // (FlowExecutor also resets this before dispatch — kept here for the
+  // legacy direct callers of runCommand still in this file.)
   if (!('tapOn' in cmd)) ctx.lastTapKey = undefined;
 
-  if ('tapOn' in cmd) {
-    const sel = normalizeSelector(cmd.tapOn);
-    // Maestro's `optional: true` modifier on tapOn: if the selector
-    // doesn't resolve within a short window, silently skip the step
-    // instead of failing the flow. Used in flows that may or may
-    // not see e.g. a "Not Now" prompt depending on app state.
-    const tapObj =
-      cmd.tapOn && typeof cmd.tapOn === 'object'
-        ? (cmd.tapOn as { optional?: boolean; repeat?: number; delay?: number })
-        : null;
-    const isOptional = !!tapObj?.optional;
-    if (isOptional) {
-      const r = await findOnce(ctx, sel);
-      if (!r) return;
-    }
-    // Maestro `repeat: N` + `delay: ms`: tap the same target N times
-    // with `delay` ms between taps. Used for dismissing
-    // sometimes-present prompts (e.g. iCloud save-password sheet).
-    // Without this, ennio fires the tap once and proceeds, missing
-    // the dismiss when a slow-mounting prompt appears late.
-    if (tapObj?.repeat && tapObj.repeat > 1) {
-      const times = tapObj.repeat;
-      const delayMs = tapObj.delay ?? 200;
-      for (let i = 0; i < times; i++) {
-        if (i > 0) await sleep(delayMs);
-        await execTapOn(ctx, sel);
-      }
-      return;
-    }
-    const tapKey = JSON.stringify(sel);
-    const isRepeatTap = ctx.lastTapKey === tapKey;
-    // Look-ahead: if the NEXT command is a tapOn on the same target,
-    // skip our post-settle so the two HID events land inside RN's
-    // double-tap window (<350 ms). Without this, even with the
-    // repeat-tap fast-path on the second tap, the first tap's
-    // 800 ms POST_TAP_SETTLE + post wait_commit pushes the gap
-    // over a second.
-    let nextIsSameTap = false;
-    if (nextRawCmd && typeof nextRawCmd === 'object' && 'tapOn' in nextRawCmd) {
-      const nextSel = normalizeSelector((nextRawCmd as { tapOn: unknown }).tapOn as any);
-      if (JSON.stringify(nextSel) === tapKey) nextIsSameTap = true;
-    }
-    // When the next step taps the same target, collapse the pair into
-    // a single double-tap dispatched within ONE idb HID session. Each
-    // standalone tap() opens + closes its own gRPC stream — that
-    // open/close cycle inserts ~100ms between the two Down/Up sequences
-    // and exceeds RN/UIKit's ~350ms double-tap window, so the second
-    // tap registers as a fresh single tap (onPress fires twice instead
-    // of onDoubleTap once). Keeping both taps on one stream eliminates
-    // the gap. Skipped when the current tap targets a tiny (≤5 px)
-    // hidden test control where the pure-fast retry loop takes over.
-    if (nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
-      const rect = await findOnce(ctx, sel);
-      if (rect && (rect.w > 5 || rect.h > 5)) {
-        await timedAsync(ctx, 'tap.execTapOn', () =>
-          hidDoubleTap(ctx.udid, rect.x + rect.w / 2, rect.y + rect.h / 2),
-        );
-        ctx.lastTapKey = tapKey;
-        ctx.lastTapTestID = sel.id;
-        ctx.skipNextCmd = true;
-        return;
-      }
-    }
-    // Pre-tap settle: wait for the screen to stop animating so we tap
-    // a stable button frame, not a half-transitioned one. Without this,
-    // the tap can land on a view that's still sliding in from a tab
-    // switch and RNGH's gesture recognizer rejects the touch.
-    // stableMs 600ms outlasts React-Navigation's modal dismiss
-    // animation (~300ms) plus UIKit's presented-VC teardown — a
-    // shorter window reports "stable" while a residual sheet overlay
-    // is still absorbing touches and the next tap silently misses.
-    // Repeat-tap case skips this — back-to-back tapOns on the same
-    // target are typically intentional double-taps (RN DoubleTapBox
-    // uses a <350 ms Date.now() gap detector).
-    // If the previous step typed/erased text and the next tap targets
-    // anything other than another text field, iOS's editing-menu
-    // popover ("Select / Select All / AutoFill") is still floating
-    // over the screen — it eats the first tap as a dismiss, so the
-    // intended Save / Submit button never fires. Resign first
-    // responder before the tap so the popover clears with the
-    // keyboard. Skipped when the tap IS into another Input field
-    // (back-to-back form edits stay focused).
-    const tapIsIntoInput = sel.id && /Input$/i.test(sel.id);
-    if (ctx.lastWasTextInput && !tapIsIntoInput) {
-      await ctx.client.call('hide_keyboard').catch(() => undefined);
-      await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
-    }
-    ctx.lastWasTextInput = false;
-    if (!isRepeatTap) {
-      // Pre-tap settle reduced to ONE check: wait_commit (frame-hash
-      // stability). The hit-test exposure gate further down in the
-      // tap-pipeline catches cases where the layout settled but the
-      // visual layer is still mid-animation, so we don't need the
-      // VC-transition / React-mount checks here too. Dropping those
-      // two saves ~450 ms / tap on average — curate-lists 97-step
-      // run drops ~25 s. Generous maxMs gives slow async submits
-      // room; stableMs floor keeps the average low.
-      await timedAsync(ctx, 'tap.preWaitCommit', async () => {
-        // Wait for any UIKit transition (modal dismiss, nav push/pop)
-        // to fully end before tapping. Signal-based: polls
-        // animations_active (checks UIViewController.transitionCoordinator
-        // across the VC chain). No magic-number stable-quiet window —
-        // we wait until the system itself reports no transition in
-        // flight. Cap at 1500 ms for safety; the cap is reached only
-        // when a custom transition holds the coordinator open past the
-        // visible animation end.
-        const deadline = Date.now() + 1500;
-        while (Date.now() < deadline) {
-          const r = await ctx.client.call('animations_active').catch(() => undefined);
-          const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
-          if (!active) break;
-          await sleep(20);
-        }
-      });
-    }
-    const preTapHash = await captureHash(ctx);
-    const preReact = await captureReactTs(ctx);
-    // If the next op is inputText (typing) and we have a testID,
-    // route the "tap to focus" through focus_testid: it calls
-    // becomeFirstResponder in-process — deterministic, no race with
-    // RN's onPress firing a state-driven focus transition. Without
-    // this, a freshly-presented form's first TextInput tap can land
-    // before RN has wired up the press handler, leaving the field
-    // unfocused; the inputText that follows types into nowhere.
-    // Observed on Bluesky's "Create moderation list" name field.
-    // Edit-form text inputs (RN TextInput with `defaultValue`) reject
-    // the first tap. Detect by testID matching /Input$/ AND next op
-    // editing the field — call focus_testid as primary; the regular
-    // tap below still fires as belt-and-braces.
-    const nextEditsField =
-      !!nextRawCmd &&
-      typeof nextRawCmd === 'object' &&
-      ('inputText' in nextRawCmd || 'eraseText' in nextRawCmd || 'clearText' in nextRawCmd);
-    let focusedViaTestId = false;
-    if (sel.id && nextEditsField) {
-      // Focus the field in-process via becomeFirstResponder. This is
-      // deterministic and avoids the race where a fresh form's first
-      // TextInput tap lands before RN has wired up the press handler.
-      const r = await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
-      focusedViaTestId = !!(r && r.ok);
-    }
-    if (focusedViaTestId) {
-      // Field is already firstResponder — skip the redundant HID tap.
-      // The keyboard is animating up and the tap coordinates (computed
-      // from the pre-keyboard layout) may now land on the keyboard
-      // itself, injecting a ghost keypress (observed: "tbanana"
-      // instead of "banana" when the tap hit the "t" key).
-      await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 200 }).catch(() => undefined);
-      ctx.lastTapKey = tapKey;
-      ctx.lastTapTestID = sel.id;
-      return;
-    }
-    await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
-    if (isRepeatTap || nextIsSameTap) {
-      // Tight gap so consecutive same-target taps register as a
-      // double-tap on RN Pressables / RNGH Tap recognizers.
-      await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
-    } else if (preReact.attach !== 'none') {
-      // Hermes/Paper/Fabric commit observer attached — block on the
-      // next RN commit AFTER the tap. This is O(1) inside the dylib
-      // (NSCondition broadcast from a swizzled mount method) and
-      // returns on the same vsync RN commits.
-      //
-      // We wait for *two* commits, not one: a Pressable's onPress
-      // typically dispatches a setState that takes one commit to
-      // reach the view tree, plus a second commit for the React
-      // effect that follows (focus transition, navigation push,
-      // dropdown open). Stopping after commit #1 caused inputText
-      // to fire before the just-tapped TextInput became first
-      // responder — see "Please enter your username" regression on
-      // login.yml.
-      const waitOneCommit = async (since: number, maxMs: number): Promise<number> => {
-        const r = await ctx.client
-          .call('wait_react_commit', { sinceMs: since, maxMs })
-          .catch(() => undefined);
-        if (!r || !r.ok || !r.data) return 0;
-        const data = r.data as { ok: boolean; elapsedMs: number };
-        if (!data.ok) return 0;
-        // Re-sample lastCommitMs so the next wait starts after this one.
-        const ts = await captureReactTs(ctx);
-        return ts.ts || since + (data.elapsedMs ?? 0);
-      };
-      const committed = await timedAsync(ctx, 'tap.postWaitReactCommit', async () => {
-        // Signal-based post-tap wait. Two coupled signals:
-        //   1. Frame hash must DIFFER from preTapHash (something
-        //      changed on screen — press handler ran, layer
-        //      repainted, or modal dismissed).
-        //   2. UIViewController.transitionCoordinator must be nil
-        //      (no animation in flight).
-        // Both must be true to return committed=true. Cap 1500 ms —
-        // covers modal-dismiss tails after `router.dismiss()`-style
-        // calls that don't trigger React commits.
-        const deadline = Date.now() + 1500;
-        while (Date.now() < deadline) {
-          const cur = await captureHash(ctx);
-          if (cur !== preTapHash) {
-            const animR = await ctx.client.call('animations_active').catch(() => undefined);
-            const animActive = !!(
-              animR &&
-              animR.ok &&
-              animR.data &&
-              (animR.data as { active?: boolean }).active
-            );
-            if (!animActive) {
-              if (nextEditsField) {
-                await waitOneCommit(preReact.ts, 250);
-              }
-              return true;
-            }
-          }
-        }
-        return false;
-      });
-      if (!committed) {
-        // No commit fired — likely a no-op tap, fall back to the
-        // hash-change signal so we don't skip ahead.
-        await timedAsync(ctx, 'tap.postWaitHashChange', async () => {
-          await ctx.client
-            .call('wait_hash_change', { sinceHash: preTapHash, maxMs: 400 })
-            .catch(() => undefined);
-        });
-      }
-      await timedAsync(ctx, 'tap.postWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined),
-      );
-    } else {
-      // Event-driven post-tap settle. Replaces fixed POST_TAP_SETTLE_MS
-      // sleep with a CADisplayLink-condition wait inside the dylib:
-      // returns the instant the visible-UIView hash differs from
-      // pre-tap. Active screens react in 50-200ms; static-screen taps
-      // hit the 600ms ceiling and fall through to a short fixed sleep
-      // so we don't skip ahead of a slow React commit. Subsequent
-      // wait_commit smooths the transition's tail.
-      const changed = await timedAsync(ctx, 'tap.postWaitHashChange', async () => {
-        const r = await ctx.client
-          .call('wait_hash_change', { sinceHash: preTapHash, maxMs: 600 })
-          .catch(() => undefined);
-        return !!(r && r.ok && r.data && (r.data as { ok: boolean }).ok);
-      });
-      if (!changed) {
-        // No hash change — likely a no-op tap, OR the JS bridge
-        // hasn't fired its commit yet. Check animations_active: if
-        // UIKit reports idle, halve the sleep since the screen is
-        // genuinely static. Full budget only when animations are
-        // in-flight (a transition may be producing the commit we're
-        // waiting for).
-        const animR = await ctx.client.call('animations_active').catch(() => undefined);
-        const animActive = !!(
-          animR &&
-          animR.ok &&
-          animR.data &&
-          (animR.data as { active?: boolean }).active
-        );
-        const settleMs = animActive ? POST_TAP_SETTLE_MS : Math.min(POST_TAP_SETTLE_MS, 400);
-        await timedAsync(ctx, 'tap.postSleep', () => sleep(settleMs));
-      }
-      // 350 ms of commit-quiet outlasts setState batching, RN-Nav
-      // pop animations, list re-layouts. Below ~300 ms we race the
-      // next tap onto a still-transitioning view. maxMs trimmed
-      // 1500 → 800: in practice the screen stabilizes within
-      // 300-500 ms of the dismiss, so 800 ms is generous headroom
-      // without paying for the legacy worst-case ceiling.
-      await timedAsync(ctx, 'tap.postWaitCommit', () =>
-        ctx.client.call('wait_commit', { maxMs: 800, stableMs: 350 }).catch(() => undefined),
-      );
-      // Tail-end: UIKit-level transitions (modal dismiss, RN-Nav
-      // interactive pop) that don't fire React commits. The
-      // transitionCoordinator on the dismissing VC clears in
-      // 300-400 ms; 500 ms cap covers normal cases. wait_commit
-      // above already absorbs longer JS-driven settle.
-      await ctx.client.call('wait_presentation_idle', { maxMs: 500 }).catch(() => undefined);
-    }
-    ctx.lastTapKey = tapKey;
-    ctx.lastTapTestID = sel.id;
-    return;
-  }
-  if ('doubleTapOn' in cmd) {
-    const sel = normalizeSelector(cmd.doubleTapOn);
-    const { x, y } = await resolveCenter(ctx, sel);
-    await hidDoubleTap(ctx.udid, x, y);
-    await sleep(POST_TAP_SETTLE_MS);
-    return;
-  }
-  if ('longPress' in cmd || 'longPressOn' in cmd) {
-    const sel = normalizeSelector(('longPress' in cmd ? cmd.longPress : cmd.longPressOn) as any);
-    const { x, y } = await resolveCenter(ctx, sel);
-    // Long press = tap with hold duration. Maestro default 1500ms;
-    // many RN long-press handlers register at ~500ms.
-    await hidTap(ctx.udid, x, y, 0.8);
-    await sleep(POST_TAP_SETTLE_MS);
-    return;
-  }
+  // tapOn: migrated to commands/handlers/tap.ts.
+  // tapOn, doubleTapOn, longPress, longPressOn: migrated to commands/handlers/tap.ts.
   // assertVisible, assertNotVisible, waitFor, assertAnyVisible,
   // extendedWaitUntil: migrated to commands/handlers/assert.ts.
   if ('inputText' in cmd) {
