@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { tap as hidTap } from '../hid';
 import { findDylib, getAppContainer, terminateApp } from '../sim';
-import { EnnioSocketClient } from '../socket-client';
+import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 
 import { RunContext, sleep } from './context';
 
@@ -132,6 +132,22 @@ export async function relaunchAndReconnect(
     }
     ctx.dylibPath = auto;
   }
+  // Set ENNIO_SOCKET_PATH on the simulator launchctl env (SIMCTL_CHILD_*
+  // only forwards DYLD_* and a few known prefixes; arbitrary names are
+  // dropped). Per-UDID path, sim-wide scope, not a secret.
+  execFileSync(
+    'xcrun',
+    [
+      'simctl',
+      'spawn',
+      ctx.udid,
+      'launchctl',
+      'setenv',
+      'ENNIO_SOCKET_PATH',
+      ennioSocketPath(ctx.udid),
+    ],
+    { stdio: 'pipe' },
+  );
   execFileSync(
     'xcrun',
     ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
@@ -140,7 +156,7 @@ export async function relaunchAndReconnect(
       stdio: 'pipe',
     },
   );
-  const reopen = new EnnioSocketClient();
+  const reopen = new EnnioSocketClient(ctx.udid);
   if (!(await reopen.connectWithRetry(15_000))) {
     throw new Error('socket reconnect failed after launchApp');
   }
@@ -172,7 +188,7 @@ export async function clearStateAndRelaunch(
   ctx.client.close();
   // Remove stale socket so the new process binds cleanly.
   try {
-    rmSync('/tmp/ennio-control.sock', { force: true });
+    rmSync(ennioSocketPath(ctx.udid), { force: true });
   } catch {
     /* ok */
   }
@@ -272,6 +288,22 @@ export async function clearStateAndRelaunch(
     }
     ctx.dylibPath = auto;
   }
+  // Set ENNIO_SOCKET_PATH on the simulator launchctl env (SIMCTL_CHILD_*
+  // only forwards DYLD_* and a few known prefixes; arbitrary names are
+  // dropped). Per-UDID path, sim-wide scope, not a secret.
+  execFileSync(
+    'xcrun',
+    [
+      'simctl',
+      'spawn',
+      ctx.udid,
+      'launchctl',
+      'setenv',
+      'ENNIO_SOCKET_PATH',
+      ennioSocketPath(ctx.udid),
+    ],
+    { stdio: 'pipe' },
+  );
   execFileSync(
     'xcrun',
     ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
@@ -280,7 +312,7 @@ export async function clearStateAndRelaunch(
       stdio: 'pipe',
     },
   );
-  const reopen = new EnnioSocketClient();
+  const reopen = new EnnioSocketClient(ctx.udid);
   if (!(await reopen.connectWithRetry(15_000))) {
     throw new Error('socket reconnect failed after clearState relaunch');
   }

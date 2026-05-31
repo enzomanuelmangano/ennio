@@ -35,7 +35,7 @@ import {
   normalizeSelector,
   parseMaestroFile,
 } from '../maestro-parser';
-import { EnnioSocketClient } from '../socket-client';
+import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 import {
   tap as hidTap,
   tapFast as hidTapFast,
@@ -44,6 +44,7 @@ import {
   longPressDrag as hidLongPressDrag,
   typeText as hidType,
   setDylibClient,
+  closeAllIdbClients,
 } from '../hid';
 import { enableAccessibility, ensureBootedSim, findDylib, terminateApp } from '../sim';
 
@@ -123,7 +124,7 @@ export async function runFlow(
   // like iOS Settings is invisible to find_ax_by_text. One-time, cheap.
   enableAccessibility(udid);
 
-  const client = new EnnioSocketClient();
+  const client = new EnnioSocketClient(udid);
   if (!(await client.connect())) {
     // Socket not up — app isn't running with libennio injected. Auto-
     // launch with the dylib so users don't need a pre-step. Auto-locate
@@ -144,6 +145,16 @@ export async function runFlow(
     } catch {
       /* not running */
     }
+    // Set ENNIO_SOCKET_PATH on the simulator's launchctl env so the
+    // dylib reads it via getenv() at +load time. SIMCTL_CHILD_* only
+    // forwards DYLD_* / CFNETWORK_* and a few other known prefixes —
+    // arbitrary names are dropped silently. Setting via launchctl
+    // setenv is sim-wide but harmless: per-UDID path, not a secret.
+    execFileSync(
+      'xcrun',
+      ['simctl', 'spawn', udid, 'launchctl', 'setenv', 'ENNIO_SOCKET_PATH', ennioSocketPath(udid)],
+      { stdio: 'pipe' },
+    );
     execFileSync('xcrun', ['simctl', 'launch', '--terminate-running-process', udid, flow.appId], {
       env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib },
       stdio: 'pipe',
@@ -202,93 +213,110 @@ export async function runFlow(
   let stepsPassed = 0;
   const stepTimings: { step: number; ms: number; cmd: string }[] = [];
   let lastTapCmd: unknown = undefined;
-  for (let i = 0; i < flow.commands.length; i++) {
-    const cmd = flow.commands[i];
-    const nextCmd = flow.commands[i + 1];
-    const t0 = Date.now();
-    try {
-      await runCommand(ctx, cmd, nextCmd);
-      // A step (typically tapOn collapsing with its same-target peer
-      // into a single double-tap) can mark the next command consumed.
-      // Advance one extra position to skip it.
-      if (ctx.skipNextCmd) {
-        ctx.skipNextCmd = false;
-        if (i + 1 < flow.commands.length) {
-          const consumed = flow.commands[i + 1];
-          stepsPassed++;
-          stepTimings.push({ step: i + 2, ms: 0, cmd: describeCommand(consumed) + ' (collapsed)' });
-          logStep(ctx, i + 2, 0, describeCommand(consumed) + ' (collapsed)', true);
-          i++;
-        }
-      }
-      const dt = Date.now() - t0;
-      stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
-      logStep(ctx, i + 1, dt, describeCommand(cmd), true);
-      stepsPassed++;
-      if (typeof cmd === 'object' && cmd && 'tapOn' in cmd) {
-        lastTapCmd = cmd;
-      } else {
-        lastTapCmd = undefined;
-      }
-    } catch (err) {
-      // Step-level retry for find-failure following a tapOn. Bluesky's
-      // dropdown / sheet open is non-deterministic: ennio's HID tap
-      // lands at the right pixel but the RN responder system
-      // intermittently swallows the press (~40% flake on home-screen
-      // step 21→22). If the failing step is a tapOn or assertVisible
-      // that can't find its target AND the previous step was a tapOn,
-      // re-fire that previous tap once and retry the current step.
-      const msg = err instanceof Error ? err.message : String(err);
-      const isFindMiss = /element not found|assertVisible\/waitFor timeout/i.test(msg);
-      const isFindableStep =
-        cmd &&
-        typeof cmd === 'object' &&
-        ('tapOn' in cmd || 'assertVisible' in cmd || 'waitFor' in cmd);
-      if (lastTapCmd && isFindMiss && isFindableStep) {
-        try {
-          if (ctx.verbose) {
-            process.stderr.write(
-              `   ↻  re-firing previous tap (${describeCommand(lastTapCmd as MaestroCommand)})\n`,
-            );
+  // Wrap the step loop in a try/finally so a thrown error in
+  // runCommand or runOnFlowComplete can't leave the socket open and
+  // idb gRPC clients pooled across flows. Without this, a partial-
+  // flow crash deadlocks the next launch attempt.
+  try {
+    for (let i = 0; i < flow.commands.length; i++) {
+      const cmd = flow.commands[i];
+      const nextCmd = flow.commands[i + 1];
+      const t0 = Date.now();
+      try {
+        await runCommand(ctx, cmd, nextCmd);
+        // A step (typically tapOn collapsing with its same-target peer
+        // into a single double-tap) can mark the next command consumed.
+        // Advance one extra position to skip it.
+        if (ctx.skipNextCmd) {
+          ctx.skipNextCmd = false;
+          if (i + 1 < flow.commands.length) {
+            const consumed = flow.commands[i + 1];
+            stepsPassed++;
+            stepTimings.push({
+              step: i + 2,
+              ms: 0,
+              cmd: describeCommand(consumed) + ' (collapsed)',
+            });
+            logStep(ctx, i + 2, 0, describeCommand(consumed) + ' (collapsed)', true);
+            i++;
           }
-          await runCommand(ctx, lastTapCmd as any, cmd);
-          await sleep(150);
-          await runCommand(ctx, cmd, nextCmd);
-          const dt = Date.now() - t0;
-          stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
-          logStep(ctx, i + 1, dt, describeCommand(cmd), true);
-          stepsPassed++;
-          lastTapCmd = typeof cmd === 'object' && cmd && 'tapOn' in cmd ? cmd : undefined;
-          continue;
-        } catch {
-          /* fall through to fail */
         }
+        const dt = Date.now() - t0;
+        stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
+        logStep(ctx, i + 1, dt, describeCommand(cmd), true);
+        stepsPassed++;
+        if (typeof cmd === 'object' && cmd && 'tapOn' in cmd) {
+          lastTapCmd = cmd;
+        } else {
+          lastTapCmd = undefined;
+        }
+      } catch (err) {
+        // Step-level retry for find-failure following a tapOn. Bluesky's
+        // dropdown / sheet open is non-deterministic: ennio's HID tap
+        // lands at the right pixel but the RN responder system
+        // intermittently swallows the press (~40% flake on home-screen
+        // step 21→22). If the failing step is a tapOn or assertVisible
+        // that can't find its target AND the previous step was a tapOn,
+        // re-fire that previous tap once and retry the current step.
+        const msg = err instanceof Error ? err.message : String(err);
+        const isFindMiss = /element not found|assertVisible\/waitFor timeout/i.test(msg);
+        const isFindableStep =
+          cmd &&
+          typeof cmd === 'object' &&
+          ('tapOn' in cmd || 'assertVisible' in cmd || 'waitFor' in cmd);
+        if (lastTapCmd && isFindMiss && isFindableStep) {
+          try {
+            if (ctx.verbose) {
+              process.stderr.write(
+                `   ↻  re-firing previous tap (${describeCommand(lastTapCmd as MaestroCommand)})\n`,
+              );
+            }
+            await runCommand(ctx, lastTapCmd as any, cmd);
+            await sleep(150);
+            await runCommand(ctx, cmd, nextCmd);
+            const dt = Date.now() - t0;
+            stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
+            logStep(ctx, i + 1, dt, describeCommand(cmd), true);
+            stepsPassed++;
+            lastTapCmd = typeof cmd === 'object' && cmd && 'tapOn' in cmd ? cmd : undefined;
+            continue;
+          } catch {
+            /* fall through to fail */
+          }
+        }
+        const dt = Date.now() - t0;
+        stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
+        logStep(ctx, i + 1, dt, describeCommand(cmd), false);
+        await runOnFlowComplete(ctx, flow);
+        printSlowSteps(stepTimings);
+        printPhaseTotals(ctx);
+        return {
+          passed: false,
+          stepsRun: i + 1,
+          stepsPassed,
+          failure: {
+            step: i + 1,
+            command: describeCommand(cmd),
+            reason: err instanceof Error ? err.message : String(err),
+          },
+        };
       }
-      const dt = Date.now() - t0;
-      stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
-      logStep(ctx, i + 1, dt, describeCommand(cmd), false);
-      setDylibClient(null);
-      await runOnFlowComplete(ctx, flow);
-      client.close();
-      printSlowSteps(stepTimings);
-      printPhaseTotals(ctx);
-      return {
-        passed: false,
-        stepsRun: i + 1,
-        stepsPassed,
-        failure: {
-          step: i + 1,
-          command: describeCommand(cmd),
-          reason: err instanceof Error ? err.message : String(err),
-        },
-      };
     }
+    await runOnFlowComplete(ctx, flow);
+    printSlowSteps(stepTimings);
+    printPhaseTotals(ctx);
+    return { passed: true, stepsRun: flow.commands.length, stepsPassed };
+  } finally {
+    // Always clean up — socket close, idb gRPC pool drain, runner-
+    // facing dylib client unset. Safe to call even after early return.
+    setDylibClient(null);
+    try {
+      client.close();
+    } catch {
+      /* socket may already be closed */
+    }
+    closeAllIdbClients();
   }
-  await runOnFlowComplete(ctx, flow);
-  client.close();
-  printSlowSteps(stepTimings);
-  printPhaseTotals(ctx);
-  return { passed: true, stepsRun: flow.commands.length, stepsPassed };
 }
 
 async function runOnFlowComplete(ctx: RunContext, flow: MaestroFlow): Promise<void> {

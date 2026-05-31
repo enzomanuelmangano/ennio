@@ -18,8 +18,7 @@ are seeing.
 ## Before opening an issue
 
 1. Search existing issues — your problem may already be tracked.
-2. Confirm you are on the **latest** `@reactiive/ennio` and
-   `@reactiive/ennio-expo-plugin`.
+2. Confirm you are on the **latest** `@reactiive/ennio`.
 3. Confirm the environment matches the supported matrix in the
    [README](README.md#getting-started): RN ≥ 0.81 (New Arch / Fabric),
    iOS 17+ simulator, Xcode 16+, Node 18+, `idb-companion` + `fb-idb`

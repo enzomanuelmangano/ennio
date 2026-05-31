@@ -8,10 +8,16 @@
 // Response:  {"id":"r1","ok":true,"data":{"x":...,"y":...,"w":...,"h":...}}
 // Error:     {"id":"r1","ok":false,"err":"testID not found: foo"}
 //
-// Socket path is the fixed host-shared "/tmp/ennio-control.sock" because
-// (a) the iOS simulator process and the host CLI share `/tmp`, and
-// (b) sockaddr_un.sun_path is 104 bytes on macOS — the app sandbox
-// path exceeds that limit.
+// Socket path is per-target: derived from the UDID and pinned via
+// ENNIO_SOCKET_PATH on the simulator launchctl env. The host CLI and
+// the in-app dylib read the same env var. Falls back to the legacy
+// shared path if env is missing (older shims, manual debugging).
+//
+// Constraints:
+// (a) iOS simulator and host share `/tmp`
+// (b) sockaddr_un.sun_path is 104 bytes on macOS — keep path short
+//     (UDID is 36 chars; "/tmp/ennio-<UDID>.sock" = ~57 chars, fits)
+// (c) 0600 perms applied dylib-side so other users can't connect
 //
 // Single persistent connection per CLI run. Requests pipelined; the
 // dylib services them sequentially per connection on a worker thread.
@@ -22,7 +28,19 @@ import { Socket, createConnection } from 'node:net';
 // device; short enough that a hung handler doesn't deadlock the runner.
 const REQUEST_TIMEOUT_MS = 20_000;
 
-const SOCKET_PATH = '/tmp/ennio-control.sock';
+const LEGACY_SOCKET_PATH = '/tmp/ennio-control.sock';
+
+/**
+ * Compute the per-UDID socket path. Both the dylib and the CLI read
+ * ENNIO_SOCKET_PATH; this helper produces the same path the CLI sets
+ * on the simulator launchctl env. UDID-keyed so concurrent simulators
+ * (or multiple test runners on the same dev box) don't collide.
+ */
+export function ennioSocketPath(udid?: string): string {
+  if (process.env.ENNIO_SOCKET_PATH) return process.env.ENNIO_SOCKET_PATH;
+  if (udid) return `/tmp/ennio-${udid}.sock`;
+  return LEGACY_SOCKET_PATH;
+}
 
 export interface EnnioSocketResponse {
   id: string;
@@ -42,6 +60,11 @@ export class EnnioSocketClient {
   private pending = new Map<string, PendingRequest>();
   private idSeq = 0;
   private connecting: Promise<boolean> | null = null;
+  private path: string;
+
+  constructor(udid?: string) {
+    this.path = ennioSocketPath(udid);
+  }
 
   /**
    * Open the Unix-socket connection. Idempotent. Returns true on success,
@@ -59,7 +82,7 @@ export class EnnioSocketClient {
 
   private async doConnect(): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      const s = createConnection(SOCKET_PATH);
+      const s = createConnection(this.path);
       const onError = () => {
         s.destroy();
         resolve(false);

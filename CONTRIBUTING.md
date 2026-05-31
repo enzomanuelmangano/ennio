@@ -10,18 +10,22 @@ the regression bench gives you a clear go/no-go signal for any change.
 ```
 packages/
   ennio/              @reactiive/ennio
-    cpp/              C++ core (shadow tree traversal, selector parser,
-                      element matcher, dispatch table)
-    ios/              ObjC++ (UIKit helpers, +load swizzle, prepareTap)
-    src/Ennio.nitro.ts  Nitro spec → generates the JSI bridge
+    cpp/              EnnioControlSocket (Unix-domain socket primitive)
+    ios/              ObjC++ dylib source:
+      bootstrap/      DYLD constructor + debug banner + RCTHost swizzle
+      finders/        UIView walker + testID index + finder manager
+      handlers/       Socket RPC handlers (find / interact / system / wait)
+      observers/      React commit observer + frame-hash settle ticker
+      ops/            UIKit operations (tab switch, alerts, keyboard)
+      PrivateAPI/     Synthetic UITouch (fallback path)
+    native-shim/      ennio-shim.m — RN-agnostic loader gate
+    prebuilt/         Universal dylib + shim + manifest (gitignored,
+                      built by CI, ships in npm tarball)
     src/cli/          TypeScript CLI:
+      socket-client   Unix-domain socket transport
+      hid.ts          idb gRPC HID client (touch actuation)
       maestro-parser  YAML → AST
-      maestro-runner  Executes the AST (the brain)
-      client          Hermes Inspector CDP transport
-      writer/reader   Action + query abstractions over native + idb
-      hid.ts          Persistent HID daemon manager (Python child proc)
-      hid-daemon.py   The Python process — gRPC client to idb_companion
-  ennio-expo-plugin/  @reactiive/ennio-expo-plugin — Podfile gate
+      runner/         Executes the AST (commands + lifecycle + tap)
 example/              Sample RN app + maestro-e2e/ regression suite
 ```
 

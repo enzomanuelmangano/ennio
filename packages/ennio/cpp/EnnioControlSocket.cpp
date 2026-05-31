@@ -27,6 +27,7 @@
 #include <mutex>
 #include <string>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
@@ -57,10 +58,16 @@ static std::mutex &handlersMutex() {
     return instance;
 }
 
-static const char *kSocketPath = "/tmp/ennio-control.sock";
+// Socket path is per-target: ENNIO_SOCKET_PATH env (set by the CLI on
+// the simulator's launchctl env, scoped to the UDID), with a legacy
+// fallback so an older shim still finds it. The CLI side reads the
+// same env var to connect — see src/cli/socket-client.ts.
+static const char *kSocketPathFallback = "/tmp/ennio-control.sock";
 
 std::string EnnioControlSocket::socketPath() {
-    return kSocketPath;
+    const char *env = std::getenv("ENNIO_SOCKET_PATH");
+    if (env && env[0] != '\0') return env;
+    return kSocketPathFallback;
 }
 
 void EnnioControlSocket::registerHandler(const std::string &op, EnnioHandler handler) {
@@ -323,15 +330,16 @@ void EnnioControlSocket::start() {
         return;
     }
 
+    const std::string path = EnnioControlSocket::socketPath();
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, kSocketPath, sizeof(addr.sun_path) - 1);
+    std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
 
     // Clean up any orphaned socket file from a previous run.
-    unlink(kSocketPath);
+    unlink(path.c_str());
 
     if (bind(fd, (sockaddr *)&addr, sizeof(addr)) < 0) {
-        std::fprintf(stderr, "[Ennio] bind(%s) failed: %s\n", kSocketPath, std::strerror(errno));
+        std::fprintf(stderr, "[Ennio] bind(%s) failed: %s\n", path.c_str(), std::strerror(errno));
         close(fd);
         g_started = false;
         return;
@@ -340,13 +348,17 @@ void EnnioControlSocket::start() {
     if (listen(fd, 4) < 0) {
         std::fprintf(stderr, "[Ennio] listen() failed: %s\n", std::strerror(errno));
         close(fd);
-        unlink(kSocketPath);
+        unlink(path.c_str());
         g_started = false;
         return;
     }
 
+    // Restrict socket to the owning user. Defense in depth: even on
+    // shared dev machines, another user can't connect to drive the app.
+    chmod(path.c_str(), 0600);
+
     std::thread(acceptLoop, fd).detach();
-    std::fprintf(stderr, "[Ennio] socket listening on %s\n", kSocketPath);
+    std::fprintf(stderr, "[Ennio] socket listening on %s\n", path.c_str());
 }
 
 } // namespace ennio
