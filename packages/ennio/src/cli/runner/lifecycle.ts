@@ -86,7 +86,9 @@ export async function dismissPermissionDialogs(udid: string): Promise<boolean> {
       }
     }
     if (!target) return dismissedAny;
-    process.stderr.write(`[ennio] dismissing system permission dialog → tap (${Math.round(target.x)},${Math.round(target.y)})\n`);
+    process.stderr.write(
+      `[ennio] dismissing system permission dialog → tap (${Math.round(target.x)},${Math.round(target.y)})\n`,
+    );
     await hidTap(udid, target.x, target.y);
     dismissedAny = true;
     await sleep(700); // let it dismiss; loop catches a second stacked sheet

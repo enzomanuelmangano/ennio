@@ -24,7 +24,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(__dirname, '..');
 
 function parseArgs(argv) {
-  const a = { dir: resolve(pkgRoot, '../../example/maestro-e2e'), runs: 5, out: resolve(pkgRoot, 'reports/flake-baseline.json') };
+  const a = {
+    dir: resolve(pkgRoot, '../../example/maestro-e2e'),
+    runs: 5,
+    out: resolve(pkgRoot, 'reports/flake-baseline.json'),
+  };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dir') a.dir = resolve(argv[++i]);
     else if (argv[i] === '--runs') a.runs = parseInt(argv[++i], 10);
@@ -97,7 +101,9 @@ function main() {
 
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, JSON.stringify(summary, null, 2));
-  console.log(`\nFully green: ${summary.fullyGreen}/${flows.length}  |  flaky: ${flaky.length}  |  dead: ${dead.length}`);
+  console.log(
+    `\nFully green: ${summary.fullyGreen}/${flows.length}  |  flaky: ${flaky.length}  |  dead: ${dead.length}`,
+  );
   console.log(`Baseline written to ${out}`);
 }
 
