@@ -12,6 +12,17 @@ function color(code: string, s: string): string {
   return isTty ? `[${code}m${s}[0m` : s;
 }
 
+/**
+ * OSC 8 hyperlink. Supported by iTerm2, VSCode terminal, kitty,
+ * WezTerm. Other terminals render as plain text (graceful fallback).
+ */
+function hyperlink(target: string, label?: string): string {
+  if (!isTty) return target;
+  const url = target.startsWith('/') ? `file://${target}` : target;
+  const text = label ?? target;
+  return `]8;;${url}\\${text}]8;;\\`;
+}
+
 const c = {
   green: (s: string) => color('32', s),
   red: (s: string) => color('31', s),
@@ -71,19 +82,26 @@ export class PrettyReporter implements Reporter {
   private flowStepTimings: { step: number; ms: number; cmd: string }[] = [];
   private flowStart_!: number;
   private suiteStart_!: number;
+  private totalFlows = 0;
+  private currentFlowIndex = 0;
 
   constructor(private opts: PrettyReporterOptions = {}) {}
 
-  suiteStart(_flows: MaestroFlow[]): void {
+  suiteStart(flows: MaestroFlow[]): void {
     this.suiteStart_ = Date.now();
+    this.totalFlows = flows.length;
+    this.currentFlowIndex = 0;
     process.stdout.write(`\n${c.bold('🧪 Ennio')}\n\n`);
   }
 
   flowStart(flow: MaestroFlow): void {
     this.flowStart_ = Date.now();
     this.flowStepTimings = [];
+    this.currentFlowIndex++;
     const file = flow.filePath ? flow.filePath.split('/').pop() : flow.name;
-    process.stdout.write(`${c.cyan('▸')} ${c.bold(file ?? 'unknown')}\n`);
+    const progress =
+      this.totalFlows > 1 ? c.dim(`[${this.currentFlowIndex}/${this.totalFlows}] `) : '';
+    process.stdout.write(`${progress}${c.cyan('▸')} ${c.bold(file ?? 'unknown')}\n`);
     if (this.opts.verbose && flow.name) {
       process.stderr.write(c.dim(`   ${flow.name} (${flow.commands.length} steps)\n`));
     }
@@ -143,10 +161,26 @@ export class PrettyReporter implements Reporter {
     } else {
       const f = result.failure!;
       process.stdout.write(
-        `  ${c.red('✗ FAIL')}  step ${f.step}/${result.stepsRun}  ${c.dim(fmtMs(result.durationMs))}\n` +
-          `         ${c.dim(f.command)}\n` +
-          `         ${c.red(f.reason)}\n\n`,
+        `  ${c.red('✗ FAIL')}  step ${f.step}/${result.stepsRun}  ${c.dim(fmtMs(result.durationMs))}\n`,
       );
+      // Show last 3 passing steps for context — helps spot whether
+      // the failure is "didn't get there" vs "got there but broke".
+      const passingBefore = result.stepTimings.filter((t) => t.step < f.step).slice(-3);
+      for (const t of passingBefore) {
+        process.stdout.write(
+          c.dim(
+            `         ${String(t.step).padStart(3)}  ✓  ${fmtMs(t.ms).padStart(7)}  ${t.cmd}\n`,
+          ),
+        );
+      }
+      process.stdout.write(
+        `         ${String(f.step).padStart(3)}  ${c.red('✗')}  ${c.red(f.command)}\n` +
+          `              ${c.red(f.reason)}\n`,
+      );
+      if (f.screenshotPath) {
+        process.stdout.write(`         📷 ${hyperlink(f.screenshotPath)}\n`);
+      }
+      process.stdout.write('\n');
     }
   }
 

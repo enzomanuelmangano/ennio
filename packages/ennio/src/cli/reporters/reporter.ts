@@ -15,6 +15,8 @@ export interface FlowResult {
     step: number;
     command: string;
     reason: string;
+    /** Path to the diagnostic screenshot captured at failure, if any. */
+    screenshotPath?: string;
   };
   stepTimings: { step: number; ms: number; cmd: string }[];
 }

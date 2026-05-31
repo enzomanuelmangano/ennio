@@ -157,6 +157,7 @@ export class FlowExecutor {
           step: i + 1,
           command: describeCommand(cmd),
           reason: msg,
+          screenshotPath: findLatestScreenshot(flowStart),
         };
 
         await this.runOnFlowComplete(flow, ctx);
@@ -215,4 +216,36 @@ function cmdIsFindable(cmd: MaestroCommand): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Locate the most recently-modified screenshot file in /tmp/ennio-shots/
+ * dated after the given start time. Returns null if no shots dir or
+ * no matching file. The dylib's assertVisible-timeout diagnostic
+ * writes screenshots here via xcrun simctl io screenshot.
+ */
+function findLatestScreenshot(sinceMs: number): string | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('node:fs') as typeof import('node:fs');
+    const dir = '/tmp/ennio-shots';
+    if (!fs.existsSync(dir)) return undefined;
+    const entries = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.png'))
+      .map((f) => {
+        const path = `${dir}/${f}`;
+        try {
+          return { path, mtime: fs.statSync(path).mtimeMs };
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is { path: string; mtime: number } => e !== null)
+      .filter((e) => e.mtime >= sinceMs)
+      .sort((a, b) => b.mtime - a.mtime);
+    return entries[0]?.path;
+  } catch {
+    return undefined;
+  }
 }
