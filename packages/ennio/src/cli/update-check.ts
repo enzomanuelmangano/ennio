@@ -179,9 +179,9 @@ export function printUpdateNotice(currentVersion: string): void {
 export function currentVersion(): string {
   try {
     // After esbuild, __filename is dist/cli.js; package.json is one up.
-    const pkg = JSON.parse(
-      readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'),
-    ) as { version?: string };
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')) as {
+      version?: string;
+    };
     return pkg.version ?? '0.0.0';
   } catch {
     return '0.0.0';

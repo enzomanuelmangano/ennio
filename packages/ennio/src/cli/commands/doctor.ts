@@ -64,7 +64,8 @@ function checkIdb(udid: string | null): Result {
     return {
       name: 'idb',
       severity: 'fail',
-      detail: 'not on PATH — install with `brew tap facebook/fb && brew install idb-companion` + `pipx install fb-idb`',
+      detail:
+        'not on PATH — install with `brew tap facebook/fb && brew install idb-companion` + `pipx install fb-idb`',
     };
   }
   // idb is present → actuation backend exists. Target reachability is
@@ -74,7 +75,9 @@ function checkIdb(udid: string | null): Result {
   const targets = tryExec('idb', ['list-targets'], 5000);
   let detail = 'on PATH';
   if (targets !== null && udid) {
-    detail = targets.includes(udid) ? `on PATH; target ${udid} visible` : 'on PATH; target not yet connected (auto-connects at run)';
+    detail = targets.includes(udid)
+      ? `on PATH; target ${udid} visible`
+      : 'on PATH; target not yet connected (auto-connects at run)';
   }
   return { name: 'idb', severity: 'pass', detail };
 }
@@ -84,7 +87,8 @@ function checkDylib(): Result {
   return {
     name: 'libennio.dylib',
     severity: dylib ? 'pass' : 'fail',
-    detail: dylib ?? 'not found — reinstall the package or build it (set ENNIO_DYLIB_PATH to override)',
+    detail:
+      dylib ?? 'not found — reinstall the package or build it (set ENNIO_DYLIB_PATH to override)',
   };
 }
 
@@ -103,14 +107,19 @@ async function checkSocket(): Promise<Result> {
     return {
       name: 'libennio socket',
       severity: 'warn',
-      detail: 'not listening — only live while an injected app is running (normal for a cold check)',
+      detail:
+        'not listening — only live while an injected app is running (normal for a cold check)',
     };
   }
   try {
     const r = await client.call('ping');
     const bootstrap =
       r.ok && r.data ? (r.data as { bootstrap?: string }).bootstrap || 'unknown' : 'unknown';
-    return { name: 'libennio socket', severity: 'pass', detail: `connected, bootstrap=${bootstrap}` };
+    return {
+      name: 'libennio socket',
+      severity: 'pass',
+      detail: `connected, bootstrap=${bootstrap}`,
+    };
   } catch (e) {
     return {
       name: 'libennio socket',
