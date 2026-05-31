@@ -43,6 +43,11 @@ typedef struct {
 /// a UIView. Uses a11y walk, no cache.
 + (nullable UIView *)findViewByText:(NSString *)text;
 
+/// Relaxed variant: skips the topmost-VC filter so views behind
+/// overlays (drawer, sheet) are also found. Use for visibility checks
+/// where any on-screen match counts, not for tap targeting.
++ (nullable UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed;
+
 /// Resolve text against the UIAccessibility element tree. Walks
 /// accessibilityElements / accessibilityElementAtIndex: in addition
 /// to subviews, so cross-process UIRemoteView contents (PHPicker,

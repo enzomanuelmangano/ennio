@@ -229,19 +229,26 @@ tags:
 - tapOn:
     id: 'decrease-quantity'
 
-# Add to cart
+# Add to cart. Dismiss the confirmation via "View Cart" (not "Continue
+# Shopping") — View Cart's handler calls router.dismissAll() which clears
+# the whole alert stack and lands on the cart, matching the pattern the
+# other shopping flows (02 / 03 / 10) use. "Continue Shopping" only
+# dismisses the top alert, so when the app stacks a duplicate
+# confirmation it leaves one floating over the cart that then blocks the
+# checkout tap.
 - tapOn:
     id: 'add-to-cart-btn'
 - assertVisible:
     text: 'Added to Cart'
 - tapOn:
-    text: 'Continue Shopping'
+    text: 'View Cart'
 
 # ============================================
 # PHASE 6: CART MANAGEMENT
 # ============================================
 
-# Navigate to cart
+# Ensure we're on the Cart tab (View Cart already navigated here; the
+# tab tap is idempotent).
 - tapOn:
     text: 'Cart'
 - assertVisible:

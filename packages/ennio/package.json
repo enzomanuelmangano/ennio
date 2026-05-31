@@ -18,7 +18,8 @@
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "esbuild": "^0.21.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.7"
   },
   "peerDependencies": {
     "react": "*",
@@ -80,6 +81,9 @@
     "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --external:fsevents",
     "build": "npm run build:lib && npm run build:cli && chmod +x dist/cli.js",
     "clean": "rm -rf lib dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "node dist/cli.js test ../../example/maestro-e2e",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
     "lint": "eslint . --max-warnings=0",
     "prepublishOnly": "npm run clean && npm run build"

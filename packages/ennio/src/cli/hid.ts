@@ -83,7 +83,9 @@ async function getScreenSize(udid: string): Promise<{ w: number; h: number }> {
 }
 
 function trace(line: string): void {
-  process.stderr.write(`${line}\n`);
+  // Gated: HID-level tap/swipe coords are noisy in normal verbose output.
+  // Set ENNIO_PHASE_TRACE=1 to enable.
+  if (process.env.ENNIO_PHASE_TRACE) process.stderr.write(`${line}\n`);
 }
 
 // =====================================================================

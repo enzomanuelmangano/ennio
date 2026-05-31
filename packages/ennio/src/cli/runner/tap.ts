@@ -26,7 +26,7 @@ import {
 } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
-import { Rect, RunContext, sleep, timedAsync } from './context';
+import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, parsePoint, resolveRect } from './find';
 
 export async function execTapOn(
@@ -42,7 +42,17 @@ export async function execTapOn(
   // transitioning overlay.
   if (sel.point !== undefined) {
     await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined);
-    const { x, y } = parsePoint(sel.point);
+    let winW = DEFAULT_WIN_W;
+    let winH = DEFAULT_WIN_H;
+    const ws = await ctx.client.call('window_size').catch(() => undefined);
+    if (ws && ws.ok && ws.data) {
+      const d = ws.data as { w: number; h: number };
+      if (d.w > 0 && d.h > 0) {
+        winW = d.w;
+        winH = d.h;
+      }
+    }
+    const { x, y } = parsePoint(sel.point, winW, winH);
     await hidTap(ctx.udid, x, y);
     return;
   }
@@ -85,9 +95,11 @@ export async function execTapOn(
     const cy = rect.y + rect.h / 2;
     const offViewport = cx < 0 || cx > winW || cy < 0 || cy > winH;
     if (offViewport) {
-      process.stderr.write(
-        `[ennio] off-viewport id="${sel.id}" rect=(${rect.x.toFixed(0)},${rect.y.toFixed(0)},${rect.w.toFixed(0)},${rect.h.toFixed(0)}) center=(${cx.toFixed(0)},${cy.toFixed(0)}) win=(${winW.toFixed(0)},${winH.toFixed(0)}) → scroll_to\n`,
-      );
+      if (process.env.ENNIO_PHASE_TRACE) {
+        process.stderr.write(
+          `[ennio] off-viewport id="${sel.id}" rect=(${rect.x.toFixed(0)},${rect.y.toFixed(0)},${rect.w.toFixed(0)},${rect.h.toFixed(0)}) center=(${cx.toFixed(0)},${cy.toFixed(0)}) win=(${winW.toFixed(0)},${winH.toFixed(0)}) → scroll_to\n`,
+        );
+      }
       const scrollResp = await ctx.client
         .call('scroll_to', { elementTestID: sel.id })
         .catch(() => undefined);
@@ -97,7 +109,9 @@ export async function execTapOn(
         scrollResp.data &&
         (scrollResp.data as { scrolled?: boolean }).scrolled
       );
-      process.stderr.write(`[ennio] scroll_to id="${sel.id}" scrolled=${scrolled}\n`);
+      if (process.env.ENNIO_PHASE_TRACE) {
+        process.stderr.write(`[ennio] scroll_to id="${sel.id}" scrolled=${scrolled}\n`);
+      }
       // After scrollRectToVisible the carousel snaps, but React
       // Fabric in Release mode mounts virtualized items lazily —
       // the target view exists in the UIView tree (its testID
@@ -109,9 +123,11 @@ export async function execTapOn(
       const refresh = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
       if (refresh) {
         rect = refresh;
-        process.stderr.write(
-          `[ennio] post-scroll rect id="${sel.id}" rect=(${refresh.x.toFixed(0)},${refresh.y.toFixed(0)},${refresh.w.toFixed(0)},${refresh.h.toFixed(0)})\n`,
-        );
+        if (process.env.ENNIO_PHASE_TRACE) {
+          process.stderr.write(
+            `[ennio] post-scroll rect id="${sel.id}" rect=(${refresh.x.toFixed(0)},${refresh.y.toFixed(0)},${refresh.w.toFixed(0)},${refresh.h.toFixed(0)})\n`,
+          );
+        }
       }
       // Activate path bypasses hit-test entirely. Works on RN
       // Pressable in most archs; returns false on Fabric Release
@@ -119,7 +135,9 @@ export async function execTapOn(
       // accessibility chain — fall through to HID tap in that case.
       const r = await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
       const ok = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
-      process.stderr.write(`[ennio] activate_testid id="${sel.id}" ok=${ok}\n`);
+      if (process.env.ENNIO_PHASE_TRACE) {
+        process.stderr.write(`[ennio] activate_testid id="${sel.id}" ok=${ok}\n`);
+      }
       if (ok) return;
     }
   }

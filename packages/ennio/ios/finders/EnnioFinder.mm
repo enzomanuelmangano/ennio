@@ -387,11 +387,17 @@ static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
     return v;
 }
 
+static UIView *_Nullable walkByTextEx(UIView *root, NSString *text, BOOL relaxed);
+
 static UIView *_Nullable walkByText(UIView *root, NSString *text) {
+    return walkByTextEx(root, text, NO);
+}
+
+static UIView *_Nullable walkByTextEx(UIView *root, NSString *text, BOOL relaxed) {
     if (!root) return nil;
     NSMutableArray<UIView *> *matches = [NSMutableArray new];
     collectByText(root, text, matches);
-    UIViewController *topmost = finderTopmostPresentedVC();
+    UIViewController *topmost = relaxed ? nil : finderTopmostPresentedVC();
     // Bucket candidates by selection-priority tier, then within each
     // tier pick the smallest. Without the size tie-break, an oversized
     // TextField wrapper whose a11y label equals "Description" outranks
@@ -798,9 +804,13 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
 }
 
 + (UIView *)findViewByText:(NSString *)text {
+    return [self findViewByText:text relaxed:NO];
+}
+
++ (UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed {
     if (text.length == 0) return nil;
     UIWindow *keyWin = [EnnioBootstrap keyWindow];
-    UIView *match = walkByText(keyWin, text);
+    UIView *match = walkByTextEx(keyWin, text, relaxed);
     if (!match) {
         match = walkAllWindows(^BOOL(UIView *v) {
             if ([v.accessibilityLabel isEqualToString:text]) return YES;

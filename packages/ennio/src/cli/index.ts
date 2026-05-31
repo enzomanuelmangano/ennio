@@ -1,12 +1,14 @@
 /**
  * Ennio CLI entry — subcommand dispatcher.
  *
- * Architecture:
- *   - one channel: WebSocket to the in-app ennio module on :9876.
- *     Reads (assertVisible, layout, alerts) traverse the Fabric shadow
- *     tree. Writes (tap, typeText, scroll, alert button tap) run inside
- *     the user app via UIKit / accessibilityActivate / sendActions —
- *     no XCTest helper, no HID injection, no xcodebuild cold-start.
+ * Architecture (two channels):
+ *   - Unix-domain socket (/tmp/ennio-control.sock) to the in-app
+ *     libennio dylib: discovery, reads, and settle coordination
+ *     (find_by_testid, visible, wait_commit, insert_text, …) via
+ *     line-delimited JSON. See socket-client.ts.
+ *   - idb gRPC HID: every tap / swipe / long-press is a real
+ *     IOHIDEvent at the CoreSimulator level (see hid.ts / idb-grpc.ts).
+ *   No XCTest helper, no xcodebuild cold-start, no Metro/CDP.
  *
  * Subcommands live in ./commands. Bare invocation with a yaml/dir/glob
  * routes to `test` for back-compat with the original CLI surface.

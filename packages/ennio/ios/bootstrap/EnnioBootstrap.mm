@@ -15,9 +15,17 @@
 // :configurations build-time gate that already excludes ennio from
 // Release builds.
 //
-// No React Native checks. No swizzles. No JSI. The dylib doesn't know
-// or care what the app is built with — only that it has a UIWindow and
+// No JSI, no RN-version-specific linkage. The dylib doesn't know or
+// care what the app is built with — only that it has a UIWindow and
 // propagated accessibility identifiers.
+//
+// Two swizzles ARE installed (both isolated, file-local IMPs, guarded
+// by dispatch_once):
+//   - UIView -setAccessibilityIdentifier: (EnnioTestIDIndex) for the
+//     O(1) testID index.
+//   - the RN mount/commit method (EnnioReactObserver) for settle
+//     signals. Paper uses an NSNotification; Fabric is swizzled.
+// They are observation-only — neither alters app behavior.
 //
 
 #import "EnnioBootstrap.h"

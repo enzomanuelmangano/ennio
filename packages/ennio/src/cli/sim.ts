@@ -14,6 +14,41 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 
+/**
+ * Turn on the simulator's accessibility automation server. SwiftUI (and
+ * some UIKit) build their accessibility tree LAZILY — only once an
+ * accessibility client is active. With it off, a SwiftUI screen (e.g.
+ * iOS Settings) exposes NOTHING to an in-process walk: the rows are
+ * drawn, not UILabels, and no a11y nodes exist yet. Flipping this on
+ * makes SwiftUI materialize its tree, which ennio's in-process
+ * find_ax_by_text then reads directly (~50ms) — no idb, no XCUITest.
+ * Idempotent + best-effort; runs once per flow.
+ */
+export function enableAccessibility(udid: string): void {
+  const set = (key: string) => {
+    try {
+      execFileSync(
+        'xcrun',
+        ['simctl', 'spawn', udid, 'defaults', 'write', 'com.apple.Accessibility', key, '-int', '1'],
+        { stdio: 'pipe' },
+      );
+    } catch {
+      /* best effort */
+    }
+  };
+  set('ApplicationAccessibilityEnabled');
+  set('AccessibilityEnabled');
+  // Poke the a11y caches so already-running apps rebuild their tree
+  // without needing a relaunch.
+  for (const note of ['com.apple.accessibility.cache.ax', 'com.apple.accessibility.cache.app.ax']) {
+    try {
+      execFileSync('xcrun', ['simctl', 'spawn', udid, 'notifyutil', '-p', note], { stdio: 'pipe' });
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 export function getTargetUdid(): string | null {
   if (process.env.ENNIO_UDID) return process.env.ENNIO_UDID;
   try {
@@ -74,6 +109,25 @@ export function launchApp(udid: string, bundleId: string): void {
   execFileSync('xcrun', ['simctl', 'launch', '--terminate-running-process', udid, bundleId], {
     stdio: 'pipe',
   });
+}
+
+export function uninstallApp(udid: string, bundleId: string): void {
+  try {
+    execFileSync('xcrun', ['simctl', 'uninstall', udid, bundleId], { stdio: 'pipe' });
+  } catch {
+    // App may not be installed.
+  }
+}
+
+export function getAppBundlePath(udid: string, bundleId: string): string | null {
+  try {
+    const out = execFileSync('xcrun', ['simctl', 'get_app_container', udid, bundleId, 'app'], {
+      encoding: 'utf-8',
+    });
+    return out.trim();
+  } catch {
+    return null;
+  }
 }
 
 export function getAppContainer(udid: string, bundleId: string): string | null {

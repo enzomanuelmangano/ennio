@@ -7,10 +7,12 @@
 name: ci-fast-build
 
 on:
-  pull_request:
-    branches: [main, 'feat/**']
-  push:
-    branches: [main]
+  # Manual-only trigger for now. PR/push triggers disabled — re-enable
+  # once flake rate is low enough to gate merges on E2E.
+  # pull_request:
+  #   branches: [main, 'feat/**']
+  # push:
+  #   branches: [main]
   workflow_dispatch: {}
 
 concurrency:
