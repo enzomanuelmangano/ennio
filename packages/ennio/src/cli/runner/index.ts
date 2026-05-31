@@ -31,10 +31,8 @@ import { dirname, resolve } from 'node:path';
 import { MaestroCommand, MaestroFlow, MaestroSelector, normalizeSelector } from '../maestro-parser';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 import {
-  tapFast as hidTapFast,
   swipe as hidSwipe,
   longPressDrag as hidLongPressDrag,
-  typeText as hidType,
   setDylibClient,
   closeAllIdbClients,
 } from '../hid';
@@ -46,7 +44,6 @@ import {
   DEFAULT_WIN_W,
   RunContext,
   RunResult,
-  interpolate,
   recordPhase,
   sleep,
 } from './context';
@@ -380,112 +377,7 @@ export async function runCommand(
   // tapOn, doubleTapOn, longPress, longPressOn: migrated to commands/handlers/tap.ts.
   // assertVisible, assertNotVisible, waitFor, assertAnyVisible,
   // extendedWaitUntil: migrated to commands/handlers/assert.ts.
-  if ('inputText' in cmd) {
-    // Wait for ANY view to be the firstResponder before typing.
-    // Without this, a previous tap that opens a composer / modal
-    // may still be mid-animation when inputText fires — no field
-    // is focused yet, insert_text returns NO, hidType fallback
-    // types into nowhere.
-    // Poll for up to 2 s; first responder usually lands within
-    // 100-300 ms of an onPress-driven focus transition.
-    // 500 ms is enough for a healthy focus transition; longer windows
-    // routinely fire on already-broken state (prior tap landed on
-    // the wrong field) and pad the step by 2 s before we fall back
-    // to the hardware-keyboard path that types into nowhere anyway.
-    const text = interpolate(String(cmd.inputText), ctx);
-    // Try insert_text (UIKeyInput on the current firstResponder) up
-    // to 3 times. Between attempts, if the prior tap target was a
-    // testID, re-tap it via the dylib activate path — that's the cheapest way to
-    // recover when the original tap didn't actually move focus into
-    // the field (Bluesky's login username TextInput is the textbook
-    // case). After 3 failed attempts, fall back to a single
-    // hardware-keyboard type — at worst the chars land somewhere
-    // useful and the next step fails fast.
-    let ok = false;
-    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
-      if (attempt > 0 && ctx.lastTapTestID) {
-        const rect = await ctx.client
-          .call('find_by_testid', { testID: ctx.lastTapTestID })
-          .catch(() => undefined);
-        if (rect && rect.ok && rect.data) {
-          const r = rect.data as { x: number; y: number; w: number; h: number };
-          await hidTapFast(ctx.udid, r.x + r.w / 2, r.y + r.h / 2);
-        }
-      }
-      const fr = await ctx.client
-        .call('first_responder_ready', { maxMs: 500 })
-        .catch(() => undefined);
-      void fr;
-      try {
-        const r = await ctx.client.call('insert_text', { text });
-        ok = !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
-      } catch {
-        /* retry */
-      }
-    }
-    if (!ok) await hidType(ctx.udid, text);
-    // No fixed sleep: wait_commit's CADisplayLink ticker already
-    // catches the post-insert layout pass + onChangeText commit.
-    await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 80 });
-    ctx.lastWasTextInput = true;
-    return;
-  }
-  if ('eraseText' in cmd) {
-    // Maestro semantics:
-    //   - eraseText                 → erase ALL text in focused field
-    //   - eraseText: 5              → erase exactly 5 chars
-    //   - eraseText: { characters } → erase that many chars
-    let count: number;
-    if (typeof cmd.eraseText === 'number') {
-      count = cmd.eraseText;
-    } else if (
-      cmd.eraseText &&
-      typeof cmd.eraseText === 'object' &&
-      'characters' in cmd.eraseText
-    ) {
-      count = (cmd.eraseText as { characters: number }).characters;
-    } else {
-      count = 100; // bare form: clear the field
-    }
-    for (let i = 0; i < count; i++) await ctx.client.call('hardware_key', { keyCode: 42 });
-    ctx.lastWasTextInput = true;
-    return;
-  }
-  if ('clearText' in cmd) {
-    // Best effort: erase a generous chunk via backspace key on the dylib's
-    // hardware-key handler. Real Maestro semantics: erase until the field
-    // is empty.
-    for (let i = 0; i < 200; i++) await ctx.client.call('hardware_key', { keyCode: 42 });
-    return;
-  }
-  if ('pressKey' in cmd) {
-    // Map Maestro key names to HID keycodes. Maestro accepts a string
-    // like 'Backspace' / 'Enter' / 'Tab' / 'Home' / etc.
-    const name = String(cmd.pressKey).toLowerCase();
-    const map: Record<string, number> = {
-      backspace: 42,
-      delete: 42,
-      enter: 40,
-      return: 40,
-      tab: 43,
-      space: 44,
-      escape: 41,
-      esc: 41,
-    };
-    const code = map[name];
-    if (code != null) await ctx.client.call('hardware_key', { keyCode: code });
-    // pressKey Enter on a form input typically triggers a submit
-    // handler that runs React state updates (Bluesky's
-    // configureProxy → agent.setHeader → re-render of the entire
-    // navigator). Without waiting for that to settle, the very next
-    // tapOn lands on a JS bridge mid-update — onPress wired to a
-    // stale closure, press registered but no effect. Wait for
-    // commit + UIView stable.
-    await sleep(80);
-    await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 800 }).catch(() => undefined);
-    await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
-    return;
-  }
+  // inputText, eraseText, clearText, pressKey: migrated to commands/handlers/input.ts.
   // back, hideKeyboard: migrated to commands/handlers/system.ts.
   if ('scrollUntilVisible' in cmd) {
     // Resolve the target selector. Maestro accepts either a bare
