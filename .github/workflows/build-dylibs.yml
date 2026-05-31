@@ -133,7 +133,17 @@ jobs:
         working-directory: packages/ennio
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public
+        run: |
+          # Route prerelease versions (0.0.7-beta.0, -rc.1, …) to the
+          # `beta` dist-tag so they never clobber `latest`. Plain versions
+          # go to `latest`. npm does NOT auto-route prereleases.
+          VERSION="$(node -p "require('./package.json').version")"
+          case "$VERSION" in
+            *-*) DIST_TAG=beta ;;
+            *)   DIST_TAG=latest ;;
+          esac
+          echo "Publishing $VERSION to dist-tag: $DIST_TAG"
+          npm publish --provenance --access public --tag "$DIST_TAG"
 
       - name: Attach dylibs to GH Release
         uses: softprops/action-gh-release@v2
