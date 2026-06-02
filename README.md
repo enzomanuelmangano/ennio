@@ -18,7 +18,7 @@ npx ennio test e2e/01-auth-flow.yaml      # one flow
 npx ennio test e2e/                       # every *.yaml in the directory
 ```
 
-https://github.com/user-attachments/assets/97a32505-e4d2-4661-8ed6-7915c0ced1f8
+https://github.com/user-attachments/assets/8734572f-f90c-4658-9cba-98642d0da2d5
 
 ## Getting started
 
@@ -201,8 +201,6 @@ The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
 ## Limitations
 
 - **iOS only.** No Android support.
-- **New Architecture only.** Old-architecture RN (Bridge mode) is
-  not supported.
 
 ## License
 
