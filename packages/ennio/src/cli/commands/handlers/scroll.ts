@@ -9,7 +9,6 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand, MaestroSelector } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { swipe as hidSwipe, swipeHid, longPressDrag as hidLongPressDrag } from '../../hid';
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, sleep } from '../../runner/context';
 import { resolveRect } from '../../runner/find';
 import { isVisible } from '../../runner/visibility';
@@ -60,40 +59,29 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       const NUDGE_DISTANCE = Math.round(winH / 6);
       // Bottom 20% of screen overlaps with the tab bar.
       const TAB_BAR_THRESHOLD = (winH * 4) / 5;
-      // Top ~12% sits under the nav header. Only fast mode needs the
-      // guard: in-process swipes jump by EXACT distances, so a target
-      // can land pixel-perfectly under the header (HID momentum
+      // Top ~12% sits under the nav header. Only the fast driver needs
+      // the guard: in-process swipes jump by EXACT distances, so a
+      // target can land pixel-perfectly under the header (HID momentum
       // naturally overshoots past it).
+      // TODO(phase2): replace both nudges with is_exposed + scroll_to.
       const TOP_THRESHOLD = winH * 0.12;
-      // Fast mode: swipes handled in-process are setContentOffset
-      // jumps — no momentum to wait out, so the fixed sleeps drop and
-      // the stable windows shrink. HID-fallback swipes keep the full
-      // settle (real deceleration). `lastSwipeInProc` tracks which
-      // path the most recent swipe took.
-      const F = !!ctx.fast;
+      const isFastDriver = ctx.driver.name === 'fast';
       // True only after a swipe that ran in-process (instant, no
       // momentum). Deliberately false before the first swipe: the
       // found-branch's settle also guards against the PREVIOUS
       // command's animation tail (tab-entry transition) — skipping it
       // fired the tab-bar nudge mid-transition and scrolled nothing
       // (g-pan).
-      let lastSwipeInProc = false;
+      let noMomentum = false;
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await isVisible(ctx, target)) {
-          const quick = F && lastSwipeInProc;
-          if (!quick) await sleep(600);
-          await ctx.client
-            .call(
-              'wait_commit',
-              quick ? { maxMs: 800, stableMs: 100 } : { maxMs: 2000, stableMs: 300 },
-            )
-            .catch(() => undefined);
+          await ctx.driver.settleScrollFound(ctx.client, noMomentum);
           const rect = await resolveRect(ctx, target);
           if (rect && rect.y + rect.h / 2 > TAB_BAR_THRESHOLD) {
-            let nudgeInProc = true;
+            let nudgeOutcome = { inProcess: true };
             if (dir === 'DOWN') {
-              nudgeInProc = await hidSwipe(
+              nudgeOutcome = await ctx.driver.swipe(
                 ctx.udid,
                 SWIPE_CENTER_X,
                 SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
@@ -102,7 +90,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
                 250,
               );
             } else if (dir === 'UP') {
-              nudgeInProc = await hidSwipe(
+              nudgeOutcome = await ctx.driver.swipe(
                 ctx.udid,
                 SWIPE_CENTER_X,
                 SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
@@ -111,18 +99,11 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
                 250,
               );
             }
-            const quickNudge = F && nudgeInProc;
-            if (!quickNudge) await sleep(500);
-            await ctx.client
-              .call(
-                'wait_commit',
-                quickNudge ? { maxMs: 600, stableMs: 100 } : { maxMs: 1500, stableMs: 200 },
-              )
-              .catch(() => undefined);
-          } else if (F && rect && rect.y + rect.h / 2 < TOP_THRESHOLD) {
+            await ctx.driver.settleAfterNudge(ctx.client, nudgeOutcome);
+          } else if (isFastDriver && rect && rect.y + rect.h / 2 < TOP_THRESHOLD) {
             // Target pinned under the nav header — push content down a
             // notch so the row clears it.
-            const topNudgeInProc = await hidSwipe(
+            const topNudge = await ctx.driver.swipe(
               ctx.udid,
               SWIPE_CENTER_X,
               SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
@@ -130,13 +111,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
               SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
               250,
             );
-            if (!topNudgeInProc) await sleep(500);
-            await ctx.client
-              .call(
-                'wait_commit',
-                topNudgeInProc ? { maxMs: 600, stableMs: 100 } : { maxMs: 1500, stableMs: 200 },
-              )
-              .catch(() => undefined);
+            await ctx.driver.settleAfterNudge(ctx.client, topNudge);
           }
           return;
         }
@@ -158,14 +133,9 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           x1 = SWIPE_CENTER_X - dist / 2;
           x2 = SWIPE_CENTER_X + dist / 2;
         }
-        lastSwipeInProc = await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-        const quick = F && lastSwipeInProc;
-        await ctx.client
-          .call(
-            'wait_commit',
-            quick ? { maxMs: 800, stableMs: 100 } : { maxMs: 2000, stableMs: 300 },
-          )
-          .catch(() => undefined);
+        const outcome = await ctx.driver.swipe(ctx.udid, x1, y1, x2, y2, 250);
+        noMomentum = outcome.inProcess;
+        await ctx.driver.settleScrollStep(ctx.client, outcome);
       }
       throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
     },
@@ -283,35 +253,12 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           return;
         }
         ctx.lastRefreshAtMs = now;
-        // Fast mode: a setContentOffset jump can't trigger
-        // UIRefreshControl (needs a real over-scroll drag + release).
-        // Use the dylib's trigger_refresh op — fires beginRefreshing +
-        // the valueChanged action in-process. HID fallback on miss.
-        if (ctx.fast) {
-          const r = await ctx.client
-            .call('trigger_refresh', { x: Math.round(from.x), y: Math.round(from.y) })
-            .catch(() => undefined);
-          const fired = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
-          if (!fired) {
-            // Real over-scroll drag — setContentOffset can't fire
-            // UIRefreshControl, so the in-process swipe path is wrong
-            // here regardless of what its hitTest says. Mirror the
-            // baseline sequence exactly (settle + presentation idle +
-            // HID drag + momentum settle).
-            await ctx.client
-              .call('wait_commit', { maxMs: 2500, stableMs: 350 })
-              .catch(() => undefined);
-            await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
-            await swipeHid(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
-            await sleep(500);
-            await ctx.client
-              .call('wait_commit', { maxMs: 1000, stableMs: 150 })
-              .catch(() => undefined);
-            return;
-          }
-          await ctx.client
-            .call('wait_commit', { maxMs: 800, stableMs: 100 })
-            .catch(() => undefined);
+        // Firing mechanism is a driver decision: fast tries the
+        // in-process trigger_refresh (a setContentOffset jump can't
+        // produce the over-scroll drag UIRefreshControl needs), with
+        // a real HID drag as fallback; baseline declines and runs the
+        // shared path below.
+        if (await ctx.driver.tryPullToRefresh(ctx.client, ctx.udid, from, to, sw.duration ?? 400)) {
           return;
         }
       }
@@ -323,7 +270,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
         const totalDur = sw.duration ?? 1000;
         const holdMs = 800;
         const moveMs = Math.max(500, totalDur - holdMs);
-        await hidLongPressDrag(ctx.udid, from.x, from.y, to.x, to.y, holdMs, moveMs);
+        await ctx.driver.longPressDrag(ctx.udid, from.x, from.y, to.x, to.y, holdMs, moveMs);
         await sleep(500);
         await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
         return;
@@ -335,19 +282,11 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       // is what makes the gesture (and the in-process hitTest) land on
       // the right scroll view; firing early just downgrades the swipe
       // to a momentum HID fallback that costs more than the wait.
-      const F = !!ctx.fast;
       await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 350 }).catch(() => undefined);
       await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
       // Maestro default swipe is 400 ms.
-      const inProc = await hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
-      // Trim the post-swipe settle only when the swipe ran in-process
-      // (instant setContentOffset, no momentum). An HID-fallback swipe
-      // has real deceleration the find would otherwise race against.
-      const quick = F && inProc;
-      if (!quick) await sleep(500);
-      await ctx.client
-        .call('wait_commit', quick ? { maxMs: 600, stableMs: 100 } : { maxMs: 1000, stableMs: 150 })
-        .catch(() => undefined);
+      const outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
+      await ctx.driver.settleAfterSwipe(ctx.client, outcome);
     },
   );
 
@@ -376,8 +315,8 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
         x1 = cx - dist / 2;
         x2 = cx + dist / 2;
       }
-      const inProc = await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-      if (ctx.fast && inProc) {
+      const outcome = await ctx.driver.swipe(ctx.udid, x1, y1, x2, y2, 250);
+      if (outcome.inProcess) {
         await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 100 }).catch(() => undefined);
       } else {
         await sleep(400);

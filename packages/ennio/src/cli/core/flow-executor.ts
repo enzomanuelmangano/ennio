@@ -11,6 +11,8 @@
 // against a mock connection.
 
 import { registerAllHandlers } from '../commands/handlers';
+import { createDriver } from '../driver';
+import type { GestureDriver } from '../driver';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
 import type { RunContext } from '../runner/context';
 import { describeCommand } from '../runner/index';
@@ -27,7 +29,7 @@ export interface FlowExecutorOptions {
   registry?: CommandRegistry;
   verbose?: boolean;
   lenient?: boolean;
-  fast?: boolean;
+  driver?: GestureDriver;
 }
 
 interface StepTiming {
@@ -43,7 +45,7 @@ export class FlowExecutor {
   private registry: CommandRegistry;
   private verbose: boolean;
   private lenient: boolean;
-  private fast: boolean;
+  private driver: GestureDriver;
 
   constructor(opts: FlowExecutorOptions) {
     this.session = opts.session;
@@ -51,7 +53,7 @@ export class FlowExecutor {
     this.reporter = opts.reporter;
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
-    this.fast = opts.fast ?? false;
+    this.driver = opts.driver ?? createDriver(false);
     this.registry =
       opts.registry ??
       new CommandRegistry({
@@ -81,7 +83,7 @@ export class FlowExecutor {
       dylibPath: this.session.dylibPath,
       verbose: this.verbose,
       lenient: this.lenient,
-      fast: this.fast,
+      driver: this.driver,
       flowPath: flow.filePath,
       outputs: {},
     };

@@ -18,13 +18,7 @@
 //         _accessibilityHandleUserTouchActivate directly when the
 //         gesture chain never armed)
 
-import {
-  tap as hidTap,
-  tapFast as hidTapFast,
-  tapPureFast as hidTapPureFast,
-  tapHid as hidTapForced,
-  press as hidPress,
-} from '../hid';
+import type { TapIntent } from '../driver/types';
 import { MaestroSelector } from '../maestro-parser';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
@@ -34,6 +28,7 @@ export async function execTapOn(
   ctx: RunContext,
   sel: MaestroSelector,
   preHash?: string,
+  intent: TapIntent = 'press',
 ): Promise<void> {
   // Point-tap fast path — no discovery needed. Wait for commits to
   // quiesce before firing: the YAML emits literal-coord taps right
@@ -54,7 +49,7 @@ export async function execTapOn(
       }
     }
     const { x, y } = parsePoint(sel.point, winW, winH);
-    await hidTap(ctx.udid, x, y);
+    await ctx.driver.tap(ctx.udid, x, y, { intent });
     return;
   }
   // UIAlertController auto-handler: button labels never make it into
@@ -71,6 +66,13 @@ export async function execTapOn(
     } catch {
       /* fall through to normal find */
     }
+    // Tab-bar routing is a driver decision: fast routes text matching
+    // a tab item through tap_tab up front (in-process, deterministic,
+    // idempotent — re-tapping the CURRENT tab produces zero visual
+    // change, which would otherwise trip the phantom detector into a
+    // pointless HID redo); baseline keeps the probe in the retap loop
+    // only.
+    if (await ctx.driver.tryTabTap(ctx.client, sel.text)) return;
   }
   let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
   if (!rect) {
@@ -195,15 +197,14 @@ export async function execTapOn(
   let stableRect: Rect = rect;
   {
     const deadline = Date.now() + 800;
-    // Fast mode trims the PREVIOUS step's post-settle, so this gate is
-    // the main defence against tapping a target mid-entrance-animation
-    // (Reanimated card slide-ins are invisible to animations_active
-    // and to React-commit signals). 10ms spacing gives a 30ms window —
-    // springs have 30ms-still frames near their inflection points, so
-    // the gate false-locks and the tap lands on the card's transit
-    // position (04-checkout add-to-cart-1 → opened the card instead).
-    // 40ms spacing = 120ms window, still cheap on settled screens.
-    const gapMs = ctx.fast ? 40 : 10;
+    // Sample spacing is a driver property. Fast trims the PREVIOUS
+    // step's post-settle, so this gate is its main defence against
+    // tapping a target mid-entrance-animation (Reanimated slide-ins
+    // are invisible to animations_active and React-commit signals);
+    // springs have ~30ms-still frames near inflection points, so the
+    // tight 10ms baseline window can false-lock (04-checkout
+    // add-to-cart-1 landed on the card's transit position).
+    const gapMs = ctx.driver.stabilityGateGapMs;
     let s1: Rect | null = rect;
     let s2: Rect | null = null;
     let s3: Rect | null = null;
@@ -311,12 +312,13 @@ export async function execTapOn(
   // gesture, closing the sheet instead of selecting the row. The
   // retap-self-heal loop covers any single-miss case.
   const isTextOnlyTap = !!sel.text && !sel.id;
-  // suppressFastTap: the handler marked this tap as needing a real
-  // touch (e.g. focusing a native text input) — bypass activation.
-  // Same when exposure was never confirmed: activation would hit the
+  // The driver picks the mechanism from intent + exposure: a focus
+  // tap needs a real touch (activation can't focus native inputs);
+  // an unexposed target means an in-process activation would hit the
   // occluding layer.
-  const tapFn = ctx.suppressFastTap || !confirmedExposed ? hidTapForced : hidTapFast;
-  await timedAsync(ctx, 'tap.hidTap', () => tapFn(ctx.udid, center.x, center.y));
+  await timedAsync(ctx, 'tap.hidTap', () =>
+    ctx.driver.tap(ctx.udid, center.x, center.y, { intent, exposed: confirmedExposed }),
+  );
   // Tiny ≤5 px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx
   // stack of 1×1 px Pressables at top:100 right:0 zIndex:100): integer
   // rounding misses the hit-box ~30 % of taps. Fire pure DOWN+UP and
@@ -325,12 +327,12 @@ export async function execTapOn(
   // dismissing sibling controls when the first tap succeeded.
   if (rect.w <= 5 && rect.h <= 5) {
     const baseHash = preHash ?? (await captureHash(ctx));
-    await hidTapPureFast(ctx.udid, center.x, center.y);
+    await ctx.driver.tap(ctx.udid, center.x, center.y, { intent, exposed: confirmedExposed });
     for (let i = 1; i < 3; i++) {
       await sleep(80);
       const h = await captureHash(ctx);
       if (h !== baseHash) return;
-      await hidTapPureFast(ctx.udid, center.x, center.y);
+      await ctx.driver.tap(ctx.udid, center.x, center.y, { intent, exposed: confirmedExposed });
     }
     return;
   }
@@ -390,7 +392,9 @@ export async function execTapOn(
       if (hashChanged && !isLateRecogniserHost) break;
       const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
       await timedAsync(ctx, 'tap.selfHealRetap', () =>
-        isTextOnlyTap ? hidPress(ctx.udid, c.x, c.y) : hidTapFast(ctx.udid, c.x, c.y),
+        isTextOnlyTap
+          ? ctx.driver.press(ctx.udid, c.x, c.y)
+          : ctx.driver.tap(ctx.udid, c.x, c.y, { intent, exposed: stillExposed }),
       );
     }
     // Last-resort: if the entire retap loop above never moved the

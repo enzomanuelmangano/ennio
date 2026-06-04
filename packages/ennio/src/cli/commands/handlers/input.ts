@@ -8,7 +8,7 @@
 
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
-import { tapFast as hidTapFast, typeText as hidType } from '../../hid';
+import { typeText as hidType } from '../../hid';
 import { interpolate, sleep } from '../../runner/context';
 
 interface InputTextCmd {
@@ -48,7 +48,8 @@ export function registerInputHandlers(registry: CommandRegistry): void {
             .catch(() => undefined);
           if (rect && rect.ok && rect.data) {
             const r = rect.data as { x: number; y: number; w: number; h: number };
-            await hidTapFast(ctx.udid, r.x + r.w / 2, r.y + r.h / 2);
+            // Recovery tap must move FOCUS into the field — real touch.
+            await ctx.driver.tap(ctx.udid, r.x + r.w / 2, r.y + r.h / 2, { intent: 'focus' });
           }
         }
         const fr = await ctx.client

@@ -18,7 +18,8 @@
 import { execFileSync } from 'node:child_process';
 
 import { enableAccessibility } from '../sim';
-import { setFastMode, getFastStats, resetFastStats } from '../hid';
+import { createDriver } from '../driver';
+import type { GestureDriver } from '../driver';
 import { ensureIdb, defaultIdbDeps } from '../idb-setup';
 import type { MaestroFlow } from '../maestro-parser';
 import { parseMaestroFile } from '../maestro-parser';
@@ -48,6 +49,7 @@ export class EnnioRunner {
   private verbose: boolean;
   private lenient: boolean;
   private fast: boolean;
+  private driver: GestureDriver;
 
   constructor(opts: EnnioRunnerOptions = {}) {
     this.udid = opts.udid;
@@ -55,7 +57,7 @@ export class EnnioRunner {
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
     this.fast = opts.fast ?? false;
-    setFastMode(this.fast);
+    this.driver = createDriver(this.fast);
     this.reporter =
       opts.reporter ?? pickReporter({ kind: opts.reporterKind ?? 'pretty', verbose: this.verbose });
   }
@@ -140,12 +142,12 @@ export class EnnioRunner {
         reporter: this.reporter,
         verbose: this.verbose,
         lenient: this.lenient,
-        fast: this.fast,
+        driver: this.driver,
       });
-      if (this.fast) resetFastStats();
+      if (this.fast) this.driver.resetStats();
       const result = await executor.run(flow);
       if (this.fast) {
-        const s = getFastStats();
+        const s = this.driver.stats();
         process.stderr.write(
           `[fast] ${flow.name ?? flow.filePath}: ${s.hits} in-process, ${s.fallbacks} HID fallbacks\n`,
         );

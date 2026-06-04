@@ -8,7 +8,6 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { doubleTap as hidDoubleTap, tap as hidTap } from '../../hid';
 import { POST_TAP_SETTLE_MS, sleep, timedAsync } from '../../runner/context';
 import { captureHash, captureReactTs, findOnce, resolveCenter } from '../../runner/find';
 import { execTapOn } from '../../runner/tap';
@@ -67,16 +66,15 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         );
         if (JSON.stringify(nextSel) === tapKey) nextIsSameTap = true;
       }
-      // Fast mode: no collapse. The collapse works around HID's tap-gap
-      // landing inside RN's double-tap window; in-process activations
-      // fire onPress deterministically per call, and mixing one HID
-      // doubleTap with a follow-up activation has been seen to drop an
-      // increment (g-switch-stepper).
-      if (!ctx.fast && nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
+      // Collapse policy lives on the driver — HID needs it (two real
+      // taps land inside RN's double-tap window), in-process
+      // activation fires onPress deterministically per call and must
+      // NOT collapse (g-switch-stepper dropped an increment).
+      if (ctx.driver.collapsesRepeatTaps && nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
         const rect = await findOnce(ctx, sel);
         if (rect && (rect.w > 5 || rect.h > 5)) {
           await timedAsync(ctx, 'tap.execTapOn', () =>
-            hidDoubleTap(ctx.udid, rect.x + rect.w / 2, rect.y + rect.h / 2),
+            ctx.driver.doubleTap(ctx.udid, rect.x + rect.w / 2, rect.y + rect.h / 2),
           );
           ctx.lastTapKey = tapKey;
           ctx.lastTapTestID = sel.id;
@@ -127,113 +125,25 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         ctx.lastTapTestID = sel.id;
         return;
       }
-      // Fast-mode exception: a tap whose next command types text must
-      // deliver REAL focus. In-process activation fires onPress but
-      // does not focus native inputs (UISearchBar — g-searchbar), and
-      // the focus_testid shortcut above only covers id selectors.
-      if (ctx.fast && nextEditsField) ctx.suppressFastTap = true;
-      try {
-        await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
-      } finally {
-        ctx.suppressFastTap = false;
-      }
+      // A tap whose next command types text must deliver REAL focus —
+      // in-process activation fires onPress but does not focus native
+      // inputs (UISearchBar — g-searchbar), and the focus_testid
+      // shortcut above only covers id selectors. Express the intent;
+      // the driver picks the mechanism.
+      await timedAsync(ctx, 'tap.execTapOn', () =>
+        execTapOn(ctx, sel, preTapHash, nextEditsField ? 'focus' : 'press'),
+      );
       if (isRepeatTap || nextIsSameTap) {
         await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
-      } else if (ctx.fast) {
-        // Fast mode: event-driven only. wait_hash_change returns the
-        // instant the visible tree differs (the tap's effect landed);
-        // a short stable window smooths mid-layout reads. Animation
-        // tails are absorbed by the NEXT command's own guards — the
-        // pre-tap animations_active poll, the position-stability gate
-        // in execTapOn, and assert/find polling.
-        await timedAsync(ctx, 'tap.postWaitHashChange', async () => {
-          await ctx.client
-            .call('wait_hash_change', { sinceHash: preTapHash, maxMs: 500 })
-            .catch(() => undefined);
-        });
-        if (nextEditsField) {
-          await ctx.client
-            .call('wait_react_commit', { sinceMs: preReact.ts, maxMs: 250 })
-            .catch(() => undefined);
-        }
-        // Tight cap: on screens with perpetual animation (auto-playing
-        // carousel) the hash never stabilises and a stableMs wait just
-        // burns its full maxMs budget. Hash-change above already proved
-        // the tap landed.
-        await timedAsync(ctx, 'tap.postWaitCommit', () =>
-          ctx.client.call('wait_commit', { maxMs: 250, stableMs: 60 }).catch(() => undefined),
-        );
-      } else if (preReact.attach !== 'none') {
-        // Hermes/Paper/Fabric commit observer attached — block on the
-        // next RN commit AFTER the tap.
-        const waitOneCommit = async (since: number, maxMs: number): Promise<number> => {
-          const r = await ctx.client
-            .call('wait_react_commit', { sinceMs: since, maxMs })
-            .catch(() => undefined);
-          if (!r || !r.ok || !r.data) return 0;
-          const data = r.data as { ok: boolean; elapsedMs: number };
-          if (!data.ok) return 0;
-          const ts = await captureReactTs(ctx);
-          return ts.ts || since + (data.elapsedMs ?? 0);
-        };
-        const committed = await timedAsync(ctx, 'tap.postWaitReactCommit', async () => {
-          const deadline = Date.now() + 1500;
-          while (Date.now() < deadline) {
-            const cur = await captureHash(ctx);
-            if (cur !== preTapHash) {
-              const animR = await ctx.client.call('animations_active').catch(() => undefined);
-              const animActive = !!(
-                animR &&
-                animR.ok &&
-                animR.data &&
-                (animR.data as { active?: boolean }).active
-              );
-              if (!animActive) {
-                if (nextEditsField) {
-                  await waitOneCommit(preReact.ts, 250);
-                }
-                return true;
-              }
-            }
-          }
-          return false;
-        });
-        if (!committed) {
-          await timedAsync(ctx, 'tap.postWaitHashChange', async () => {
-            await ctx.client
-              .call('wait_hash_change', { sinceHash: preTapHash, maxMs: 400 })
-              .catch(() => undefined);
-          });
-        }
-        await timedAsync(ctx, 'tap.postWaitCommit', () =>
-          ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined),
-        );
       } else {
-        // Event-driven post-tap settle. wait_hash_change inside the
-        // dylib returns the instant the visible-UIView hash differs.
-        const changed = await timedAsync(ctx, 'tap.postWaitHashChange', async () => {
-          const r = await ctx.client
-            .call('wait_hash_change', { sinceHash: preTapHash, maxMs: 600 })
-            .catch(() => undefined);
-          return !!(r && r.ok && r.data && (r.data as { ok: boolean }).ok);
-        });
-        if (!changed) {
-          const animR = await ctx.client.call('animations_active').catch(() => undefined);
-          const animActive = !!(
-            animR &&
-            animR.ok &&
-            animR.data &&
-            (animR.data as { active?: boolean }).active
-          );
-          const settleMs = animActive ? POST_TAP_SETTLE_MS : Math.min(POST_TAP_SETTLE_MS, 400);
-          await timedAsync(ctx, 'tap.postSleep', () => sleep(settleMs));
-        }
-        await timedAsync(ctx, 'tap.postWaitCommit', () =>
-          ctx.client.call('wait_commit', { maxMs: 800, stableMs: 350 }).catch(() => undefined),
+        await timedAsync(ctx, 'tap.postSettle', () =>
+          ctx.driver.settleAfterTap(ctx.client, {
+            preTapHash,
+            reactAttach: preReact.attach,
+            reactSinceMs: preReact.ts,
+            nextEditsField,
+          }),
         );
-        // UIKit-level tail: modal-dismiss / RN-Nav interactive pop
-        // transitions that don't fire React commits.
-        await ctx.client.call('wait_presentation_idle', { maxMs: 500 }).catch(() => undefined);
       }
       ctx.lastTapKey = tapKey;
       ctx.lastTapTestID = sel.id;
@@ -245,7 +155,7 @@ export function registerTapHandlers(registry: CommandRegistry): void {
     async (cmd, { ctx }) => {
       const sel = normalizeSelector(cmd.doubleTapOn as Parameters<typeof normalizeSelector>[0]);
       const { x, y } = await resolveCenter(ctx, sel);
-      await hidDoubleTap(ctx.udid, x, y);
+      await ctx.driver.doubleTap(ctx.udid, x, y);
       await sleep(POST_TAP_SETTLE_MS);
     },
   );
@@ -262,7 +172,7 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       const { x, y } = await resolveCenter(ctx, sel);
       // Long press = tap with hold duration. Maestro default 1500ms;
       // many RN handlers register at ~500ms — 0.8s is the middle.
-      await hidTap(ctx.udid, x, y, 0.8);
+      await ctx.driver.tap(ctx.udid, x, y, { intent: 'longPress', holdSec: 0.8 });
       await sleep(POST_TAP_SETTLE_MS);
     },
   );

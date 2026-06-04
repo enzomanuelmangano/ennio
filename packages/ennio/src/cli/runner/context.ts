@@ -6,6 +6,7 @@
 // the next step's pre/post-tap settle path uses to disambiguate
 // transitions from no-ops. Everything here is pure data — no I/O.
 
+import type { GestureDriver } from '../driver/types';
 import type { EnnioSocketClient } from '../socket-client';
 
 // =====================================================================
@@ -60,16 +61,10 @@ export interface RunContext {
   /** When true, unknown/unsupported commands are skipped with a warning
    *  instead of failing the flow. Useful during incremental Maestro migration. */
   lenient: boolean;
-  /** --fast: in-process gestures + trimmed, event-driven settle. Post-
-   *  action waits drop their fixed sleeps / long stable windows and rely
-   *  on the next command's own guards (pre-tap animation poll, position-
-   *  stability gate, assert polling) to absorb animation tails. */
-  fast?: boolean;
-  /** Transient: force the next tap through idb HID even in fast mode.
-   *  Set by the tapOn handler when the tap must produce a real-touch
-   *  side effect activation can't (focusing a native text input before
-   *  inputText). Cleared by the handler after the tap. */
-  suppressFastTap?: boolean;
+  /** Gesture mechanism + settle policy for this run. HidDriver
+   *  (baseline, real IOHIDEvents) or FastDriver (in-process-first with
+   *  per-gesture HID fallback). Decided once by EnnioRunner. */
+  driver: GestureDriver;
   /** Path to the currently-executing flow file. Used for runFlow
    *  subflow path resolution. */
   flowPath: string;
