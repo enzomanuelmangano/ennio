@@ -12,7 +12,7 @@ The CLI injects a prebuilt ObjC dylib into your simulator app via
 CoreSimulator touches are dispatched by an in-house host helper that
 posts Indigo HID events straight to the simulator — the gesture goes
 through the same path a finger would. No XCTest, no CDP, no companion
-driver, no idb.
+driver.
 
 ```bash
 bun add -D @reactiive/ennio          # or npm install --save-dev
@@ -30,7 +30,7 @@ the matching slice at simulator launch time.
 - React Native ≥ 0.83 (New Architecture, Fabric)
 - iOS 17+ simulator
 - Xcode 16+, Node 18+ (no extra toolchain — touches use Xcode's own
-  CoreSimulator / SimulatorKit frameworks; no idb, brew, or pip)
+  CoreSimulator / SimulatorKit frameworks; no Homebrew or pip)
 
 ## How it works
 

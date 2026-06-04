@@ -1,9 +1,8 @@
-// enniohid — in-house host-side HID sender. Replaces idb_companion's
-// touch path with the same mechanism (CoreSimulator Indigo) owned by
-// us: no daemon, no fb-idb, no grpc. The Indigo struct + touch-message
-// builder are vendored (MIT, from FBSimulatorControl) in
-// indigo_touch.h; the send goes through SimulatorKit's
-// SimDeviceLegacyHIDClient.
+// enniohid — in-house host-side HID sender. Posts real touches into
+// the simulator via CoreSimulator Indigo: builds a digitizer Indigo
+// message (struct + builder vendored MIT from Meta's FBSimulatorControl,
+// see indigo_touch.h) and sends it through SimulatorKit's
+// SimDeviceLegacyHIDClient. No external daemon.
 //
 // Spike form: posts a single Down→Up at a normalized point to prove
 // the seam end to end. Becomes a persistent stdin-driven process once
@@ -67,8 +66,8 @@ log("HID client ready")
 
 // ── 3. Build (vendored Indigo touch) + send via the ObjC-bridged
 //       sendWithMessage:freeWhenDone:completionQueue:completion: ──────
-// (the @objc name of SimDeviceLegacyHIDClient's send — the same call
-// idb makes; the simple Swift send(message:) variant doesn't flush.)
+// (the @objc name of SimDeviceLegacyHIDClient's send; the simple Swift
+// send(message:) variant doesn't flush.)
 typealias SendFn = @convention(c) (AnyObject, Selector, UnsafeMutableRawPointer, Bool, AnyObject?, AnyObject?) -> Void
 let sendSel = NSSelectorFromString("sendWithMessage:freeWhenDone:completionQueue:completion:")
 guard (hid as AnyObject).responds(to: sendSel) else { die("no sendWithMessage selector") }

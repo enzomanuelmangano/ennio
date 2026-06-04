@@ -2,7 +2,7 @@
 # Build the enniohid host helper — the in-house HID sender that posts
 # real touches into the simulator via CoreSimulator Indigo (SimulatorKit
 # SimDeviceLegacyHIDClient + the vendored MIT Indigo builder). Replaces
-# idb_companion's touch path. Output: /tmp/ennio-build/enniohid
+# the host CoreSimulator touch path. Output: /tmp/ennio-build/enniohid
 # (the dev-mode path EnnioHidClient checks first).
 set -euo pipefail
 

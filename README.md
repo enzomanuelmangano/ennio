@@ -12,7 +12,7 @@ CoreSimulator touches are dispatched by an in-house host helper that
 posts Indigo HID events straight to the simulator — the gesture goes
 through the same path a finger would.
 
-No XCTest, no CDP, no Metro required, no companion driver, no idb.
+No XCTest, no CDP, no Metro required, no companion driver.
 
 ```bash
 npx ennio test e2e/01-auth-flow.yaml      # one flow
@@ -26,7 +26,7 @@ https://github.com/user-attachments/assets/8734572f-f90c-4658-9cba-98642d0da2d5
 Requires a React Native app (New Architecture, Fabric), iOS 17+
 simulator, Xcode 16+, and Node 18+. No extra toolchain — touches are
 driven by an in-house helper that links Xcode's own CoreSimulator /
-SimulatorKit frameworks. (No `idb`, no Homebrew formula, no pip.)
+SimulatorKit frameworks. No Homebrew formula, no pip.
 
 ### Install
 
@@ -88,11 +88,11 @@ promotion.
 
 Touches go through an in-house host helper (`enniohid`) that posts
 Indigo HID events to the simulator via CoreSimulator / SimulatorKit
-(`SimDeviceLegacyHIDClient`) — the same CoreSimulator path
-`idb_companion` uses, reimplemented in-process with a vendored
-(MIT, FBSimulatorControl) Indigo message builder. Same touch pipeline
-as a physical finger — UIKit gesture recognizers, React Native's
-responder system, and RNGH all see a real touch. No external daemon.
+(`SimDeviceLegacyHIDClient`), built with a vendored (MIT, from Meta's
+FBSimulatorControl) Indigo message struct + builder. Same touch
+pipeline as a physical finger — UIKit gesture recognizers, React
+Native's responder system, and RNGH all see a real touch. No external
+daemon.
 
 Three special cases bypass HID — tab-bar taps, native-alert button
 taps, and the iOS back gesture — because driving those through UIKit

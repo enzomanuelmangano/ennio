@@ -5,9 +5,10 @@
  * Meta's FBSimulatorControl (MIT-licensed): PrivateHeaders/SimulatorApp/
  * {Indigo.h,Mach.h} and FBSimulatorControl/HID/FBSimulatorIndigoHID.m.
  * Copyright (c) Meta Platforms, Inc. and affiliates — MIT. Vendored so
- * ennio's in-house HID needs neither idb_companion nor the wider
- * FBSimulatorControl framework: just this ~1 struct + builder + the
- * already-exported SimulatorKit C entry point IndigoHIDMessageForMouseNSEvent.
+ * ennio's in-house HID needs only this ~1 struct + builder + the
+ * already-exported SimulatorKit C entry point
+ * IndigoHIDMessageForMouseNSEvent — not the wider FBSimulatorControl
+ * framework.
  *
  * A touch message is built by reshaping the base message that
  * IndigoHIDMessageForMouseNSEvent produces into the 2-payload digitizer

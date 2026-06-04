@@ -42,8 +42,8 @@ A read-only architectural overview lives in the root `README.md`
    - iOS 17+ simulator
    - No extra toolchain: touches are driven by the in-house `enniohid`
      helper, which links Xcode's own CoreSimulator / SimulatorKit
-     frameworks (built via `scripts/build-hid-helper.sh`). No idb,
-     Homebrew formula, or pip.
+     frameworks (built via `scripts/build-hid-helper.sh`). No
+     Homebrew formula or pip.
 
 2. **Clone + install**:
 
@@ -103,7 +103,7 @@ fails:
   ```
 - Add `ENNIO_VERBOSE=1` for runner-side step tracing.
 - Add `ENNIO_DEBUG_TAP=1` for prepareTap coord resolution logs.
-- Add `ENNIO_DEBUG_IDB=1` for HID daemon traffic logs.
+- Add `ENNIO_PHASE_TRACE=1` for per-gesture HID + phase-timing logs.
 
 ### Adding a new Maestro command
 
