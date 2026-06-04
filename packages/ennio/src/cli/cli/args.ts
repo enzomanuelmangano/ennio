@@ -20,6 +20,7 @@ export type Flags = {
   output?: string;
   lenient?: boolean;
   reporter?: string;
+  fast?: boolean;
 };
 
 export type ParsedArgs = {
@@ -29,7 +30,7 @@ export type ParsedArgs = {
 };
 
 const STRING_FLAGS = new Set(['port', 'output', 'reporter']);
-const BOOL_FLAGS = new Set(['verbose', 'trace', 'help', 'lenient', 'version']);
+const BOOL_FLAGS = new Set(['verbose', 'trace', 'help', 'lenient', 'version', 'fast']);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];

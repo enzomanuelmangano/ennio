@@ -18,6 +18,7 @@
 import { execFileSync } from 'node:child_process';
 
 import { enableAccessibility } from '../sim';
+import { setFastMode, getFastStats, resetFastStats } from '../hid';
 import { ensureIdb, defaultIdbDeps } from '../idb-setup';
 import type { MaestroFlow } from '../maestro-parser';
 import { parseMaestroFile } from '../maestro-parser';
@@ -34,6 +35,8 @@ export interface EnnioRunnerOptions {
   reporter?: Reporter;
   verbose?: boolean;
   lenient?: boolean;
+  /** Route taps/swipes through in-process dylib ops, HID fallback. */
+  fast?: boolean;
   /** Reporter kind when no explicit reporter is passed. Default 'pretty'. */
   reporterKind?: 'pretty' | 'json';
 }
@@ -44,12 +47,15 @@ export class EnnioRunner {
   private reporter: Reporter;
   private verbose: boolean;
   private lenient: boolean;
+  private fast: boolean;
 
   constructor(opts: EnnioRunnerOptions = {}) {
     this.udid = opts.udid;
     this.dylibPath = opts.dylibPath;
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
+    this.fast = opts.fast ?? false;
+    setFastMode(this.fast);
     this.reporter =
       opts.reporter ?? pickReporter({ kind: opts.reporterKind ?? 'pretty', verbose: this.verbose });
   }
@@ -135,7 +141,15 @@ export class EnnioRunner {
         verbose: this.verbose,
         lenient: this.lenient,
       });
-      return await executor.run(flow);
+      if (this.fast) resetFastStats();
+      const result = await executor.run(flow);
+      if (this.fast) {
+        const s = getFastStats();
+        process.stderr.write(
+          `[fast] ${flow.name ?? flow.filePath}: ${s.hits} in-process, ${s.fallbacks} HID fallbacks\n`,
+        );
+      }
+      return result;
     } finally {
       connection.close();
     }

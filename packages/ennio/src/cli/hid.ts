@@ -8,12 +8,69 @@
 // core/active-connections so the helpers below can look up the right
 // connection by UDID.
 //
-// hid.ts itself holds no mutable state — every call route is a pure
-// function of (udid, params).
+// hid.ts holds no per-device mutable state — every call route is a
+// pure function of (udid, params). The only module state is the
+// run-global fast-mode switch + its counters (set once at runner
+// start, before any gesture fires).
+//
+// Fast mode (--fast): plain single taps and swipes are routed to the
+// in-process dylib ops first — `activate_at_point` (EnnioTouchSynth
+// activation chain) and `swipe_points` (setContentOffset fast path on
+// UIScrollView hits). Both ops report {ok:false} when they can't
+// handle the target (non-activatable view, non-scroll swipe), in
+// which case the gesture falls back to idb gRPC HID transparently.
+// Double-taps, held taps (longPress), press() and longPressDrag stay
+// on HID — they need a real timed UITouch sequence.
 
 import { getActiveConnection } from './core/active-connections';
 import type { EnnioSocketClient } from './socket-client';
 import type { IdbGrpcClient } from './idb-grpc';
+
+let fastMode = false;
+let fastHits = 0;
+let fastFallbacks = 0;
+
+/** Enable/disable the in-process fast path. Called once by EnnioRunner. */
+export function setFastMode(v: boolean): void {
+  fastMode = v;
+}
+
+export function getFastStats(): { hits: number; fallbacks: number } {
+  return { hits: fastHits, fallbacks: fastFallbacks };
+}
+
+export function resetFastStats(): void {
+  fastHits = 0;
+  fastFallbacks = 0;
+}
+
+/**
+ * Try an in-process dylib gesture op. Returns true when the dylib
+ * handled the gesture ({ok:true}); false on {ok:false}, socket error,
+ * or any infra failure — the caller then falls back to idb HID.
+ */
+async function tryFastOp(
+  dy: EnnioSocketClient,
+  op: string,
+  args: Record<string, unknown>,
+): Promise<boolean> {
+  try {
+    const r = await dy.call(op, args);
+    const handled = !!(r.ok && r.data && (r.data as { ok?: boolean }).ok === true);
+    if (handled) {
+      fastHits++;
+      trace(`[fast] ${op} handled in-process`);
+    } else {
+      fastFallbacks++;
+      trace(`[fast] ${op} declined (${r.ok ? 'ok:false' : (r.err ?? 'no data')}) → HID fallback`);
+    }
+    return handled;
+  } catch (e) {
+    fastFallbacks++;
+    trace(`[fast] ${op} infra error (${e instanceof Error ? e.message : String(e)}) → HID fallback`);
+    return false;
+  }
+}
 
 function getDylibClient(udid: string): EnnioSocketClient {
   return getActiveConnection(udid).socket;
@@ -183,6 +240,15 @@ async function callTool(
       return;
     }
     const holdSec = (payload.holdSec as number | undefined) ?? 0.08;
+    // Fast path: plain short taps only. Held taps (longPress passes
+    // holdSec=0.8) need a real timed UITouch — activation can't hold.
+    if (fastMode && holdSec <= 0.2) {
+      const handled = await tryFastOp(dy, 'activate_at_point', {
+        x: Math.round(nx * w),
+        y: Math.round(ny * h),
+      });
+      if (handled) return;
+    }
     trace(`[hid] tap nx=${nx.toFixed(4)} ny=${ny.toFixed(4)} hold=${holdSec}s`);
     await idb.tap(nx * w, ny * h, holdSec);
     return;
@@ -194,6 +260,18 @@ async function callTool(
     const toX = (payload.toX as number) * w;
     const toY = (payload.toY as number) * h;
     const durationMs = payload.durationMs as number;
+    // Fast path: swipe_points drives UIScrollView via setContentOffset
+    // when the start point hits one; declines (ok:false) otherwise.
+    if (fastMode) {
+      const handled = await tryFastOp(dy, 'swipe_points', {
+        x1: fromX,
+        y1: fromY,
+        x2: toX,
+        y2: toY,
+        durationMs: durationMs ?? 250,
+      });
+      if (handled) return;
+    }
     const idb = getIdb(udid);
     trace(
       `[hid] swipe (${fromX.toFixed(0)},${fromY.toFixed(0)})→(${toX.toFixed(0)},${toY.toFixed(0)}) dur=${durationMs}`,
