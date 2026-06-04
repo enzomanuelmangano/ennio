@@ -20,6 +20,7 @@ import { getActuator, getScreenSize, trace } from './hid';
 export interface AxElement {
   role: string;
   label: string;
+  id: string; // iOS testID, bridged from macOS AXIdentifier
   value: string;
   nx: number;
   ny: number;
@@ -79,6 +80,49 @@ export function axHasText(udid: string, text: string): boolean {
   return tree.elements.some(
     (e) => e.label.toLowerCase().includes(needle) || e.value.toLowerCase().includes(needle),
   );
+}
+
+/** Resolve a Maestro selector against the cross-process tree. */
+export function axResolve(udid: string, sel: { id?: string; text?: string }): AxElement | null {
+  const tree = axTree(udid);
+  if (!tree) return null;
+  if (sel.id) {
+    const byId = tree.elements.find((e) => e.id === sel.id);
+    if (byId) return byId;
+  }
+  if (sel.text) {
+    // Exact label match on an interactive element only. A loose
+    // `includes` match is unsafe here: this runs as a fallback on every
+    // not-found tap, and a wrong cross-process button tap derails the
+    // flow. testID (above) is the high-confidence path.
+    const needle = sel.text.toLowerCase();
+    const exact = tree.elements.find(
+      (e) => e.role.includes('Button') && e.label.toLowerCase() === needle,
+    );
+    if (exact) return exact;
+  }
+  return null;
+}
+
+/**
+ * Tap a target that lives in cross-process UI the in-app finder can't
+ * reach — a native bottom-sheet (BottomSheet.SheetViewController),
+ * popover, or system layer. Matches by testID (bridged AXIdentifier) or
+ * visible label, then taps its center via the in-house HID. Returns true
+ * if it tapped.
+ */
+export async function axTapTarget(
+  udid: string,
+  sel: { id?: string; text?: string },
+): Promise<boolean> {
+  const el = axResolve(udid, sel);
+  if (!el) return false;
+  const { w, h } = await getScreenSize(udid);
+  trace(
+    `ax: cross-process tap "${el.id || el.label}" @ (${el.cx.toFixed(3)},${el.cy.toFixed(3)})`,
+  );
+  await getActuator(udid).tap(el.cx * w, el.cy * h);
+  return true;
 }
 
 // System-sheet buttons we treat as "proceed", most-specific first. A

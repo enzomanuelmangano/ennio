@@ -19,7 +19,7 @@
 //         gesture chain never armed)
 
 import type { TapIntent } from '../driver/types';
-import { dismissSystemSheet } from '../ennio-ax';
+import { axTapTarget, dismissSystemSheet } from '../ennio-ax';
 import { MaestroSelector } from '../maestro-parser';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
@@ -84,6 +84,16 @@ export async function execTapOn(
     if (await dismissSystemSheet(ctx.udid).catch(() => false)) {
       await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
       rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+    }
+  }
+  if (!rect && (sel.id || sel.text)) {
+    // The target may live in a native bottom-sheet / popover the in-app
+    // dylib doesn't traverse (Bluesky's Dialog/Prompt + composer render
+    // in a separate SheetViewController window). It's still on screen,
+    // so the cross-process AX tree sees it — match by testID (bridged
+    // AXIdentifier) or label and tap it directly. Soft-fails off-box.
+    if (await axTapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false)) {
+      return;
     }
   }
   if (!rect) {

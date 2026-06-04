@@ -98,15 +98,16 @@ static void collect(AXUIElementRef e, CGPoint g, CGSize gs, NSMutableArray *out,
   NSString *title = axStr(e, kAXTitleAttribute);
   NSString *desc = axStr(e, kAXDescriptionAttribute);
   NSString *val = axStr(e, kAXValueAttribute);
+  NSString *ident = axStr(e, CFSTR("AXIdentifier")); // iOS testID bridges here
   NSString *label = title.length ? title : (desc.length ? desc : nil);
-  if (label && gs.width > 0 && gs.height > 0) {
+  if ((label || ident.length) && gs.width > 0 && gs.height > 0) {
     CGPoint p; CGSize s; axRect(e, &p, &s);
     double nx = (p.x - g.x) / gs.width, ny = (p.y - g.y) / gs.height;
     double nw = s.width / gs.width, nh = s.height / gs.height;
     double cx = nx + nw / 2, cy = ny + nh / 2;
     [out addObject:[NSString stringWithFormat:
-      @"{\"role\":\"%@\",\"label\":\"%@\",\"value\":\"%@\",\"nx\":%.4f,\"ny\":%.4f,\"nw\":%.4f,\"nh\":%.4f,\"cx\":%.4f,\"cy\":%.4f}",
-      jsonEsc(role), jsonEsc(label), jsonEsc(val.length ? val : @""), nx, ny, nw, nh, cx, cy]];
+      @"{\"role\":\"%@\",\"label\":\"%@\",\"id\":\"%@\",\"value\":\"%@\",\"nx\":%.4f,\"ny\":%.4f,\"nw\":%.4f,\"nh\":%.4f,\"cx\":%.4f,\"cy\":%.4f}",
+      jsonEsc(role), jsonEsc(label ?: @""), jsonEsc(ident ?: @""), jsonEsc(val.length ? val : @""), nx, ny, nw, nh, cx, cy]];
   }
   CFTypeRef kids = NULL;
   if (AXUIElementCopyAttributeValue(e, kAXChildrenAttribute, &kids) == kAXErrorSuccess && kids) {
