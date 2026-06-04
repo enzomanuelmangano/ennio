@@ -241,6 +241,14 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
     return findTabIndex(tbc, name) != NSNotFound;
 }
 
++ (BOOL)isTabSelectedByName:(NSString *)name {
+    UITabBarController *tbc = findTabBarController();
+    if (!tbc) return NO;
+    NSInteger idx = findTabIndex(tbc, name);
+    if (idx == NSNotFound) return NO;
+    return tbc.selectedIndex == (NSUInteger)idx;
+}
+
 // ─── Navigation ─────────────────────────────────────────────────────
 
 + (BOOL)backGesture {
@@ -348,6 +356,46 @@ static BOOL anyVCInTransition(UIViewController *root) {
     if (!sv) return NO;
     CGRect rectInSv = [target convertRect:target.bounds toView:sv];
     [sv scrollRectToVisible:rectInSv animated:NO];
+
+    // scrollRectToVisible trusts adjustedContentInset — but RN sets
+    // contentInsetAdjustmentBehavior=never by default, so the scroll
+    // view believes it is full-bleed while the floating tab bar / nav
+    // header overlays its content. Occlusion-aware correction: hitTest
+    // at the target's center; if the hit lands OUTSIDE the target's
+    // subtree, measure the occluder's overlap and scroll exactly past
+    // it. Signal-driven (the occluder's real frame), no magic
+    // distances; capped at 4 iterations.
+    UIWindow *win = target.window;
+    if (!win) return YES;
+    for (int i = 0; i < 4; i++) {
+        [sv layoutIfNeeded];
+        CGRect inWin = [target convertRect:target.bounds toView:nil];
+        CGPoint center = CGPointMake(CGRectGetMidX(inWin), CGRectGetMidY(inWin));
+        UIView *hit = [win hitTest:center withEvent:nil];
+        BOOL exposed = NO;
+        for (UIView *cur = hit; cur; cur = cur.superview) {
+            if (cur == target) { exposed = YES; break; }
+        }
+        if (exposed || !hit) break;
+        CGRect occluder = [hit convertRect:hit.bounds toView:nil];
+        CGPoint offset = sv.contentOffset;
+        if (CGRectGetMinY(occluder) > CGRectGetMidY(inWin) - 1 ||
+            CGRectGetMaxY(occluder) > CGRectGetMaxY(inWin)) {
+            // Occluder below/overlapping bottom (tab bar): scroll the
+            // content up by the overlap so the target clears its top.
+            offset.y += CGRectGetMaxY(inWin) - CGRectGetMinY(occluder) + 8;
+        } else {
+            // Occluder above (nav header): scroll content down.
+            offset.y -= CGRectGetMaxY(occluder) - CGRectGetMinY(inWin) + 8;
+        }
+        CGSize content = sv.contentSize;
+        CGSize frame = sv.frame.size;
+        UIEdgeInsets ins = sv.adjustedContentInset;
+        CGFloat maxY = MAX(0, content.height - frame.height + ins.bottom);
+        offset.y = MAX(-ins.top, MIN(offset.y, maxY));
+        if (fabs(offset.y - sv.contentOffset.y) < 0.5) break; // clamped, can't improve
+        [sv setContentOffset:offset animated:NO];
+    }
     return YES;
 }
 

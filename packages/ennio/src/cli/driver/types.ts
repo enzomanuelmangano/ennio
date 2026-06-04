@@ -89,6 +89,20 @@ export interface GestureDriver {
     moveMs: number,
   ): Promise<void>;
 
+  // ── readiness ─────────────────────────────────────────────────────
+  /**
+   * Signal-based target steadiness: resolves when the target's model
+   * frame has been unchanged across consecutive display frames AND no
+   * CALayer animation is in flight on its ancestor chain
+   * (wait_view_steady op). Returns false when the driver doesn't
+   * support the signal (HID — caller runs its legacy sampling gate)
+   * or the budget expired without steadiness.
+   */
+  waitTargetSteady(
+    client: EnnioSocketClient,
+    sel: { id?: string; text?: string },
+  ): Promise<boolean>;
+
   // ── routing ───────────────────────────────────────────────────────
   /**
    * Text-selector tap that matches a tab-bar item. Fast routes through

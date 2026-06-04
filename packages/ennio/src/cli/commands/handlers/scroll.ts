@@ -59,12 +59,6 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       const NUDGE_DISTANCE = Math.round(winH / 6);
       // Bottom 20% of screen overlaps with the tab bar.
       const TAB_BAR_THRESHOLD = (winH * 4) / 5;
-      // Top ~12% sits under the nav header. Only the fast driver needs
-      // the guard: in-process swipes jump by EXACT distances, so a
-      // target can land pixel-perfectly under the header (HID momentum
-      // naturally overshoots past it).
-      // TODO(phase2): replace both nudges with is_exposed + scroll_to.
-      const TOP_THRESHOLD = winH * 0.12;
       const isFastDriver = ctx.driver.name === 'fast';
       // True only after a swipe that ran in-process (instant, no
       // momentum). Deliberately false before the first swipe: the
@@ -77,6 +71,22 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       while (Date.now() < deadline) {
         if (await isVisible(ctx, target)) {
           await ctx.driver.settleScrollFound(ctx.client, noMomentum);
+          // Fast + id targets: replace the geometry-threshold nudges
+          // with scroll_to — UIKit's scrollRectToVisible plus the
+          // occlusion-aware correction loop in the dylib. Idempotent
+          // when the target is already fully visible; deterministic
+          // placement when an exact-jump swipe parked it on the
+          // visibility boundary or under floating chrome. Tap-time
+          // exposure self-heal covers anything that shifts after this.
+          if (isFastDriver && target.id) {
+            await ctx.client
+              .call('scroll_to', { elementTestID: target.id })
+              .catch(() => undefined);
+            await ctx.client
+              .call('wait_commit', { maxMs: 600, stableMs: 100 })
+              .catch(() => undefined);
+            return;
+          }
           const rect = await resolveRect(ctx, target);
           if (rect && rect.y + rect.h / 2 > TAB_BAR_THRESHOLD) {
             let nudgeOutcome = { inProcess: true };
@@ -100,18 +110,6 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
               );
             }
             await ctx.driver.settleAfterNudge(ctx.client, nudgeOutcome);
-          } else if (isFastDriver && rect && rect.y + rect.h / 2 < TOP_THRESHOLD) {
-            // Target pinned under the nav header — push content down a
-            // notch so the row clears it.
-            const topNudge = await ctx.driver.swipe(
-              ctx.udid,
-              SWIPE_CENTER_X,
-              SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
-              SWIPE_CENTER_X,
-              SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
-              250,
-            );
-            await ctx.driver.settleAfterNudge(ctx.client, topNudge);
           }
           return;
         }
@@ -285,7 +283,14 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 350 }).catch(() => undefined);
       await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
       // Maestro default swipe is 400 ms.
-      const outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
+      const outcome = await ctx.driver.swipe(
+        ctx.udid,
+        from.x,
+        from.y,
+        to.x,
+        to.y,
+        sw.duration ?? 400,
+      );
       await ctx.driver.settleAfterSwipe(ctx.client, outcome);
     },
   );

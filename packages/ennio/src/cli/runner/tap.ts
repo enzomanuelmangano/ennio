@@ -195,15 +195,19 @@ export async function execTapOn(
     Math.abs(a.w - b.w) < 1 &&
     Math.abs(a.h - b.h) < 1;
   let stableRect: Rect = rect;
-  {
+  // Position-stability gate. Preferred: the driver's signal-based
+  // steadiness (wait_view_steady — frame-locked native sampling +
+  // CALayer animation introspection; immune to spring inflection
+  // points that fool socket-roundtrip sampling). Fallback: the legacy
+  // CLI-side rect-sampling loop (HID driver, or the op missed).
+  const steady = await timedAsync(ctx, 'tap.waitSteady', () =>
+    ctx.driver.waitTargetSteady(ctx.client, { id: sel.id, text: sel.text }),
+  );
+  if (steady) {
+    const cur = await sampleRect();
+    if (cur) stableRect = cur;
+  } else {
     const deadline = Date.now() + 800;
-    // Sample spacing is a driver property. Fast trims the PREVIOUS
-    // step's post-settle, so this gate is its main defence against
-    // tapping a target mid-entrance-animation (Reanimated slide-ins
-    // are invisible to animations_active and React-commit signals);
-    // springs have ~30ms-still frames near inflection points, so the
-    // tight 10ms baseline window can false-lock (04-checkout
-    // add-to-cart-1 landed on the card's transit position).
     const gapMs = ctx.driver.stabilityGateGapMs;
     let s1: Rect | null = rect;
     let s2: Rect | null = null;
@@ -246,9 +250,11 @@ export async function execTapOn(
   // touch routing handles edge-covered rows far more gracefully.
   let confirmedExposed = true;
   if (exposureSel) {
-    const ex = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
-    const exposed = !!(ex && ex.ok && ex.data && (ex.data as { exposed?: boolean }).exposed);
-    if (!exposed) {
+    const checkExposed = async (): Promise<boolean> => {
+      const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
+      return !!(r && r.ok && r.data && (r.data as { exposed?: boolean }).exposed);
+    };
+    if (!(await checkExposed())) {
       confirmedExposed = false;
       await timedAsync(ctx, 'tap.waitExposed', async () => {
         // 800 ms cap: RN animations (sheet present/dismiss, modal
@@ -257,14 +263,26 @@ export async function execTapOn(
         const deadline = Date.now() + 800;
         while (Date.now() < deadline) {
           await sleep(80);
-          const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
-          const ok = !!(r && r.ok && r.data && (r.data as { exposed?: boolean }).exposed);
-          if (ok) {
+          if (await checkExposed()) {
             confirmedExposed = true;
             break;
           }
         }
       });
+      // Occlusion self-heal: still covered after the wait AND we have
+      // a testID → the cover is positional (target parked under the
+      // tab bar / nav header), not transitional. scroll_to drives
+      // scrollRectToVisible:, which respects adjusted contentInset on
+      // any layout — UIKit moves the row clear of its own chrome.
+      // This is checked at TAP time (not in scrollUntilVisible) so the
+      // answer can't decay between scroll and tap.
+      if (!confirmedExposed && sel.id) {
+        await timedAsync(ctx, 'tap.scrollToExpose', async () => {
+          await ctx.client.call('scroll_to', { elementTestID: sel.id }).catch(() => undefined);
+          await ctx.client.call('wait_commit', { maxMs: 600, stableMs: 100 }).catch(() => undefined);
+          confirmedExposed = await checkExposed();
+        });
+      }
     }
     // Re-sample rect post-exposure. The position-stability gate can
     // lock onto a transient steady frame during a spring animation

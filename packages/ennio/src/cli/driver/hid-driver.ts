@@ -69,6 +69,11 @@ export class HidDriver implements GestureDriver {
     await hid.longPressDrag(udid, x1, y1, x2, y2, holdMs, moveMs);
   }
 
+  async waitTargetSteady(): Promise<boolean> {
+    // Baseline uses the legacy CLI-side rect-sampling gate.
+    return false;
+  }
+
   async tryTabTap(): Promise<boolean> {
     // Baseline keeps the tab probe in execTapOn's retap loop only.
     return false;

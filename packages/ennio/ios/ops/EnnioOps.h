@@ -45,6 +45,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Existence query — same matching rules as +tapTabByName, no tap.
 + (BOOL)findTabByName:(NSString *)name;
 
+/// True when the named tab is the CURRENTLY selected one. Re-tapping
+/// the current tab has pop-to-root semantics that synthetic selection
+/// can't reproduce faithfully — callers route that case to a real tap.
++ (BOOL)isTabSelectedByName:(NSString *)name;
+
 // ─── Navigation ─────────────────────────────────────────────────────
 
 + (BOOL)backGesture;

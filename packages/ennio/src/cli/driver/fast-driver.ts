@@ -72,7 +72,9 @@ export class FastDriver implements GestureDriver {
         const via = (r.data as { via?: string }).via;
         trace(`[fast] activate_at_point handled in-process${via ? ` via=${via}` : ''}`);
       } else {
-        trace(`[fast] activate_at_point declined (${r.ok ? 'ok:false' : (r.err ?? 'no data')}) → HID fallback`);
+        trace(
+          `[fast] activate_at_point declined (${r.ok ? 'ok:false' : (r.err ?? 'no data')}) → HID fallback`,
+        );
       }
     } catch (e) {
       trace(
@@ -127,7 +129,9 @@ export class FastDriver implements GestureDriver {
         trace('[fast] swipe_points handled in-process');
         return { inProcess: true };
       }
-      trace(`[fast] swipe_points declined (${r.ok ? 'ok:false' : (r.err ?? 'no data')}) → HID fallback`);
+      trace(
+        `[fast] swipe_points declined (${r.ok ? 'ok:false' : (r.err ?? 'no data')}) → HID fallback`,
+      );
     } catch (e) {
       trace(
         `[fast] swipe_points infra error (${e instanceof Error ? e.message : String(e)}) → HID fallback`,
@@ -150,6 +154,25 @@ export class FastDriver implements GestureDriver {
   }
 
   /**
+   * Signal-based steadiness via wait_view_steady: model frame
+   * unchanged across consecutive ~16ms samples (catches Reanimated /
+   * per-frame drivers) + no CAAnimations / presentation≈model on the
+   * ancestor chain (catches UIKit animations). Replaces the
+   * socket-roundtrip rect-sampling guess.
+   */
+  async waitTargetSteady(
+    client: EnnioSocketClient,
+    sel: { id?: string; text?: string },
+  ): Promise<boolean> {
+    if (!sel.id && !sel.text) return false;
+    const args: Record<string, unknown> = { maxMs: 800, steadyFrames: 3 };
+    if (sel.id) args.testID = sel.id;
+    else args.text = sel.text;
+    const r = await bestEffort(client, 'wait_view_steady', args);
+    return !!r?.ok;
+  }
+
+  /**
    * Text matching a tab-bar item → tap_tab. In-process, deterministic,
    * idempotent — re-tapping the CURRENT tab produces zero visual
    * change, which would otherwise trip the phantom detector into a
@@ -158,7 +181,16 @@ export class FastDriver implements GestureDriver {
   async tryTabTap(client: EnnioSocketClient, text: string): Promise<boolean> {
     try {
       const f = await client.call('find_tab', { name: text });
-      if (f.ok && f.data && (f.data as { present: boolean }).present) {
+      const d = f.ok ? (f.data as { present?: boolean; selected?: boolean } | undefined) : undefined;
+      if (d?.present) {
+        // Re-tapping the CURRENT tab has pop-to-root semantics that a
+        // synthetic selectedIndex write can't reproduce faithfully —
+        // expo-router/RNScreens resync JS navigation state from their
+        // own delegate, and a native-only pop leaves JS believing the
+        // pushed route is still focused (08-profile: Orders re-rendered
+        // back after the pop). Decline; the real HID tap on the tab
+        // button drives the framework's own handler.
+        if (d.selected) return false;
         const t = await client.call('tap_tab', { name: text });
         if (t.ok && t.data && (t.data as { tapped: boolean }).tapped) {
           this.hits++;

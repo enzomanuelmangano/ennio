@@ -33,8 +33,13 @@ void RegisterEnnioInteractionHandlers(void) {
         NSString *name = EnnioArgString(a, @"name");
         if (!name.length) throw std::runtime_error("missing name");
         BOOL ok = NO;
-        EnnioOnMainVoid([&]() { ok = [EnnioOps findTabByName:name]; });
-        return std::string("{\"present\":") + (ok ? "true" : "false") + "}";
+        BOOL selected = NO;
+        EnnioOnMainVoid([&]() {
+            ok = [EnnioOps findTabByName:name];
+            if (ok) selected = [EnnioOps isTabSelectedByName:name];
+        });
+        return std::string("{\"present\":") + (ok ? "true" : "false") +
+            ",\"selected\":" + (selected ? "true" : "false") + "}";
     });
 
     EnnioControlSocket::registerHandler("activate_at_point", [](const std::string &args) -> std::string {
