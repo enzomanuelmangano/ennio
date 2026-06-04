@@ -60,17 +60,31 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       const NUDGE_DISTANCE = Math.round(winH / 6);
       // Bottom 20% of screen overlaps with the tab bar.
       const TAB_BAR_THRESHOLD = (winH * 4) / 5;
+      // Fast mode: swipes handled in-process are setContentOffset
+      // jumps — no momentum to wait out, so the fixed sleeps drop and
+      // the stable windows shrink. HID-fallback swipes keep the full
+      // settle (real deceleration). `lastSwipeInProc` tracks which
+      // path the most recent swipe took.
+      const F = !!ctx.fast;
+      // True when there is no scroll momentum in flight: before any
+      // swipe, or after an in-process (instant) one.
+      let lastSwipeInProc = true;
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await isVisible(ctx, target)) {
-          await sleep(600);
+          const quick = F && lastSwipeInProc;
+          if (!quick) await sleep(600);
           await ctx.client
-            .call('wait_commit', { maxMs: 2000, stableMs: 300 })
+            .call(
+              'wait_commit',
+              quick ? { maxMs: 800, stableMs: 100 } : { maxMs: 2000, stableMs: 300 },
+            )
             .catch(() => undefined);
           const rect = await resolveRect(ctx, target);
           if (rect && rect.y + rect.h / 2 > TAB_BAR_THRESHOLD) {
+            let nudgeInProc = true;
             if (dir === 'DOWN') {
-              await hidSwipe(
+              nudgeInProc = await hidSwipe(
                 ctx.udid,
                 SWIPE_CENTER_X,
                 SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
@@ -79,7 +93,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
                 250,
               );
             } else if (dir === 'UP') {
-              await hidSwipe(
+              nudgeInProc = await hidSwipe(
                 ctx.udid,
                 SWIPE_CENTER_X,
                 SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
@@ -88,9 +102,13 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
                 250,
               );
             }
-            await sleep(500);
+            const quickNudge = F && nudgeInProc;
+            if (!quickNudge) await sleep(500);
             await ctx.client
-              .call('wait_commit', { maxMs: 1500, stableMs: 200 })
+              .call(
+                'wait_commit',
+                quickNudge ? { maxMs: 600, stableMs: 100 } : { maxMs: 1500, stableMs: 200 },
+              )
               .catch(() => undefined);
           }
           return;
@@ -113,8 +131,11 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           x1 = SWIPE_CENTER_X - dist / 2;
           x2 = SWIPE_CENTER_X + dist / 2;
         }
-        await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-        await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 300 }).catch(() => undefined);
+        lastSwipeInProc = await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
+        const quick = F && lastSwipeInProc;
+        await ctx.client
+          .call('wait_commit', quick ? { maxMs: 800, stableMs: 100 } : { maxMs: 2000, stableMs: 300 })
+          .catch(() => undefined);
       }
       throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
     },
@@ -249,13 +270,23 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       // Pre-swipe settle: wait for animation to end so the gesture
       // lands on a stable target (RN-Nav push spring, FlatList layout,
       // expo-router tab change). stableMs 350 / maxMs 2500 covers
-      // the typical worst case.
+      // the typical worst case. NOT trimmed in fast mode — this wait
+      // is what makes the gesture (and the in-process hitTest) land on
+      // the right scroll view; firing early just downgrades the swipe
+      // to a momentum HID fallback that costs more than the wait.
+      const F = !!ctx.fast;
       await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 350 }).catch(() => undefined);
       await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
       // Maestro default swipe is 400 ms.
-      await hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
-      await sleep(500);
-      await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
+      const inProc = await hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
+      // Trim the post-swipe settle only when the swipe ran in-process
+      // (instant setContentOffset, no momentum). An HID-fallback swipe
+      // has real deceleration the find would otherwise race against.
+      const quick = F && inProc;
+      if (!quick) await sleep(500);
+      await ctx.client
+        .call('wait_commit', quick ? { maxMs: 600, stableMs: 100 } : { maxMs: 1000, stableMs: 150 })
+        .catch(() => undefined);
     },
   );
 
@@ -284,8 +315,12 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
         x1 = cx - dist / 2;
         x2 = cx + dist / 2;
       }
-      await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-      await sleep(400);
+      const inProc = await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
+      if (ctx.fast && inProc) {
+        await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 100 }).catch(() => undefined);
+      } else {
+        await sleep(400);
+      }
     },
   );
 }

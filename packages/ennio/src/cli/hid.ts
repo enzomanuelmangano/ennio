@@ -67,7 +67,9 @@ async function tryFastOp(
     return handled;
   } catch (e) {
     fastFallbacks++;
-    trace(`[fast] ${op} infra error (${e instanceof Error ? e.message : String(e)}) → HID fallback`);
+    trace(
+      `[fast] ${op} infra error (${e instanceof Error ? e.message : String(e)}) → HID fallback`,
+    );
     return false;
   }
 }
@@ -226,7 +228,7 @@ async function callTool(
   toolName: string,
   payload: Record<string, unknown>,
   _cliArgs: string[],
-): Promise<void> {
+): Promise<boolean> {
   const udid = payload.udid as string;
   const dy = getDylibClient(udid);
   if (toolName === 'gesture-tap') {
@@ -237,7 +239,7 @@ async function callTool(
     if (payload.doubleTap) {
       trace(`[hid] double-tap nx=${nx.toFixed(4)} ny=${ny.toFixed(4)}`);
       await idb.doubleTap(nx * w, ny * h);
-      return;
+      return false;
     }
     const holdSec = (payload.holdSec as number | undefined) ?? 0.08;
     // Fast path: plain short taps only. Held taps (longPress passes
@@ -247,11 +249,11 @@ async function callTool(
         x: Math.round(nx * w),
         y: Math.round(ny * h),
       });
-      if (handled) return;
+      if (handled) return true;
     }
     trace(`[hid] tap nx=${nx.toFixed(4)} ny=${ny.toFixed(4)} hold=${holdSec}s`);
     await idb.tap(nx * w, ny * h, holdSec);
-    return;
+    return false;
   }
   if (toolName === 'gesture-swipe') {
     const { w, h } = await getScreenSize(udid);
@@ -270,32 +272,32 @@ async function callTool(
         y2: toY,
         durationMs: durationMs ?? 250,
       });
-      if (handled) return;
+      if (handled) return true;
     }
     const idb = getIdb(udid);
     trace(
       `[hid] swipe (${fromX.toFixed(0)},${fromY.toFixed(0)})→(${toX.toFixed(0)},${toY.toFixed(0)}) dur=${durationMs}`,
     );
     await idb.swipe(fromX, fromY, toX, toY, (durationMs ?? 250) / 1000);
-    return;
+    return false;
   }
   if (toolName === 'gesture-custom') {
     const events = payload.events as CustomEvent[];
     await dispatchGestureCustom(udid, events);
-    return;
+    return false;
   }
   if (toolName === 'keyboard') {
     if (typeof payload.text === 'string') {
       const r = await dy.call('insert_text', { text: payload.text });
       if (!r.ok) throw new Error(`insert_text failed: ${r.err ?? 'unknown'}`);
-      return;
+      return true;
     }
     if (typeof payload.key === 'string') {
       const code = KEY_NAME_TO_HID_USAGE[payload.key.toLowerCase()];
       if (code == null) throw new Error(`unsupported key: ${payload.key}`);
       const r = await dy.call('hardware_key', { keyCode: code });
       if (!r.ok) throw new Error(`hardware_key failed: ${r.err ?? 'unknown'}`);
-      return;
+      return true;
     }
     throw new Error('keyboard payload requires text or key');
   }
@@ -363,6 +365,12 @@ export async function press(udid: string, x: number, y: number): Promise<void> {
   ]);
 }
 
+/**
+ * Swipe. Returns true when the gesture was handled in-process
+ * (setContentOffset — instant, no momentum); false when it went
+ * through idb HID (real touch sequence with deceleration). Callers
+ * use this to decide how much post-swipe settle is needed.
+ */
 export async function swipe(
   udid: string,
   x1: number,
@@ -370,7 +378,7 @@ export async function swipe(
   x2: number,
   y2: number,
   durationMs: number,
-): Promise<void> {
+): Promise<boolean> {
   const { w, h } = await getScreenSize(udid);
   const fromX = Math.max(0, Math.min(1, x1 / w));
   const fromY = Math.max(0, Math.min(1, y1 / h));
@@ -380,7 +388,7 @@ export async function swipe(
   trace(
     `[hid-swipe] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)}) dur=${dur}`,
   );
-  await callTool('gesture-swipe', { udid, fromX, fromY, toX, toY, durationMs: dur }, [
+  return callTool('gesture-swipe', { udid, fromX, fromY, toX, toY, durationMs: dur }, [
     'run',
     'gesture-swipe',
     '--udid',

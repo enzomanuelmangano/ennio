@@ -140,6 +140,7 @@ export class EnnioRunner {
         reporter: this.reporter,
         verbose: this.verbose,
         lenient: this.lenient,
+        fast: this.fast,
       });
       if (this.fast) resetFastStats();
       const result = await executor.run(flow);

@@ -60,6 +60,11 @@ export interface RunContext {
   /** When true, unknown/unsupported commands are skipped with a warning
    *  instead of failing the flow. Useful during incremental Maestro migration. */
   lenient: boolean;
+  /** --fast: in-process gestures + trimmed, event-driven settle. Post-
+   *  action waits drop their fixed sleeps / long stable windows and rely
+   *  on the next command's own guards (pre-tap animation poll, position-
+   *  stability gate, assert polling) to absorb animation tails. */
+  fast?: boolean;
   /** Path to the currently-executing flow file. Used for runFlow
    *  subflow path resolution. */
   flowPath: string;

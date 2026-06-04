@@ -125,6 +125,30 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
       if (isRepeatTap || nextIsSameTap) {
         await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
+      } else if (ctx.fast) {
+        // Fast mode: event-driven only. wait_hash_change returns the
+        // instant the visible tree differs (the tap's effect landed);
+        // a short stable window smooths mid-layout reads. Animation
+        // tails are absorbed by the NEXT command's own guards — the
+        // pre-tap animations_active poll, the position-stability gate
+        // in execTapOn, and assert/find polling.
+        await timedAsync(ctx, 'tap.postWaitHashChange', async () => {
+          await ctx.client
+            .call('wait_hash_change', { sinceHash: preTapHash, maxMs: 500 })
+            .catch(() => undefined);
+        });
+        if (nextEditsField) {
+          await ctx.client
+            .call('wait_react_commit', { sinceMs: preReact.ts, maxMs: 250 })
+            .catch(() => undefined);
+        }
+        // Tight cap: on screens with perpetual animation (auto-playing
+        // carousel) the hash never stabilises and a stableMs wait just
+        // burns its full maxMs budget. Hash-change above already proved
+        // the tap landed.
+        await timedAsync(ctx, 'tap.postWaitCommit', () =>
+          ctx.client.call('wait_commit', { maxMs: 250, stableMs: 60 }).catch(() => undefined),
+        );
       } else if (preReact.attach !== 'none') {
         // Hermes/Paper/Fabric commit observer attached — block on the
         // next RN commit AFTER the tap.
