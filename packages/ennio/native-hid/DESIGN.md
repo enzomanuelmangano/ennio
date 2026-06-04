@@ -11,6 +11,7 @@ deterministic; 19 in-house actuations per flow. Opt-in via
 full suite).
 
 How it works:
+
 - Resolve the booted `SimDevice` via CoreSimulator (SimServiceContext →
   defaultDeviceSet → device by UDID, ObjC runtime).
 - `SimDeviceLegacyHIDClient(device:)` (ObjC `initWithDevice:error:`).
@@ -27,6 +28,7 @@ How it works:
   for IdbGrpcClient behind `hid.ts`.
 
 Notes / follow-ups:
+
 - `swiftcall.c` (x20 swiftself trampoline) is retained but unused now
   that the @objc send selector works; keep as a reference.
 - Next: ship `enniohid` as a prebuilt universal slice + SHA manifest

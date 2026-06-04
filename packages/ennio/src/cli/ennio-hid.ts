@@ -75,7 +75,8 @@ class HelperProcess {
       proc.on('exit', (code) => {
         this.proc = null;
         this.ready = null;
-        if (process.env.ENNIO_PHASE_TRACE) process.stderr.write(`[enniohid] helper exited ${code}\n`);
+        if (process.env.ENNIO_PHASE_TRACE)
+          process.stderr.write(`[enniohid] helper exited ${code}\n`);
       });
       // First "ready" line resolves startup.
       this.waiters.push((line) => {
@@ -196,7 +197,9 @@ export class EnnioHidClient {
     await this.h.cmd(`down ${from.nx} ${from.ny}`);
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
-      await this.h.cmd(`move ${from.nx + (to.nx - from.nx) * t} ${from.ny + (to.ny - from.ny) * t}`);
+      await this.h.cmd(
+        `move ${from.nx + (to.nx - from.nx) * t} ${from.ny + (to.ny - from.ny) * t}`,
+      );
       await sleep(stepMs);
     }
     await this.h.cmd(`up ${to.nx} ${to.ny}`);

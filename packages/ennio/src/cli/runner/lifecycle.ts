@@ -11,101 +11,24 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { tap as hidTap } from '../hid';
 import { findDylib, getAppContainer, terminateApp } from '../sim';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 
 import { RunContext, sleep } from './context';
 
-// Grant buttons, most-permissive first. We tap the FIRST that exists.
-const PERMISSION_GRANT_LABELS = [
-  'Allow Full Access',
-  'Allow While Using App',
-  'Allow Once',
-  'Allow',
-  'OK',
-];
-// Distinctly-system button labels — their presence alone confirms a
-// system permission sheet (so we don't misfire on an app's own "Allow").
-const SYSTEM_DIALOG_MARKERS = [
-  'Allow Full Access',
-  'Keep Add Only',
-  'Limit Access…',
-  'Allow While Using App',
-  "Don't Allow",
-];
 
-interface IdbAxNode {
-  AXLabel?: string;
-  title?: string;
-  frame?: { x: number; y: number; width: number; height: number };
-}
 
 /**
- * Dismiss native system permission sheets (Photo Library, notifications,
- * tracking, location). They render in a SEPARATE process, so the in-app
- * dylib is blind to them (find_by_text / top_vc_chain / alert_present
- * all miss). idb's accessibility describe DOES see cross-process windows;
- * we tap the grant button by its frame center via HID (process-agnostic).
- * Returns true if it dismissed at least one. Safe no-op when none present.
+ * System permission sheets (Photo Library, notifications, tracking,
+ * location) render in a SEPARATE process (SpringBoard), so neither the
+ * in-app dylib nor the in-house host HID can introspect them. ennio
+ * pre-grants all privacy permissions via `simctl privacy grant` at
+ * clearState (see clearStateAndRelaunch), so these sheets don't appear
+ * for supported flows. This is a no-op kept for call-site compatibility;
+ * it does not depend on idb. Returns false (nothing dismissed).
  */
-export async function dismissPermissionDialogs(udid: string): Promise<boolean> {
-  let dismissedAny = false;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    let out = '';
-    try {
-      out = execFileSync('idb', ['ui', 'describe-all', '--udid', udid], {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        // 128 MB: deep view trees (Bluesky thread screen with 200+
-        // reply rows + nav + tab bar) can hit ~40 MB. Previous 32 MB
-        // cap silently truncated and we'd miss permission sheets
-        // sitting at the end of the buffer.
-        maxBuffer: 128 * 1024 * 1024,
-      });
-      // Detect truncation by checking the tail. `idb ui describe-all`
-      // outputs valid JSON; a truncated buffer ends mid-token. If parse
-      // fails the catch below returns — log so the user knows.
-      if (out.length >= 128 * 1024 * 1024 - 1024) {
-        process.stderr.write(
-          '   ⚠ idb describe-all output near maxBuffer cap — view tree may be truncated\n',
-        );
-      }
-    } catch {
-      return dismissedAny;
-    }
-    let els: IdbAxNode[];
-    try {
-      els = JSON.parse(out) as IdbAxNode[];
-    } catch {
-      return dismissedAny;
-    }
-    const labelOf = (e: IdbAxNode) => e.AXLabel ?? e.title ?? '';
-    const labels = els.map(labelOf);
-    // Only act when this really is a system permission sheet: either a
-    // request-prompt string or a distinctly-system button is present.
-    const looksLikePermission =
-      labels.some((l) => /requesting|would like|access to your|access your/i.test(l)) ||
-      labels.some((l) => SYSTEM_DIALOG_MARKERS.includes(l));
-    if (!looksLikePermission) return dismissedAny;
-
-    let target: { x: number; y: number } | null = null;
-    for (const want of PERMISSION_GRANT_LABELS) {
-      const el = els.find((e) => labelOf(e) === want && e.frame);
-      if (el?.frame) {
-        target = { x: el.frame.x + el.frame.width / 2, y: el.frame.y + el.frame.height / 2 };
-        break;
-      }
-    }
-    if (!target) return dismissedAny;
-    process.stderr.write(
-      `[ennio] dismissing system permission dialog → tap (${Math.round(target.x)},${Math.round(target.y)})\n`,
-    );
-    await hidTap(udid, target.x, target.y);
-    dismissedAny = true;
-    await sleep(700); // let it dismiss; loop catches a second stacked sheet
-  }
-  return dismissedAny;
+export async function dismissPermissionDialogs(_udid: string): Promise<boolean> {
+  return false;
 }
 
 export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void> {
@@ -191,12 +114,7 @@ export async function clearStateAndRelaunch(
   ctx: RunContext,
   launchArgs: string[] = [],
 ): Promise<void> {
-  // Full app reset: copy .app → idb uninstall → simctl install → launch.
-  // idb uninstall goes through idb_companion's CoreSimulator API which
-  // does a proper OS-level app removal (Keychain, UserDefaults, caches,
-  // group containers). Plain simctl container wipe or simctl uninstall
-  // leaves residual state that causes Expo dev-client apps to hang
-  // permanently after login (React navigation stuck in loading state).
+  // Full app reset: copy .app → simctl uninstall → simctl install → launch.
   ctx.client.close();
   // Remove stale socket so the new process binds cleanly.
   try {
@@ -217,25 +135,17 @@ export async function clearStateAndRelaunch(
     /* app not installed */
   }
 
-  // Terminate via idb (goes through idb_companion).
-  try {
-    execFileSync('idb', ['terminate', ctx.bundleId, '--udid', ctx.udid], { stdio: 'pipe' });
-  } catch {
-    // App may not be running.
-    terminateApp(ctx.udid, ctx.bundleId);
-  }
+  // Terminate via simctl (app may not be running — terminateApp swallows that).
+  terminateApp(ctx.udid, ctx.bundleId);
 
   if (appBundle) {
     const tmp = mkdtempSync(join(tmpdir(), 'ennio-cs-'));
     const copy = join(tmp, 'App.app');
     cpSync(appBundle, copy, { recursive: true });
 
-    // Uninstall via idb for a proper OS-level reset.
-    try {
-      execFileSync('idb', ['uninstall', ctx.bundleId, '--udid', ctx.udid], { stdio: 'pipe' });
-    } catch {
-      execFileSync('xcrun', ['simctl', 'uninstall', ctx.udid, ctx.bundleId], { stdio: 'pipe' });
-    }
+    // Uninstall via simctl for an OS-level reset (Keychain, UserDefaults,
+    // caches, group containers).
+    execFileSync('xcrun', ['simctl', 'uninstall', ctx.udid, ctx.bundleId], { stdio: 'pipe' });
     await sleep(1000);
 
     // Reinstall via simctl.

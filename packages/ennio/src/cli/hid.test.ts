@@ -3,7 +3,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FastDriver, HidDriver, createDriver } from './driver';
 import type { EnnioSocketClient } from './socket-client';
 
-// Mock the per-UDID connection registry so the drivers talk to fakes.
+// Mock the dylib socket registry + the in-house HID actuator so the
+// drivers talk to fakes. `idbTap/Swipe/DoubleTap` here are the
+// EnnioHidClient actuator spies (named idb* for test-history continuity
+// — they assert "fell back to a real HID touch", whatever the backend).
 const { socketCall, idbTap, idbDoubleTap, idbSwipe } = vi.hoisted(() => ({
   socketCall: vi.fn(),
   idbTap: vi.fn(async () => {}),
@@ -12,10 +15,15 @@ const { socketCall, idbTap, idbDoubleTap, idbSwipe } = vi.hoisted(() => ({
 }));
 
 vi.mock('./core/active-connections', () => ({
-  getActiveConnection: () => ({
-    socket: { call: socketCall },
-    idb: () => ({ tap: idbTap, doubleTap: idbDoubleTap, swipe: idbSwipe }),
-  }),
+  getActiveConnection: () => ({ socket: { call: socketCall } }),
+}));
+
+vi.mock('./ennio-hid', () => ({
+  EnnioHidClient: class {
+    tap = idbTap;
+    doubleTap = idbDoubleTap;
+    swipe = idbSwipe;
+  },
 }));
 
 const UDID = 'TEST-UDID';

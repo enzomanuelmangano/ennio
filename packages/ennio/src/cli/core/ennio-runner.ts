@@ -20,7 +20,6 @@ import { execFileSync } from 'node:child_process';
 import { enableAccessibility } from '../sim';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
-import { ensureIdb, defaultIdbDeps } from '../idb-setup';
 import type { MaestroFlow } from '../maestro-parser';
 import { parseMaestroFile } from '../maestro-parser';
 import { pickReporter } from '../reporters';
@@ -68,11 +67,6 @@ export class EnnioRunner {
    */
   async run(flowFiles: string[]): Promise<SuiteResult> {
     const flows = flowFiles.map((f) => parseMaestroFile(f));
-
-    // Preflight: idb_companion + the idb CLI back every tap and the app
-    // lifecycle. Check once up front and (with consent) install what's
-    // missing, so a fresh machine doesn't fail cryptically at the first tap.
-    await ensureIdb(defaultIdbDeps());
 
     this.reporter.suiteStart(flows);
     const suiteStart = Date.now();

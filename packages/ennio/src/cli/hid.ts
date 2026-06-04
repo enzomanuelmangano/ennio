@@ -16,21 +16,18 @@
 import { getActiveConnection } from './core/active-connections';
 import { EnnioHidClient } from './ennio-hid';
 import type { EnnioSocketClient } from './socket-client';
-import type { IdbGrpcClient } from './idb-grpc';
 
 export function getDylibClient(udid: string): EnnioSocketClient {
   return getActiveConnection(udid).socket;
 }
 
-// Actuation backend. ENNIO_INHOUSE_HID=1 routes to the in-house host
-// helper (EnnioHidClient → the `enniohid` Swift process), which posts
-// real touches via CoreSimulator Indigo — the same mechanism idb uses,
-// owned by us, no daemon/pip/grpc. Proven to drive 03-cart end to end.
-// Default (unset) stays on idb_companion gRPC while the in-house path
-// proves out across the full suite. (The earlier in-process IOHIDEvent
+// Actuation backend: the in-house host helper (EnnioHidClient → the
+// `enniohid` Swift process), which posts real touches into the
+// simulator via CoreSimulator Indigo (SimulatorKit SimDeviceLegacyHID
+// Client + a vendored MIT Indigo builder). idb_companion is gone —
+// no daemon, no fb-idb, no grpc. (The earlier in-process IOHIDEvent
 // injector — the dylib's hid_* ops — is dead: the simulator never
 // dispatches in-process HID; see native-hid/DESIGN.md.)
-const USE_INHOUSE_HID = process.env.ENNIO_INHOUSE_HID === '1';
 const ennioHidCache = new Map<string, EnnioHidClient>();
 
 interface HidBackend {
@@ -39,8 +36,7 @@ interface HidBackend {
   swipe(x1: number, y1: number, x2: number, y2: number, durationSec: number): Promise<void>;
 }
 
-function getIdb(udid: string): HidBackend {
-  if (!USE_INHOUSE_HID) return getActiveConnection(udid).idb();
+function getActuator(udid: string): HidBackend {
   let c = ennioHidCache.get(udid);
   if (!c) {
     c = new EnnioHidClient(udid);
@@ -48,8 +44,6 @@ function getIdb(udid: string): HidBackend {
   }
   return c;
 }
-
-export type { IdbGrpcClient };
 
 const screenSizeCache = new Map<string, { w: number; h: number }>();
 
@@ -90,7 +84,7 @@ export async function tap(udid: string, x: number, y: number, holdSec?: number):
   const cx = Math.max(0, Math.min(w, x));
   const cy = Math.max(0, Math.min(h, y));
   trace(`[hid] tap px=(${cx.toFixed(1)},${cy.toFixed(1)})${holdSec ? ` hold=${holdSec}s` : ''}`);
-  await getIdb(udid).tap(cx, cy, holdSec ?? 0.08);
+  await getActuator(udid).tap(cx, cy, holdSec ?? 0.08);
 }
 
 export async function doubleTap(udid: string, x: number, y: number): Promise<void> {
@@ -98,7 +92,7 @@ export async function doubleTap(udid: string, x: number, y: number): Promise<voi
   const cx = Math.max(0, Math.min(w, x));
   const cy = Math.max(0, Math.min(h, y));
   trace(`[hid] double-tap px=(${cx.toFixed(1)},${cy.toFixed(1)})`);
-  await getIdb(udid).doubleTap(cx, cy);
+  await getActuator(udid).doubleTap(cx, cy);
 }
 
 /**
@@ -113,7 +107,7 @@ export async function press(udid: string, x: number, y: number): Promise<void> {
   const cx = Math.max(0, Math.min(w, x));
   const cy = Math.max(0, Math.min(h, y));
   trace(`[hid] press px=(${cx.toFixed(1)},${cy.toFixed(1)})`);
-  await getIdb(udid).tap(cx, cy, 0.05);
+  await getActuator(udid).tap(cx, cy, 0.05);
 }
 
 export async function swipe(
@@ -131,7 +125,7 @@ export async function swipe(
   trace(
     `[hid] swipe (${x1.toFixed(0)},${y1.toFixed(0)})→(${x2.toFixed(0)},${y2.toFixed(0)}) dur=${dur}`,
   );
-  await getIdb(udid).swipe(clampX(x1), clampY(y1), clampX(x2), clampY(y2), dur / 1000);
+  await getActuator(udid).swipe(clampX(x1), clampY(y1), clampX(x2), clampY(y2), dur / 1000);
 }
 
 /**
@@ -159,7 +153,7 @@ export async function longPressDrag(
   // One slow swipe whose duration covers hold + glide. (The legacy
   // event-sequence path also collapsed to a single idb swipe with the
   // summed delays — preserved byte-for-byte here.)
-  await getIdb(udid).swipe(
+  await getActuator(udid).swipe(
     clampX(x1),
     clampY(y1),
     clampX(x2),

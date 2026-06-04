@@ -1,19 +1,16 @@
 // Per-UDID connection registry. Populated by EnnioConnection on open(),
 // drained on close(). hid.ts uses this to find the socket + idb client
-// for the UDID a gesture targets — replaces the old free-floating
-// `sharedClient` / `idbClients` module globals.
+// for the UDID a gesture targets.
 //
 // The registry IS still process-scoped state, but its lifetime is
 // owned by EnnioConnection: every entry has exactly one owner that
 // removes itself on close. hid.ts is now read-only against this map.
 
-import type { IdbGrpcClient } from '../idb-grpc';
 import type { EnnioSocketClient } from '../socket-client';
 
 export interface ActiveConnection {
   udid: string;
   socket: EnnioSocketClient;
-  idb(): IdbGrpcClient;
 }
 
 const byUdid = new Map<string, ActiveConnection>();
