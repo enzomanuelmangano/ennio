@@ -14,6 +14,7 @@
 // [0,1] space idb expects internally.
 
 import { getActiveConnection } from './core/active-connections';
+import { EnnioHidClient } from './ennio-hid';
 import type { EnnioSocketClient } from './socket-client';
 import type { IdbGrpcClient } from './idb-grpc';
 
@@ -21,9 +22,34 @@ export function getDylibClient(udid: string): EnnioSocketClient {
   return getActiveConnection(udid).socket;
 }
 
-function getIdb(udid: string): IdbGrpcClient {
-  return getActiveConnection(udid).idb();
+// Actuation backend. Default: idb_companion gRPC HID — the only
+// mechanism that delivers real touches into the simulator (the host
+// CoreSimulator Indigo path). The in-house in-process IOHIDEvent
+// injector (ENNIO_INHOUSE_HID=1, the dylib's hid_down/move/up ops) is
+// kept behind an opt-in flag for ongoing R&D: in-process injection is
+// ACCEPTED by UIApplication but NOT dispatched on the modern simulator
+// (proven: zero touch events reach -[UIApplication sendEvent:]), so it
+// must not be the default. See native-hid/DESIGN.md.
+const USE_INHOUSE_HID = process.env.ENNIO_INHOUSE_HID === '1';
+const ennioHidCache = new Map<string, EnnioHidClient>();
+
+interface HidBackend {
+  tap(x: number, y: number, holdSec?: number): Promise<void>;
+  doubleTap(x: number, y: number): Promise<void>;
+  swipe(x1: number, y1: number, x2: number, y2: number, durationSec: number): Promise<void>;
 }
+
+function getIdb(udid: string): HidBackend {
+  if (!USE_INHOUSE_HID) return getActiveConnection(udid).idb();
+  let c = ennioHidCache.get(udid);
+  if (!c) {
+    c = new EnnioHidClient(udid);
+    ennioHidCache.set(udid, c);
+  }
+  return c;
+}
+
+export type { IdbGrpcClient };
 
 const screenSizeCache = new Map<string, { w: number; h: number }>();
 

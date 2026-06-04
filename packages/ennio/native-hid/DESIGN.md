@@ -1,8 +1,42 @@
 # In-house HID — replacing idb_companion
 
+## STATUS — in-process path proven dead; pivot to host-side Indigo
+
+Two approaches were considered. **Findings, so the next iteration
+doesn't repeat the dead end:**
+
+**Approach B (in-process IOHIDEvent, the elegant one) — DOES NOT WORK
+on the modern simulator.** Built `EnnioHIDInjector` in the dylib:
+`IOHIDEventCreateDigitizerEvent` + finger child + `_enqueueHIDEvent:` /
+`_handleHIDEvent:`. Tried every variant — senderID magic constant,
+`IsDisplayIntegrated`, explicit Range/Touch fields on parent, parent
+coords, Position in all masks, both delivery selectors. A swizzle on
+`-[UIApplication sendEvent:]` proves the verdict: **zero** touch events
+reach UIKit. The simulator's UIApplication *accepts* the enqueue (the
+selector exists and returns) but never dispatches it — sim touch input
+is gated to the host Indigo→backboard channel; in-process injection is
+ignored regardless of event shape. Kept behind `ENNIO_INHOUSE_HID=1`
+for the record (ops `hid_down/move/up`, `hid_probe`, `hid_listen`),
+NOT the default.
+
+**Approach A (host-side CoreSimulator Indigo) — the viable path.** This
+is idb's actual mechanism, proven to work on the sim. The in-house
+version reimplements just that send, dropping the idb_companion daemon
++ fb-idb + grpc. Seam (symbol-confirmed): SimulatorKit
+`SimDeviceLegacyHIDClient.init(device:)` / `.send(message:)` +
+`IndigoHIDMessageFor*` C builders, `SimDevice` from CoreSimulator. The
+open work: `.send(message:)` is Swift-ABI (no ObjC selector) so the
+helper is a Swift binary, and the Indigo digitizer message layout
+(R1) still needs a compile→boot→run→observe loop. This is a host
+helper binary (a real build), not a dylib op — see the revised
+architecture below.
+
+---
+
 ## Why
 
 idb is ennio's last heavy external dependency. Today the CLI needs:
+
 - `brew install facebook/fb/idb-companion` (install-time)
 - `pip3 install fb-idb` (install-time)
 - `@grpc/grpc-js` + `@grpc/proto-loader` + `proto/idb.proto` (runtime)
@@ -117,6 +151,7 @@ prebuilt slice + SHA-256 manifest verification + Unix-socket envelope.
 ## Spike (de-risk R1 before building the helper)
 
 `native-hid/spike/` — a standalone Swift binary that:
+
 1. Resolves the booted `SimDevice` via CoreSimulator.
 2. `SimDeviceLegacyHIDClient(device:)`.
 3. Posts a single Down+Up at a hard-coded point.
@@ -135,4 +170,7 @@ prebuilt slice + SHA-256 manifest verification + Unix-socket envelope.
    release.
 4. **Strip idb** — remove grpc deps + proto once the helper is proven
    across the full 41-flow suite (HID + fast modes).
+
+```
+
 ```

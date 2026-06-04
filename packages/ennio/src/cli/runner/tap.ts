@@ -279,7 +279,9 @@ export async function execTapOn(
       if (!confirmedExposed && sel.id) {
         await timedAsync(ctx, 'tap.scrollToExpose', async () => {
           await ctx.client.call('scroll_to', { elementTestID: sel.id }).catch(() => undefined);
-          await ctx.client.call('wait_commit', { maxMs: 600, stableMs: 100 }).catch(() => undefined);
+          await ctx.client
+            .call('wait_commit', { maxMs: 600, stableMs: 100 })
+            .catch(() => undefined);
           confirmedExposed = await checkExposed();
         });
       }

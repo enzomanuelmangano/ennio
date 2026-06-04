@@ -79,9 +79,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           // visibility boundary or under floating chrome. Tap-time
           // exposure self-heal covers anything that shifts after this.
           if (isFastDriver && target.id) {
-            await ctx.client
-              .call('scroll_to', { elementTestID: target.id })
-              .catch(() => undefined);
+            await ctx.client.call('scroll_to', { elementTestID: target.id }).catch(() => undefined);
             await ctx.client
               .call('wait_commit', { maxMs: 600, stableMs: 100 })
               .catch(() => undefined);

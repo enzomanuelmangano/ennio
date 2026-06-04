@@ -181,7 +181,9 @@ export class FastDriver implements GestureDriver {
   async tryTabTap(client: EnnioSocketClient, text: string): Promise<boolean> {
     try {
       const f = await client.call('find_tab', { name: text });
-      const d = f.ok ? (f.data as { present?: boolean; selected?: boolean } | undefined) : undefined;
+      const d = f.ok
+        ? (f.data as { present?: boolean; selected?: boolean } | undefined)
+        : undefined;
       if (d?.present) {
         // Re-tapping the CURRENT tab has pop-to-root semantics that a
         // synthetic selectedIndex write can't reproduce faithfully —
