@@ -136,7 +136,9 @@ export async function dismissSystemSheet(udid: string): Promise<boolean> {
     if (!btn) continue;
     const { w, h } = await getScreenSize(udid);
     const actuator = getActuator(udid);
-    trace(`ax: dismiss system sheet via "${btn.label}" @ (${btn.cx.toFixed(3)},${btn.cy.toFixed(3)})`);
+    trace(
+      `ax: dismiss system sheet via "${btn.label}" @ (${btn.cx.toFixed(3)},${btn.cy.toFixed(3)})`,
+    );
     await actuator.tap(btn.cx * w, btn.cy * h);
     return true;
   }
