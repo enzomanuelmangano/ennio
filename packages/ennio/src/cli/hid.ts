@@ -36,7 +36,7 @@ interface HidBackend {
   swipe(x1: number, y1: number, x2: number, y2: number, durationSec: number): Promise<void>;
 }
 
-function getActuator(udid: string): HidBackend {
+export function getActuator(udid: string): HidBackend {
   let c = ennioHidCache.get(udid);
   if (!c) {
     c = new EnnioHidClient(udid);

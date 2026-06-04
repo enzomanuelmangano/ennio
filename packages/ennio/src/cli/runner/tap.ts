@@ -19,6 +19,7 @@
 //         gesture chain never armed)
 
 import type { TapIntent } from '../driver/types';
+import { dismissSystemSheet } from '../ennio-ax';
 import { MaestroSelector } from '../maestro-parser';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
@@ -75,6 +76,16 @@ export async function execTapOn(
     if (await ctx.driver.tryTabTap(ctx.client, sel.text)) return;
   }
   let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+  if (!rect) {
+    // A cross-process system sheet (Photo Library, tracking, a
+    // SpringBoard confirmation) may be floating over the app and hiding
+    // the in-app target. Clear it via the macOS AX tree + a real HID
+    // tap, then resolve once more before giving up.
+    if (await dismissSystemSheet(ctx.udid).catch(() => false)) {
+      await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
+      rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+    }
+  }
   if (!rect) {
     throw new Error(`element not found: ${JSON.stringify(sel)}`);
   }

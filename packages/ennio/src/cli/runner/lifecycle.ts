@@ -11,6 +11,7 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { dismissSystemSheet } from '../ennio-ax';
 import { findDylib, getAppContainer, terminateApp } from '../sim';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 
@@ -18,15 +19,16 @@ import { RunContext, sleep } from './context';
 
 /**
  * System permission sheets (Photo Library, notifications, tracking,
- * location) render in a SEPARATE process (SpringBoard), so neither the
- * in-app dylib nor the in-house host HID can introspect them. ennio
- * pre-grants all privacy permissions via `simctl privacy grant` at
- * clearState (see clearStateAndRelaunch), so these sheets don't appear
- * for supported flows. This is a no-op kept for call-site compatibility;
- * Returns false (nothing dismissed).
+ * location) and SpringBoard confirmations render in a SEPARATE process,
+ * so neither the in-app dylib nor the in-house host HID can introspect
+ * them. We read them out of Simulator.app's macOS AX tree via the
+ * `ennioax` helper (see ennio-ax.ts) and clear them with a real HID tap
+ * on the permissive button. Soft-fails to false when the AX helper is
+ * unavailable (e.g. headless CI with no Simulator.app) — callers treat
+ * that as "nothing to dismiss".
  */
-export async function dismissPermissionDialogs(_udid: string): Promise<boolean> {
-  return false;
+export async function dismissPermissionDialogs(udid: string): Promise<boolean> {
+  return dismissSystemSheet(udid).catch(() => false);
 }
 
 export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void> {

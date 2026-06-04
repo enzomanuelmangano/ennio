@@ -2,6 +2,7 @@
 // `waitUntilNotVisible` — the building blocks for assertVisible /
 // assertNotVisible / waitFor / extendedWaitUntil.
 
+import { axHasText } from '../ennio-ax';
 import { MaestroSelector } from '../maestro-parser';
 
 import { POLL_MS, RunContext, sleep } from './context';
@@ -44,6 +45,10 @@ export async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<
     } catch {
       /* not an alert */
     }
+    // Last resort: fully cross-process UI the in-app proxies can't reach
+    // (the system Photos picker, SpringBoard sheets). Read Simulator.app's
+    // macOS AX tree via the ennioax helper. Soft-fails to false off-box.
+    if (axHasText(ctx.udid, sel.text)) return true;
   }
   return false;
 }
