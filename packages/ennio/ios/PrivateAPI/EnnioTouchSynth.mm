@@ -46,6 +46,14 @@ static void resetRecognisersAlongChain(UIView *hit) {
 
 static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
     if (![v isKindOfClass:UIControl.class]) return NO;
+    // RNGH's GestureHandlerButton IS a UIControl, but its press logic
+    // lives in the gesture pipeline, not target-action. sendActions
+    // half-presses it: the begin phase fires (press-in animation, so
+    // the frame hash changes and verification passes) while the tap
+    // never completes — observed as flaky lost presses on
+    // pressto/RNGH buttons. Refuse so the caller falls back to a real
+    // HID touch.
+    if ([NSStringFromClass([v class]) hasSuffix:@"GestureHandlerButton"]) return NO;
     UIControl *ctl = (UIControl *)v;
     // sendActionsForControlEvents:UIControlEventTouchUpInside is
     // exactly what UIKit invokes after a real touch-up over the
@@ -72,6 +80,12 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
 
         UIView *target = findActivatableUpwards(hit);
         if (!target) target = hit;
+
+        // RNGH buttons: press logic lives in the gesture pipeline.
+        // Every synthetic strategy half-engages it at best (flaky
+        // repeat presses on pressto/RNGH). Decline the whole chain so
+        // the CLI sends a real HID touch.
+        if ([NSStringFromClass([target class]) hasSuffix:@"GestureHandlerButton"]) return;
 
         // Clear any recogniser a previous synthetic activation left
         // mid-state — see resetRecognisersAlongChain.

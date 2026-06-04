@@ -332,12 +332,10 @@ async function callTool(
 export async function tapHid(udid: string, x: number, y: number, holdSec?: number): Promise<void> {
   const { w, h } = await getScreenSize(udid);
   const idb = getIdb(udid);
-  trace(`[hid-tap-forced] px=(${x.toFixed(1)},${y.toFixed(1)})${holdSec ? ` hold=${holdSec}s` : ''}`);
-  await idb.tap(
-    Math.max(0, Math.min(w, x)),
-    Math.max(0, Math.min(h, y)),
-    holdSec ?? 0.08,
+  trace(
+    `[hid-tap-forced] px=(${x.toFixed(1)},${y.toFixed(1)})${holdSec ? ` hold=${holdSec}s` : ''}`,
   );
+  await idb.tap(Math.max(0, Math.min(w, x)), Math.max(0, Math.min(h, y)), holdSec ?? 0.08);
 }
 
 export async function tap(udid: string, x: number, y: number, holdSec?: number): Promise<void> {
@@ -418,8 +416,16 @@ export async function swipeHid(
   const idb = getIdb(udid);
   const clampX = (v: number) => Math.max(0, Math.min(w, v));
   const clampY = (v: number) => Math.max(0, Math.min(h, v));
-  trace(`[hid-swipe-forced] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)})`);
-  await idb.swipe(clampX(x1), clampY(y1), clampX(x2), clampY(y2), Math.max(50, durationMs || 250) / 1000);
+  trace(
+    `[hid-swipe-forced] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)})`,
+  );
+  await idb.swipe(
+    clampX(x1),
+    clampY(y1),
+    clampX(x2),
+    clampY(y2),
+    Math.max(50, durationMs || 250) / 1000,
+  );
 }
 
 /**

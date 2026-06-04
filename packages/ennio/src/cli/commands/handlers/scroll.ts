@@ -60,6 +60,11 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       const NUDGE_DISTANCE = Math.round(winH / 6);
       // Bottom 20% of screen overlaps with the tab bar.
       const TAB_BAR_THRESHOLD = (winH * 4) / 5;
+      // Top ~12% sits under the nav header. Only fast mode needs the
+      // guard: in-process swipes jump by EXACT distances, so a target
+      // can land pixel-perfectly under the header (HID momentum
+      // naturally overshoots past it).
+      const TOP_THRESHOLD = winH * 0.12;
       // Fast mode: swipes handled in-process are setContentOffset
       // jumps — no momentum to wait out, so the fixed sleeps drop and
       // the stable windows shrink. HID-fallback swipes keep the full
@@ -112,6 +117,24 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
               .call(
                 'wait_commit',
                 quickNudge ? { maxMs: 600, stableMs: 100 } : { maxMs: 1500, stableMs: 200 },
+              )
+              .catch(() => undefined);
+          } else if (F && rect && rect.y + rect.h / 2 < TOP_THRESHOLD) {
+            // Target pinned under the nav header — push content down a
+            // notch so the row clears it.
+            const topNudgeInProc = await hidSwipe(
+              ctx.udid,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
+              250,
+            );
+            if (!topNudgeInProc) await sleep(500);
+            await ctx.client
+              .call(
+                'wait_commit',
+                topNudgeInProc ? { maxMs: 600, stableMs: 100 } : { maxMs: 1500, stableMs: 200 },
               )
               .catch(() => undefined);
           }
@@ -286,7 +309,9 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
               .catch(() => undefined);
             return;
           }
-          await ctx.client.call('wait_commit', { maxMs: 800, stableMs: 100 }).catch(() => undefined);
+          await ctx.client
+            .call('wait_commit', { maxMs: 800, stableMs: 100 })
+            .catch(() => undefined);
           return;
         }
       }
