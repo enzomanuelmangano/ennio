@@ -195,11 +195,20 @@ export async function execTapOn(
   let stableRect: Rect = rect;
   {
     const deadline = Date.now() + 800;
+    // Fast mode trims the PREVIOUS step's post-settle, so this gate is
+    // the main defence against tapping a target mid-entrance-animation
+    // (Reanimated card slide-ins are invisible to animations_active
+    // and to React-commit signals). 10ms spacing gives a 30ms window —
+    // springs have 30ms-still frames near their inflection points, so
+    // the gate false-locks and the tap lands on the card's transit
+    // position (04-checkout add-to-cart-1 → opened the card instead).
+    // 40ms spacing = 120ms window, still cheap on settled screens.
+    const gapMs = ctx.fast ? 40 : 10;
     let s1: Rect | null = rect;
     let s2: Rect | null = null;
     let s3: Rect | null = null;
     while (Date.now() < deadline) {
-      await sleep(10);
+      await sleep(gapMs);
       const cur = await sampleRect();
       if (cur) {
         s3 = s2;
