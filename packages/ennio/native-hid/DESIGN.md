@@ -1,6 +1,41 @@
 # In-house HID — replacing idb_companion
 
-## STATUS — in-process path proven dead; pivot to host-side Indigo
+## STATUS — WORKING. Host-side Indigo helper drives 03-cart end to end.
+
+`native-hid/helper/enniohid` (Swift) posts real touches into the
+simulator via CoreSimulator Indigo — the exact mechanism idb uses,
+owned by us: no idb_companion daemon, no fb-idb, no grpc. 03-cart runs
+49/49 entirely on in-house HID, 3× consecutive green (~24s),
+deterministic; 19 in-house actuations per flow. Opt-in via
+`ENNIO_INHOUSE_HID=1` (default still idb while it proves across the
+full suite).
+
+How it works:
+- Resolve the booted `SimDevice` via CoreSimulator (SimServiceContext →
+  defaultDeviceSet → device by UDID, ObjC runtime).
+- `SimDeviceLegacyHIDClient(device:)` (ObjC `initWithDevice:error:`).
+- Build a digitizer touch `IndigoMessage` with the **vendored MIT**
+  builder (`indigo_touch.h`, from FBSimulatorControl) on top of
+  SimulatorKit's exported `IndigoHIDMessageForMouseNSEvent`. Wire size
+  0x140 (320), 2-payload digitizer form.
+- Send via `sendWithMessage:freeWhenDone:completionQueue:completion:`
+  (the @objc-bridged name of the Swift send — same call idb makes; the
+  simple `send(message:)` variant does not flush).
+- Persistent process: spawned once per UDID, fed `down/move/up`
+  newline commands over stdin (normalized [0,1] coords), one `ok` per
+  command. EnnioHidClient (CLI) composes taps/swipes and is a drop-in
+  for IdbGrpcClient behind `hid.ts`.
+
+Notes / follow-ups:
+- `swiftcall.c` (x20 swiftself trampoline) is retained but unused now
+  that the @objc send selector works; keep as a reference.
+- Next: ship `enniohid` as a prebuilt universal slice + SHA manifest
+  (reuse the dylib infra), run the full 41-flow suite on in-house HID,
+  then flip the default and strip the grpc deps + proto.
+
+---
+
+## (Earlier) in-process path proven dead; pivot to host-side Indigo
 
 Two approaches were considered. **Findings, so the next iteration
 doesn't repeat the dead end:**
@@ -12,7 +47,7 @@ on the modern simulator.** Built `EnnioHIDInjector` in the dylib:
 `IsDisplayIntegrated`, explicit Range/Touch fields on parent, parent
 coords, Position in all masks, both delivery selectors. A swizzle on
 `-[UIApplication sendEvent:]` proves the verdict: **zero** touch events
-reach UIKit. The simulator's UIApplication *accepts* the enqueue (the
+reach UIKit. The simulator's UIApplication _accepts_ the enqueue (the
 selector exists and returns) but never dispatches it — sim touch input
 is gated to the host Indigo→backboard channel; in-process injection is
 ignored regardless of event shape. Kept behind `ENNIO_INHOUSE_HID=1`
@@ -22,14 +57,15 @@ NOT the default.
 **Approach A (host-side CoreSimulator Indigo) — the viable path.** This
 is idb's actual mechanism, proven to work on the sim. The in-house
 version reimplements just that send, dropping the idb_companion daemon
-+ fb-idb + grpc. Seam (symbol-confirmed): SimulatorKit
-`SimDeviceLegacyHIDClient.init(device:)` / `.send(message:)` +
-`IndigoHIDMessageFor*` C builders, `SimDevice` from CoreSimulator. The
-open work: `.send(message:)` is Swift-ABI (no ObjC selector) so the
-helper is a Swift binary, and the Indigo digitizer message layout
-(R1) still needs a compile→boot→run→observe loop. This is a host
-helper binary (a real build), not a dylib op — see the revised
-architecture below.
+
+- fb-idb + grpc. Seam (symbol-confirmed): SimulatorKit
+  `SimDeviceLegacyHIDClient.init(device:)` / `.send(message:)` +
+  `IndigoHIDMessageFor*` C builders, `SimDevice` from CoreSimulator. The
+  open work: `.send(message:)` is Swift-ABI (no ObjC selector) so the
+  helper is a Swift binary, and the Indigo digitizer message layout
+  (R1) still needs a compile→boot→run→observe loop. This is a host
+  helper binary (a real build), not a dylib op — see the revised
+  architecture below.
 
 ---
 

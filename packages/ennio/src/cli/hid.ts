@@ -22,14 +22,14 @@ export function getDylibClient(udid: string): EnnioSocketClient {
   return getActiveConnection(udid).socket;
 }
 
-// Actuation backend. Default: idb_companion gRPC HID — the only
-// mechanism that delivers real touches into the simulator (the host
-// CoreSimulator Indigo path). The in-house in-process IOHIDEvent
-// injector (ENNIO_INHOUSE_HID=1, the dylib's hid_down/move/up ops) is
-// kept behind an opt-in flag for ongoing R&D: in-process injection is
-// ACCEPTED by UIApplication but NOT dispatched on the modern simulator
-// (proven: zero touch events reach -[UIApplication sendEvent:]), so it
-// must not be the default. See native-hid/DESIGN.md.
+// Actuation backend. ENNIO_INHOUSE_HID=1 routes to the in-house host
+// helper (EnnioHidClient → the `enniohid` Swift process), which posts
+// real touches via CoreSimulator Indigo — the same mechanism idb uses,
+// owned by us, no daemon/pip/grpc. Proven to drive 03-cart end to end.
+// Default (unset) stays on idb_companion gRPC while the in-house path
+// proves out across the full suite. (The earlier in-process IOHIDEvent
+// injector — the dylib's hid_* ops — is dead: the simulator never
+// dispatches in-process HID; see native-hid/DESIGN.md.)
 const USE_INHOUSE_HID = process.env.ENNIO_INHOUSE_HID === '1';
 const ennioHidCache = new Map<string, EnnioHidClient>();
 
