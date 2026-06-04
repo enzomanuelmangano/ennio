@@ -5,6 +5,7 @@
 #import "EnnioTouchSynth.h"
 #import "EnnioBootstrap.h"
 
+#import <objc/message.h>
 #import <objc/runtime.h>
 
 static UIView *_Nullable findActivatableUpwards(UIView *v) {
@@ -42,6 +43,118 @@ static void resetRecognisersAlongChain(UIView *hit) {
             }
         }
     }
+}
+
+// ─── Fabric surface-touch dispatch ──────────────────────────────────
+//
+// Core RN Pressables (Fabric, New Arch) have NO per-view hook: no
+// recognizer, no UIControl, no touch handlers on the view. Their only
+// entry point is RCTSurfaceTouchHandler — a UIGestureRecognizer on the
+// surface root view whose touchesBegan:/touchesEnded: convert UITouches
+// into Fabric TouchEvents and dispatch them to the component's
+// eventEmitter (onTouchStart/onTouchEnd → Pressability → onPress).
+//
+// So: synthesize a UITouch and deliver it to the HANDLER (not the
+// view — that was the old touchsynth mistake). The `event` argument is
+// nil-safe in the handler's implementation. UITouch fields are set via
+// private setters (KIF-style) because plain KVC throws on iOS 26.
+
+static UITouch *_Nullable makeSyntheticTouch(UIView *hit, CGPoint pWindow) {
+    UITouch *t = [UITouch new];
+    BOOL ok = YES;
+    @try {
+        // Private but long-stable UITouch setters.
+        if ([t respondsToSelector:@selector(setWindow:)]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(t, @selector(setWindow:), hit.window);
+        } else { ok = NO; }
+        if ([t respondsToSelector:@selector(setView:)]) {
+            ((void (*)(id, SEL, id))objc_msgSend)(t, @selector(setView:), hit);
+        } else { ok = NO; }
+        SEL setLoc = NSSelectorFromString(@"_setLocationInWindow:resetPrevious:");
+        if ([t respondsToSelector:setLoc]) {
+            ((void (*)(id, SEL, CGPoint, BOOL))objc_msgSend)(t, setLoc, pWindow, YES);
+        } else { ok = NO; }
+        if ([t respondsToSelector:@selector(setTapCount:)]) {
+            ((void (*)(id, SEL, NSUInteger))objc_msgSend)(t, @selector(setTapCount:), 1);
+        }
+        if ([t respondsToSelector:@selector(setTimestamp:)]) {
+            ((void (*)(id, SEL, NSTimeInterval))objc_msgSend)(t, @selector(setTimestamp:), CACurrentMediaTime());
+        }
+    } @catch (NSException *e) {
+        ok = NO;
+    }
+    return ok ? t : nil;
+}
+
+static BOOL setTouchPhase(UITouch *t, UITouchPhase phase) {
+    @try {
+        if ([t respondsToSelector:@selector(setPhase:)]) {
+            ((void (*)(id, SEL, UITouchPhase))objc_msgSend)(t, @selector(setPhase:), phase);
+            if ([t respondsToSelector:@selector(setTimestamp:)]) {
+                ((void (*)(id, SEL, NSTimeInterval))objc_msgSend)(t, @selector(setTimestamp:), CACurrentMediaTime());
+            }
+            return YES;
+        }
+    } @catch (NSException *e) {
+    }
+    return NO;
+}
+
+static BOOL fireFabricSurfaceTouch(UIView *hit, CGPoint pWindow) {
+    // Only meaningful when a Fabric component view is in the chain —
+    // CreateTouchWithUITouch walks for touchEventEmitterAtPoint:.
+    SEL emitterSel = NSSelectorFromString(@"touchEventEmitterAtPoint:");
+    BOOL hasFabricView = NO;
+    for (UIView *cur = hit; cur; cur = cur.superview) {
+        if ([cur respondsToSelector:emitterSel]) { hasFabricView = YES; break; }
+    }
+    if (!hasFabricView) return NO;
+
+    // Find the surface touch handler on the hit chain's recognizers.
+    UIGestureRecognizer *handler = nil;
+    for (UIView *cur = hit; cur && !handler; cur = cur.superview) {
+        for (UIGestureRecognizer *g in cur.gestureRecognizers) {
+            if ([NSStringFromClass([g class]) isEqualToString:@"RCTSurfaceTouchHandler"]) {
+                handler = g;
+                break;
+            }
+        }
+    }
+    if (!handler || !handler.isEnabled) return NO;
+
+    UITouch *t = makeSyntheticTouch(hit, pWindow);
+    if (!t) return NO;
+    if (!setTouchPhase(t, UITouchPhaseBegan)) return NO;
+
+    NSSet *touches = [NSSet setWithObject:t];
+    @try {
+        [handler touchesBegan:touches withEvent:nil];
+        setTouchPhase(t, UITouchPhaseEnded);
+        [handler touchesEnded:touches withEvent:nil];
+    } @catch (NSException *e) {
+        // Half-delivered touch: cancel + reset so the handler's
+        // registry doesn't leak a stuck ActiveTouch.
+        @try {
+            [handler touchesCancelled:touches withEvent:nil];
+        } @catch (NSException *e2) {
+        }
+        return NO;
+    } @finally {
+        // Our synthetic state mutations bypass UIKit's end-of-touch
+        // reset pass. Return the handler to Possible so the NEXT
+        // (real or synthetic) touch starts clean — a stuck handler
+        // here would deafen the whole surface.
+        SEL setStateSel = NSSelectorFromString(@"_setState:");
+        if ([handler respondsToSelector:setStateSel]) {
+            ((void (*)(id, SEL, NSInteger))objc_msgSend)(
+                handler, setStateSel, UIGestureRecognizerStatePossible);
+        }
+        SEL resetSel = NSSelectorFromString(@"reset");
+        if ([handler respondsToSelector:resetSel]) {
+            ((void (*)(id, SEL))objc_msgSend)(handler, resetSel);
+        }
+    }
+    return YES;
 }
 
 static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
@@ -200,6 +313,14 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
                     return;
                 }
             }
+        }
+        // Strategy 4 (last resort): Fabric surface-touch dispatch.
+        // Core RN Pressables expose no per-view hook at all — their
+        // press pipeline starts at RCTSurfaceTouchHandler. Deliver a
+        // synthetic Began→Ended pair to the handler itself.
+        if (fireFabricSurfaceTouch(hit, p)) {
+            via = @"fabrictouch";
+            return;
         }
     };
     if (NSThread.isMainThread) doActivate();
