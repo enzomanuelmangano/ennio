@@ -59,7 +59,8 @@ async function tryFastOp(
     const handled = !!(r.ok && r.data && (r.data as { ok?: boolean }).ok === true);
     if (handled) {
       fastHits++;
-      trace(`[fast] ${op} handled in-process`);
+      const via = (r.data as { via?: string }).via;
+      trace(`[fast] ${op} handled in-process${via ? ` via=${via}` : ''}`);
     } else {
       fastFallbacks++;
       trace(`[fast] ${op} declined (${r.ok ? 'ok:false' : (r.err ?? 'no data')}) → HID fallback`);
@@ -245,11 +246,30 @@ async function callTool(
     // Fast path: plain short taps only. Held taps (longPress passes
     // holdSec=0.8) need a real timed UITouch — activation can't hold.
     if (fastMode && holdSec <= 0.2) {
+      // The activation chain over-reports: its UITouch-synthesis
+      // strategy returns YES unconditionally ("caller verifies").
+      // Verify by frame hash — a tap whose effect landed changes the
+      // visible tree within a frame or two. No change → phantom →
+      // fall back to a real HID tap. wait_hash_change is event-driven,
+      // so a genuine hit costs ~2 extra in-process roundtrips.
+      const preR = await dy.call('frame_hash').catch(() => undefined);
+      const preHash =
+        preR && preR.ok && preR.data ? ((preR.data as { hash?: string }).hash ?? '') : '';
       const handled = await tryFastOp(dy, 'activate_at_point', {
         x: Math.round(nx * w),
         y: Math.round(ny * h),
       });
-      if (handled) return true;
+      if (handled) {
+        if (!preHash) return true; // no baseline — trust the report
+        const chg = await dy
+          .call('wait_hash_change', { sinceHash: preHash, maxMs: 400 })
+          .catch(() => undefined);
+        const changed = !!(chg && chg.ok && chg.data && (chg.data as { ok?: boolean }).ok);
+        if (changed) return true;
+        fastHits--;
+        fastFallbacks++;
+        trace('[fast] activate_at_point phantom (no hash change) → HID fallback');
+      }
     }
     trace(`[hid] tap nx=${nx.toFixed(4)} ny=${ny.toFixed(4)} hold=${holdSec}s`);
     await idb.tap(nx * w, ny * h, holdSec);
@@ -302,6 +322,22 @@ async function callTool(
     throw new Error('keyboard payload requires text or key');
   }
   throw new Error(`unsupported tool: ${toolName}`);
+}
+
+/**
+ * Tap that always goes through idb HID, even in fast mode. For taps
+ * whose side effect activation can't reproduce — focusing a native
+ * text input (UISearchBar) needs a real touch, not an onPress fire.
+ */
+export async function tapHid(udid: string, x: number, y: number, holdSec?: number): Promise<void> {
+  const { w, h } = await getScreenSize(udid);
+  const idb = getIdb(udid);
+  trace(`[hid-tap-forced] px=(${x.toFixed(1)},${y.toFixed(1)})${holdSec ? ` hold=${holdSec}s` : ''}`);
+  await idb.tap(
+    Math.max(0, Math.min(w, x)),
+    Math.max(0, Math.min(h, y)),
+    holdSec ?? 0.08,
+  );
 }
 
 export async function tap(udid: string, x: number, y: number, holdSec?: number): Promise<void> {
@@ -363,6 +399,27 @@ export async function press(udid: string, x: number, y: number): Promise<void> {
     '--events-json',
     JSON.stringify(events),
   ]);
+}
+
+/**
+ * Swipe that always goes through idb HID, even in fast mode. For
+ * gestures whose physics matter — pull-to-refresh over-scroll needs a
+ * real drag + release, not a contentOffset jump.
+ */
+export async function swipeHid(
+  udid: string,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  durationMs: number,
+): Promise<void> {
+  const { w, h } = await getScreenSize(udid);
+  const idb = getIdb(udid);
+  const clampX = (v: number) => Math.max(0, Math.min(w, v));
+  const clampY = (v: number) => Math.max(0, Math.min(h, v));
+  trace(`[hid-swipe-forced] from=(${x1.toFixed(0)},${y1.toFixed(0)}) to=(${x2.toFixed(0)},${y2.toFixed(0)})`);
+  await idb.swipe(clampX(x1), clampY(y1), clampX(x2), clampY(y2), Math.max(50, durationMs || 250) / 1000);
 }
 
 /**

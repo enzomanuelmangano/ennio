@@ -22,6 +22,7 @@ import {
   tap as hidTap,
   tapFast as hidTapFast,
   tapPureFast as hidTapPureFast,
+  tapHid as hidTapForced,
   press as hidPress,
 } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
@@ -227,10 +228,18 @@ export async function execTapOn(
     : sel.text
       ? { text: sel.text }
       : null;
+  // When the exposure wait expires without the target ever becoming
+  // exposed, the point is covered by another layer (tab bar, overlay).
+  // In fast mode the activation hitTest would land on — and activate —
+  // that occluder (observed: g-pan row half under the tab bar fired
+  // the tab button). Force a real HID tap for this gesture; UIKit
+  // touch routing handles edge-covered rows far more gracefully.
+  let confirmedExposed = true;
   if (exposureSel) {
     const ex = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
     const exposed = !!(ex && ex.ok && ex.data && (ex.data as { exposed?: boolean }).exposed);
     if (!exposed) {
+      confirmedExposed = false;
       await timedAsync(ctx, 'tap.waitExposed', async () => {
         // 800 ms cap: RN animations (sheet present/dismiss, modal
         // slide) are typically 300-500 ms. The retap-self-heal loop
@@ -240,7 +249,10 @@ export async function execTapOn(
           await sleep(80);
           const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
           const ok = !!(r && r.ok && r.data && (r.data as { exposed?: boolean }).exposed);
-          if (ok) break;
+          if (ok) {
+            confirmedExposed = true;
+            break;
+          }
         }
       });
     }
@@ -290,7 +302,12 @@ export async function execTapOn(
   // gesture, closing the sheet instead of selecting the row. The
   // retap-self-heal loop covers any single-miss case.
   const isTextOnlyTap = !!sel.text && !sel.id;
-  await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
+  // suppressFastTap: the handler marked this tap as needing a real
+  // touch (e.g. focusing a native text input) — bypass activation.
+  // Same when exposure was never confirmed: activation would hit the
+  // occluding layer.
+  const tapFn = ctx.suppressFastTap || !confirmedExposed ? hidTapForced : hidTapFast;
+  await timedAsync(ctx, 'tap.hidTap', () => tapFn(ctx.udid, center.x, center.y));
   // Tiny ≤5 px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx
   // stack of 1×1 px Pressables at top:100 right:0 zIndex:100): integer
   // rounding misses the hit-box ~30 % of taps. Fire pure DOWN+UP and

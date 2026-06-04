@@ -67,7 +67,12 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         );
         if (JSON.stringify(nextSel) === tapKey) nextIsSameTap = true;
       }
-      if (nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
+      // Fast mode: no collapse. The collapse works around HID's tap-gap
+      // landing inside RN's double-tap window; in-process activations
+      // fire onPress deterministically per call, and mixing one HID
+      // doubleTap with a follow-up activation has been seen to drop an
+      // increment (g-switch-stepper).
+      if (!ctx.fast && nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
         const rect = await findOnce(ctx, sel);
         if (rect && (rect.w > 5 || rect.h > 5)) {
           await timedAsync(ctx, 'tap.execTapOn', () =>
@@ -122,7 +127,16 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         ctx.lastTapTestID = sel.id;
         return;
       }
-      await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
+      // Fast-mode exception: a tap whose next command types text must
+      // deliver REAL focus. In-process activation fires onPress but
+      // does not focus native inputs (UISearchBar — g-searchbar), and
+      // the focus_testid shortcut above only covers id selectors.
+      if (ctx.fast && nextEditsField) ctx.suppressFastTap = true;
+      try {
+        await timedAsync(ctx, 'tap.execTapOn', () => execTapOn(ctx, sel, preTapHash));
+      } finally {
+        ctx.suppressFastTap = false;
+      }
       if (isRepeatTap || nextIsSameTap) {
         await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
       } else if (ctx.fast) {

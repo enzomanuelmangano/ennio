@@ -21,6 +21,29 @@ static UIView *_Nullable findActivatableUpwards(UIView *v) {
     return nil;
 }
 
+// Return every recogniser along the hit chain to Possible. Synthetic
+// activations skip UIKit's end-of-touch reset pass, so a recogniser
+// (UITap or RNGH's custom classes) left in Ended/Failed silently
+// swallows the next synthetic activation — observed as "3 taps → 1
+// press" on a pressto/RNGH button. Pre-cleaning before each activation
+// makes repeat activations idempotent.
+static void resetRecognisersAlongChain(UIView *hit) {
+    SEL setStateSel = NSSelectorFromString(@"_setState:");
+    SEL resetSel = NSSelectorFromString(@"reset");
+    for (UIView *cur = hit; cur; cur = cur.superview) {
+        for (UIGestureRecognizer *g in cur.gestureRecognizers) {
+            if (g.state == UIGestureRecognizerStatePossible) continue;
+            if ([g respondsToSelector:setStateSel]) {
+                IMP imp = [g methodForSelector:setStateSel];
+                ((void (*)(id, SEL, NSInteger))imp)(g, setStateSel, UIGestureRecognizerStatePossible);
+            }
+            if ([g respondsToSelector:resetSel]) {
+                ((void (*)(id, SEL))[g methodForSelector:resetSel])(g, resetSel);
+            }
+        }
+    }
+}
+
 static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
     if (![v isKindOfClass:UIControl.class]) return NO;
     UIControl *ctl = (UIControl *)v;
@@ -35,7 +58,11 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
 @implementation EnnioTouchSynth
 
 + (BOOL)activateAtX:(double)x y:(double)y {
-    __block BOOL fired = NO;
+    return [self activationStrategyAtX:x y:y] != nil;
+}
+
++ (NSString *_Nullable)activationStrategyAtX:(double)x y:(double)y {
+    __block NSString *via = nil;
     void (^doActivate)(void) = ^{
         UIWindow *win = [EnnioBootstrap keyWindow];
         if (!win) return;
@@ -45,6 +72,10 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
 
         UIView *target = findActivatableUpwards(hit);
         if (!target) target = hit;
+
+        // Clear any recogniser a previous synthetic activation left
+        // mid-state — see resetRecognisersAlongChain.
+        resetRecognisersAlongChain(hit);
 
         // Strategy 0a: drive a UITapGestureRecognizer through its
         // state transitions (Began → Ended). Catches RNGH /
@@ -57,11 +88,26 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
                     if (!g.isEnabled) continue;
                     if (![g isKindOfClass:UITapGestureRecognizer.class]) continue;
                     if (![g respondsToSelector:setStateSel]) continue;
+                    // Only inject into a recogniser at rest. A real
+                    // touch returns the state machine to Possible via
+                    // the runloop's reset pass; synthetic transitions
+                    // skip that, so a recogniser left in Ended would
+                    // silently swallow every later injection (observed:
+                    // 3 taps on a Reanimated/RNGH button → 1 press).
+                    if (g.state != UIGestureRecognizerStatePossible) continue;
                     IMP imp = [g methodForSelector:setStateSel];
                     typedef void (*SetStateFn)(id, SEL, NSInteger);
                     ((SetStateFn)imp)(g, setStateSel, UIGestureRecognizerStateBegan);
                     ((SetStateFn)imp)(g, setStateSel, UIGestureRecognizerStateEnded);
-                    fired = YES;
+                    // Reset to Possible so the next injection (or real
+                    // touch) starts clean. `reset` is the documented
+                    // subclassing hook UIKit itself calls after a
+                    // recognition cycle.
+                    SEL resetSel = NSSelectorFromString(@"reset");
+                    if ([g respondsToSelector:resetSel]) {
+                        ((void (*)(id, SEL))[g methodForSelector:resetSel])(g, resetSel);
+                    }
+                    via = @"recognizer";
                     return;
                 }
             }
@@ -99,7 +145,7 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
                     [t setValue:@(UITouchPhaseEnded) forKey:@"phase"];
                     [hit touchesEnded:touches withEvent:nil];
                 } @catch (NSException *e) {}
-                fired = YES;
+                via = @"touchsynth";
                 return;
             }
         }
@@ -109,13 +155,13 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
         // handler. Returns YES only when the action fires.
         if ([target respondsToSelector:@selector(accessibilityActivate)]) {
             if ([target accessibilityActivate]) {
-                fired = YES;
+                via = @"axactivate";
                 return;
             }
         }
         // Strategy 2: UIControl action dispatch.
         if (fireUIControlAction(target, p)) {
-            fired = YES;
+            via = @"uicontrol";
             return;
         }
         // Strategy 3: walk the view chain for a UITapGestureRecognizer
@@ -129,7 +175,7 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
                 if ([g respondsToSelector:fire]) {
                     IMP imp = [g methodForSelector:fire];
                     ((void (*)(id, SEL))imp)(g, fire);
-                    fired = YES;
+                    via = @"handleaction";
                     return;
                 }
             }
@@ -137,7 +183,7 @@ static BOOL fireUIControlAction(UIView *v, CGPoint inWindow) {
     };
     if (NSThread.isMainThread) doActivate();
     else dispatch_sync(dispatch_get_main_queue(), doActivate);
-    return fired;
+    return via;
 }
 
 @end

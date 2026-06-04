@@ -41,8 +41,9 @@ void RegisterEnnioInteractionHandlers(void) {
         NSDictionary *a = EnnioParseArgs(args);
         double x = (double)EnnioArgInt(a, @"x", 0);
         double y = (double)EnnioArgInt(a, @"y", 0);
-        BOOL ok = [EnnioTouchSynth activateAtX:x y:y];
-        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
+        NSString *via = [EnnioTouchSynth activationStrategyAtX:x y:y];
+        if (!via) return "{\"ok\":false}";
+        return std::string("{\"ok\":true,\"via\":\"") + via.UTF8String + "\"}";
     });
 
     EnnioControlSocket::registerHandler("activate_testid", [](const std::string &args) -> std::string {

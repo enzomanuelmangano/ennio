@@ -9,7 +9,7 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand, MaestroSelector } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { swipe as hidSwipe, longPressDrag as hidLongPressDrag } from '../../hid';
+import { swipe as hidSwipe, swipeHid, longPressDrag as hidLongPressDrag } from '../../hid';
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, sleep } from '../../runner/context';
 import { resolveRect } from '../../runner/find';
 import { isVisible } from '../../runner/visibility';
@@ -66,9 +66,13 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       // settle (real deceleration). `lastSwipeInProc` tracks which
       // path the most recent swipe took.
       const F = !!ctx.fast;
-      // True when there is no scroll momentum in flight: before any
-      // swipe, or after an in-process (instant) one.
-      let lastSwipeInProc = true;
+      // True only after a swipe that ran in-process (instant, no
+      // momentum). Deliberately false before the first swipe: the
+      // found-branch's settle also guards against the PREVIOUS
+      // command's animation tail (tab-entry transition) — skipping it
+      // fired the tab-bar nudge mid-transition and scrolled nothing
+      // (g-pan).
+      let lastSwipeInProc = false;
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await isVisible(ctx, target)) {
@@ -134,7 +138,10 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
         lastSwipeInProc = await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
         const quick = F && lastSwipeInProc;
         await ctx.client
-          .call('wait_commit', quick ? { maxMs: 800, stableMs: 100 } : { maxMs: 2000, stableMs: 300 })
+          .call(
+            'wait_commit',
+            quick ? { maxMs: 800, stableMs: 100 } : { maxMs: 2000, stableMs: 300 },
+          )
           .catch(() => undefined);
       }
       throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
@@ -253,6 +260,35 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           return;
         }
         ctx.lastRefreshAtMs = now;
+        // Fast mode: a setContentOffset jump can't trigger
+        // UIRefreshControl (needs a real over-scroll drag + release).
+        // Use the dylib's trigger_refresh op — fires beginRefreshing +
+        // the valueChanged action in-process. HID fallback on miss.
+        if (ctx.fast) {
+          const r = await ctx.client
+            .call('trigger_refresh', { x: Math.round(from.x), y: Math.round(from.y) })
+            .catch(() => undefined);
+          const fired = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
+          if (!fired) {
+            // Real over-scroll drag — setContentOffset can't fire
+            // UIRefreshControl, so the in-process swipe path is wrong
+            // here regardless of what its hitTest says. Mirror the
+            // baseline sequence exactly (settle + presentation idle +
+            // HID drag + momentum settle).
+            await ctx.client
+              .call('wait_commit', { maxMs: 2500, stableMs: 350 })
+              .catch(() => undefined);
+            await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
+            await swipeHid(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
+            await sleep(500);
+            await ctx.client
+              .call('wait_commit', { maxMs: 1000, stableMs: 150 })
+              .catch(() => undefined);
+            return;
+          }
+          await ctx.client.call('wait_commit', { maxMs: 800, stableMs: 100 }).catch(() => undefined);
+          return;
+        }
       }
       // Drag-to-sort: RN draggable-flatlist needs a ~500 ms hold before
       // drag mode. Long-press-then-drag fires when YAML provides

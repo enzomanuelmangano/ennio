@@ -35,6 +35,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// at the point — caller falls back to idb HID for a real touch.
 + (BOOL)activateAtX:(double)x y:(double)y;
 
+/// Same as activateAtX:y: but reports WHICH strategy claimed the
+/// activation (diagnostics: phantom-success hunting). Returns nil when
+/// nothing fired; otherwise one of "recognizer", "touchsynth",
+/// "axactivate", "uicontrol", "handleaction".
++ (NSString *_Nullable)activationStrategyAtX:(double)x y:(double)y;
+
 @end
 
 NS_ASSUME_NONNULL_END

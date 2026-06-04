@@ -65,6 +65,11 @@ export interface RunContext {
    *  on the next command's own guards (pre-tap animation poll, position-
    *  stability gate, assert polling) to absorb animation tails. */
   fast?: boolean;
+  /** Transient: force the next tap through idb HID even in fast mode.
+   *  Set by the tapOn handler when the tap must produce a real-touch
+   *  side effect activation can't (focusing a native text input before
+   *  inputText). Cleared by the handler after the tap. */
+  suppressFastTap?: boolean;
   /** Path to the currently-executing flow file. Used for runFlow
    *  subflow path resolution. */
   flowPath: string;
