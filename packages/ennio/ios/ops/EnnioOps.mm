@@ -18,7 +18,7 @@
 //     the slide-from-edge gesture that's hard to drive cleanly.
 //
 // For "real touch" semantics (Pressable, RNGH BaseButton, etc.) the
-// CLI drives idb HID after EnnioFinder hands back coords. This file
+// CLI drives HID after EnnioFinder hands back coords. This file
 // only handles the special cases where UIKit-direct beats HID.
 //
 
@@ -684,7 +684,7 @@ static BOOL anyVCInTransition(UIViewController *root) {
     }
 
     // Slow path: not over a scroll view. Return NO so the CLI falls
-    // back to idb HID for a real UITouch sequence — synthesising
+    // back to host HID for a real UITouch sequence — synthesising
     // UITouch from native land requires private API (UIInternalEvent /
     // _UIPhysicalKeyboardEvent equivalents). Honest "unsupported in
     // this code path" so the orchestration layer routes correctly.

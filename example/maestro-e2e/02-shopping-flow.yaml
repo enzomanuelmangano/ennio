@@ -114,7 +114,7 @@ tags:
 # ============================================
 
 # Sort dropdown — zeego native UIMenu (UIButton.menu + showsMenuAsPrimaryAction).
-# Ennio detects the menu trigger and routes the tap through idb HID;
+# Ennio detects the menu trigger and routes the tap through real HID;
 # items become accessibility-tree-resolvable once open and tap-by-text
 # activates them natively.
 

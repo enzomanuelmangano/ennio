@@ -12,8 +12,8 @@
 //      subclasses missed by step 1.
 //
 // Steps that need real UITouch delivery (drag, pinch, long-press
-// gesture coordination) still go through idb. This is the fast-path
-// for the common case (tapping a button), saving the 400 ms idb
+// gesture coordination) still go through real HID. This is the
+// fast-path for the common case (tapping a button), saving the HID
 // subprocess spawn.
 //
 // Sim only. No private API on this current iteration — the prior
@@ -32,7 +32,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Activate the topmost interactive view at window-space (x, y).
 /// Returns YES if a handler fired. NO if no activatable target found
-/// at the point — caller falls back to idb HID for a real touch.
+/// at the point — caller falls back to real HID for a real touch.
 + (BOOL)activateAtX:(double)x y:(double)y;
 
 /// Same as activateAtX:y: but reports WHICH strategy claimed the

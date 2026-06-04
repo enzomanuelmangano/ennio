@@ -122,7 +122,7 @@ tags:
 # TEST: Sort options
 # ============================================
 # zeego DropdownMenu = native UIMenu. Ennio detects the trigger and
-# routes through idb HID; menu items are accessibility-resolvable once
+# routes through real HID; menu items are accessibility-resolvable once
 # open and tap-by-text activates them.
 
 # Price: Low to High

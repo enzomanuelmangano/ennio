@@ -6,7 +6,6 @@
 #import "EnnioHandlerUtils.h"
 
 #import "EnnioFinder.h"
-#import "EnnioHIDInjector.h"
 #import "EnnioOps.h"
 #import "EnnioTouchSynth.h"
 
@@ -149,72 +148,6 @@ void RegisterEnnioInteractionHandlers(void) {
         int code = EnnioArgInt(a, @"keyCode", 0);
         BOOL ok = NO;
         EnnioOnMainVoid([&]() { ok = [EnnioOps pressHardwareKey:code]; });
-        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
-    });
-
-    // In-process real-HID injection (idb replacement). Normalized
-    // [0,1] coords; UIApplication ingests the IOHIDEvent through its
-    // real touch pipeline. Phases composed CLI-side into taps/swipes.
-    // Swizzle -[UIApplication sendEvent:] once; count UIEvents that
-    // carry touches. Lets the harness prove whether injected HID
-    // actually reaches UIKit's event dispatch (delivery) vs lands but
-    // hit-tests wrong (coordinates).
-    EnnioControlSocket::registerHandler("hid_listen", [](const std::string &) -> std::string {
-        static int s_touchEventCount = 0;
-        static dispatch_once_t once;
-        dispatch_once(&once, ^{
-            Class cls = UIApplication.class;
-            SEL sel = @selector(sendEvent:);
-            Method m = class_getInstanceMethod(cls, sel);
-            __block IMP orig = method_getImplementation(m);
-            IMP repl = imp_implementationWithBlock(^(id self_, UIEvent *ev) {
-                if (ev.type == UIEventTypeTouches && ev.allTouches.count > 0) {
-                    s_touchEventCount++;
-                }
-                ((void (*)(id, SEL, UIEvent *))orig)(self_, sel, ev);
-            });
-            method_setImplementation(m, repl);
-        });
-        // Reset + report current count.
-        int c = s_touchEventCount;
-        s_touchEventCount = 0;
-        return std::string("{\"touchEvents\":") + std::to_string(c) + "}";
-    });
-
-    EnnioControlSocket::registerHandler("hid_probe", [](const std::string &) -> std::string {
-        BOOL hasEnqueue = NO, hasHandle = NO, hasBypass = NO;
-        EnnioOnMainVoid([&]() {
-            UIApplication *app = UIApplication.sharedApplication;
-            hasEnqueue = [app respondsToSelector:NSSelectorFromString(@"_enqueueHIDEvent:")];
-            hasHandle = [app respondsToSelector:NSSelectorFromString(@"_handleHIDEvent:")];
-            hasBypass = [app respondsToSelector:NSSelectorFromString(@"_handleHIDEventBypassingUIEvent:")];
-        });
-        return std::string("{\"enqueue\":") + (hasEnqueue ? "true" : "false") +
-            ",\"handle\":" + (hasHandle ? "true" : "false") +
-            ",\"bypass\":" + (hasBypass ? "true" : "false") + "}";
-    });
-
-    EnnioControlSocket::registerHandler("hid_down", [](const std::string &args) -> std::string {
-        NSDictionary *a = EnnioParseArgs(args);
-        double x = EnnioArgDouble(a, @"x", 0);
-        double y = EnnioArgDouble(a, @"y", 0);
-        BOOL ok = [EnnioHIDInjector touchDownAtX:x y:y];
-        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
-    });
-
-    EnnioControlSocket::registerHandler("hid_move", [](const std::string &args) -> std::string {
-        NSDictionary *a = EnnioParseArgs(args);
-        double x = EnnioArgDouble(a, @"x", 0);
-        double y = EnnioArgDouble(a, @"y", 0);
-        BOOL ok = [EnnioHIDInjector touchMoveToX:x y:y];
-        return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
-    });
-
-    EnnioControlSocket::registerHandler("hid_up", [](const std::string &args) -> std::string {
-        NSDictionary *a = EnnioParseArgs(args);
-        double x = EnnioArgDouble(a, @"x", 0);
-        double y = EnnioArgDouble(a, @"y", 0);
-        BOOL ok = [EnnioHIDInjector touchUpAtX:x y:y];
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 

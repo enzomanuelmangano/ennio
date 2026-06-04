@@ -1,5 +1,5 @@
 // Action sheet — ActionSheetIOS is system-rendered (out-of-process on
-// iOS 18+). Tests Ennio's idb describe-OOP fallback for non-Fabric UI.
+// iOS 18+). Tests Ennio's cross-process AX fallback for non-Fabric UI.
 
 import { useState } from 'react';
 import { View, Text, ActionSheetIOS, StyleSheet } from 'react-native';
