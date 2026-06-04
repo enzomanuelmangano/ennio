@@ -55,7 +55,7 @@ export async function waitUntilVisible(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   // Don't probe for a blocking permission sheet on the first few seconds
-  // — most targets appear quickly and the idb describe is ~1-2s. Only
+  // — most targets appear quickly. Only
   // pay it once the wait is genuinely stalling.
   let lastPermCheck = Date.now();
   while (Date.now() < deadline) {
@@ -66,7 +66,7 @@ export async function waitUntilVisible(
       // A native system permission sheet (Photo Library, notifications,
       // tracking) renders in another process and floats over the app,
       // swallowing every touch — the in-app dylib can't see it, so a
-      // wait would otherwise spin to timeout. Clear it via idb, then
+      // wait would otherwise spin to timeout. Clear it, then
       // re-check immediately.
       if (await dismissPermissionDialogs(ctx.udid).catch(() => false)) continue;
     }

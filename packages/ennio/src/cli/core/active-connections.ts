@@ -1,5 +1,5 @@
 // Per-UDID connection registry. Populated by EnnioConnection on open(),
-// drained on close(). hid.ts uses this to find the socket + idb client
+// drained on close(). hid.ts uses this to find the dylib socket
 // for the UDID a gesture targets.
 //
 // The registry IS still process-scoped state, but its lifetime is

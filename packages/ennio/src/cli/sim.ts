@@ -21,7 +21,7 @@ import { join, resolve, dirname } from 'node:path';
  * iOS Settings) exposes NOTHING to an in-process walk: the rows are
  * drawn, not UILabels, and no a11y nodes exist yet. Flipping this on
  * makes SwiftUI materialize its tree, which ennio's in-process
- * find_ax_by_text then reads directly (~50ms) — no idb, no XCUITest.
+ * find_ax_by_text then reads directly (~50ms) — no XCUITest.
  * Idempotent + best-effort; runs once per flow.
  */
 export function enableAccessibility(udid: string): void {

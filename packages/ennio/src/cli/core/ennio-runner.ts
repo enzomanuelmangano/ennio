@@ -7,7 +7,7 @@
 //   1. Pick reporter (default PrettyReporter).
 //   2. For each flow:
 //      a. Build SimulatorSession (UDID + bundleId + dylib path).
-//      b. Build EnnioConnection (Unix socket + idb pool).
+//      b. Build EnnioConnection (Unix socket).
 //      c. If connection.open() fails, the dylib isn't loaded yet —
 //         have SimulatorSession launch the app with DYLD injection,
 //         then retry the connection.

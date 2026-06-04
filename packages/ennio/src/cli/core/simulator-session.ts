@@ -1,4 +1,4 @@
-// Simulator + app lifecycle. Wraps simctl/idb invocations and the
+// Simulator + app lifecycle. Wraps simctl invocations and the
 // launchctl-env propagation needed to feed ENNIO_SOCKET_PATH into the
 // dylib at +load time.
 //

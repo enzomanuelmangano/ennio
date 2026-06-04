@@ -1,15 +1,15 @@
-// In-house HID client — drop-in replacement for IdbGrpcClient's
-// actuation surface (tap / doubleTap / swipe). Drives the `enniohid`
+// In-house HID client — the actuation surface (tap / doubleTap /
+// swipe). Drives the `enniohid`
 // host helper: a persistent Swift process that posts real touches into
 // the simulator via CoreSimulator Indigo (SimulatorKit
 // SimDeviceLegacyHIDClient + a vendored MIT Indigo message builder).
-// Same mechanism idb uses, owned by us — no daemon, no fb-idb, no grpc.
+// CoreSimulator Indigo (the framework path), owned by us — no daemon.
 //
 // One helper process per UDID, spawned lazily, fed newline commands:
 //   down <nx> <ny> | move <nx> <ny> | up <nx> <ny> | ping | quit
 // Coordinates are normalized [0,1], top-left origin. Each command
 // replies "ok\n". Coordinates IN to this client are window-space
-// pixels (matching IdbGrpcClient); normalized here via screen size.
+// pixels; normalized here via screen size.
 
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';

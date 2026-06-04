@@ -60,11 +60,10 @@ function checkXcode(): Result {
 
 function checkHidHelper(): Result {
   // In-house HID actuation: the enniohid host helper (CoreSimulator
-  // Indigo). Replaces idb_companion entirely.
-  const candidates = [
-    process.env.ENNIO_HID_HELPER,
-    '/tmp/ennio-build/enniohid',
-  ].filter(Boolean) as string[];
+  // Indigo). No idb.
+  const candidates = [process.env.ENNIO_HID_HELPER, '/tmp/ennio-build/enniohid'].filter(
+    Boolean,
+  ) as string[];
   const found = candidates.find((c) => {
     try {
       return tryExec('test', ['-x', c]) !== null;
@@ -78,7 +77,8 @@ function checkHidHelper(): Result {
   return {
     name: 'enniohid (in-house HID)',
     severity: 'warn',
-    detail: 'helper not found in /tmp/ennio-build or prebuilt/; built from native-hid/helper or shipped in the tarball',
+    detail:
+      'helper not found in /tmp/ennio-build or prebuilt/; built from native-hid/helper or shipped in the tarball',
   };
 }
 

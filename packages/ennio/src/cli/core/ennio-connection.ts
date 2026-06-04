@@ -1,6 +1,6 @@
 // Owned resource: dylib Unix socket + RPC layer.
 //
-// Replaces the module-level `sharedClient` / `idbClients` globals in
+// Replaces the module-level `sharedClient` globals in
 // hid.ts. A connection is created per flow run, exposes typed access
 // to all in-app capabilities (find / tap / settle / system ops), and
 // cleans up its socket on close().

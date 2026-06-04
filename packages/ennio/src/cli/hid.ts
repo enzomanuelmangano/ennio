@@ -1,4 +1,4 @@
-// Low-level gesture transport. Single home for the idb HID primitives
+// Low-level gesture transport. Single home for the HID primitives
 // and the mode-independent dylib ops (keyboard, AX queries). Holds NO
 // mode state — mechanism choice (in-process vs HID) lives in
 // driver/ (GestureDriver implementations), which compose these
@@ -6,12 +6,12 @@
 //
 // The dylib runs inside the target app (injected via DYLD_INSERT)
 // and listens on a per-UDID Unix socket. EnnioConnection owns that
-// socket + the idb gRPC pool and registers itself in
+// socket and registers itself in
 // core/active-connections so the helpers below can look up the right
 // connection by UDID.
 //
 // All coordinates are window-space points; helpers normalise to the
-// [0,1] space idb expects internally.
+// [0,1] space the actuator expects internally.
 
 import { getActiveConnection } from './core/active-connections';
 import { EnnioHidClient } from './ennio-hid';
@@ -24,10 +24,10 @@ export function getDylibClient(udid: string): EnnioSocketClient {
 // Actuation backend: the in-house host helper (EnnioHidClient → the
 // `enniohid` Swift process), which posts real touches into the
 // simulator via CoreSimulator Indigo (SimulatorKit SimDeviceLegacyHID
-// Client + a vendored MIT Indigo builder). idb_companion is gone —
-// no daemon, no fb-idb, no grpc. (The earlier in-process IOHIDEvent
-// injector — the dylib's hid_* ops — is dead: the simulator never
-// dispatches in-process HID; see native-hid/DESIGN.md.)
+// Client + a vendored MIT Indigo builder). No external daemon. (The
+// earlier in-process IOHIDEvent injector — the dylib's hid_* ops — is
+// dead: the simulator never dispatches in-process HID; see
+// native-hid/DESIGN.md.)
 const ennioHidCache = new Map<string, EnnioHidClient>();
 
 interface HidBackend {
@@ -75,7 +75,7 @@ export function trace(line: string): void {
 }
 
 // =====================================================================
-// idb HID primitives — every call dispatches a real IOHIDEvent through
+// HID primitives — every call dispatches a real IOHIDEvent through
 // CoreSimulator. Same touch pipeline as a physical finger.
 // =====================================================================
 
@@ -151,7 +151,7 @@ export async function longPressDrag(
     `[hid] long-drag (${x1.toFixed(0)},${y1.toFixed(0)})→(${x2.toFixed(0)},${y2.toFixed(0)}) hold=${holdMs} move=${moveMs}`,
   );
   // One slow swipe whose duration covers hold + glide. (The legacy
-  // event-sequence path also collapsed to a single idb swipe with the
+  // event-sequence path also collapsed to a single swipe with the
   // summed delays — preserved byte-for-byte here.)
   await getActuator(udid).swipe(
     clampX(x1),

@@ -1,6 +1,6 @@
 // HidDriver — the baseline GestureDriver. Every gesture is a real
-// IOHIDEvent via idb; settle budgets are the legacy, parity-proven
-// values (moved verbatim from the pre-driver inline code in
+// IOHIDEvent via the in-house host helper; settle budgets are the
+// legacy parity-proven values (moved verbatim from the pre-driver
 // commands/handlers/tap.ts and scroll.ts).
 
 import * as hid from '../hid';

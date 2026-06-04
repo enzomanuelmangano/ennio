@@ -4,14 +4,13 @@ import { FastDriver, HidDriver, createDriver } from './driver';
 import type { EnnioSocketClient } from './socket-client';
 
 // Mock the dylib socket registry + the in-house HID actuator so the
-// drivers talk to fakes. `idbTap/Swipe/DoubleTap` here are the
-// EnnioHidClient actuator spies (named idb* for test-history continuity
-// — they assert "fell back to a real HID touch", whatever the backend).
-const { socketCall, idbTap, idbDoubleTap, idbSwipe } = vi.hoisted(() => ({
+// drivers talk to fakes. actTap/Swipe/DoubleTap are the EnnioHidClient
+// actuator spies — they assert "delivered a real HID touch".
+const { socketCall, actTap, actDoubleTap, actSwipe } = vi.hoisted(() => ({
   socketCall: vi.fn(),
-  idbTap: vi.fn(async () => {}),
-  idbDoubleTap: vi.fn(async () => {}),
-  idbSwipe: vi.fn(async () => {}),
+  actTap: vi.fn(async () => {}),
+  actDoubleTap: vi.fn(async () => {}),
+  actSwipe: vi.fn(async () => {}),
 }));
 
 vi.mock('./core/active-connections', () => ({
@@ -20,9 +19,9 @@ vi.mock('./core/active-connections', () => ({
 
 vi.mock('./ennio-hid', () => ({
   EnnioHidClient: class {
-    tap = idbTap;
-    doubleTap = idbDoubleTap;
-    swipe = idbSwipe;
+    tap = actTap;
+    doubleTap = actDoubleTap;
+    swipe = actSwipe;
   },
 }));
 
@@ -39,9 +38,9 @@ function stubSocket(gesture: (op: string) => { ok: boolean; data?: unknown; err?
 
 beforeEach(() => {
   socketCall.mockReset();
-  idbTap.mockClear();
-  idbDoubleTap.mockClear();
-  idbSwipe.mockClear();
+  actTap.mockClear();
+  actDoubleTap.mockClear();
+  actSwipe.mockClear();
 });
 
 describe('createDriver', () => {
@@ -52,10 +51,10 @@ describe('createDriver', () => {
 });
 
 describe('HidDriver', () => {
-  it('tap goes straight to idb, no dylib gesture ops', async () => {
+  it('tap goes straight to HID, no dylib gesture ops', async () => {
     stubSocket(() => ({ ok: true, data: { ok: true } }));
     await new HidDriver().tap(UDID, 100, 200);
-    expect(idbTap).toHaveBeenCalledOnce();
+    expect(actTap).toHaveBeenCalledOnce();
     const gestureOps = socketCall.mock.calls.map((c) => c[0]).filter((o) => o !== 'window_size');
     expect(gestureOps).toEqual([]);
   });
@@ -63,7 +62,7 @@ describe('HidDriver', () => {
   it('swipe reports inProcess=false', async () => {
     stubSocket(() => ({ ok: true, data: { ok: true } }));
     const out = await new HidDriver().swipe(UDID, 360, 400, 40, 400, 250);
-    expect(idbSwipe).toHaveBeenCalledOnce();
+    expect(actSwipe).toHaveBeenCalledOnce();
     expect(out.inProcess).toBe(false);
   });
 });
@@ -73,7 +72,7 @@ describe('FastDriver tap', () => {
     return new FastDriver(new HidDriver());
   }
 
-  it('activation ok + hash change → idb not called', async () => {
+  it('activation ok + hash change → HID not called', async () => {
     stubSocket((op) => {
       if (op === 'frame_hash') return { ok: true, data: { hash: 'AAA' } };
       if (op === 'activate_at_point') return { ok: true, data: { ok: true, via: 'uicontrol' } };
@@ -82,12 +81,12 @@ describe('FastDriver tap', () => {
     });
     const d = makeFast();
     await d.tap(UDID, 100, 200);
-    expect(idbTap).not.toHaveBeenCalled();
+    expect(actTap).not.toHaveBeenCalled();
     expect(socketCall).toHaveBeenCalledWith('activate_at_point', { x: 100, y: 200 });
     expect(d.stats()).toEqual({ hits: 1, fallbacks: 0 });
   });
 
-  it('activation declined → idb fallback', async () => {
+  it('activation declined → HID fallback', async () => {
     stubSocket((op) => {
       if (op === 'frame_hash') return { ok: true, data: { hash: 'AAA' } };
       if (op === 'activate_at_point') return { ok: true, data: { ok: false } };
@@ -95,11 +94,11 @@ describe('FastDriver tap', () => {
     });
     const d = makeFast();
     await d.tap(UDID, 100, 200);
-    expect(idbTap).toHaveBeenCalledOnce();
+    expect(actTap).toHaveBeenCalledOnce();
     expect(d.stats()).toEqual({ hits: 0, fallbacks: 1 });
   });
 
-  it('phantom activation (no hash change) → idb fallback', async () => {
+  it('phantom activation (no hash change) → HID fallback', async () => {
     stubSocket((op) => {
       if (op === 'frame_hash') return { ok: true, data: { hash: 'AAA' } };
       if (op === 'activate_at_point') return { ok: true, data: { ok: true } };
@@ -108,11 +107,11 @@ describe('FastDriver tap', () => {
     });
     const d = makeFast();
     await d.tap(UDID, 100, 200);
-    expect(idbTap).toHaveBeenCalledOnce();
+    expect(actTap).toHaveBeenCalledOnce();
     expect(d.stats()).toEqual({ hits: 0, fallbacks: 1 });
   });
 
-  it('socket error → idb fallback', async () => {
+  it('socket error → HID fallback', async () => {
     socketCall.mockImplementation(async (op: string) => {
       if (op === 'window_size') return { ok: true, data: { w: 400, h: 800 } };
       if (op === 'frame_hash') return { ok: true, data: { hash: 'AAA' } };
@@ -120,14 +119,14 @@ describe('FastDriver tap', () => {
     });
     const d = makeFast();
     await d.tap(UDID, 100, 200);
-    expect(idbTap).toHaveBeenCalledOnce();
+    expect(actTap).toHaveBeenCalledOnce();
     expect(d.stats()).toEqual({ hits: 0, fallbacks: 1 });
   });
 
   it('focus intent → real touch, no activation attempt', async () => {
     stubSocket(() => ({ ok: true, data: { ok: true } }));
     await makeFast().tap(UDID, 100, 200, { intent: 'focus' });
-    expect(idbTap).toHaveBeenCalledOnce();
+    expect(actTap).toHaveBeenCalledOnce();
     const gestureOps = socketCall.mock.calls.map((c) => c[0]).filter((o) => o !== 'window_size');
     expect(gestureOps).toEqual([]);
   });
@@ -135,13 +134,13 @@ describe('FastDriver tap', () => {
   it('held tap (longPress) → real touch', async () => {
     stubSocket(() => ({ ok: true, data: { ok: true } }));
     await makeFast().tap(UDID, 100, 200, { intent: 'longPress', holdSec: 0.8 });
-    expect(idbTap).toHaveBeenCalledWith(100, 200, 0.8);
+    expect(actTap).toHaveBeenCalledWith(100, 200, 0.8);
   });
 
   it('unexposed target → real touch (activation would hit the occluder)', async () => {
     stubSocket(() => ({ ok: true, data: { ok: true } }));
     await makeFast().tap(UDID, 100, 200, { exposed: false });
-    expect(idbTap).toHaveBeenCalledOnce();
+    expect(actTap).toHaveBeenCalledOnce();
     const gestureOps = socketCall.mock.calls.map((c) => c[0]).filter((o) => o !== 'window_size');
     expect(gestureOps).toEqual([]);
   });
@@ -149,12 +148,12 @@ describe('FastDriver tap', () => {
   it('doubleTap always real (needs the tap-gap timing)', async () => {
     stubSocket(() => ({ ok: true, data: { ok: true } }));
     await makeFast().doubleTap(UDID, 100, 200);
-    expect(idbDoubleTap).toHaveBeenCalledOnce();
+    expect(actDoubleTap).toHaveBeenCalledOnce();
   });
 });
 
 describe('FastDriver swipe', () => {
-  it('swipe_points ok → inProcess, idb not called', async () => {
+  it('swipe_points ok → inProcess, HID not called', async () => {
     stubSocket((op) => {
       if (op === 'swipe_points') return { ok: true, data: { ok: true } };
       return { ok: false };
@@ -162,7 +161,7 @@ describe('FastDriver swipe', () => {
     const d = new FastDriver(new HidDriver());
     const out = await d.swipe(UDID, 360, 400, 40, 400, 250);
     expect(out.inProcess).toBe(true);
-    expect(idbSwipe).not.toHaveBeenCalled();
+    expect(actSwipe).not.toHaveBeenCalled();
     expect(socketCall).toHaveBeenCalledWith('swipe_points', {
       x1: 360,
       y1: 400,
@@ -172,7 +171,7 @@ describe('FastDriver swipe', () => {
     });
   });
 
-  it('swipe_points declined (non-scroll target) → idb fallback, inProcess=false', async () => {
+  it('swipe_points declined (non-scroll target) → HID fallback, inProcess=false', async () => {
     stubSocket((op) => {
       if (op === 'swipe_points') return { ok: true, data: { ok: false } };
       return { ok: false };
@@ -180,7 +179,7 @@ describe('FastDriver swipe', () => {
     const d = new FastDriver(new HidDriver());
     const out = await d.swipe(UDID, 360, 400, 40, 400, 250);
     expect(out.inProcess).toBe(false);
-    expect(idbSwipe).toHaveBeenCalledOnce();
+    expect(actSwipe).toHaveBeenCalledOnce();
   });
 });
 

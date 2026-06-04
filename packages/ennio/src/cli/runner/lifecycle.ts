@@ -16,8 +16,6 @@ import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 
 import { RunContext, sleep } from './context';
 
-
-
 /**
  * System permission sheets (Photo Library, notifications, tracking,
  * location) render in a SEPARATE process (SpringBoard), so neither the
@@ -25,7 +23,7 @@ import { RunContext, sleep } from './context';
  * pre-grants all privacy permissions via `simctl privacy grant` at
  * clearState (see clearStateAndRelaunch), so these sheets don't appear
  * for supported flows. This is a no-op kept for call-site compatibility;
- * it does not depend on idb. Returns false (nothing dismissed).
+ * Returns false (nothing dismissed).
  */
 export async function dismissPermissionDialogs(_udid: string): Promise<boolean> {
   return false;

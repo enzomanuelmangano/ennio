@@ -56,7 +56,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('  --lenient             Skip unknown commands with a warning');
     console.error('  --reporter=<kind>     pretty (default) | json');
     console.error('  --fast                In-process taps/swipes (dylib activation),');
-    console.error('                        per-gesture fallback to idb HID');
+    console.error('                        per-gesture fallback to real HID');
     console.error('');
     console.error('Auto-detection:');
     console.error('  - booted iOS simulator (or auto-boots one)');

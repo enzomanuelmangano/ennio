@@ -146,7 +146,7 @@ export async function execTapOn(
   }
   // Hidden test-only controls: some apps expose 1×1 px elements
   // (TextInput and Pressable variants) as side-channels for e2e
-  // harnesses. idb HID taps round to int — a 1×1 rect at
+  // harnesses. HID taps round to int — a 1×1 rect at
   // (401, 101) has its FP-center at (401.5, 101.5) which rounds
   // to (402, 102) — landing on the sibling button 1 px below.
   // Fall back to focus_testid for tiny TextInputs so the next

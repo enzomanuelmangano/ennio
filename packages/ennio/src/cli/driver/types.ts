@@ -1,10 +1,10 @@
 // GestureDriver — the mode abstraction. Handlers and the tap pipeline
 // express INTENT (tap to press, tap to focus, swipe, settle after X);
-// the driver picks the MECHANISM (in-process dylib op vs idb HID) and
+// the driver picks the MECHANISM (in-process dylib op vs real HID) and
 // owns the settle budgets that go with it.
 //
 // Two implementations:
-//   HidDriver  — baseline. Every gesture is a real IOHIDEvent via idb;
+//   HidDriver  — baseline. Every gesture is a real IOHIDEvent via the
 //                settle budgets are the legacy, parity-proven values.
 //   FastDriver — in-process first (activation chain, setContentOffset,
 //                tap_tab, trigger_refresh), wraps HidDriver for
