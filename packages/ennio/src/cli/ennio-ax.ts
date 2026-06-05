@@ -133,10 +133,24 @@ export function axResolve(udid: string, sel: { id?: string; text?: string }): Ax
     // label's rect and a tap there misses the Pressable's onPress.
     const idd = tree.elements.find((e) => e.id && e.label.toLowerCase() === needle);
     if (idd) return idd;
-    const btn = tree.elements.find(
-      (e) => e.role.includes('Button') && e.label.toLowerCase() === needle,
+    // Interactive element with this exact label. Includes AXGeneric /
+    // AXLink — native bottom-sheet menu rows (Bluesky's "Mute accounts"
+    // / "Block accounts") render as AXGeneric with no testID, so a
+    // Button-only match would miss them and the in-app tap mislands on an
+    // adjacent row. Exclude AXStaticText so a bare label never matches.
+    const interactive = tree.elements.filter(
+      (e) =>
+        !e.role.includes('StaticText') &&
+        (e.role.includes('Button') ||
+          e.role.includes('Generic') ||
+          e.role.includes('Link') ||
+          e.role.includes('Cell') ||
+          e.role.includes('MenuItem')) &&
+        e.label.toLowerCase() === needle,
     );
-    if (btn) return btn;
+    // Only when unambiguous (exactly one match) — two rows sharing a
+    // label would make the pick arbitrary.
+    if (interactive.length === 1) return interactive[0];
   }
   return null;
 }

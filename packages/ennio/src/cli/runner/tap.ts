@@ -87,7 +87,7 @@ export async function execTapOn(
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
     const axEl = sel.childOf ? null : axResolve(ctx.udid, { text: sel.text });
-    if (axEl && axEl.id) {
+    if (axEl) {
       const { w, h } = await getScreenSize(ctx.udid);
       const baseHash = preHash ?? (await captureHash(ctx));
       await ctx.driver.tap(ctx.udid, axEl.cx * w, axEl.cy * h, { intent });
