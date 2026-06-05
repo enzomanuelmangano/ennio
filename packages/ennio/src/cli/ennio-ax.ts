@@ -118,9 +118,7 @@ export async function axTapTarget(
   const el = axResolve(udid, sel);
   if (!el) return false;
   const { w, h } = await getScreenSize(udid);
-  trace(
-    `ax: cross-process tap "${el.id || el.label}" @ (${el.cx.toFixed(3)},${el.cy.toFixed(3)})`,
-  );
+  trace(`ax: cross-process tap "${el.id || el.label}" @ (${el.cx.toFixed(3)},${el.cy.toFixed(3)})`);
   await getActuator(udid).tap(el.cx * w, el.cy * h);
   return true;
 }
