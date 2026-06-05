@@ -93,7 +93,9 @@ export async function axFocusTextField(udid: string): Promise<boolean> {
   );
   if (!field) return false;
   const { w, h } = await getScreenSize(udid);
-  trace(`ax: focus text field "${field.label || field.id}" @ (${field.cx.toFixed(3)},${field.cy.toFixed(3)})`);
+  trace(
+    `ax: focus text field "${field.label || field.id}" @ (${field.cx.toFixed(3)},${field.cy.toFixed(3)})`,
+  );
   await getActuator(udid).tap(field.cx * w, field.cy * h);
   return true;
 }

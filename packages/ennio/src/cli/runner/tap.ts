@@ -129,7 +129,12 @@ export async function execTapOn(
   // disagree, so correctly-located taps fall straight through untouched.
   if (sel.id || sel.text) {
     const axEl = axResolve(ctx.udid, { id: sel.id, text: sel.text });
-    if (axEl) {
+    // Only correct SMALL interactive elements (buttons, tabs, menu rows
+    // — height < ~12% of the screen). For a large container (a feed item,
+    // a card) the AX "center" can sit on an inner sub-link (the avatar →
+    // profile) while the in-app rect already targets the right body
+    // region; overriding there would mis-route the tap.
+    if (axEl && axEl.nh > 0 && axEl.nh < 0.12) {
       const { w, h } = await getScreenSize(ctx.udid);
       const axCx = axEl.cx * w;
       const axCy = axEl.cy * h;
