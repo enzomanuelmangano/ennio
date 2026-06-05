@@ -80,6 +80,13 @@ func post(_ x: Double, _ y: Double, _ direction: Int32) {
     sendImp(hid, sendSel, UnsafeMutableRawPointer(msg), true, nil, nil)
 }
 
+
+// Keyboard key event via SimulatorKit's exported builder. dir 1=down 2=up.
+func postKey(_ keyCode: Int32, _ direction: Int32) {
+    guard let msg = ennio_indigo_key(keyCode, direction) else { return }
+    sendImp(hid, sendSel, UnsafeMutableRawPointer(msg), true, nil, nil)
+}
+
 // ── 4. Persistent command loop. One line per command on stdin:
 //        down <xNorm> <yNorm>
 //        move <xNorm> <yNorm>
@@ -102,6 +109,10 @@ while let line = readLine(strippingNewline: true) {
         reply("ok")
     case "up":
         if parts.count >= 3, let x = Double(parts[1]), let y = Double(parts[2]) { post(x, y, 2) }
+        reply("ok")
+    case "key":
+        // key <usage> <dir>   dir 1=down 2=up
+        if parts.count >= 3, let u = Int32(parts[1]), let d = Int32(parts[2]) { postKey(u, d) }
         reply("ok")
     case "ping":
         reply("ok")

@@ -34,6 +34,7 @@ interface HidBackend {
   tap(x: number, y: number, holdSec?: number): Promise<void>;
   doubleTap(x: number, y: number): Promise<void>;
   swipe(x1: number, y1: number, x2: number, y2: number, durationSec: number): Promise<void>;
+  typeText(text: string): Promise<void>;
 }
 
 export function getActuator(udid: string): HidBackend {

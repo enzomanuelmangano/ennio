@@ -138,4 +138,12 @@ static inline IndigoMessage *ennio_indigo_touch(double xRatio, double yRatio,
   return message;
 }
 
+/* SimulatorKit-exported keyboard builder — constructs a correct keyboard
+ * Indigo message internally (usage page 0x07). keyCode = USB HID usage;
+ * direction = ButtonEventTypeDown(1)/Up(2). Sent as-is (single payload). */
+extern IndigoMessage *IndigoHIDMessageForKeyboardArbitrary(int keyCode, int direction);
+static inline IndigoMessage *ennio_indigo_key(int keyCode, int direction) {
+  return IndigoHIDMessageForKeyboardArbitrary(keyCode, direction);
+}
+
 #endif /* ENNIO_INDIGO_TOUCH_H */

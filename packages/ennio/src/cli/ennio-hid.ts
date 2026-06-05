@@ -204,4 +204,46 @@ export class EnnioHidClient {
     }
     await this.h.cmd(`up ${to.nx} ${to.ny}`);
   }
+
+  /**
+   * Type text via REAL keyboard HID events (USB usage-page 0x07) through
+   * the host Indigo keyboard builder. Unlike UIKeyInput.insertText, real
+   * key events traverse the full UITextInput delegate chain, so they fire
+   * React Native's onChangeText — which is what flips Bluesky's composer
+   * `canPost` (its publish button stays disabled under insert_text on a
+   * reopened composer). The field must already hold first-responder.
+   */
+  async typeText(text: string): Promise<void> {
+    const SHIFT = 225; // left-shift USB usage
+    trace(`[enniohid] typeText ${JSON.stringify(text)}`);
+    for (const ch of text) {
+      const m = charToUsage(ch);
+      if (!m) continue;
+      if (m.shift) await this.h.cmd(`key ${SHIFT} 1`);
+      await this.h.cmd(`key ${m.usage} 1`);
+      await sleep(8);
+      await this.h.cmd(`key ${m.usage} 2`);
+      if (m.shift) await this.h.cmd(`key ${SHIFT} 2`);
+      await sleep(14); // inter-key gap — keys sent too fast get dropped
+    }
+  }
+}
+
+/** Map a character to its USB HID keyboard usage code + shift flag. */
+function charToUsage(ch: string): { usage: number; shift: boolean } | null {
+  if (ch >= 'a' && ch <= 'z') return { usage: 4 + (ch.charCodeAt(0) - 97), shift: false };
+  if (ch >= 'A' && ch <= 'Z') return { usage: 4 + (ch.charCodeAt(0) - 65), shift: true };
+  if (ch >= '1' && ch <= '9') return { usage: 30 + (ch.charCodeAt(0) - 49), shift: false };
+  const plain: Record<string, number> = {
+    '0': 39, ' ': 44, '\n': 40, '\t': 43, '-': 45, '=': 46,
+    '[': 47, ']': 48, '\\': 49, ';': 51, "'": 52, '`': 53, ',': 54, '.': 55, '/': 56,
+  };
+  if (ch in plain) return { usage: plain[ch], shift: false };
+  // Shifted symbols (US layout).
+  const shifted: Record<string, number> = {
+    '!': 30, '@': 31, '#': 32, $: 33, '%': 34, '^': 35, '&': 36, '*': 37, '(': 38, ')': 39,
+    _: 45, '+': 46, '{': 47, '}': 48, '|': 49, ':': 51, '"': 52, '~': 53, '<': 54, '>': 55, '?': 56,
+  };
+  if (ch in shifted) return { usage: shifted[ch], shift: true };
+  return null;
 }

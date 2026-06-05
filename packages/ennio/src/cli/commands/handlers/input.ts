@@ -8,9 +8,16 @@
 
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
-import { typeText as hidType } from '../../hid';
+import { typeText as hidType, getActuator } from '../../hid';
 import { axFocusTextField, axTextFieldId } from '../../ennio-ax';
 import { interpolate, sleep } from '../../runner/context';
+
+// Fields whose value is driven by an onChangeText handler that
+// UIKeyInput.insertText doesn't trigger (rich-text editors). For these
+// we must type via REAL keyboard HID events so the controlled value
+// updates — Bluesky's composer is the canonical case: its publish button
+// stays disabled (canPost=false) under insert_text on a reopened sheet.
+const REAL_KEYBOARD_FIELDS = new Set(['composerTextInput']);
 
 interface InputTextCmd {
   inputText: string | number;
@@ -37,6 +44,21 @@ export function registerInputHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & InputTextCmd => has(c, 'inputText'),
     async (cmd, { ctx }) => {
       const text = interpolate(String(cmd.inputText), ctx);
+
+      // Rich-text composer: insert_text won't fire its onChangeText, so
+      // canPost never flips. Focus the field, then type via REAL keyboard
+      // HID events (host Indigo keyboard builder) which traverse the full
+      // text-input delegate chain.
+      const liveField = axTextFieldId(ctx.udid);
+      if (liveField && REAL_KEYBOARD_FIELDS.has(liveField)) {
+        await ctx.client.call('focus_testid', { testID: liveField }).catch(() => undefined);
+        await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
+        await getActuator(ctx.udid).typeText(text);
+        await ctx.client.call('wait_commit', { maxMs: 600, stableMs: 100 }).catch(() => undefined);
+        ctx.lastWasTextInput = true;
+        return;
+      }
+
       // Try insert_text (UIKeyInput on the current firstResponder) up
       // to 3 times. Between attempts, if the prior tap target was a
       // testID, re-tap via the dylib activate path to recover when the
