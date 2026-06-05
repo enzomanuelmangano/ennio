@@ -75,6 +75,8 @@ export async function execTapOn(
     // pointless HID redo); baseline keeps the probe in the retap loop
     // only.
     if (await ctx.driver.tryTabTap(ctx.client, sel.text)) return;
+    // (Skipped when childOf is set — the cross-process AX can't scope by
+    // parent, and a bare testID/label match would pick the wrong sibling.)
     // Text tap onto a testID'd interactive container the in-app finder
     // mis-locates: it returns the inner Text label's rect (a pager tab,
     // a segmented control), so the HID tap lands on the label and the
@@ -84,7 +86,7 @@ export async function execTapOn(
     // it and verify the frame moved. High-confidence (testID-backed) and
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
-    const axEl = axResolve(ctx.udid, { text: sel.text });
+    const axEl = sel.childOf ? null : axResolve(ctx.udid, { text: sel.text });
     if (axEl && axEl.id) {
       const { w, h } = await getScreenSize(ctx.udid);
       const baseHash = preHash ?? (await captureHash(ctx));
@@ -106,7 +108,7 @@ export async function execTapOn(
       rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
     }
   }
-  if (!rect && (sel.id || sel.text)) {
+  if (!rect && (sel.id || sel.text) && !sel.childOf) {
     // The target may live in a native bottom-sheet / popover the in-app
     // dylib doesn't traverse (Bluesky's Dialog/Prompt + composer render
     // in a separate SheetViewController window). It's still on screen,
@@ -127,7 +129,7 @@ export async function execTapOn(
   // in-app center, the AX coords are device-authoritative; tap there and
   // return on a confirmed frame change. Only diverges when the two
   // disagree, so correctly-located taps fall straight through untouched.
-  if (sel.id || sel.text) {
+  if ((sel.id || sel.text) && !sel.childOf) {
     const axEl = axResolve(ctx.udid, { id: sel.id, text: sel.text });
     // Only correct SMALL interactive elements (buttons, tabs, menu rows
     // — height < ~12% of the screen). For a large container (a feed item,
