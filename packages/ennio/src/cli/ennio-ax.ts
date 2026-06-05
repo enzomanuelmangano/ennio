@@ -11,7 +11,7 @@
 // and swallow touches, (2) asserting visibility of cross-process UI the
 // in-app finder cannot reach.
 
-import { spawnSync } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -45,22 +45,107 @@ function findHelper(): string | null {
   return null;
 }
 
+// Persistent ennioax process per UDID. Spawned once, armed once, fed
+// "dump" lines over stdin — amortizes the spawn + AXEnhancedUserInterface
+// re-arm + bridge settle that a per-call spawnSync paid every time
+// (~870ms → ~310ms/dump measured).
+class AxHelperProcess {
+  private proc: ChildProcessWithoutNullStreams | null = null;
+  private ready: Promise<boolean> | null = null;
+  private buf = '';
+  private waiters: ((line: string) => void)[] = [];
+  constructor(
+    private readonly udid: string,
+    private readonly helper: string,
+  ) {}
+
+  private start(): Promise<boolean> {
+    if (this.ready) return this.ready;
+    this.ready = new Promise<boolean>((resolve) => {
+      const proc = spawn(this.helper, [this.udid, '--persistent']);
+      this.proc = proc;
+      proc.stdout.setEncoding('utf8');
+      proc.stdout.on('data', (c: string) => this.onData(c));
+      proc.on('error', () => resolve(false));
+      proc.on('exit', () => {
+        this.proc = null;
+        this.ready = null;
+      });
+      // First line is "ready" (armed) or an {"error":...} JSON.
+      this.waiters.push((line) => resolve(line.trim() === 'ready'));
+    });
+    return this.ready;
+  }
+
+  private onData(chunk: string): void {
+    this.buf += chunk;
+    let i: number;
+    while ((i = this.buf.indexOf('\n')) >= 0) {
+      const line = this.buf.slice(0, i);
+      this.buf = this.buf.slice(i + 1);
+      const w = this.waiters.shift();
+      if (w) w(line);
+    }
+  }
+
+  async dump(): Promise<string | null> {
+    const ok = await this.start().catch(() => false);
+    const proc = this.proc;
+    if (!ok || !proc) return null;
+    return new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 6000);
+      this.waiters.push((line) => {
+        clearTimeout(timer);
+        resolve(line);
+      });
+      proc.stdin.write('dump\n');
+    });
+  }
+
+  close(): void {
+    if (this.proc) {
+      try {
+        this.proc.stdin.write('quit\n');
+      } catch {
+        /* ignore */
+      }
+      this.proc.kill();
+      this.proc = null;
+      this.ready = null;
+    }
+  }
+}
+
+const axHelpers = new Map<string, AxHelperProcess>();
+
+/** Tear down every persistent ennioax process (CLI teardown). */
+export function shutdownAxHelpers(): void {
+  for (const h of axHelpers.values()) h.close();
+  axHelpers.clear();
+}
+for (const sig of ['exit', 'SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => shutdownAxHelpers());
+}
+
 /**
  * Pull the cross-process AX tree for the booted device. Returns null
  * when the helper is missing, Simulator.app isn't running, or the
  * process lacks Accessibility trust — all soft failures (the in-app
- * path stays the default; this is an augmentation).
+ * path stays the default; this is an augmentation). Backed by a
+ * persistent ennioax process (spawn + arm paid once).
  */
-export function axTree(udid: string): AxTree | null {
+export async function axTree(udid: string): Promise<AxTree | null> {
   const helper = findHelper();
   if (!helper) return null;
+  let h = axHelpers.get(udid);
+  if (!h) {
+    h = new AxHelperProcess(udid, helper);
+    axHelpers.set(udid, h);
+  }
   try {
-    const r = spawnSync(helper, [udid], { encoding: 'utf8', timeout: 6000 });
-    if (r.status !== 0 || !r.stdout) {
-      trace(`ax: helper exit=${r.status} ${(r.stdout || '').slice(0, 80)}`);
-      return null;
-    }
-    const data = JSON.parse(r.stdout) as AxTree & { error?: string };
+    const out = await h.dump();
+    if (!out) return null;
+    const data = JSON.parse(out) as AxTree & { error?: string };
     if (data.error) {
       trace(`ax: ${data.error}`);
       return null;
@@ -80,7 +165,7 @@ export function axTree(udid: string): AxTree | null {
  * shut. Returns true if a field was tapped.
  */
 export async function axFocusTextField(udid: string): Promise<boolean> {
-  const tree = axTree(udid);
+  const tree = await axTree(udid);
   if (!tree) return false;
   // Large text inputs on screen (rich-text composer = AXTextArea/View,
   // plain field = AXTextField). Only act when there is EXACTLY ONE — an
@@ -111,8 +196,8 @@ export async function axFocusTextField(udid: string): Promise<boolean> {
  * cross-process AX position, which is stale while a sheet animates in.
  * Returns null when there isn't exactly one identified input.
  */
-export function axTextFieldId(udid: string): string | null {
-  const tree = axTree(udid);
+export async function axTextFieldId(udid: string): Promise<string | null> {
+  const tree = await axTree(udid);
   if (!tree) return null;
   const fields = tree.elements.filter(
     (e) =>
@@ -126,8 +211,8 @@ export function axTextFieldId(udid: string): string | null {
 }
 
 /** True if any cross-process element's label/value contains `text`. */
-export function axHasText(udid: string, text: string): boolean {
-  const tree = axTree(udid);
+export async function axHasText(udid: string, text: string): Promise<boolean> {
+  const tree = await axTree(udid);
   if (!tree) return false;
   const needle = text.toLowerCase();
   return tree.elements.some(
@@ -136,8 +221,8 @@ export function axHasText(udid: string, text: string): boolean {
 }
 
 /** Resolve a Maestro selector against the cross-process tree. */
-export function axResolve(udid: string, sel: { id?: string; text?: string }): AxElement | null {
-  const tree = axTree(udid);
+export async function axResolve(udid: string, sel: { id?: string; text?: string }): Promise<AxElement | null> {
+  const tree = await axTree(udid);
   if (!tree) return null;
   if (sel.id) {
     const byId = tree.elements.find((e) => e.id === sel.id);
@@ -194,7 +279,7 @@ export async function axTapTarget(
   // it's caught once present, instead of giving up on a single miss.
   const deadline = Date.now() + pollMs;
   for (;;) {
-    const el = axResolve(udid, sel);
+    const el = await axResolve(udid, sel);
     if (el) {
       const { w, h } = await getScreenSize(udid);
       trace(
@@ -246,7 +331,7 @@ const SYSTEM_MARKERS = [
  * unavailable or no recognizable sheet is present.
  */
 export async function dismissSystemSheet(udid: string): Promise<boolean> {
-  const tree = axTree(udid);
+  const tree = await axTree(udid);
   if (!tree || !tree.elements.length) return false;
   const labels = tree.elements.map((e) => e.label);
   const looksSystem = SYSTEM_MARKERS.some((m) =>

@@ -122,10 +122,50 @@ descend:;
   }
 }
 
+// Walk the device window once and emit a JSON line. `warm` skips the
+// long first-arm settle (the bridge is already armed from a prior dump);
+// a still-empty read re-arms with a short settle and retries. Returns
+// the JSON string (one line, no newline).
+static NSString *dumpTree(AXUIElementRef app, NSString *name, BOOL warm) {
+  CGPoint g = CGPointZero; CGSize gs = CGSizeZero;
+  NSMutableArray *els = [NSMutableArray new];
+  for (int attempt = 0; attempt < 3; attempt++) {
+    // Arm on the first attempt only when cold, then on every retry — a
+    // warm process keeps AXEnhancedUserInterface set, so the steady-state
+    // dump skips the re-arm + long settle entirely.
+    if (!warm || attempt > 0) {
+      AXUIElementSetAttributeValue(app, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
+      usleep((warm || attempt > 0) ? 120000 : 400000);
+    }
+    AXUIElementRef screen = NULL, window = NULL;
+    CFTypeRef wins = NULL;
+    if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, &wins) == kAXErrorSuccess && wins) {
+      for (id w in (__bridge NSArray *)wins) {
+        NSString *t = axStr((__bridge AXUIElementRef)w, kAXTitleAttribute);
+        if (!t.length) continue;
+        if (name.length && ![t hasPrefix:name]) continue;
+        screen = findScreen((__bridge AXUIElementRef)w, 0);
+        if (screen) { window = (AXUIElementRef)CFRetain((__bridge AXUIElementRef)w); break; }
+      }
+      CFRelease(wins);
+    }
+    if (!screen) { if (window) CFRelease(window); continue; }
+    axRect(screen, &g, &gs);
+    [els removeAllObjects];
+    collect(window ?: screen, g, gs, els, 0);
+    CFRelease(screen); if (window) CFRelease(window);
+    if (els.count > 0) break;
+  }
+  return [NSString stringWithFormat:
+    @"{\"screen\":{\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f},\"elements\":[%s]}",
+    g.x, g.y, gs.width, gs.height, [[els componentsJoinedByString:@","] UTF8String]];
+}
+
 int main(int argc, char **argv) {
   @autoreleasepool {
-    if (argc < 2) { fprintf(stderr, "usage: ennioax <UDID>\n"); return 2; }
+    if (argc < 2) { fprintf(stderr, "usage: ennioax <UDID> [--persistent]\n"); return 2; }
     NSString *udid = [NSString stringWithUTF8String:argv[1]];
+    BOOL persistent = (argc >= 3 && strcmp(argv[2], "--persistent") == 0);
 
     if (!AXIsProcessTrusted()) {
       fprintf(stderr, "ennioax: process not trusted for Accessibility — grant it in System Settings > Privacy & Security > Accessibility\n");
@@ -139,44 +179,29 @@ int main(int argc, char **argv) {
     AXUIElementRef app = AXUIElementCreateApplication(sim.processIdentifier);
     NSString *name = deviceName(udid); // may be nil → match any window
 
-    // The iOS-content bridge is lazy and can come back empty right after
-    // a full-screen native VC (image cropper, share sheet) presents.
-    // Re-arm AXEnhancedUserInterface and re-read a few times until the
-    // tree populates, with a growing settle.
-    CGPoint g = CGPointZero; CGSize gs = CGSizeZero;
-    NSMutableArray *els = [NSMutableArray new];
-    for (int attempt = 0; attempt < 4; attempt++) {
-      AXUIElementSetAttributeValue(app, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
-      usleep(attempt == 0 ? 400000 : 500000);
+    if (!persistent) {
+      // One-shot (back-compat): single dump, exit.
+      printf("%s\n", [dumpTree(app, name, NO) UTF8String]);
+      CFRelease(app);
+      return 0;
+    }
 
-      AXUIElementRef screen = NULL;
-      AXUIElementRef window = NULL;
-      CFTypeRef wins = NULL;
-      if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, &wins) == kAXErrorSuccess && wins) {
-        for (id w in (__bridge NSArray *)wins) {
-          NSString *t = axStr((__bridge AXUIElementRef)w, kAXTitleAttribute);
-          if (!t.length) continue;
-          if (name.length && ![t hasPrefix:name]) continue;
-          screen = findScreen((__bridge AXUIElementRef)w, 0);
-          if (screen) { window = (AXUIElementRef)CFRetain((__bridge AXUIElementRef)w); break; }
+    // Persistent mode: arm once, then serve "dump" commands over stdin so
+    // the spawn + re-arm + settle cost is paid once, not per call.
+    AXUIElementSetAttributeValue(app, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
+    usleep(400000);
+    printf("ready\n"); fflush(stdout);
+    char line[64];
+    while (fgets(line, sizeof(line), stdin)) {
+      @autoreleasepool {
+        if (strncmp(line, "quit", 4) == 0) break;
+        if (strncmp(line, "dump", 4) == 0) {
+          printf("%s\n", [dumpTree(app, name, YES) UTF8String]);
+          fflush(stdout);
         }
-        CFRelease(wins);
       }
-      if (!screen) { if (window) CFRelease(window); continue; }
-
-      // iOSContentGroup gives the device-screen rect for normalization;
-      // collect from the whole WINDOW so native overlays (cropper, picker,
-      // share sheet) that sit outside iOSContentGroup are captured too.
-      axRect(screen, &g, &gs);
-      [els removeAllObjects];
-      collect(window ?: screen, g, gs, els, 0);
-      CFRelease(screen); if (window) CFRelease(window);
-      if (els.count > 0) break; // populated — done
     }
     CFRelease(app);
-
-    printf("{\"screen\":{\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f},\"elements\":[%s]}\n",
-           g.x, g.y, gs.width, gs.height, [[els componentsJoinedByString:@","] UTF8String]);
     return 0;
   }
 }

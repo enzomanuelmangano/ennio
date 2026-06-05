@@ -86,7 +86,7 @@ export async function execTapOn(
     // it and verify the frame moved. High-confidence (testID-backed) and
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
-    const axEl = sel.childOf ? null : axResolve(ctx.udid, { text: sel.text });
+    const axEl = sel.childOf ? null : await axResolve(ctx.udid, { text: sel.text });
     if (axEl) {
       const { w, h } = await getScreenSize(ctx.udid);
       const baseHash = preHash ?? (await captureHash(ctx));
@@ -149,7 +149,7 @@ export async function execTapOn(
     ambiguousId = !!(nth && nth.ok && nth.data);
   }
   if ((sel.id || sel.text) && !sel.childOf && !ambiguousId) {
-    const axEl = axResolve(ctx.udid, { id: sel.id, text: sel.text });
+    const axEl = await axResolve(ctx.udid, { id: sel.id, text: sel.text });
     // Only correct SMALL interactive elements (buttons, tabs, menu rows
     // — height < ~12% of the screen). For a large container (a feed item,
     // a card) the AX "center" can sit on an inner sub-link (the avatar →

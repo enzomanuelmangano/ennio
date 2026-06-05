@@ -48,7 +48,7 @@ export async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<
     // Last resort: fully cross-process UI the in-app proxies can't reach
     // (the system Photos picker, SpringBoard sheets). Read Simulator.app's
     // macOS AX tree via the ennioax helper. Soft-fails to false off-box.
-    if (axHasText(ctx.udid, sel.text)) return true;
+    if (await axHasText(ctx.udid, sel.text)) return true;
   }
   return false;
 }

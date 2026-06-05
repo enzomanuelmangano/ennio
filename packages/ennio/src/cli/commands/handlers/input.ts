@@ -49,7 +49,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
       // canPost never flips. Focus the field, then type via REAL keyboard
       // HID events (host Indigo keyboard builder) which traverse the full
       // text-input delegate chain.
-      const liveField = axTextFieldId(ctx.udid);
+      const liveField = await axTextFieldId(ctx.udid);
       if (liveField && REAL_KEYBOARD_FIELDS.has(liveField)) {
         await ctx.client.call('focus_testid', { testID: liveField }).catch(() => undefined);
         await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
@@ -79,7 +79,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
           //     SHUT (the bug behind consecutive replies failing).
           //   • field absent (composer hasn't mounted / was dismissed) →
           //     re-tap the opener to (re)open it.
-          const fieldId = axTextFieldId(ctx.udid);
+          const fieldId = await axTextFieldId(ctx.udid);
           let focusTap = false;
           if (fieldId) {
             const r = await ctx.client
