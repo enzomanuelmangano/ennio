@@ -119,6 +119,33 @@ export async function execTapOn(
   if (!rect) {
     throw new Error(`element not found: ${JSON.stringify(sel)}`);
   }
+  // Coordinate cross-check: the in-app rect can be a mislocated sub-rect
+  // — the inner Text label of a tab-bar button or pager tab, where a tap
+  // hits the label and the Pressable's onPress never fires — or a rect in
+  // a native sheet window's coordinate space. If the cross-process AX
+  // places the SAME element (by testID, or exact label) far from the
+  // in-app center, the AX coords are device-authoritative; tap there and
+  // return on a confirmed frame change. Only diverges when the two
+  // disagree, so correctly-located taps fall straight through untouched.
+  if (sel.id || sel.text) {
+    const axEl = axResolve(ctx.udid, { id: sel.id, text: sel.text });
+    if (axEl) {
+      const { w, h } = await getScreenSize(ctx.udid);
+      const axCx = axEl.cx * w;
+      const axCy = axEl.cy * h;
+      const inCx = rect.x + rect.w / 2;
+      const inCy = rect.y + rect.h / 2;
+      if (Math.hypot(axCx - inCx, axCy - inCy) > 44) {
+        const baseHash = preHash ?? (await captureHash(ctx));
+        await ctx.driver.tap(ctx.udid, axCx, axCy, { intent });
+        if (sel.id) ctx.lastTapTestID = sel.id;
+        const hc = await ctx.client
+          .call('wait_hash_change', { sinceHash: baseHash, maxMs: 500 })
+          .catch(() => undefined);
+        if (hc && hc.ok && (hc.data as { ok?: boolean })?.ok) return;
+      }
+    }
+  }
   // Off-viewport auto-scroll: the testID resolved, but the rect
   // sits outside the window's visible bounds — common when a YAML
   // `swipe` doesn't fully snap a horizontal carousel to the target
