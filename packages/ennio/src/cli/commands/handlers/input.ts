@@ -42,6 +42,9 @@ export function registerInputHandlers(registry: CommandRegistry): void {
       // testID, re-tap via the dylib activate path to recover when the
       // original tap didn't actually move focus into the field.
       let ok = false;
+      let focusedViaAx = false; // tap the field at most once — a rich-text
+      // composer never reports first_responder ready, so repeating the
+      // focus tap would destabilise / dismiss the sheet.
       for (let attempt = 0; attempt < 3 && !ok; attempt++) {
         if (attempt > 0 && ctx.lastTapTestID) {
           const rect = await ctx.client
@@ -57,14 +60,16 @@ export function registerInputHandlers(registry: CommandRegistry): void {
           .call('first_responder_ready', { maxMs: 500 })
           .catch(() => undefined);
         const focused = !!(fr && fr.ok && fr.data && (fr.data as { ok?: boolean }).ok);
-        if (!focused) {
+        if (!focused && !focusedViaAx) {
           // No first responder — a composer/sheet input that didn't
           // auto-focus (Bluesky's reply composer opens unfocused, so the
           // controlled value never updates → canPost stays false → the
           // publish button is disabled). The in-app recovery re-taps the
           // OPENER (replyBtn), which would toggle the sheet shut; instead
           // tap the actual text field via cross-process AX, then re-poll.
+          // Once only — re-tapping a rich-text field can dismiss the sheet.
           if (await axFocusTextField(ctx.udid).catch(() => false)) {
+            focusedViaAx = true;
             await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
           }
         }
