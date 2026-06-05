@@ -590,7 +590,15 @@ static BOOL anyVCInTransition(UIViewController *root) {
 }
 
 + (BOOL)focusByTestID:(NSString *)testID {
-    UIView *v = [EnnioFinder findViewByTestID:testID];
+    // Prefer the on-screen match (topmost in Y), NOT findViewByTestID's
+    // last-registered entry — after a composer publishes and reopens
+    // (consecutive replies) that's the DETACHED previous field; focusing
+    // it "succeeds" but the live composer stays empty so canPost never
+    // flips and the publish button never shows.
+    NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+    UIView *v = nil;
+    for (UIView *cand in all) { if ([EnnioFinder isOnScreen:cand]) { v = cand; break; } }
+    if (!v) v = all.firstObject ?: [EnnioFinder findViewByTestID:testID];
     if (!v) return NO;
     // RCTBaseTextInputView wraps the actual UITextField/UITextView in a
     // child; ask becomeFirstResponder on the wrapper and let UIKit
