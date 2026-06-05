@@ -23,13 +23,13 @@ on the Bluesky e2e suite.
 Isolated micro-benchmarks, no app/mock noise. This is the runner's raw cost
 per primitive.
 
-| Action | ennio | idb (Maestro backend) | speedup |
-|---|---:|---:|---:|
-| **tap** | **9.9 ms** | 212 ms | **21×** |
-| **swipe** (8-step) | **37.7 ms** | 469 ms | **12×** |
-| **text** — 24 chars | 260 ms¹ (10.8 ms/char) | 722 ms (bulk) | ~2.8× |
-| **AX tree dump** | 312 ms² | 586 ms (`describe-all`) | ~1.9× |
-| **find by testID** | <5 ms³ (dylib socket) | — | — |
+| Action              |                  ennio |   idb (Maestro backend) | speedup |
+| ------------------- | ---------------------: | ----------------------: | ------: |
+| **tap**             |             **9.9 ms** |                  212 ms | **21×** |
+| **swipe** (8-step)  |            **37.7 ms** |                  469 ms | **12×** |
+| **text** — 24 chars | 260 ms¹ (10.8 ms/char) |           722 ms (bulk) |   ~2.8× |
+| **AX tree dump**    |                312 ms² | 586 ms (`describe-all`) |   ~1.9× |
+| **find by testID**  |  <5 ms³ (dylib socket) |                       — |       — |
 
 ¹ Raw enniohid key round-trip. The CLI composer path adds inter-key
 settle (~30 ms/char) for reliability — see bottleneck #2.
@@ -48,10 +48,10 @@ is the 200–470 ms.
 
 Both runners on the identical flow, same sim, same mock, back-to-back.
 
-| | ennio | Maestro |
-|---|---:|---:|
-| wall-clock to step 6 | **66 s** | 111 s |
-| outcome | flaky env fail at "Discover New Feeds"⁴ | same |
+|                      |                                   ennio | Maestro |
+| -------------------- | --------------------------------------: | ------: |
+| wall-clock to step 6 |                                **66 s** |   111 s |
+| outcome              | flaky env fail at "Discover New Feeds"⁴ |    same |
 
 ⁴ Both fail at the same step — a slow/cold local-mock feed-page, not a
 runner issue. ennio simply got there ~40% faster.
@@ -78,12 +78,14 @@ interaction-heavy flows (long scrolls, many taps).
 ## 3. Bottlenecks (ranked)
 
 ### App/mock (not ennio) — dominant
+
 The local mock spins a **cold PDS per flow**; the home feed load is tens of
 seconds and sometimes never completes, causing early-step failures. This
 dwarfs runner cost and makes full-suite numbers noisy. Fixed by CI-grade
 mock infra, not the runner.
 
 ### #1 — Cross-process AX dump (FIXED this round)
+
 `ennioax` was `spawnSync` **per call**: process spawn + `AXEnhancedUserInterface`
 re-arm + ~400 ms bridge settle every time = **~870 ms/dump**.
 **Fix shipped:** persistent `--persistent` mode — arm once, serve `dump`
@@ -93,6 +95,7 @@ is the ~5% fallback, net flow impact is bounded but free.
 since last dump (cache + invalidate on gesture).
 
 ### #2 — Keyboard-HID char-by-char
+
 The composer real-keyboard path types one USB-usage event at a time with
 ~30 ms inter-key settle (needed so the sim doesn't drop keys under load).
 For a 20-char reply that's ~600 ms vs a bulk insert's ~200 ms.
@@ -102,6 +105,7 @@ dylib `insert_text`. Tunable: lower the inter-key gap with a per-char
 ack instead of a fixed sleep.
 
 ### #3 — Settle/wait logic
+
 ennio inserts `wait_commit` / `wait_react_commit` between steps for
 reliability on iOS 26. Correct, but a few hundred ms each. Tunable per
 step once a flow is known-stable.
