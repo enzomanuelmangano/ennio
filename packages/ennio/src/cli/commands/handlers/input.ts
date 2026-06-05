@@ -42,34 +42,21 @@ export function registerInputHandlers(registry: CommandRegistry): void {
       // testID, re-tap via the dylib activate path to recover when the
       // original tap didn't actually move focus into the field.
       let ok = false;
-      let focusedViaAx = false; // tap the field at most once — a rich-text
-      // composer never reports first_responder ready, so repeating the
-      // focus tap would destabilise / dismiss the sheet.
-      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
-        if (attempt > 0 && ctx.lastTapTestID) {
-          const rect = await ctx.client
-            .call('find_by_testid', { testID: ctx.lastTapTestID })
-            .catch(() => undefined);
-          if (rect && rect.ok && rect.data) {
-            const r = rect.data as { x: number; y: number; w: number; h: number };
-            // Recovery tap must move FOCUS into the field — real touch.
-            await ctx.driver.tap(ctx.udid, r.x + r.w / 2, r.y + r.h / 2, { intent: 'focus' });
-          }
-        }
+      for (let attempt = 0; attempt < 4 && !ok; attempt++) {
         const fr = await ctx.client
           .call('first_responder_ready', { maxMs: 500 })
           .catch(() => undefined);
         const focused = !!(fr && fr.ok && fr.data && (fr.data as { ok?: boolean }).ok);
-        if (!focused && !focusedViaAx) {
+        if (!focused) {
           // No first responder — a composer/sheet input that didn't
-          // auto-focus (Bluesky's reply composer opens unfocused, so the
-          // controlled value never updates → canPost stays false → the
-          // publish button is disabled). The in-app recovery re-taps the
-          // OPENER (replyBtn), which would toggle the sheet shut.
-          // Prefer focusing the field by its testID via the IN-APP finder
-          // (accurate, current rect) — the cross-process AX position is
-          // stale while the sheet animates in, and a tap on a mid-flight
-          // field lands on the dimmed backdrop and dismisses it.
+          // auto-focus. Recovery depends on whether the field is on
+          // screen yet:
+          //   • field present (composer open, just unfocused) → tap the
+          //     FIELD to focus it. Crucially, do NOT re-tap the opener
+          //     (replyBtn/composeFAB) here — that toggles an open sheet
+          //     SHUT (the bug behind consecutive replies failing).
+          //   • field absent (composer hasn't mounted / was dismissed) →
+          //     re-tap the opener to (re)open it.
           const fieldId = axTextFieldId(ctx.udid);
           let focusTap = false;
           if (fieldId) {
@@ -82,11 +69,19 @@ export function registerInputHandlers(registry: CommandRegistry): void {
               focusTap = true;
             }
           }
-          if (!focusTap) focusTap = await axFocusTextField(ctx.udid).catch(() => false);
-          if (focusTap) {
-            focusedViaAx = true;
-            await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
+          if (!focusTap) {
+            focusTap = await axFocusTextField(ctx.udid).catch(() => false);
           }
+          if (!focusTap && ctx.lastTapTestID) {
+            const rect = await ctx.client
+              .call('find_by_testid', { testID: ctx.lastTapTestID })
+              .catch(() => undefined);
+            if (rect && rect.ok && rect.data) {
+              const r = rect.data as { x: number; y: number; w: number; h: number };
+              await ctx.driver.tap(ctx.udid, r.x + r.w / 2, r.y + r.h / 2, { intent: 'focus' });
+            }
+          }
+          await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
         }
         try {
           const r = await ctx.client.call('insert_text', { text });
@@ -94,6 +89,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
         } catch {
           /* retry */
         }
+        if (!ok) await sleep(300); // let the composer settle before retrying
       }
       if (!ok) await hidType(ctx.udid, text);
       await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 80 });
