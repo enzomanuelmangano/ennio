@@ -146,3 +146,55 @@ _Methodology: micro-benchmarks via direct `enniohid`/`ennioax`/`idb` calls
 (20× tap, 10× swipe, 24-char text, 10× dump). Flow timings via `ennio test`
 and `maestro test` wall-clock with `ENNIO_PHASE_TRACE` per-step. iOS 18.2,
 Bluesky e2e build._
+
+---
+
+## 6. Longest flow — curate-lists (92 actions), 1:1 attempt
+
+Ran the **longest** Bluesky flow on both runners, same iOS 18 sim, same mock.
+
+### Result: not a clean 1:1 — Maestro is blocked at the feed-load
+
+| | ennio | Maestro |
+|---|---|---|
+| reaches | steps 28–41 (flaky) | **step 4 — blocked** |
+| blocker | env feed-data flake (`Bad Ppl` / `confirmBtn`) | **home feed never loads** (90.6s wait → FAIL) |
+
+**Maestro never gets past sign-in on this local mock.** Its proxy-set +
+sign-in complete, but `viewHeaderHomeFeedPrefsBtn` (home header) never
+appears — the mock PDS doesn't serve its timeline. ennio's run loads the
+feed and runs 28–41 actions deep. Same flow, same mock, same sim. argent
+inspection confirmed: app signed-in, timeline stuck on a spinner.
+**This is the local-mock infra (cold per-flow PDS), not the runner — but it
+means a clean full-flow 1:1 is not obtainable on this setup.** (And it's
+again a case where ennio survives an environment Maestro doesn't.)
+
+### Maestro per-command timing (setup — the actions it did run)
+
+```
+Launch app (clearState) .............. 3.43 s
+Open dev-launcher URL ................ 2.26 s
+waitForAnimationToEnd ................ 0.84 s
+Tap point (dev-launcher "Open") ...... 1.51 s
+waitForAnimationToEnd ................ 1.05 s
+Tap e2eProxyHeaderInput .............. 4.20 s   ← XCUITest find + tap + settle
+Input proxy (appviewDid) ............. 3.41 s
+Press Enter .......................... 0.43 s
+Tap e2eSignInAlice ................... 1.08 s
+Assert home header ................... 90.59 s  → FAIL (feed never loaded)
+```
+
+### The action-level insight
+
+A single `Tap e2eProxyHeaderInput` cost Maestro **4.2 s** — but that's
+**find + settle**, not the tap. The raw tap is 212 ms (§1); the rest is
+XCUITest's element query + Maestro's settle. ennio's comparable flow taps
+(`moreOptionsBtn` 0.96 s, `Delete List` 1.4 s, `Save` 2.3 s) are also
+**find+settle-dominated**, not gesture-dominated.
+
+**So: the 12–21× raw-gesture win is real but masked at the flow level** —
+per-action time is dominated by element-find + commit-settle (seconds),
+not the gesture (ms). ennio is still faster per action (faster find via the
+dylib socket, faster gesture), but the end-to-end edge is the ~40% measured
+on home-screen, not 20×. The 20× shows up on gesture-dense work (long
+scrolls, drag-reorder, rapid taps).
