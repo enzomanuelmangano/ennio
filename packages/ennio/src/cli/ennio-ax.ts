@@ -165,13 +165,26 @@ export function axResolve(udid: string, sel: { id?: string; text?: string }): Ax
 export async function axTapTarget(
   udid: string,
   sel: { id?: string; text?: string },
+  pollMs = 3000,
 ): Promise<boolean> {
-  const el = axResolve(udid, sel);
-  if (!el) return false;
-  const { w, h } = await getScreenSize(udid);
-  trace(`ax: cross-process tap "${el.id || el.label}" @ (${el.cx.toFixed(3)},${el.cy.toFixed(3)})`);
-  await getActuator(udid).tap(el.cx * w, el.cy * h);
-  return true;
+  // Poll: a native overlay (image cropper, share sheet) opened by the
+  // previous step may still be animating in when this runs — e.g. after
+  // a permission sheet was just dismissed. Retry the AX read briefly so
+  // it's caught once present, instead of giving up on a single miss.
+  const deadline = Date.now() + pollMs;
+  for (;;) {
+    const el = axResolve(udid, sel);
+    if (el) {
+      const { w, h } = await getScreenSize(udid);
+      trace(
+        `ax: cross-process tap "${el.id || el.label}" @ (${el.cx.toFixed(3)},${el.cy.toFixed(3)})`,
+      );
+      await getActuator(udid).tap(el.cx * w, el.cy * h);
+      return true;
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 300));
+  }
 }
 
 // System-sheet buttons we treat as "proceed", most-specific first. A

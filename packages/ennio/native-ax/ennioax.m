@@ -105,10 +105,16 @@ static void collect(AXUIElementRef e, CGPoint g, CGSize gs, NSMutableArray *out,
     double nx = (p.x - g.x) / gs.width, ny = (p.y - g.y) / gs.height;
     double nw = s.width / gs.width, nh = s.height / gs.height;
     double cx = nx + nw / 2, cy = ny + nh / 2;
+    // We walk the whole device window (not just iOSContentGroup) so
+    // native overlays — the image cropper, share sheet — are included.
+    // The window also holds hardware-button / toolbar chrome at the
+    // edges; drop anything whose center falls outside the screen rect.
+    if (cx < -0.02 || cx > 1.02 || cy < -0.02 || cy > 1.02) goto descend;
     [out addObject:[NSString stringWithFormat:
       @"{\"role\":\"%@\",\"label\":\"%@\",\"id\":\"%@\",\"value\":\"%@\",\"nx\":%.4f,\"ny\":%.4f,\"nw\":%.4f,\"nh\":%.4f,\"cx\":%.4f,\"cy\":%.4f}",
       jsonEsc(role), jsonEsc(label ?: @""), jsonEsc(ident ?: @""), jsonEsc(val.length ? val : @""), nx, ny, nw, nh, cx, cy]];
   }
+descend:;
   CFTypeRef kids = NULL;
   if (AXUIElementCopyAttributeValue(e, kAXChildrenAttribute, &kids) == kAXErrorSuccess && kids) {
     for (id c in (__bridge NSArray *)kids) collect((__bridge AXUIElementRef)c, g, gs, out, depth + 1);
@@ -131,28 +137,43 @@ int main(int argc, char **argv) {
     if (!sim) { printf("{\"error\":\"simulator-not-running\"}\n"); return 4; }
 
     AXUIElementRef app = AXUIElementCreateApplication(sim.processIdentifier);
-    AXUIElementSetAttributeValue(app, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
-    usleep(400000); // let the iOS-content bridge populate
-
     NSString *name = deviceName(udid); // may be nil → match any window
-    AXUIElementRef screen = NULL;
-    CFTypeRef wins = NULL;
-    if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, &wins) == kAXErrorSuccess && wins) {
-      for (id w in (__bridge NSArray *)wins) {
-        NSString *t = axStr((__bridge AXUIElementRef)w, kAXTitleAttribute);
-        if (!t.length) continue;
-        if (name.length && ![t hasPrefix:name]) continue;
-        screen = findScreen((__bridge AXUIElementRef)w, 0);
-        if (screen) break;
-      }
-      CFRelease(wins);
-    }
-    if (!screen) { CFRelease(app); printf("{\"error\":\"no-device-window\"}\n"); return 5; }
 
-    CGPoint g; CGSize gs; axRect(screen, &g, &gs);
+    // The iOS-content bridge is lazy and can come back empty right after
+    // a full-screen native VC (image cropper, share sheet) presents.
+    // Re-arm AXEnhancedUserInterface and re-read a few times until the
+    // tree populates, with a growing settle.
+    CGPoint g = CGPointZero; CGSize gs = CGSizeZero;
     NSMutableArray *els = [NSMutableArray new];
-    collect(screen, g, gs, els, 0);
-    CFRelease(screen); CFRelease(app);
+    for (int attempt = 0; attempt < 4; attempt++) {
+      AXUIElementSetAttributeValue(app, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
+      usleep(attempt == 0 ? 400000 : 500000);
+
+      AXUIElementRef screen = NULL;
+      AXUIElementRef window = NULL;
+      CFTypeRef wins = NULL;
+      if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, &wins) == kAXErrorSuccess && wins) {
+        for (id w in (__bridge NSArray *)wins) {
+          NSString *t = axStr((__bridge AXUIElementRef)w, kAXTitleAttribute);
+          if (!t.length) continue;
+          if (name.length && ![t hasPrefix:name]) continue;
+          screen = findScreen((__bridge AXUIElementRef)w, 0);
+          if (screen) { window = (AXUIElementRef)CFRetain((__bridge AXUIElementRef)w); break; }
+        }
+        CFRelease(wins);
+      }
+      if (!screen) { if (window) CFRelease(window); continue; }
+
+      // iOSContentGroup gives the device-screen rect for normalization;
+      // collect from the whole WINDOW so native overlays (cropper, picker,
+      // share sheet) that sit outside iOSContentGroup are captured too.
+      axRect(screen, &g, &gs);
+      [els removeAllObjects];
+      collect(window ?: screen, g, gs, els, 0);
+      CFRelease(screen); if (window) CFRelease(window);
+      if (els.count > 0) break; // populated — done
+    }
+    CFRelease(app);
 
     printf("{\"screen\":{\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f},\"elements\":[%s]}\n",
            g.x, g.y, gs.width, gs.height, [[els componentsJoinedByString:@","] UTF8String]);
