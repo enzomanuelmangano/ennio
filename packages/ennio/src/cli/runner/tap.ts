@@ -476,6 +476,19 @@ export async function execTapOn(
         // wires to the React-side onPress.
         await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
       }
+      // Native sheet / context-menu / picker: the in-app finder returned
+      // a rect in a separate SheetViewController window's coordinate
+      // space, so the device-space HID tap (and the in-app activation
+      // above) both no-op'd. The element is still frontmost, so the
+      // cross-process AX tree has it at the correct device-screen coords
+      // — re-tap there. Self-guarding: if the original tap actually
+      // worked, the element is gone from the AX tree and this is a no-op.
+      const stillNoChange = await ctx.client
+        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 60 })
+        .catch(() => undefined);
+      if (!(stillNoChange && stillNoChange.ok && (stillNoChange.data as { ok?: boolean })?.ok)) {
+        await axTapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false);
+      }
     }
     // Tab-bar resilience: iOS 26's liquid-glass tab bar drops HID
     // taps when the host is mid-transition (slow CI runners reproduce
