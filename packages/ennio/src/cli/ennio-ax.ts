@@ -82,16 +82,20 @@ export function axTree(udid: string): AxTree | null {
 export async function axFocusTextField(udid: string): Promise<boolean> {
   const tree = axTree(udid);
   if (!tree) return false;
-  // Prefer a focusable text input; the composer's rich-text area shows
-  // up as AXTextArea / AXTextView, a plain field as AXTextField.
-  const field = tree.elements.find(
+  // Large text inputs on screen (rich-text composer = AXTextArea/View,
+  // plain field = AXTextField). Only act when there is EXACTLY ONE — an
+  // unambiguous composer. A multi-field form (e.g. edit-profile's Display
+  // name + Description) is ambiguous: tapping the wrong field routes the
+  // input to the wrong place, so defer to the in-app focus path there.
+  const fields = tree.elements.filter(
     (e) =>
       (e.role.includes('TextArea') ||
         e.role.includes('TextField') ||
         e.role.includes('TextView')) &&
       e.nw > 0.2, // a real input, not a tiny search/proxy box
   );
-  if (!field) return false;
+  if (fields.length !== 1) return false;
+  const field = fields[0];
   const { w, h } = await getScreenSize(udid);
   trace(
     `ax: focus text field "${field.label || field.id}" @ (${field.cx.toFixed(3)},${field.cy.toFixed(3)})`,
