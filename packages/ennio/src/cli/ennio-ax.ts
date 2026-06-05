@@ -221,7 +221,10 @@ export async function axHasText(udid: string, text: string): Promise<boolean> {
 }
 
 /** Resolve a Maestro selector against the cross-process tree. */
-export async function axResolve(udid: string, sel: { id?: string; text?: string }): Promise<AxElement | null> {
+export async function axResolve(
+  udid: string,
+  sel: { id?: string; text?: string },
+): Promise<AxElement | null> {
   const tree = await axTree(udid);
   if (!tree) return null;
   if (sel.id) {
