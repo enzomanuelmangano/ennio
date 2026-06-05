@@ -72,6 +72,32 @@ export function axTree(udid: string): AxTree | null {
   }
 }
 
+/**
+ * Tap the frontmost text field via cross-process AX to move keyboard
+ * focus into it. Used when insert_text reports no first responder — a
+ * composer/sheet whose input didn't auto-focus, where the in-app
+ * recovery (re-tapping the button that OPENED the sheet) would toggle it
+ * shut. Returns true if a field was tapped.
+ */
+export async function axFocusTextField(udid: string): Promise<boolean> {
+  const tree = axTree(udid);
+  if (!tree) return false;
+  // Prefer a focusable text input; the composer's rich-text area shows
+  // up as AXTextArea / AXTextView, a plain field as AXTextField.
+  const field = tree.elements.find(
+    (e) =>
+      (e.role.includes('TextArea') ||
+        e.role.includes('TextField') ||
+        e.role.includes('TextView')) &&
+      e.nw > 0.2, // a real input, not a tiny search/proxy box
+  );
+  if (!field) return false;
+  const { w, h } = await getScreenSize(udid);
+  trace(`ax: focus text field "${field.label || field.id}" @ (${field.cx.toFixed(3)},${field.cy.toFixed(3)})`);
+  await getActuator(udid).tap(field.cx * w, field.cy * h);
+  return true;
+}
+
 /** True if any cross-process element's label/value contains `text`. */
 export function axHasText(udid: string, text: string): boolean {
   const tree = axTree(udid);

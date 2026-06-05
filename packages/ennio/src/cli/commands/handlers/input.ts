@@ -9,6 +9,7 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { typeText as hidType } from '../../hid';
+import { axFocusTextField } from '../../ennio-ax';
 import { interpolate, sleep } from '../../runner/context';
 
 interface InputTextCmd {
@@ -55,7 +56,18 @@ export function registerInputHandlers(registry: CommandRegistry): void {
         const fr = await ctx.client
           .call('first_responder_ready', { maxMs: 500 })
           .catch(() => undefined);
-        void fr;
+        const focused = !!(fr && fr.ok && fr.data && (fr.data as { ok?: boolean }).ok);
+        if (!focused) {
+          // No first responder — a composer/sheet input that didn't
+          // auto-focus (Bluesky's reply composer opens unfocused, so the
+          // controlled value never updates → canPost stays false → the
+          // publish button is disabled). The in-app recovery re-taps the
+          // OPENER (replyBtn), which would toggle the sheet shut; instead
+          // tap the actual text field via cross-process AX, then re-poll.
+          if (await axFocusTextField(ctx.udid).catch(() => false)) {
+            await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
+          }
+        }
         try {
           const r = await ctx.client.call('insert_text', { text });
           ok = !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
