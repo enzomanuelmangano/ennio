@@ -91,15 +91,20 @@ export function axResolve(udid: string, sel: { id?: string; text?: string }): Ax
     if (byId) return byId;
   }
   if (sel.text) {
-    // Exact label match on an interactive element only. A loose
-    // `includes` match is unsafe here: this runs as a fallback on every
-    // not-found tap, and a wrong cross-process button tap derails the
-    // flow. testID (above) is the high-confidence path.
+    // Exact label match. A loose `includes` is unsafe (this runs as a
+    // fallback on every not-found tap; a wrong cross-process tap derails
+    // the flow), so require an exact label AND an interactive element.
     const needle = sel.text.toLowerCase();
-    const exact = tree.elements.find(
+    // Highest confidence: a testID'd element carrying this exact label —
+    // e.g. a pager tab rendered as an AXGeneric container (not a
+    // Button), where the in-app finder returns only the inner Text
+    // label's rect and a tap there misses the Pressable's onPress.
+    const idd = tree.elements.find((e) => e.id && e.label.toLowerCase() === needle);
+    if (idd) return idd;
+    const btn = tree.elements.find(
       (e) => e.role.includes('Button') && e.label.toLowerCase() === needle,
     );
-    if (exact) return exact;
+    if (btn) return btn;
   }
   return null;
 }

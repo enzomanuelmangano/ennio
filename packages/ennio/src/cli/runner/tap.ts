@@ -19,7 +19,8 @@
 //         gesture chain never armed)
 
 import type { TapIntent } from '../driver/types';
-import { axTapTarget, dismissSystemSheet } from '../ennio-ax';
+import { axResolve, axTapTarget, dismissSystemSheet } from '../ennio-ax';
+import { getScreenSize } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
@@ -74,6 +75,25 @@ export async function execTapOn(
     // pointless HID redo); baseline keeps the probe in the retap loop
     // only.
     if (await ctx.driver.tryTabTap(ctx.client, sel.text)) return;
+    // Text tap onto a testID'd interactive container the in-app finder
+    // mis-locates: it returns the inner Text label's rect (a pager tab,
+    // a segmented control), so the HID tap lands on the label and the
+    // Pressable's onPress never fires. The cross-process AX tree carries
+    // the FULL interactive element (with its testID) at device-correct
+    // coords — when the label resolves there to a testID'd element, tap
+    // it and verify the frame moved. High-confidence (testID-backed) and
+    // text-only, so the hot path is unaffected; falls through on no
+    // match / no effect / off-box.
+    const axEl = axResolve(ctx.udid, { text: sel.text });
+    if (axEl && axEl.id) {
+      const { w, h } = await getScreenSize(ctx.udid);
+      const baseHash = preHash ?? (await captureHash(ctx));
+      await ctx.driver.tap(ctx.udid, axEl.cx * w, axEl.cy * h, { intent });
+      const hc = await ctx.client
+        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 500 })
+        .catch(() => undefined);
+      if (hc && hc.ok && (hc.data as { ok?: boolean })?.ok) return;
+    }
   }
   let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
   if (!rect) {
