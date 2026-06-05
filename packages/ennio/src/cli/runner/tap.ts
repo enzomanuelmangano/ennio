@@ -135,7 +135,20 @@ export async function execTapOn(
   // in-app center, the AX coords are device-authoritative; tap there and
   // return on a confirmed frame change. Only diverges when the two
   // disagree, so correctly-located taps fall straight through untouched.
-  if ((sel.id || sel.text) && !sel.childOf) {
+  // Ambiguity guard: when a testID has MORE THAN ONE on-screen match
+  // (a reply notification + a "followed you" row both tagged
+  // feedItem-by-bob.test), find_by_testid already picked the right
+  // topmost instance — but the cross-process AX surfaces only one of
+  // them, so a coord cross-check would mis-correct to the wrong row.
+  // Skip the AX override entirely for ambiguous testIDs.
+  let ambiguousId = false;
+  if (sel.id && !sel.childOf) {
+    const nth = await ctx.client
+      .call('find_by_testid_nth', { testID: sel.id, index: 1 })
+      .catch(() => undefined);
+    ambiguousId = !!(nth && nth.ok && nth.data);
+  }
+  if ((sel.id || sel.text) && !sel.childOf && !ambiguousId) {
     const axEl = axResolve(ctx.udid, { id: sel.id, text: sel.text });
     // Only correct SMALL interactive elements (buttons, tabs, menu rows
     // — height < ~12% of the screen). For a large container (a feed item,
