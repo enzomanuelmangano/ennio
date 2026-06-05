@@ -94,7 +94,13 @@ export async function execTapOn(
       const hc = await ctx.client
         .call('wait_hash_change', { sinceHash: baseHash, maxMs: 500 })
         .catch(() => undefined);
-      if (hc && hc.ok && (hc.data as { ok?: boolean })?.ok) return;
+      if (hc && hc.ok && (hc.data as { ok?: boolean })?.ok) {
+        // A native bottom-sheet menu row was tapped; let its dismiss
+        // animation finish so the NEXT tap (often a button that re-opens
+        // a sibling sheet) doesn't race the transition and miss.
+        await sleep(400);
+        return;
+      }
     }
   }
   let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
