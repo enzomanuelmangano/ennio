@@ -104,6 +104,27 @@ export async function axFocusTextField(udid: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * testID of the single on-screen text input, if it has one (Bluesky's
+ * composer field is `composerTextInput`). Lets the caller focus it via
+ * the IN-APP finder — an accurate, current rect — instead of the
+ * cross-process AX position, which is stale while a sheet animates in.
+ * Returns null when there isn't exactly one identified input.
+ */
+export function axTextFieldId(udid: string): string | null {
+  const tree = axTree(udid);
+  if (!tree) return null;
+  const fields = tree.elements.filter(
+    (e) =>
+      (e.role.includes('TextArea') ||
+        e.role.includes('TextField') ||
+        e.role.includes('TextView')) &&
+      e.nw > 0.2 &&
+      e.id,
+  );
+  return fields.length === 1 ? fields[0].id : null;
+}
+
 /** True if any cross-process element's label/value contains `text`. */
 export function axHasText(udid: string, text: string): boolean {
   const tree = axTree(udid);

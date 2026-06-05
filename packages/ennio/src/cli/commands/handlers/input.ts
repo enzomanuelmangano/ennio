@@ -9,7 +9,7 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { typeText as hidType } from '../../hid';
-import { axFocusTextField } from '../../ennio-ax';
+import { axFocusTextField, axTextFieldId } from '../../ennio-ax';
 import { interpolate, sleep } from '../../runner/context';
 
 interface InputTextCmd {
@@ -65,10 +65,25 @@ export function registerInputHandlers(registry: CommandRegistry): void {
           // auto-focus (Bluesky's reply composer opens unfocused, so the
           // controlled value never updates → canPost stays false → the
           // publish button is disabled). The in-app recovery re-taps the
-          // OPENER (replyBtn), which would toggle the sheet shut; instead
-          // tap the actual text field via cross-process AX, then re-poll.
-          // Once only — re-tapping a rich-text field can dismiss the sheet.
-          if (await axFocusTextField(ctx.udid).catch(() => false)) {
+          // OPENER (replyBtn), which would toggle the sheet shut.
+          // Prefer focusing the field by its testID via the IN-APP finder
+          // (accurate, current rect) — the cross-process AX position is
+          // stale while the sheet animates in, and a tap on a mid-flight
+          // field lands on the dimmed backdrop and dismisses it.
+          const fieldId = axTextFieldId(ctx.udid);
+          let focusTap = false;
+          if (fieldId) {
+            const r = await ctx.client
+              .call('find_by_testid', { testID: fieldId })
+              .catch(() => undefined);
+            if (r && r.ok && r.data) {
+              const rr = r.data as { x: number; y: number; w: number; h: number };
+              await ctx.driver.tap(ctx.udid, rr.x + rr.w / 2, rr.y + rr.h / 2, { intent: 'focus' });
+              focusTap = true;
+            }
+          }
+          if (!focusTap) focusTap = await axFocusTextField(ctx.udid).catch(() => false);
+          if (focusTap) {
             focusedViaAx = true;
             await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
           }
