@@ -313,6 +313,106 @@ void RegisterEnnioFindHandlers(void) {
         return EnnioRectJson(rect);
     });
 
+    // get_text: return the text of a matched element. Backs Maestro's
+    // copyTextFrom. testID → exact accessibilityIdentifier; text → regex
+    // (Maestro treats selector text as regex), else case-insensitive
+    // substring, matched against accessibilityLabel/Value and
+    // UILabel/UITextView/UITextField text. `index` picks among matches
+    // in screen reading order (top→bottom, left→right). Returns {text}.
+    EnnioControlSocket::registerHandler("get_text", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = EnnioArgString(a, @"testID");
+        NSString *text = EnnioArgString(a, @"text");
+        int index = EnnioArgInt(a, @"index", 0);
+        if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
+
+        NSString *result = nil;
+        EnnioOnMainVoid([&]() {
+            NSRegularExpression *re = nil;
+            if (text.length) {
+                NSError *err = nil;
+                re = [NSRegularExpression regularExpressionWithPattern:text
+                                                              options:NSRegularExpressionCaseInsensitive
+                                                                error:&err];
+                if (err) re = nil;
+            }
+            NSMutableArray<NSDictionary *> *hits = [NSMutableArray new];
+            NSMutableArray<UIView *> *stack = [NSMutableArray new];
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    if (!w.hidden) [stack addObject:w];
+                }
+            }
+            while (stack.count) {
+                UIView *v = stack.lastObject;
+                [stack removeLastObject];
+                for (UIView *sub in v.subviews) [stack addObject:sub];
+                if (![EnnioFinder isOnScreen:v]) continue;
+
+                NSMutableArray<NSString *> *cands = [NSMutableArray new];
+                if ([v isKindOfClass:UILabel.class]) {
+                    NSString *t = ((UILabel *)v).text;
+                    if (t.length) [cands addObject:t];
+                } else if ([v isKindOfClass:UITextView.class]) {
+                    NSString *t = ((UITextView *)v).text;
+                    if (t.length) [cands addObject:t];
+                } else if ([v isKindOfClass:UITextField.class]) {
+                    NSString *t = ((UITextField *)v).text;
+                    if (t.length) [cands addObject:t];
+                }
+                if (v.accessibilityLabel.length) [cands addObject:v.accessibilityLabel];
+                if ([v.accessibilityValue isKindOfClass:NSString.class] &&
+                    [(NSString *)v.accessibilityValue length]) {
+                    [cands addObject:(NSString *)v.accessibilityValue];
+                }
+
+                BOOL matched = NO;
+                NSString *matchedText = nil;
+                if (testID.length) {
+                    if ([v.accessibilityIdentifier isEqualToString:testID] && cands.count) {
+                        matched = YES;
+                        matchedText = cands.firstObject;
+                    }
+                } else {
+                    for (NSString *cand in cands) {
+                        BOOL ok = NO;
+                        if (re) {
+                            ok = [re numberOfMatchesInString:cand
+                                                     options:0
+                                                       range:NSMakeRange(0, cand.length)] > 0;
+                        } else {
+                            ok = [cand rangeOfString:text
+                                             options:NSCaseInsensitiveSearch].location != NSNotFound;
+                        }
+                        if (ok) {
+                            matched = YES;
+                            matchedText = cand;
+                            break;
+                        }
+                    }
+                }
+                if (matched && matchedText) {
+                    EnnioRect r = [EnnioFinder windowRectFor:v];
+                    [hits addObject:@{ @"text": matchedText, @"y": @(r.y), @"x": @(r.x) }];
+                }
+            }
+            [hits sortUsingComparator:^NSComparisonResult(NSDictionary *p, NSDictionary *q) {
+                double dy = [p[@"y"] doubleValue] - [q[@"y"] doubleValue];
+                if (fabs(dy) > 1.0) return dy < 0 ? NSOrderedAscending : NSOrderedDescending;
+                double dx = [p[@"x"] doubleValue] - [q[@"x"] doubleValue];
+                return dx < 0 ? NSOrderedAscending : (dx > 0 ? NSOrderedDescending : NSOrderedSame);
+            }];
+            if (index >= 0 && index < (int)hits.count) {
+                result = hits[index][@"text"];
+            }
+        });
+        if (!result) throw std::runtime_error("get_text: no match");
+        NSData *d = [NSJSONSerialization dataWithJSONObject:@{ @"text": result } options:0 error:nil];
+        return std::string((const char *)d.bytes, d.length);
+    });
+
     EnnioControlSocket::registerHandler("frame", [](const std::string &args) -> std::string {
         NSDictionary *a = EnnioParseArgs(args);
         if (!a) throw std::runtime_error("invalid args");

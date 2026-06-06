@@ -18,7 +18,13 @@ import {
 import { terminateApp } from '../../sim';
 
 interface LaunchAppCmd {
-  launchApp: true | { clearState?: boolean; arguments?: Record<string, string | boolean | number> };
+  launchApp:
+    | true
+    | {
+        clearState?: boolean;
+        clearKeychain?: boolean;
+        arguments?: Record<string, string | boolean | number>;
+      };
 }
 interface ClearStateCmd {
   clearState: true | Record<string, unknown>;
@@ -51,8 +57,19 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
           ? { clearState: false }
           : (arg as {
               clearState?: boolean;
+              clearKeychain?: boolean;
               arguments?: Record<string, string | boolean | number>;
             });
+      // Maestro clearKeychain: wipe the SIM-WIDE keychain before
+      // launch. simctl has a first-class verb for it; app must not be
+      // mid-launch, so do it before clearState/relaunch.
+      if (opts.clearKeychain) {
+        try {
+          execFileSync('xcrun', ['simctl', 'keychain', ctx.udid, 'reset'], { stdio: 'pipe' });
+        } catch {
+          /* older Xcode without the verb — proceed; clearState wipes app data anyway */
+        }
+      }
       // iOS NSUserDefaults launch arguments need flat `-Key Value`
       // pairs. Bare key gets silently ignored. Booleans as YES/NO
       // (iOS convention).

@@ -43,6 +43,14 @@ export interface MaestroSelector {
   height?: number;
   tolerance?: number;
   traits?: string[];
+  /** Maestro: failure of this step does not fail the flow. */
+  optional?: boolean;
+  /** Maestro: skip the tap when the screen didn't change. ennio taps
+   *  are idempotent via the driver, so this is accepted as a no-op. */
+  retryTapIfNoChange?: boolean;
+  /** Maestro: per-step settle budget hint. Accepted; ennio's settle is
+   *  signal-driven, so this only caps, never extends. */
+  waitToSettleTimeoutMs?: number;
 }
 
 export interface MaestroCondition {
@@ -147,6 +155,33 @@ export interface MaestroFlow {
 // ============================================
 
 /**
+ * Substitute `${NAME}` env placeholders, Maestro-style: real Maestro
+ * takes them from `-e NAME=value` / the shell; ennio reads
+ * process.env. Resolution is parse-time and conservative — a name
+ * with no env value is left untouched, so runtime interpolations
+ * (`${output.x}`) and flow-local `env:` blocks keep working.
+ */
+const ENV_PLACEHOLDER = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+function substituteEnv(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.replace(ENV_PLACEHOLDER, (match, name: string) => {
+      // Maestro resolves ${VAR} against the CLI-provided env; dynamic
+      // lookup is intentional (the var name comes from the flow).
+      // eslint-disable-next-line expo/no-dynamic-env-var
+      const v = process.env[name];
+      return v !== undefined ? v : match;
+    });
+  }
+  if (Array.isArray(value)) return value.map(substituteEnv);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = substituteEnv(v);
+    return out;
+  }
+  return value;
+}
+
+/**
  * Parse a Maestro YAML file
  */
 export function parseMaestroFile(filePath: string): MaestroFlow {
@@ -154,7 +189,7 @@ export function parseMaestroFile(filePath: string): MaestroFlow {
   const content = readFileSync(absolutePath, 'utf-8');
 
   // Maestro YAML uses --- to separate metadata from commands
-  const documents = parseYamlAll(content) as unknown[];
+  const documents = (parseYamlAll(content) as unknown[]).map(substituteEnv);
 
   let metadata: Record<string, unknown> = {};
   let commands: MaestroCommand[] = [];

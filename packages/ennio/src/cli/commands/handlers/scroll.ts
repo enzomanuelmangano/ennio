@@ -9,14 +9,22 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand, MaestroSelector } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { DEFAULT_WIN_H, DEFAULT_WIN_W, sleep } from '../../runner/context';
+import { DEFAULT_WIN_H, DEFAULT_WIN_W, interpolateSelector, sleep } from '../../runner/context';
 import { resolveRect } from '../../runner/find';
 import { isVisible } from '../../runner/visibility';
 
 interface ScrollUntilVisibleCmd {
   scrollUntilVisible:
     | MaestroSelector
-    | { element: MaestroSelector; direction?: string; timeout?: number };
+    | {
+        element: MaestroSelector;
+        direction?: string;
+        timeout?: number;
+        // Accepted for Maestro parity; advisory (speed) or no-op
+        // (visibilityPercentage — ennio asserts real on-screen visibility).
+        speed?: number;
+        visibilityPercentage?: number;
+      };
 }
 interface SwipeCmd {
   swipe: {
@@ -42,7 +50,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & ScrollUntilVisibleCmd => has(c, 'scrollUntilVisible'),
     async (cmd, { ctx }) => {
-      const arg = cmd.scrollUntilVisible;
+      const arg = interpolateSelector(cmd.scrollUntilVisible, ctx);
       const target = 'element' in arg ? arg.element : (arg as MaestroSelector);
       const dir = ('direction' in arg && arg.direction ? arg.direction : 'DOWN').toUpperCase();
       const timeout = ('timeout' in arg && arg.timeout) || 15000;

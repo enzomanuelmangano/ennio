@@ -18,11 +18,13 @@ interface RetryCmd {
   retry: { maxRetries?: number; commands: MaestroCommand[] };
 }
 interface RunFlowCmd {
-  runFlow: {
-    when?: { visible?: unknown; notVisible?: unknown; platform?: string };
-    commands?: MaestroCommand[];
-    file?: string;
-  };
+  runFlow:
+    | string
+    | {
+        when?: { visible?: unknown; notVisible?: unknown; platform?: string };
+        commands?: MaestroCommand[];
+        file?: string;
+      };
 }
 interface RunScriptCmd {
   runScript: { file: string; env?: Record<string, string> };
@@ -69,7 +71,10 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & RunFlowCmd => has(c, 'runFlow'),
     async (cmd, { ctx, dispatch }) => {
-      const sub = cmd.runFlow;
+      // Maestro shorthand: `runFlow: path.yaml` (bare string) ==
+      // `runFlow: { file: path.yaml }`. Without this the string fell
+      // through every branch below and silently ran nothing.
+      const sub = typeof cmd.runFlow === 'string' ? { file: cmd.runFlow } : cmd.runFlow;
       // `when:` predicate — skip subflow if not satisfied.
       if (sub.when) {
         let satisfied = true;

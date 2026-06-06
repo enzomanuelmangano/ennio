@@ -8,7 +8,7 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { POST_TAP_SETTLE_MS, sleep, timedAsync } from '../../runner/context';
+import { POST_TAP_SETTLE_MS, interpolateSelector, sleep, timedAsync } from '../../runner/context';
 import { captureHash, captureReactTs, findOnce, resolveCenter } from '../../runner/find';
 import { execTapOn } from '../../runner/tap';
 
@@ -34,7 +34,7 @@ export function registerTapHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & TapOnCmd => has(c, 'tapOn'),
     async (cmd, { ctx, nextCmd }) => {
-      const sel = normalizeSelector(cmd.tapOn as Parameters<typeof normalizeSelector>[0]);
+      const sel = normalizeSelector(interpolateSelector(cmd.tapOn, ctx) as Parameters<typeof normalizeSelector>[0]);
       // Maestro `optional: true`: silently skip if selector misses.
       const tapObj =
         cmd.tapOn && typeof cmd.tapOn === 'object'
@@ -153,7 +153,7 @@ export function registerTapHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & DoubleTapOnCmd => has(c, 'doubleTapOn'),
     async (cmd, { ctx }) => {
-      const sel = normalizeSelector(cmd.doubleTapOn as Parameters<typeof normalizeSelector>[0]);
+      const sel = normalizeSelector(interpolateSelector(cmd.doubleTapOn, ctx) as Parameters<typeof normalizeSelector>[0]);
       const { x, y } = await resolveCenter(ctx, sel);
       await ctx.driver.doubleTap(ctx.udid, x, y);
       await sleep(POST_TAP_SETTLE_MS);
@@ -165,7 +165,7 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       typeof c === 'object' && c !== null && ('longPress' in c || 'longPressOn' in c),
     async (cmd, { ctx }) => {
       const sel = normalizeSelector(
-        ('longPress' in cmd ? cmd.longPress : cmd.longPressOn) as Parameters<
+        interpolateSelector('longPress' in cmd ? cmd.longPress : cmd.longPressOn, ctx) as Parameters<
           typeof normalizeSelector
         >[0],
       );

@@ -87,6 +87,7 @@ export class FlowExecutor {
       driver: this.driver,
       flowPath: flow.filePath,
       outputs: {},
+      flowEnv: { ...(flow.env ?? {}) },
     };
 
     this.reporter.flowStart(flow);
