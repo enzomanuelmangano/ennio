@@ -173,15 +173,19 @@ static bool tryAttachOnClass(Class cls, NSArray<NSString *> *selCandidates) {
 }
 
 static bool attachFabricSwizzle(void) {
-    // RN Fabric / new-arch class candidates. Different RN versions land
-    // commits on different objects — try several, attach to the first
-    // that has a matching mount-style selector.
+    // RN class candidates. Different RN versions land commits on
+    // different objects — try several, attach to the first that has a
+    // selector with a provably-forwardable signature.
+    //
+    // Fabric candidates come FIRST: on New-Architecture apps the
+    // interop layer still loads RCTUIManager, so a Paper-first order
+    // attaches to a selector that never fires there — the observer
+    // looks attached while settle silently runs on the hash-polling
+    // fallback. On true Paper apps the Fabric classes don't exist and
+    // we fall through to RCTUIManager as before. Attaching Fabric's
+    // mount methods is safe now that signatures are encoding-checked
+    // (C++ by-value args are rejected, const& pointers forward as-is).
     NSArray *classMethods = @[
-        // Paper (legacy bridge). flushUIBlocksWithCompletion: runs every
-        // batch of UIView mutations RN computes — equivalent to one
-        // commit. Selector is stable across RN ≥0.60 paper builds.
-        @[ @"RCTUIManager", @[ @"flushUIBlocksWithCompletion:",
-                               @"_layoutAndMount" ] ],
         // Fabric / new arch.
         @[ @"RCTMountingManager", @[ @"scheduleTransaction:",
                                      @"performTransaction:",
@@ -191,6 +195,11 @@ static bool attachFabricSwizzle(void) {
         @[ @"RCTSurfacePresenter", @[ @"_performMountInstructions:rootTag:",
                                       @"runtimeSchedulerDidPerformWork" ] ],
         @[ @"RCTScheduler", @[ @"runtimeSchedulerTaskDone" ] ],
+        // Paper (legacy bridge). flushUIBlocksWithCompletion: runs every
+        // batch of UIView mutations RN computes — equivalent to one
+        // commit. Selector is stable across RN ≥0.60 paper builds.
+        @[ @"RCTUIManager", @[ @"flushUIBlocksWithCompletion:",
+                               @"_layoutAndMount" ] ],
     ];
     for (NSArray *pair in classMethods) {
         Class cls = NSClassFromString(pair[0]);
