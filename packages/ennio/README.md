@@ -58,8 +58,11 @@ itself:
 
 When the gates pass, the dylib bootstraps a Unix socket server,
 swizzles `setAccessibilityIdentifier:` for O(1) testID lookup, and
-installs React commit observers (signature-checked swizzles; Paper
-and Fabric) for frame-level settle detection.
+installs a React commit observer for frame-level settle detection —
+Fabric mount methods preferred, Paper as fallback. Every swizzle
+candidate is signature-checked before attaching (methods with
+non-forwardable C++ signatures are skipped); if nothing safe matches,
+settle falls back to view-hash polling.
 
 Before injecting, the CLI verifies the prebuilt dylib's SHA-256
 against `prebuilt/manifest.json` and refuses on mismatch. Local dev
