@@ -22,6 +22,8 @@ export type Flags = {
   reporter?: string;
   /** --safe-mode: launch with all in-app hooks disabled (ENNIO_SAFE_MODE). */
   safeMode?: boolean;
+  /** --quiet / -q: suppress per-step inline output (verbose is the default). */
+  quiet?: boolean;
 };
 
 export type ParsedArgs = {
@@ -31,7 +33,15 @@ export type ParsedArgs = {
 };
 
 const STRING_FLAGS = new Set(['port', 'output', 'reporter']);
-const BOOL_FLAGS = new Set(['verbose', 'trace', 'help', 'lenient', 'version', 'safe-mode']);
+const BOOL_FLAGS = new Set([
+  'verbose',
+  'trace',
+  'help',
+  'lenient',
+  'version',
+  'safe-mode',
+  'quiet',
+]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = { 'safe-mode': 'safeMode' };
 
@@ -52,6 +62,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === '-h') {
       flags.help = true;
+      continue;
+    }
+    if (a === '-q') {
+      flags.quiet = true;
       continue;
     }
     if (!a.startsWith('--')) {
