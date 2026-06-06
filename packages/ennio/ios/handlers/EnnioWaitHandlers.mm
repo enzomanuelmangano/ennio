@@ -172,6 +172,50 @@ void RegisterEnnioWaitHandlers(void) {
     // consecutive ~16ms samples. Returns {ok, elapsedMs}; ok:false
     // when the budget expires (continuous scroller — caller proceeds,
     // the tap-retry self-heal is the backstop).
+    // scroll_offset: contentOffset of the largest on-screen
+    // UIScrollView (by area). The reliable "did a navigational swipe
+    // advance?" signal — frame_hash misses carousel page turns when
+    // pages carry no testID'd content (Wikipedia onboarding: only the
+    // persistent Skip/Next buttons are hashed, so the hash is constant
+    // across pages). Returns {ok, x, y} or {ok:false} when no scroll
+    // view is present.
+    EnnioControlSocket::registerHandler("scroll_offset", [](const std::string &) -> std::string {
+        double ox = 0, oy = 0;
+        BOOL found = NO;
+        EnnioOnMainVoid([&]() {
+            double bestArea = 0;
+            UIScrollView *best = nil;
+            NSMutableArray<UIView *> *stack = [NSMutableArray new];
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    if (!w.hidden) [stack addObject:w];
+                }
+            }
+            while (stack.count) {
+                UIView *v = stack.lastObject;
+                [stack removeLastObject];
+                for (UIView *sub in v.subviews) [stack addObject:sub];
+                if (![v isKindOfClass:UIScrollView.class]) continue;
+                if (![EnnioFinder isOnScreen:v]) continue;
+                double area = v.bounds.size.width * v.bounds.size.height;
+                if (area > bestArea) {
+                    bestArea = area;
+                    best = (UIScrollView *)v;
+                }
+            }
+            if (best) {
+                ox = best.contentOffset.x;
+                oy = best.contentOffset.y;
+                found = YES;
+            }
+        });
+        char buf[96];
+        snprintf(buf, sizeof(buf), "{\"ok\":%s,\"x\":%.1f,\"y\":%.1f}",
+                 found ? "true" : "false", ox, oy);
+        return std::string(buf);
+    });
+
     EnnioControlSocket::registerHandler("wait_scroll_idle", [](const std::string &args) -> std::string {
         NSDictionary *a = EnnioParseArgs(args);
         uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 1200);

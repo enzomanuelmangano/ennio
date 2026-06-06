@@ -122,8 +122,7 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & RunScriptCmd => has(c, 'runScript'),
     async (cmd, { ctx }) => {
       // Maestro shorthand: `runScript: file.js` == `{ file: file.js }`.
-      const script =
-        typeof cmd.runScript === 'string' ? { file: cmd.runScript } : cmd.runScript;
+      const script = typeof cmd.runScript === 'string' ? { file: cmd.runScript } : cmd.runScript;
       await runMaestroScript(ctx as RunContext, script);
     },
   );

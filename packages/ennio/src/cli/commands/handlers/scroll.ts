@@ -306,21 +306,33 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       // wait for scroll-idle and fire once more. Guarded to the
       // directional, no-coordinate form so explicit-coordinate swipes
       // (drag-to-dismiss, precise drags) are untouched.
+      // Navigational (no explicit coords) swipes verify they advanced
+      // via the scroll view's contentOffset — the reliable signal
+      // (frame_hash misses carousel turns whose pages carry no testID'd
+      // content). A swipe fired in rapid succession (onboarding pagers:
+      // swipe → waitForAnimationToEnd → swipe) can be swallowed if the
+      // previous glide hadn't committed; retry up to 3x until the offset
+      // moves. Explicit-coordinate swipes (drag-to-dismiss, precise
+      // drags) skip this — their effect isn't an offset change.
       const verifyAdvance = !sw.start && !sw.end && !!sw.direction;
       const durMs = sw.duration ?? 400;
-      const preSwipeHash = verifyAdvance
-        ? ((await ctx.client.call('frame_hash').catch(() => undefined))?.data as { hash?: string })
-            ?.hash
-        : undefined;
+      const offset = async (): Promise<{ x: number; y: number } | null> => {
+        const r = await ctx.client.call('scroll_offset').catch(() => undefined);
+        const d = r?.data as { ok?: boolean; x?: number; y?: number } | undefined;
+        return d?.ok ? { x: d.x ?? 0, y: d.y ?? 0 } : null;
+      };
+      const moved = (a: { x: number; y: number } | null, b: { x: number; y: number } | null) =>
+        !!a && !!b && (Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1);
+
+      const pre = verifyAdvance ? await offset() : null;
       let outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, durMs);
       await ctx.driver.settleAfterSwipe(ctx.client, outcome);
-      if (verifyAdvance && preSwipeHash !== undefined) {
-        const postHash = (
-          (await ctx.client.call('frame_hash').catch(() => undefined))?.data as { hash?: string }
-        )?.hash;
-        if (postHash !== undefined && postHash === preSwipeHash) {
-          // No change — the swipe was swallowed. Let any in-flight
-          // glide settle, then retry exactly once.
+      // Only retry when we had a baseline offset (a scroll view is
+      // present) and it didn't move — i.e. the swipe was genuinely
+      // swallowed, not "there's nothing to scroll".
+      if (verifyAdvance && pre) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (moved(pre, await offset())) break;
           await ctx.client.call('wait_scroll_idle', { maxMs: 1200 }).catch(() => undefined);
           outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, durMs);
           await ctx.driver.settleAfterSwipe(ctx.client, outcome);
