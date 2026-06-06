@@ -179,7 +179,11 @@ export class FlowExecutor {
         // Socket-death errors are symptoms; check whether the app
         // actually crashed under injection and say so (issue #44).
         let reason = msg;
-        if (/socket not connected|socket closed|socket reconnect failed|socket request timeout/i.test(msg)) {
+        if (
+          /socket not connected|socket closed|socket reconnect failed|socket request timeout/i.test(
+            msg,
+          )
+        ) {
           const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, flowStart);
           if (diagnosis) reason = `${msg}\n${diagnosis}`;
         }

@@ -196,8 +196,7 @@ export function diagnoseSocketFailure(udid: string, bundleId: string, sinceMs: n
     }
     lines.push(`crash report: ${report.path}`);
     lines.push(
-      'this is likely an ennio bug — please open an issue attaching the ' +
-        `report: ${ISSUES_URL}`,
+      'this is likely an ennio bug — please open an issue attaching the ' + `report: ${ISSUES_URL}`,
     );
   } else {
     lines.push(
