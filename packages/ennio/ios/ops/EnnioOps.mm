@@ -420,20 +420,29 @@ static BOOL anyVCInTransition(UIViewController *root) {
     return [app sendAction:@selector(paste:) to:nil from:view forEvent:nil];
 }
 
-// ─── Hardware key ───────────────────────────────────────────────────
-
-+ (BOOL)pressHardwareKey:(int)keyCode {
-    // Find the current first responder by descending the view tree
-    // from every window. The responder-chain *upward* path goes
-    // view → … → window → app → nil; firstResponder lives DOWN in
-    // the subview tree (typically a UITextField/UITextView), so the
-    // upward walk from a window never sees it.
+// ─── First-responder resolution (shared by text/key ops) ────────────
+//
+// Find the UIKeyInput first responder by descending the view tree
+// from every window + presented-VC chain. Two subtleties:
+//   1. The responder-chain *upward* path (view → … → window → app)
+//      never reaches it — firstResponder lives DOWN in the subview
+//      tree, so we walk down.
+//   2. Acceptance requires UIKeyInput, not just isFirstResponder:
+//      wrapper views proxy isFirstResponder for their inner field
+//      (UISearchBar reports YES but can't take keys; its descendant
+//      UISearchBarTextField also reports YES and can). Stopping at
+//      the wrapper made every native-search-bar insert/backspace
+//      fail (g-search-bar).
+static UIResponder *EnnioFindKeyInputResponder(void) {
     __block UIResponder *first = nil;
     void (^findFirst)(UIView *) = nil;
     __block __weak void (^weakFind)(UIView *);
     weakFind = findFirst = ^(UIView *v) {
         if (first) return;
-        if (v.isFirstResponder) { first = v; return; }
+        if (v.isFirstResponder && [v conformsToProtocol:@protocol(UIKeyInput)]) {
+            first = v;
+            return;
+        }
         for (UIView *sub in v.subviews) {
             weakFind(sub);
             if (first) return;
@@ -444,6 +453,17 @@ static BOOL anyVCInTransition(UIViewController *root) {
         for (UIWindow *w in ((UIWindowScene *)scene).windows) {
             findFirst(w);
             if (first) break;
+            // Walk the rootVC's presented-VC chain. Sheet presentation
+            // controllers host their content detached from the window's
+            // literal subview tree — the firstResponder lives there but
+            // findFirst(window) misses it.
+            UIViewController *vc = w.rootViewController;
+            while (vc && !first) {
+                UIView *vcView = vc.viewIfLoaded;
+                if (vcView) findFirst(vcView);
+                vc = vc.presentedViewController;
+            }
+            if (first) break;
         }
         if (first) break;
     }
@@ -451,7 +471,17 @@ static BOOL anyVCInTransition(UIViewController *root) {
         UIWindow *win = [EnnioBootstrap keyWindow];
         if (win) findFirst(win);
     }
-    if (![first conformsToProtocol:@protocol(UIKeyInput)]) return NO;
+    return first;
+}
+
+// ─── Hardware key ───────────────────────────────────────────────────
+
++ (BOOL)pressHardwareKey:(int)keyCode {
+    UIResponder *first = EnnioFindKeyInputResponder();
+    if (!first) {
+        NSLog(@"[Ennio] pressHardwareKey: no UIKeyInput first responder");
+        return NO;
+    }
     id<UIKeyInput> input = (id<UIKeyInput>)first;
     switch (keyCode) {
         case 42: // backspace
@@ -621,43 +651,11 @@ static BOOL anyVCInTransition(UIViewController *root) {
 }
 
 + (BOOL)insertText:(NSString *)text {
-    __block UIResponder *first = nil;
-    void (^findFirst)(UIView *) = nil;
-    __block __weak void (^weakFind)(UIView *);
-    weakFind = findFirst = ^(UIView *v) {
-        if (first) return;
-        if (v.isFirstResponder) { first = v; return; }
-        for (UIView *sub in v.subviews) {
-            weakFind(sub);
-            if (first) return;
-        }
-    };
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if (![scene isKindOfClass:UIWindowScene.class]) continue;
-        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-            findFirst(w);
-            if (first) break;
-            // Walk the rootVC's presented-VC chain. UISheetPresentationController
-            // hosts its content view detached from the window's literal
-            // subview tree — the firstResponder lives there but
-            // findFirst(window) misses it. Bluesky's @discord/bottom-sheet
-            // routes every modal form (create-list, edit-profile, etc.)
-            // through this path.
-            UIViewController *vc = w.rootViewController;
-            while (vc && !first) {
-                UIView *vcView = vc.viewIfLoaded;
-                if (vcView) findFirst(vcView);
-                vc = vc.presentedViewController;
-            }
-            if (first) break;
-        }
-        if (first) break;
-    }
+    UIResponder *first = EnnioFindKeyInputResponder();
     if (!first) {
-        UIWindow *win = [EnnioBootstrap keyWindow];
-        if (win) findFirst(win);
+        NSLog(@"[Ennio] insertText: no UIKeyInput first responder");
+        return NO;
     }
-    if (![first conformsToProtocol:@protocol(UIKeyInput)]) return NO;
     id<UIKeyInput> input = (id<UIKeyInput>)first;
     [input insertText:text];
     return YES;
