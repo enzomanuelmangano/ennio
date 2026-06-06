@@ -20,7 +20,10 @@ export type Flags = {
   output?: string;
   lenient?: boolean;
   reporter?: string;
-  fast?: boolean;
+  /** --safe-mode: launch with all in-app hooks disabled (ENNIO_SAFE_MODE). */
+  safeMode?: boolean;
+  /** --quiet / -q: suppress per-step inline output (verbose is the default). */
+  quiet?: boolean;
 };
 
 export type ParsedArgs = {
@@ -30,7 +33,17 @@ export type ParsedArgs = {
 };
 
 const STRING_FLAGS = new Set(['port', 'output', 'reporter']);
-const BOOL_FLAGS = new Set(['verbose', 'trace', 'help', 'lenient', 'version', 'fast']);
+const BOOL_FLAGS = new Set([
+  'verbose',
+  'trace',
+  'help',
+  'lenient',
+  'version',
+  'safe-mode',
+  'quiet',
+]);
+// kebab-case CLI names → camelCase Flags keys.
+const FLAG_KEY_ALIASES: Record<string, string> = { 'safe-mode': 'safeMode' };
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
@@ -51,6 +64,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags.help = true;
       continue;
     }
+    if (a === '-q') {
+      flags.quiet = true;
+      continue;
+    }
     if (!a.startsWith('--')) {
       positional.push(a);
       continue;
@@ -66,7 +83,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       val = undefined;
     }
     if (BOOL_FLAGS.has(name)) {
-      (flags as Record<string, unknown>)[name] = true;
+      (flags as Record<string, unknown>)[FLAG_KEY_ALIASES[name] ?? name] = true;
     } else if (STRING_FLAGS.has(name)) {
       const v = val ?? argv[++i];
       if (name === 'port') flags.port = parseInt(v, 10);

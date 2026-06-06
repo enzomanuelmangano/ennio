@@ -157,6 +157,10 @@ static EnnioCommitTicker *g_commitTicker;
 }
 
 + (uint32_t)waitForIdleWithTimeout:(uint32_t)maxMs {
+    // Never started (ENNIO_DISABLE_SETTLE / safe mode): return
+    // immediately — [nil waitUntilDate:] is a no-op, so the loops
+    // below would busy-spin until maxMs.
+    if (!g_idleCondition) return 0;
     static const uint32_t kIdleCooldownMs = 50;
     uint64_t start = nowMs();
     [g_idleCondition lock];
@@ -181,6 +185,7 @@ static EnnioCommitTicker *g_commitTicker;
 }
 
 + (uint32_t)waitForCommitWithTimeout:(uint32_t)maxMs stableForMs:(uint32_t)stableMs {
+    if (!g_commitCondition) return 0; // settle disabled — no signal source
     uint64_t start = nowMs();
     [g_commitCondition lock];
     while (true) {
@@ -208,6 +213,7 @@ static EnnioCommitTicker *g_commitTicker;
 }
 
 + (uint32_t)waitForHashChangeSince:(uint64_t)baselineHash maxMs:(uint32_t)maxMs {
+    if (!g_commitCondition) return 0; // settle disabled — no signal source
     NSDate *start = [NSDate date];
     if (g_currentHash != baselineHash) return 0;
     [g_commitCondition lock];

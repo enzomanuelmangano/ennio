@@ -46,29 +46,101 @@ static bool attachPaperObserver(void) {
 }
 
 // =====================================================================
-// Fabric: swizzle RCTMountingManager.performTransaction:
+// Fabric: swizzle a mount/commit method — signature-checked.
 // =====================================================================
 //
-// Fabric's mount path lands in RCTMountingManager. The exact method
-// signature has shifted between RN versions; we look up the class and
-// any method whose selector starts with "performTransaction" or
-// "_performTransaction" and wrap it.
+// Fabric's mount path lands in RCTMountingManager and friends. The
+// exact method signature has shifted between RN versions, and several
+// candidates take C++ arguments (e.g. scheduleTransaction: takes a
+// std::shared_ptr<const MountingCoordinator>). Forwarding those
+// through an id-typed wrapper is undefined behaviour twice over:
 //
-// If the swizzle target is missing we silently bail. The CLI logs
-// attachmentDescription() so the user can see whether Fabric attached.
+//   1. ARC emits objc_retain on the wrapper's id parameter — a retain
+//      on an NSInteger or a shared_ptr slot is a retain on garbage.
+//   2. Non-trivial C++ by-value args are passed indirectly; a blind
+//      (id, SEL, id) cast only preserves them by ABI luck, and luck
+//      ran out on RN 0.85 (issue #44: SIGSEGV under injection).
+//
+// So before attaching we parse the method's type encoding and ONLY
+// swizzle when the shape is provably forwardable:
+//
+//   - void return, AND
+//   - zero args, or exactly one single-register pointer/integer arg
+//     (objects, blocks, SELs, raw pointers, ints, bools).
+//
+// The one-arg wrapper takes `void *` — bit-pattern passthrough, no
+// ARC traffic. Anything else (C++ structs, floats, multi-arg) is
+// skipped with a log line, and we fall through to the next candidate.
+// If nothing safe matches we attach nothing: waitForCommitSince
+// returns 0 and the CLI falls back to hash polling. Slower settle
+// beats a corrupted host app.
 
 static IMP g_origMountImp = NULL;
 static SEL g_mountSel = NULL;
 
-static void swizzledMountImp(id self, SEL _cmd, id arg) {
-    using FnT = void (*)(id, SEL, id);
+static void logCommitSignal(void) {
+    static int counter = 0;
+    if (++counter <= 5 || (counter % 50 == 0)) {
+        NSLog(@"[Ennio] RN commit signal #%d", counter);
+    }
+}
+
+static void swizzledMountImp0(id self, SEL _cmd) {
+    using FnT = void (*)(id, SEL);
+    if (g_origMountImp) {
+        ((FnT)g_origMountImp)(self, _cmd);
+    }
+    markCommit();
+    logCommitSignal();
+}
+
+static void swizzledMountImp1(id self, SEL _cmd, void *arg) {
+    using FnT = void (*)(id, SEL, void *);
     if (g_origMountImp) {
         ((FnT)g_origMountImp)(self, _cmd, arg);
     }
     markCommit();
-    static int counter = 0;
-    if (++counter <= 5 || (counter % 50 == 0)) {
-        NSLog(@"[Ennio] RN commit signal #%d", counter);
+    logCommitSignal();
+}
+
+/// Classify a method's type encoding. Returns the matching wrapper
+/// IMP, or NULL when the signature is not safe to forward.
+static IMP wrapperForEncoding(const char *enc) {
+    if (!enc) return NULL;
+    NSMethodSignature *sig = nil;
+    @try {
+        sig = [NSMethodSignature signatureWithObjCTypes:enc];
+    } @catch (NSException *e) {
+        return NULL; // unparseable (heavy C++ template encoding)
+    }
+    if (!sig) return NULL;
+    if (strcmp(sig.methodReturnType, "v") != 0) return NULL;
+    NSUInteger n = sig.numberOfArguments; // includes self + _cmd
+    if (n == 2) return (IMP)swizzledMountImp0;
+    if (n != 3) return NULL;
+    // Single-register pointer/integer encodings only. Structs `{`,
+    // unions `(`, and floats `f`/`d` are rejected — they don't
+    // survive a void* passthrough. C++ by-const-ref args encode as
+    // qualified pointers (`r^v` — e.g. Fabric's
+    // performTransaction:(MountingCoordinator::Shared const &)) and
+    // ARE single-register safe, so strip qualifier prefixes first.
+    const char *argType = [sig getArgumentTypeAtIndex:2];
+    while (*argType == 'r' || *argType == 'n' || *argType == 'N' || *argType == 'o' ||
+           *argType == 'O' || *argType == 'R' || *argType == 'V') {
+        argType++;
+    }
+    switch (argType[0]) {
+        case '@': // object (also covers blocks: "@?")
+        case '#': // Class
+        case ':': // SEL
+        case '^': // pointer
+        case '*': // char *
+        case 'q': case 'Q': case 'i': case 'I':
+        case 'l': case 'L': case 's': case 'S':
+        case 'c': case 'C': case 'B':
+            return (IMP)swizzledMountImp1;
+        default:
+            return NULL;
     }
 }
 
@@ -80,29 +152,40 @@ static bool tryAttachOnClass(Class cls, NSArray<NSString *> *selCandidates) {
     for (NSString *selName in selCandidates) {
         SEL s = NSSelectorFromString(selName);
         Method m = class_getInstanceMethod(cls, s);
-        if (m) {
-            g_origMountImp = method_getImplementation(m);
-            method_setImplementation(m, (IMP)swizzledMountImp);
-            g_mountSel = s;
-            g_fabricClassName = NSStringFromClass(cls);
-            g_fabricSelName = selName;
-            NSLog(@"[Ennio] RN observer: attached to %@ %@", g_fabricClassName, g_fabricSelName);
-            return true;
+        if (!m) continue;
+        const char *enc = method_getTypeEncoding(m);
+        IMP wrapper = wrapperForEncoding(enc);
+        if (!wrapper) {
+            NSLog(@"[Ennio] RN observer: skipping %@ %@ — unsafe signature \"%s\"",
+                  NSStringFromClass(cls), selName, enc ?: "?");
+            continue;
         }
+        g_origMountImp = method_getImplementation(m);
+        method_setImplementation(m, wrapper);
+        g_mountSel = s;
+        g_fabricClassName = NSStringFromClass(cls);
+        g_fabricSelName = selName;
+        NSLog(@"[Ennio] RN observer: attached to %@ %@ (encoding \"%s\")",
+              g_fabricClassName, g_fabricSelName, enc);
+        return true;
     }
     return false;
 }
 
 static bool attachFabricSwizzle(void) {
-    // RN Fabric / new-arch class candidates. Different RN versions land
-    // commits on different objects — try several, attach to the first
-    // that has a matching mount-style selector.
+    // RN class candidates. Different RN versions land commits on
+    // different objects — try several, attach to the first that has a
+    // selector with a provably-forwardable signature.
+    //
+    // Fabric candidates come FIRST: on New-Architecture apps the
+    // interop layer still loads RCTUIManager, so a Paper-first order
+    // attaches to a selector that never fires there — the observer
+    // looks attached while settle silently runs on the hash-polling
+    // fallback. On true Paper apps the Fabric classes don't exist and
+    // we fall through to RCTUIManager as before. Attaching Fabric's
+    // mount methods is safe now that signatures are encoding-checked
+    // (C++ by-value args are rejected, const& pointers forward as-is).
     NSArray *classMethods = @[
-        // Paper (legacy bridge). flushUIBlocksWithCompletion: runs every
-        // batch of UIView mutations RN computes — equivalent to one
-        // commit. Selector is stable across RN ≥0.60 paper builds.
-        @[ @"RCTUIManager", @[ @"flushUIBlocksWithCompletion:",
-                               @"_layoutAndMount" ] ],
         // Fabric / new arch.
         @[ @"RCTMountingManager", @[ @"scheduleTransaction:",
                                      @"performTransaction:",
@@ -112,6 +195,11 @@ static bool attachFabricSwizzle(void) {
         @[ @"RCTSurfacePresenter", @[ @"_performMountInstructions:rootTag:",
                                       @"runtimeSchedulerDidPerformWork" ] ],
         @[ @"RCTScheduler", @[ @"runtimeSchedulerTaskDone" ] ],
+        // Paper (legacy bridge). flushUIBlocksWithCompletion: runs every
+        // batch of UIView mutations RN computes — equivalent to one
+        // commit. Selector is stable across RN ≥0.60 paper builds.
+        @[ @"RCTUIManager", @[ @"flushUIBlocksWithCompletion:",
+                               @"_layoutAndMount" ] ],
     ];
     for (NSArray *pair in classMethods) {
         Class cls = NSClassFromString(pair[0]);

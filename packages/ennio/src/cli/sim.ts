@@ -11,7 +11,8 @@
 // No XCTest, no WebDriverAgent, no Hermes Inspector page-discovery.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 
 /**
@@ -164,9 +165,48 @@ export function findDylib(): string | null {
     resolve(dirname(__filename), 'libennio.dylib'),
   ];
   for (const p of candidates) {
-    if (existsSync(p)) return p;
+    if (!existsSync(p)) continue;
+    verifyDylibIntegrity(p);
+    return p;
   }
   return null;
+}
+
+/**
+ * Verify a dylib's SHA-256 against the manifest.json sitting next to
+ * it, when one exists. Scope is deliberate:
+ *
+ *   - <pkg>/prebuilt/libennio.dylib ships WITH a manifest — a hash
+ *     mismatch means a corrupted install or a tampered binary we're
+ *     about to inject into the user's app. Refuse loudly.
+ *   - /tmp/ennio-build (local dev builds) and ENNIO_DYLIB_PATH have no
+ *     manifest next to them — nothing to check, returns silently.
+ *
+ * Exported for tests.
+ */
+export function verifyDylibIntegrity(dylibPath: string, manifestPath?: string): void {
+  const manifest = manifestPath ?? join(dirname(dylibPath), 'manifest.json');
+  if (!existsSync(manifest)) return;
+  let expected: string | undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(manifest, 'utf-8')) as {
+      dylib?: { file?: string; sha256?: string };
+    };
+    expected = parsed.dylib?.sha256;
+  } catch {
+    return; // unreadable manifest — don't block on our own packaging bug
+  }
+  if (!expected) return;
+  const actual = createHash('sha256').update(readFileSync(dylibPath)).digest('hex');
+  if (actual !== expected) {
+    throw new Error(
+      `libennio.dylib SHA-256 mismatch at ${dylibPath}\n` +
+        `  expected ${expected}\n  actual   ${actual}\n` +
+        'The prebuilt dylib does not match the package manifest — corrupted ' +
+        'install or tampered binary. Reinstall @reactiive/ennio. ' +
+        'To inject a custom build instead, set ENNIO_DYLIB_PATH.',
+    );
+  }
 }
 
 /**

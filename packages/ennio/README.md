@@ -21,35 +21,53 @@ bunx ennio test e2e/01-auth-flow.yaml      # one flow
 bunx ennio test e2e/                       # every *.yaml in the directory
 ```
 
-No config plugin, no `expo prebuild`, no pod install. Ennio ships
-per-RN-version prebuilt dylibs in the npm tarball; the CLI injects
-the matching slice at simulator launch time.
+No config plugin, no `expo prebuild`, no pod install. Ennio ships a
+single universal prebuilt dylib in the npm tarball; the CLI injects
+it at simulator launch time.
 
 ## Requirements
 
-- React Native ≥ 0.83 (New Architecture, Fabric)
-- iOS 17+ simulator
-- Xcode 16+, Node 18+ (no extra toolchain — touches use Xcode's own
-  CoreSimulator / SimulatorKit frameworks; no Homebrew or pip)
+- A React Native iOS app — architecture-agnostic. The dylib has no
+  RN-version-specific linkage; both Paper and Fabric (New
+  Architecture) commit signals are supported.
+- A **dev / debug simulator build** of your app (e.g. `expo run:ios`
+  or an Xcode Debug scheme). The dylib refuses to start in App Store
+  and Enterprise distribution builds.
+- iOS simulator (tested on iOS 17–18; bleeding-edge OS/RN combos may
+  hit injection issues — see the issue tracker)
+- Xcode 16+, Node 18+ — and nothing else. Touches use Xcode's own
+  CoreSimulator / SimulatorKit frameworks; no Homebrew, no pip, no
+  idb.
 
 ## How it works
 
-The CLI sets `DYLD_INSERT_LIBRARIES` on the simulator's launchctl env
-to a tiny RN-agnostic shim (`libennio-shim.dylib`, ~50 KB). The shim
-loads into every process on the sim but only activates when:
+The CLI launches your app with `DYLD_INSERT_LIBRARIES` pointing at the
+prebuilt `libennio.dylib` (set via `SIMCTL_CHILD_*` on `simctl launch`,
+so only the target app inherits it). At `+load` time the dylib gates
+itself:
 
-1. `RCTInstance` class is present (skips non-RN apps + system daemons)
-2. Bundle id matches `ENNIO_TARGET_BUNDLE_ID` (skips other RN apps)
-3. No App Store receipt (prevents accidental device injection)
+1. The host must be an iOS app bundle (`CFBundlePackageType == APPL`
+   with a bundle id) — skips simctl helpers and system daemons.
+2. No App Store / Enterprise distribution markers — the dylib refuses
+   to wire its socket in production-looking builds, on top of the
+   build-time exclusion from Release configurations.
 
-When all three pass, the shim `dlopen`s the per-RN-version slice
-(`libennio-rn<X.Y.Z>-sim.dylib`, ~530 KB). The slice's `+load`
-bootstraps a Unix socket server, swizzles `setAccessibilityIdentifier:`
-for O(1) testID lookup, and installs React commit observers for
-frame-level settle detection.
+When the gates pass, the dylib bootstraps a Unix socket server,
+swizzles `setAccessibilityIdentifier:` for O(1) testID lookup, and
+installs a React commit observer for frame-level settle detection —
+Fabric mount methods preferred, Paper as fallback. Every swizzle
+candidate is signature-checked before attaching (methods with
+non-forwardable C++ signatures are skipped); if nothing safe matches,
+settle falls back to view-hash polling.
 
-The CLI verifies each dylib's SHA-256 against `prebuilt/manifest.json`
-before injection; a mismatch refuses to proceed.
+Before injecting, the CLI verifies the prebuilt dylib's SHA-256
+against `prebuilt/manifest.json` and refuses on mismatch. Local dev
+builds (`/tmp/ennio-build/`) and explicit `ENNIO_DYLIB_PATH` overrides
+skip the check.
+
+If an in-app hook ever conflicts with your stack, `--safe-mode` (or
+the granular `ENNIO_DISABLE_*` env flags) disables them and falls back
+to polling-based settle.
 
 ### Discovery
 

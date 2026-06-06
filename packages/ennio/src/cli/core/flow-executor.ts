@@ -11,6 +11,7 @@
 // against a mock connection.
 
 import { registerAllHandlers } from '../commands/handlers';
+import { diagnoseSocketFailure } from '../crash-detector';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
@@ -181,11 +182,22 @@ export class FlowExecutor {
 
         const dt = Date.now() - t0;
         stepTimings.push({ step: i + 1, ms: dt, cmd: describeCommand(cmd) });
-        this.reporter.stepFail(i + 1, cmd, err as Error, dt);
+        // Socket-death errors are symptoms; check whether the app
+        // actually crashed under injection and say so (issue #44).
+        let reason = msg;
+        if (
+          /socket not connected|socket closed|socket reconnect failed|socket request timeout/i.test(
+            msg,
+          )
+        ) {
+          const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, flowStart);
+          if (diagnosis) reason = `${msg}\n${diagnosis}`;
+        }
+        this.reporter.stepFail(i + 1, cmd, new Error(reason), dt);
         failure = {
           step: i + 1,
           command: describeCommand(cmd),
-          reason: msg,
+          reason,
           screenshotPath: findLatestScreenshot(flowStart),
         };
 

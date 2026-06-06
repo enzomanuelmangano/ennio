@@ -85,6 +85,39 @@ static NSString *ennioDistributionName(EnnioDistribution d) {
     }
 }
 
+// =====================================================================
+// Kill switches
+// =====================================================================
+//
+// Per-hook env flags so a user hitting an injection crash (issue #44)
+// can bisect which hook conflicts with their app — and keep testing
+// with the rest. Set via `launchctl setenv` on the simulator (same
+// channel as ENNIO_SOCKET_PATH; SIMCTL_CHILD_* drops non-DYLD names).
+//
+//   ENNIO_SAFE_MODE            — all of the below at once
+//   ENNIO_DISABLE_TESTID_INDEX — no UIView setAccessibilityIdentifier:
+//                                swizzle (finders fall back to walks)
+//   ENNIO_DISABLE_RN_OBSERVER  — no Fabric mount swizzle / Paper
+//                                observer (settle falls back to
+//                                hash polling)
+//   ENNIO_DISABLE_SETTLE       — no CA commit ticker
+//
+// The socket listener itself has no flag: without it the CLI can't
+// talk to the app at all, and it installs no hooks into app code.
+
+static BOOL ennioFlag(const char *name) {
+    const char *v = getenv(name);
+    return v != NULL && v[0] != '\0' && strcmp(v, "0") != 0;
+}
+
+static BOOL ennioHookDisabled(const char *flag) {
+    if (ennioFlag("ENNIO_SAFE_MODE")) return YES;
+    if (ennioFlag(flag)) {
+        return YES;
+    }
+    return NO;
+}
+
 static BOOL g_ennioReady = NO;
 static __weak UIWindow *g_ennioKeyWindow = nil;
 
@@ -157,7 +190,11 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
     // bootstrap. Any UIView.accessibilityIdentifier assignment after
     // this call will land in the index — including RN's first commit
     // wave that runs on the JS thread shortly after this point.
-    [EnnioTestIDIndex start];
+    if (ennioHookDisabled("ENNIO_DISABLE_TESTID_INDEX")) {
+        NSLog(@"[Ennio] testID index DISABLED via env flag");
+    } else {
+        [EnnioTestIDIndex start];
+    }
 
     // Socket listener thread up immediately. Accepts will block until the
     // CLI connects — fine. Handlers will reject most ops with
@@ -180,8 +217,16 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
     // via +keyWindow re-resolves if cached value is nil.
     g_ennioKeyWindow = resolveKeyWindow();
 
-    [EnnioSettle start];
-    [EnnioReactObserver start];
+    if (ennioHookDisabled("ENNIO_DISABLE_SETTLE")) {
+        NSLog(@"[Ennio] settle observer DISABLED via env flag");
+    } else {
+        [EnnioSettle start];
+    }
+    if (ennioHookDisabled("ENNIO_DISABLE_RN_OBSERVER")) {
+        NSLog(@"[Ennio] RN observer DISABLED via env flag");
+    } else {
+        [EnnioReactObserver start];
+    }
 
     g_ennioReady = YES;
     NSLog(@"[Ennio] Bootstrap ready — socket dispatching commands (RN observer: %@)",

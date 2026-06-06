@@ -15,7 +15,8 @@ Usage:
 
 Common options:
   --version, -V  print version and exit
-  --verbose, -v  detailed command execution
+  --verbose, -v  detailed command execution (on by default)
+  --quiet, -q    suppress per-step output
   --trace        emit a trace marker between commands
 
 Environment:
@@ -29,7 +30,7 @@ const PER_COMMAND: Record<string, string> = {
 Runs Maestro YAML flows against the booted iOS simulator. If the app
 isn't running, ennio auto-launches it via the YAML's \`appId\`.
 
-Options: --port, --verbose, --trace`,
+Options: --port, --verbose (default), --quiet, --trace`,
   hierarchy: `ennio hierarchy
 
 Dumps the in-app Fabric shadow tree as JSON. Useful for figuring out

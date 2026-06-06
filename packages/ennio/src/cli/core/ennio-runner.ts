@@ -17,6 +17,7 @@
 
 import { execFileSync } from 'node:child_process';
 
+import { diagnoseSocketFailure } from '../crash-detector';
 import { enableAccessibility } from '../sim';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
@@ -35,8 +36,10 @@ export interface EnnioRunnerOptions {
   reporter?: Reporter;
   verbose?: boolean;
   lenient?: boolean;
-  /** Route taps/swipes through in-process dylib ops, HID fallback. */
-  fast?: boolean;
+  /** Launch with ENNIO_SAFE_MODE set — the dylib skips all in-app
+   *  hooks (testID index, settle ticker, RN observer). Escape hatch
+   *  for injection conflicts (issue #44). */
+  safeMode?: boolean;
   /** Reporter kind when no explicit reporter is passed. Default 'pretty'. */
   reporterKind?: 'pretty' | 'json';
 }
@@ -47,7 +50,7 @@ export class EnnioRunner {
   private reporter: Reporter;
   private verbose: boolean;
   private lenient: boolean;
-  private fast: boolean;
+  private safeMode: boolean;
   private driver: GestureDriver;
 
   constructor(opts: EnnioRunnerOptions = {}) {
@@ -55,8 +58,8 @@ export class EnnioRunner {
     this.dylibPath = opts.dylibPath;
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
-    this.fast = opts.fast ?? false;
-    this.driver = createDriver(this.fast);
+    this.safeMode = opts.safeMode ?? false;
+    this.driver = createDriver(false);
     this.reporter =
       opts.reporter ?? pickReporter({ kind: opts.reporterKind ?? 'pretty', verbose: this.verbose });
   }
@@ -107,6 +110,7 @@ export class EnnioRunner {
       udid: this.udid,
       bundleId: flow.appId,
       dylibPath: this.dylibPath ?? null,
+      safeMode: this.safeMode,
     });
 
     // Make SwiftUI / native apps readable by ennio's in-process AX
@@ -119,12 +123,16 @@ export class EnnioRunner {
       if (!(await connection.open(2_000))) {
         // App isn't running with the dylib loaded. Launch + retry.
         session.terminate();
+        const launchedAt = Date.now();
         session.launch();
         if (!(await connection.open(15_000))) {
+          const diagnosis = diagnoseSocketFailure(session.udid, session.bundleId, launchedAt);
           throw new Error(
             'Auto-launched the app with DYLD injection but libennio socket ' +
-              'never came up. Check the app is a Debug build and the dylib ' +
-              'path is correct.',
+              'never came up.' +
+              (diagnosis
+                ? `\n${diagnosis}`
+                : ' Check the app is a Debug build and the dylib path is correct.'),
           );
         }
         await this.waitBootstrapReady(connection);
@@ -138,15 +146,7 @@ export class EnnioRunner {
         lenient: this.lenient,
         driver: this.driver,
       });
-      if (this.fast) this.driver.resetStats();
-      const result = await executor.run(flow);
-      if (this.fast) {
-        const s = this.driver.stats();
-        process.stderr.write(
-          `[fast] ${flow.name ?? flow.filePath}: ${s.hits} in-process, ${s.fallbacks} HID fallbacks\n`,
-        );
-      }
-      return result;
+      return await executor.run(flow);
     } finally {
       connection.close();
     }

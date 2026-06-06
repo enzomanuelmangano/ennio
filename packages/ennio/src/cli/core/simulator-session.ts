@@ -15,11 +15,14 @@ export interface SimulatorSessionOptions {
   udid?: string;
   bundleId: string;
   dylibPath?: string | null;
+  /** Launch with ENNIO_SAFE_MODE — dylib skips all in-app hooks. */
+  safeMode?: boolean;
 }
 
 export class SimulatorSession {
   readonly udid: string;
   readonly bundleId: string;
+  readonly safeMode: boolean;
   dylibPath: string | null;
 
   constructor(opts: SimulatorSessionOptions) {
@@ -30,6 +33,7 @@ export class SimulatorSession {
     this.udid = udid;
     this.bundleId = opts.bundleId;
     this.dylibPath = opts.dylibPath ?? null;
+    this.safeMode = opts.safeMode ?? false;
   }
 
   /**
@@ -68,6 +72,19 @@ export class SimulatorSession {
       ],
       { stdio: 'pipe' },
     );
+    // launchctl env is sim-wide and persists across launches — set OR
+    // clear ENNIO_SAFE_MODE explicitly so a previous safe-mode run
+    // can't silently leak into this one.
+    const safeModeArgs = this.safeMode
+      ? ['setenv', 'ENNIO_SAFE_MODE', '1']
+      : ['unsetenv', 'ENNIO_SAFE_MODE'];
+    try {
+      execFileSync('xcrun', ['simctl', 'spawn', this.udid, 'launchctl', ...safeModeArgs], {
+        stdio: 'pipe',
+      });
+    } catch {
+      /* unsetenv on a never-set name can fail on some launchctl builds */
+    }
     execFileSync(
       'xcrun',
       ['simctl', 'launch', '--terminate-running-process', this.udid, this.bundleId, ...args],
