@@ -16,6 +16,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { getScreenSize, trace } from './hid';
+import { verifyPrebuiltIntegrity } from './sim';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -32,7 +33,10 @@ function developerDir(): string {
   return cachedDeveloperDir || '/Applications/Xcode.app/Contents/Developer';
 }
 
-/** Locate the prebuilt `enniohid` helper. Dev build first, then pkg. */
+/** Locate the prebuilt `enniohid` helper. Dev build first, then pkg.
+ *  Package candidates are SHA-256-verified against the adjacent
+ *  manifest.json (same scheme as the dylib); env override and dev
+ *  builds skip the check. */
 function findHelper(): string {
   const candidates = [
     process.env.ENNIO_HID_HELPER,
@@ -40,29 +44,64 @@ function findHelper(): string {
     join(dirname(__dirname), 'prebuilt', 'enniohid'),
     join(dirname(__dirname), '..', 'prebuilt', 'enniohid'),
   ].filter(Boolean) as string[];
-  for (const c of candidates) if (existsSync(c)) return c;
+  for (const c of candidates) {
+    if (!existsSync(c)) continue;
+    verifyPrebuiltIntegrity(c, 'hid');
+    return c;
+  }
   throw new Error(
     'enniohid helper not found (looked in /tmp/ennio-build and prebuilt/). ' +
       'Set ENNIO_HID_HELPER or build native-hid/helper.',
   );
 }
 
-/** Owns one persistent enniohid child + a serialized command queue. */
+/** Owns one persistent enniohid child + a serialized command queue.
+ *
+ * Replies are correlated to commands BY ORDER (one "ok" line per
+ * command). That invariant is only safe if a timed-out command tears
+ * the whole process down — otherwise its late reply would shift every
+ * subsequent waiter by one, silently desynchronizing the queue. So:
+ * timeout → kill + respawn on next use; helper exit → reject all
+ * pending waiters immediately instead of letting each hang its timer.
+ */
 class HelperProcess {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private ready: Promise<void> | null = null;
   private buf = '';
-  private waiters: ((line: string) => void)[] = [];
+  private waiters: { resolve: (line: string) => void; reject: (e: Error) => void }[] = [];
 
   constructor(private readonly udid: string) {}
+
+  private rejectAllPending(reason: string): void {
+    const pending = this.waiters;
+    this.waiters = [];
+    for (const w of pending) w.reject(new Error(reason));
+  }
 
   private start(): Promise<void> {
     if (this.ready) return this.ready;
     this.ready = new Promise<void>((resolve, reject) => {
       const bin = findHelper();
       trace(`[enniohid] spawning helper ${bin} for ${this.udid}`);
+      const dev = developerDir();
       const proc = spawn(bin, [this.udid], {
-        env: { ...process.env, DEVELOPER_DIR: developerDir() },
+        env: {
+          ...process.env,
+          DEVELOPER_DIR: dev,
+          // The prebuilt helper's LC_RPATH for SimulatorKit bakes the
+          // BUILD machine's Xcode path (CI uses /Applications/Xcode_X.Y
+          // .app); resolve the private frameworks against THIS
+          // machine's developer dir instead. CoreSimulator's
+          // /Library/Developer path is machine-independent but included
+          // for completeness.
+          DYLD_FRAMEWORK_PATH: [
+            `${dev}/Library/PrivateFrameworks`,
+            '/Library/Developer/PrivateFrameworks',
+            process.env.DYLD_FRAMEWORK_PATH,
+          ]
+            .filter(Boolean)
+            .join(':'),
+        },
       });
       this.proc = proc;
       proc.stdout.setEncoding('utf8');
@@ -75,13 +114,18 @@ class HelperProcess {
       proc.on('exit', (code) => {
         this.proc = null;
         this.ready = null;
+        // Don't leave in-flight commands hanging on their 5s timers.
+        this.rejectAllPending(`enniohid helper exited (code ${code})`);
         if (process.env.ENNIO_PHASE_TRACE)
           process.stderr.write(`[enniohid] helper exited ${code}\n`);
       });
       // First "ready" line resolves startup.
-      this.waiters.push((line) => {
-        if (line === 'ready') resolve();
-        else reject(new Error(`enniohid unexpected first line: ${line}`));
+      this.waiters.push({
+        resolve: (line) => {
+          if (line === 'ready') resolve();
+          else reject(new Error(`enniohid unexpected first line: ${line}`));
+        },
+        reject,
       });
     });
     return this.ready;
@@ -94,7 +138,7 @@ class HelperProcess {
       const line = this.buf.slice(0, i).trim();
       this.buf = this.buf.slice(i + 1);
       const w = this.waiters.shift();
-      if (w) w(line);
+      if (w) w.resolve(line);
     }
   }
 
@@ -104,10 +148,22 @@ class HelperProcess {
     const proc = this.proc;
     if (!proc) throw new Error('enniohid helper not running');
     return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`enniohid timeout: ${line}`)), 5000);
-      this.waiters.push((reply) => {
-        clearTimeout(timer);
-        resolve(reply);
+      const timer = setTimeout(() => {
+        // A late reply for THIS command would resolve the NEXT
+        // command's waiter — order-correlated replies can't survive a
+        // timeout. Kill the helper; it respawns lazily on next use.
+        this.close();
+        reject(new Error(`enniohid timeout: ${line}`));
+      }, 5000);
+      this.waiters.push({
+        resolve: (reply) => {
+          clearTimeout(timer);
+          resolve(reply);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
       });
       proc.stdin.write(line + '\n');
     });
@@ -124,6 +180,7 @@ class HelperProcess {
       this.proc = null;
       this.ready = null;
     }
+    this.rejectAllPending('enniohid helper closed');
   }
 }
 
@@ -143,9 +200,16 @@ export function shutdownEnnioHid(): void {
   helpers.clear();
 }
 
-// Never leave a helper process behind.
-for (const sig of ['exit', 'SIGINT', 'SIGTERM'] as const) {
-  process.on(sig, () => shutdownEnnioHid());
+// Never leave a helper process behind. 'exit' is the natural-teardown
+// hook; for signals we must re-exit ourselves — registering a handler
+// disables Node's default kill, so without the explicit exit a Ctrl-C
+// would leave the CLI running.
+process.on('exit', () => shutdownEnnioHid());
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    shutdownEnnioHid();
+    process.exit(sig === 'SIGINT' ? 130 : 143);
+  });
 }
 
 export class EnnioHidClient {
@@ -216,15 +280,28 @@ export class EnnioHidClient {
   async typeText(text: string): Promise<void> {
     const SHIFT = 225; // left-shift USB usage
     trace(`[enniohid] typeText ${JSON.stringify(text)}`);
+    const skipped: string[] = [];
     for (const ch of text) {
       const m = charToUsage(ch);
-      if (!m) continue;
+      if (!m) {
+        skipped.push(ch);
+        continue;
+      }
       if (m.shift) await this.h.cmd(`key ${SHIFT} 1`);
       await this.h.cmd(`key ${m.usage} 1`);
       await sleep(8);
       await this.h.cmd(`key ${m.usage} 2`);
       if (m.shift) await this.h.cmd(`key ${SHIFT} 2`);
       await sleep(14); // inter-key gap — keys sent too fast get dropped
+    }
+    if (skipped.length) {
+      // US-layout HID map only covers ASCII; unicode/emoji need the
+      // dylib's insert_text path. Don't silently type a different
+      // string than the flow asked for.
+      process.stderr.write(
+        `[enniohid] typeText skipped ${skipped.length} unmappable char(s): ` +
+          `${JSON.stringify([...new Set(skipped)].join(''))} — use insert_text for non-ASCII\n`,
+      );
     }
   }
 }

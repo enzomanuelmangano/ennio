@@ -49,6 +49,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  build-hid:
+    name: Build enniohid helper (in-house HID)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+      - name: Build enniohid
+        run: |
+          bash packages/ennio/scripts/build-hid-helper.sh
+          cp /tmp/ennio-build/enniohid packages/ennio/prebuilt/enniohid
+      - name: Upload enniohid artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hid-helper
+          path: packages/ennio/prebuilt/enniohid
+          if-no-files-found: error
+          retention-days: 7
+
   build-dylib:
     name: Build universal dylib
     runs-on: macos-15
@@ -108,7 +127,7 @@ jobs:
 
   publish:
     name: Publish to npm (OIDC trusted publishing)
-    needs: [build-shim, build-dylib]
+    needs: [build-shim, build-dylib, build-hid]
     runs-on: macos-15
     if: startsWith(github.ref, 'refs/tags/v')
     # `release` is a protected GitHub Environment: it requires a manual
@@ -142,6 +161,14 @@ jobs:
         with:
           name: dylib-main
           path: packages/ennio/prebuilt
+      - name: Download enniohid
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hid-helper
+          path: packages/ennio/prebuilt
+      - name: Restore enniohid exec bit
+        # upload/download-artifact does not preserve file modes.
+        run: chmod +x packages/ennio/prebuilt/enniohid
 
       - name: Regenerate manifest from downloaded artifacts
         run: bash packages/ennio/scripts/regen-manifest.sh

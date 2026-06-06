@@ -4,11 +4,33 @@
 // see indigo_touch.h) and sends it through SimulatorKit's
 // SimDeviceLegacyHIDClient. No external daemon.
 //
-// Spike form: posts a single Down→Up at a normalized point to prove
-// the seam end to end. Becomes a persistent stdin-driven process once
-// proven.
+// Why host-side, not in-process: synthesizing IOHIDEvents inside the
+// injected dylib and posting them to UIApplication (_enqueueHIDEvent: /
+// _handleHIDEvent:) does NOT work on the modern simulator — every
+// variant was tried (senderID, IsDisplayIntegrated, Range/Touch fields,
+// parent coords, Position masks, both delivery selectors) and a swizzle
+// on -[UIApplication sendEvent:] proved zero touches reach UIKit. Sim
+// touch input is gated to the host Indigo→backboard channel, so real
+// touches must originate host-side via CoreSimulator.
 //
-// Usage: enniohid <UDID> <xNorm> <yNorm>
+// Stability posture: every private-API lookup below is guarded and
+// die()s with a precise message — a future Xcode renaming a symbol
+// fails loudly at spawn (the CLI surfaces the first non-"ready" line),
+// never silently. The Indigo struct layout is vendored MIT source
+// (battle-tested across Xcode versions in FBSimulatorControl), not a
+// reverse-engineered guess. The send goes through the @objc-bridged
+// sendWithMessage:freeWhenDone:completionQueue:completion: — the plain
+// send(message:) variant does not flush. Wire size 0x140 (320),
+// 2-payload digitizer form.
+//
+// Process model: persistent, one per UDID. The CLI feeds newline
+// commands on stdin (down/move/up/key/ping/quit, normalized [0,1]
+// top-left coords) and reads one "ok" line per command. SimulatorKit
+// resolves via @rpath — the spawner sets DYLD_FRAMEWORK_PATH for this
+// machine's DEVELOPER_DIR, since the prebuilt's baked rpath points at
+// the build machine's Xcode path.
+//
+// Usage: enniohid <UDID>   (then newline cmds on stdin)
 
 import Foundation
 

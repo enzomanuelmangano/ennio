@@ -30,11 +30,17 @@ if [[ ! -f "$DYLIB" ]]; then
     exit 3
 fi
 
+HID="$DIR/enniohid"
+if [[ ! -f "$HID" ]]; then
+    echo "Missing enniohid at $HID. Run build-hid-helper.sh first." >&2
+    exit 4
+fi
+
 OUT="$DIR/manifest.json"
 cat > "$OUT" <<MANIFEST
 {
-  "\$comment": "CLI verifies SHA-256 before dlopen. Single universal dylib — no per-RN-version slices.",
-  "schema": 2,
+  "\$comment": "CLI verifies SHA-256 before dlopen / helper spawn. Single universal dylib — no per-RN-version slices.",
+  "schema": 3,
   "shim": {
     "file": "libennio-shim.dylib",
     "sha256": "$(sha_for "$SHIM")"
@@ -42,6 +48,10 @@ cat > "$OUT" <<MANIFEST
   "dylib": {
     "file": "libennio.dylib",
     "sha256": "$(sha_for "$DYLIB")"
+  },
+  "hid": {
+    "file": "enniohid",
+    "sha256": "$(sha_for "$HID")"
   }
 }
 MANIFEST

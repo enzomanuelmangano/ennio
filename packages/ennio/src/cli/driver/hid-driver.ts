@@ -108,6 +108,10 @@ export class HidDriver implements GestureDriver {
             break;
           }
         }
+        // Pace the poll — without this the loop saturates the control
+        // socket with back-to-back frame_hash round-trips (hundreds per
+        // tap on a slow commit). 30ms ≈ two display frames.
+        await sleep(30);
       }
       if (!committed) {
         // No commit fired — likely a no-op tap; fall back to hash-change.

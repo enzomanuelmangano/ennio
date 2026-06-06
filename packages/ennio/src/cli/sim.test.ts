@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { verifyDylibIntegrity } from './sim';
+import { verifyDylibIntegrity, verifyPrebuiltIntegrity } from './sim';
 
 describe('verifyDylibIntegrity', () => {
   let dir: string;
@@ -50,6 +50,21 @@ describe('verifyDylibIntegrity', () => {
   it('is a no-op when the manifest has no dylib hash', () => {
     writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ schema: 2 }));
     expect(() => verifyDylibIntegrity(dylib)).not.toThrow();
+  });
+
+  it('verifies other artifact keys (hid) independently of dylib', () => {
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      JSON.stringify({
+        schema: 3,
+        dylib: { file: 'libennio.dylib', sha256: '0'.repeat(64) }, // wrong on purpose
+        hid: { file: 'enniohid', sha256: goodSha },
+      }),
+    );
+    // Same bytes checked under the hid key pass even though the dylib
+    // entry would fail — keys are independent.
+    expect(() => verifyPrebuiltIntegrity(dylib, 'hid')).not.toThrow();
+    expect(() => verifyPrebuiltIntegrity(dylib, 'dylib')).toThrow(/SHA-256 mismatch/);
   });
 
   it('verifies the real prebuilt dylib against the shipped manifest', () => {

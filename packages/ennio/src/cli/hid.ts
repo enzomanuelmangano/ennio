@@ -26,8 +26,8 @@ export function getDylibClient(udid: string): EnnioSocketClient {
 // simulator via CoreSimulator Indigo (SimulatorKit SimDeviceLegacyHID
 // Client + a vendored MIT Indigo builder). No external daemon. (The
 // earlier in-process IOHIDEvent injector — the dylib's hid_* ops — is
-// dead: the simulator never dispatches in-process HID; see
-// native-hid/DESIGN.md.)
+// dead: the simulator never dispatches in-process HID; see the trail
+// in native-hid/helper/enniohid.swift's header.)
 const ennioHidCache = new Map<string, EnnioHidClient>();
 
 interface HidBackend {

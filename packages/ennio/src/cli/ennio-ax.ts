@@ -123,8 +123,14 @@ export function shutdownAxHelpers(): void {
   for (const h of axHelpers.values()) h.close();
   axHelpers.clear();
 }
-for (const sig of ['exit', 'SIGINT', 'SIGTERM'] as const) {
-  process.on(sig, () => shutdownAxHelpers());
+// 'exit' covers natural teardown; signal handlers must re-exit
+// explicitly (registering one disables Node's default kill).
+process.on('exit', () => shutdownAxHelpers());
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    shutdownAxHelpers();
+    process.exit(sig === 'SIGINT' ? 130 : 143);
+  });
 }
 
 /**
