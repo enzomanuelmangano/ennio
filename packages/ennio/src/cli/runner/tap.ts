@@ -289,6 +289,17 @@ export async function execTapOn(
     Math.abs(a.w - b.w) < 1 &&
     Math.abs(a.h - b.h) < 1;
   let stableRect: Rect = rect;
+  // Scroll-idle gate FIRST. A HID touch delivered while any scroll
+  // view is mid-scroll (keyboard-driven setContentOffset, momentum)
+  // is swallowed by the scroll view as "stop scrolling" and never
+  // reaches the target — the tap "lands" but focuses nothing. The
+  // in-house HID path is fast enough to beat those animations (idb's
+  // gRPC latency used to accidentally outlive them), so wait for the
+  // signal, not luck. Soft cap: a continuously-scrolling screen falls
+  // through to the retap self-heal.
+  await timedAsync(ctx, 'tap.waitScrollIdle', () =>
+    ctx.client.call('wait_scroll_idle', { maxMs: 1200 }).catch(() => undefined),
+  );
   // Position-stability gate. Preferred: the driver's signal-based
   // steadiness (wait_view_steady — frame-locked native sampling +
   // CALayer animation introspection; immune to spring inflection

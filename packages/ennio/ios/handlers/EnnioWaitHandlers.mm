@@ -160,6 +160,79 @@ void RegisterEnnioWaitHandlers(void) {
         return std::string("{\"active\":") + (active ? "true" : "false") + "}";
     });
 
+    // Scroll-idle gate. A touch delivered while ANY UIScrollView is
+    // mid-scroll gets swallowed by the scroll view as "stop scrolling"
+    // and never reaches the subview — taps fired right after a
+    // keyboard-driven setContentOffset(animated:) focus NOTHING (the
+    // checkout-form regression: fast in-house HID beats the animation
+    // that idb's gRPC latency used to accidentally outlive). Idle =
+    // no scroll view tracking/dragging/decelerating AND no scroll
+    // view's bounds animating (presentation == model — catches
+    // setContentOffset:animated: and keyboard avoidance), held for 2
+    // consecutive ~16ms samples. Returns {ok, elapsedMs}; ok:false
+    // when the budget expires (continuous scroller — caller proceeds,
+    // the tap-retry self-heal is the backstop).
+    EnnioControlSocket::registerHandler("wait_scroll_idle", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 1200);
+        NSDate *start = [NSDate date];
+        NSDate *deadline = [start dateByAddingTimeInterval:maxMs / 1000.0];
+        int streak = 0;
+        BOOL idle = NO;
+
+        while ([deadline timeIntervalSinceNow] > 0) {
+            BOOL scrolling = NO;
+            EnnioOnMainVoid([&scrolling]() {
+                // Walk every window's view tree for scroll views.
+                NSMutableArray<UIView *> *stack = [NSMutableArray new];
+                for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                    if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                    for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                        if (!w.hidden) [stack addObject:w];
+                    }
+                }
+                while (stack.count && !scrolling) {
+                    UIView *v = stack.lastObject;
+                    [stack removeLastObject];
+                    if ([v isKindOfClass:UIScrollView.class]) {
+                        UIScrollView *sv = (UIScrollView *)v;
+                        if (sv.isTracking || sv.isDragging || sv.isDecelerating) {
+                            scrolling = YES;
+                            break;
+                        }
+                        // setContentOffset:animated: / keyboard avoidance
+                        // animate bounds.origin — model jumps to final,
+                        // presentation lags while the animation runs.
+                        CALayer *pres = sv.layer.presentationLayer;
+                        if (pres) {
+                            CGPoint mo = sv.layer.bounds.origin;
+                            CGPoint po = pres.bounds.origin;
+                            if (fabs(mo.x - po.x) > 0.5 || fabs(mo.y - po.y) > 0.5) {
+                                scrolling = YES;
+                                break;
+                            }
+                        }
+                    }
+                    for (UIView *sub in v.subviews) [stack addObject:sub];
+                }
+            });
+            if (!scrolling) {
+                streak++;
+                if (streak >= 2) {
+                    idle = YES;
+                    break;
+                }
+            } else {
+                streak = 0;
+            }
+            [NSThread sleepForTimeInterval:0.016];
+        }
+        int elapsed = (int)(-[start timeIntervalSinceNow] * 1000.0);
+        char buf[96];
+        snprintf(buf, sizeof(buf), "{\"ok\":%s,\"elapsedMs\":%d}", idle ? "true" : "false", elapsed);
+        return std::string(buf);
+    });
+
     EnnioControlSocket::registerHandler("wait_idle", [](const std::string &args) -> std::string {
         NSDictionary *a = EnnioParseArgs(args);
         uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 5000);

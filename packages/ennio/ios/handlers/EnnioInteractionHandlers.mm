@@ -92,17 +92,23 @@ void RegisterEnnioInteractionHandlers(void) {
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 
+    // Wait for a UIKeyInput first responder. With `testID`, ready only
+    // when the focused responder (or an ancestor within 8 hops — RN
+    // puts the accessibilityIdentifier on the wrapping component view,
+    // the responder is the inner UITextField) carries that identifier.
+    // This is the race the checkout-form bug rode in on: a tap fires,
+    // RN switches focus asynchronously, and "ANY field is focused" is
+    // true the whole time because the PREVIOUS field still holds first
+    // responder — insert_text then types into it. Identity, not
+    // existence, is the signal.
     EnnioControlSocket::registerHandler("first_responder_ready", [](const std::string &args) -> std::string {
         NSDictionary *a = EnnioParseArgs(args);
         uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 2000);
+        NSString *wantID = EnnioArgString(a, @"testID");
         NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:maxMs / 1000.0];
         BOOL ready = NO;
         while ([deadline timeIntervalSinceNow] > 0 && !ready) {
             EnnioOnMainVoid([&]() {
-                // Walk every window + presented-VC chain looking for
-                // ANY UIResponder that's isFirstResponder + conforms
-                // to UIKeyInput. Required so subsequent insert_text
-                // doesn't fire into a half-mounted form.
                 for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
                     if (![scene isKindOfClass:UIWindowScene.class]) continue;
                     for (UIWindow *w in ((UIWindowScene *)scene).windows) {
@@ -118,8 +124,20 @@ void RegisterEnnioInteractionHandlers(void) {
                             [stack removeLastObject];
                             if (v.isFirstResponder &&
                                 [v conformsToProtocol:@protocol(UIKeyInput)]) {
-                                ready = YES;
-                                break;
+                                if (!wantID.length) {
+                                    ready = YES;
+                                    break;
+                                }
+                                // Identity check: responder or ancestor
+                                // carries the expected identifier.
+                                UIView *cur = v;
+                                for (int i = 0; cur && i < 8; i++, cur = cur.superview) {
+                                    if ([cur.accessibilityIdentifier isEqualToString:wantID]) {
+                                        ready = YES;
+                                        break;
+                                    }
+                                }
+                                if (ready) break;
                             }
                             for (UIView *sub in v.subviews) [stack addObject:sub];
                         }

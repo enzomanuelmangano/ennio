@@ -60,50 +60,76 @@ export function registerInputHandlers(registry: CommandRegistry): void {
       }
 
       // Try insert_text (UIKeyInput on the current firstResponder) up
-      // to 3 times. Between attempts, if the prior tap target was a
-      // testID, re-tap via the dylib activate path to recover when the
-      // original tap didn't actually move focus into the field.
+      // to 3 times. Focus is verified by IDENTITY, not existence: when
+      // the previous tap targeted a testID, readiness requires that
+      // exact field to hold first responder. RN switches focus
+      // asynchronously after the tap — during the switch the PREVIOUS
+      // field still answers "a field is focused", and typing lands in
+      // the old field (the checkout-form cascade; in-house HID's speed
+      // exposed what idb's gRPC latency used to mask).
+      const expectedField = ctx.lastTapTestID;
+      const responderReady = async (maxMs: number): Promise<boolean> => {
+        const fr = await ctx.client
+          .call('first_responder_ready', {
+            maxMs,
+            ...(expectedField ? { testID: expectedField } : {}),
+          })
+          .catch(() => undefined);
+        return !!(fr && fr.ok && fr.data && (fr.data as { ready?: boolean }).ready);
+      };
       let ok = false;
       for (let attempt = 0; attempt < 4 && !ok; attempt++) {
-        const fr = await ctx.client
-          .call('first_responder_ready', { maxMs: 500 })
-          .catch(() => undefined);
-        const focused = !!(fr && fr.ok && fr.data && (fr.data as { ok?: boolean }).ok);
+        let focused = await responderReady(800);
         if (!focused) {
-          // No first responder — a composer/sheet input that didn't
-          // auto-focus. Recovery depends on whether the field is on
-          // screen yet:
-          //   • field present (composer open, just unfocused) → tap the
-          //     FIELD to focus it. Crucially, do NOT re-tap the opener
-          //     (replyBtn/composeFAB) here — that toggles an open sheet
-          //     SHUT (the bug behind consecutive replies failing).
-          //   • field absent (composer hasn't mounted / was dismissed) →
-          //     re-tap the opener to (re)open it.
-          const fieldId = await axTextFieldId(ctx.udid);
+          // Wrong field focused, or none. Recovery order:
+          //   1. The INTENDED field (last tap's testID) via the dylib
+          //      focus path, rect-tap fallback.
+          //   2. The live text field per the cross-process AX tree —
+          //      composer/sheet inputs without a prior testID tap.
+          //      Deliberately second: during a focus switch AX still
+          //      reports the OLD field; preferring it typed into the
+          //      wrong input.
+          //   3. axFocusTextField as the last resort.
+          // Never re-tap the opener here — that toggles an open sheet
+          // SHUT (the bug behind consecutive replies failing).
           let focusTap = false;
-          if (fieldId) {
+          if (expectedField) {
             const r = await ctx.client
-              .call('find_by_testid', { testID: fieldId })
+              .call('focus_testid', { testID: expectedField })
               .catch(() => undefined);
-            if (r && r.ok && r.data) {
-              const rr = r.data as { x: number; y: number; w: number; h: number };
-              await ctx.driver.tap(ctx.udid, rr.x + rr.w / 2, rr.y + rr.h / 2, { intent: 'focus' });
-              focusTap = true;
+            focusTap = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
+            if (!focusTap) {
+              const rect = await ctx.client
+                .call('find_by_testid', { testID: expectedField })
+                .catch(() => undefined);
+              if (rect && rect.ok && rect.data) {
+                const rr = rect.data as { x: number; y: number; w: number; h: number };
+                await ctx.driver.tap(ctx.udid, rr.x + rr.w / 2, rr.y + rr.h / 2, {
+                  intent: 'focus',
+                });
+                focusTap = true;
+              }
             }
           }
           if (!focusTap) {
-            focusTap = await axFocusTextField(ctx.udid).catch(() => false);
-          }
-          if (!focusTap && ctx.lastTapTestID) {
-            const rect = await ctx.client
-              .call('find_by_testid', { testID: ctx.lastTapTestID })
-              .catch(() => undefined);
-            if (rect && rect.ok && rect.data) {
-              const r = rect.data as { x: number; y: number; w: number; h: number };
-              await ctx.driver.tap(ctx.udid, r.x + r.w / 2, r.y + r.h / 2, { intent: 'focus' });
+            const fieldId = await axTextFieldId(ctx.udid);
+            if (fieldId) {
+              const r = await ctx.client
+                .call('find_by_testid', { testID: fieldId })
+                .catch(() => undefined);
+              if (r && r.ok && r.data) {
+                const rr = r.data as { x: number; y: number; w: number; h: number };
+                await ctx.driver.tap(ctx.udid, rr.x + rr.w / 2, rr.y + rr.h / 2, {
+                  intent: 'focus',
+                });
+                focusTap = true;
+              }
             }
           }
-          await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
+          if (!focusTap) {
+            await axFocusTextField(ctx.udid).catch(() => false);
+          }
+          await responderReady(800);
         }
         try {
           const r = await ctx.client.call('insert_text', { text });
