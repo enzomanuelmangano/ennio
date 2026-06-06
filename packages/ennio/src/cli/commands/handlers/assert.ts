@@ -89,7 +89,11 @@ export function registerAssertHandlers(registry: CommandRegistry): void {
       // can take 30-40s).
       const timeout = cmd.extendedWaitUntil.timeout ?? 60000;
       if (cmd.extendedWaitUntil.visible) {
-        await waitUntilVisible(ctx, normalizeSelector(interpolateSelector(cmd.extendedWaitUntil.visible, ctx)), timeout);
+        await waitUntilVisible(
+          ctx,
+          normalizeSelector(interpolateSelector(cmd.extendedWaitUntil.visible, ctx)),
+          timeout,
+        );
       } else if (cmd.extendedWaitUntil.notVisible) {
         await waitUntilNotVisible(
           ctx,

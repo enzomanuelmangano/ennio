@@ -149,6 +149,14 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & SwipeCmd => has(c, 'swipe'),
     async (cmd, { ctx }) => {
       const sw = cmd.swipe;
+      // Pre-swipe scroll-idle gate. A swipe fired before a pager/
+      // scrollview is interactive (e.g. the first carousel swipe right
+      // after launchApp, before the onboarding pager mounts) is
+      // swallowed — the gesture lands on a still-animating or
+      // not-yet-ready surface and the page doesn't advance. ennio's
+      // fast actuation hits this where Maestro's gRPC latency didn't.
+      // Soft cap; continuous scrollers fall through.
+      await ctx.client.call('wait_scroll_idle', { maxMs: 1200 }).catch(() => undefined);
       // Query real device dims so `%` coords land on actual pixels —
       // hardcoded 390×844 was 12-30 pt off on iPhone 17 Pro / Air / iPad.
       const sizeResp = await ctx.client.call('window_size').catch(() => undefined);
@@ -288,16 +296,36 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       // to a momentum HID fallback that costs more than the wait.
       await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 350 }).catch(() => undefined);
       await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
-      // Maestro default swipe is 400 ms.
-      const outcome = await ctx.driver.swipe(
-        ctx.udid,
-        from.x,
-        from.y,
-        to.x,
-        to.y,
-        sw.duration ?? 400,
-      );
+      // Maestro default swipe is 400 ms. Directional swipes (no
+      // explicit coords) are usually navigational — a carousel page
+      // turn, a tab change. A fast HID swipe fired in rapid succession
+      // (onboarding pagers: swipe → waitForAnimationToEnd → swipe) can
+      // be dropped if the previous page glide hadn't committed: the
+      // gesture lands mid-transition and the pager ignores it. Verify
+      // the screen actually changed; if not, the swipe was a no-op —
+      // wait for scroll-idle and fire once more. Guarded to the
+      // directional, no-coordinate form so explicit-coordinate swipes
+      // (drag-to-dismiss, precise drags) are untouched.
+      const verifyAdvance = !sw.start && !sw.end && !!sw.direction;
+      const durMs = sw.duration ?? 400;
+      const preSwipeHash = verifyAdvance
+        ? ((await ctx.client.call('frame_hash').catch(() => undefined))?.data as { hash?: string })
+            ?.hash
+        : undefined;
+      let outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, durMs);
       await ctx.driver.settleAfterSwipe(ctx.client, outcome);
+      if (verifyAdvance && preSwipeHash !== undefined) {
+        const postHash = (
+          (await ctx.client.call('frame_hash').catch(() => undefined))?.data as { hash?: string }
+        )?.hash;
+        if (postHash !== undefined && postHash === preSwipeHash) {
+          // No change — the swipe was swallowed. Let any in-flight
+          // glide settle, then retry exactly once.
+          await ctx.client.call('wait_scroll_idle', { maxMs: 1200 }).catch(() => undefined);
+          outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, durMs);
+          await ctx.driver.settleAfterSwipe(ctx.client, outcome);
+        }
+      }
     },
   );
 

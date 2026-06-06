@@ -34,7 +34,9 @@ export function registerTapHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & TapOnCmd => has(c, 'tapOn'),
     async (cmd, { ctx, nextCmd }) => {
-      const sel = normalizeSelector(interpolateSelector(cmd.tapOn, ctx) as Parameters<typeof normalizeSelector>[0]);
+      const sel = normalizeSelector(
+        interpolateSelector(cmd.tapOn, ctx) as Parameters<typeof normalizeSelector>[0],
+      );
       // Maestro `optional: true`: silently skip if selector misses.
       const tapObj =
         cmd.tapOn && typeof cmd.tapOn === 'object'
@@ -153,7 +155,9 @@ export function registerTapHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & DoubleTapOnCmd => has(c, 'doubleTapOn'),
     async (cmd, { ctx }) => {
-      const sel = normalizeSelector(interpolateSelector(cmd.doubleTapOn, ctx) as Parameters<typeof normalizeSelector>[0]);
+      const sel = normalizeSelector(
+        interpolateSelector(cmd.doubleTapOn, ctx) as Parameters<typeof normalizeSelector>[0],
+      );
       const { x, y } = await resolveCenter(ctx, sel);
       await ctx.driver.doubleTap(ctx.udid, x, y);
       await sleep(POST_TAP_SETTLE_MS);
@@ -165,9 +169,10 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       typeof c === 'object' && c !== null && ('longPress' in c || 'longPressOn' in c),
     async (cmd, { ctx }) => {
       const sel = normalizeSelector(
-        interpolateSelector('longPress' in cmd ? cmd.longPress : cmd.longPressOn, ctx) as Parameters<
-          typeof normalizeSelector
-        >[0],
+        interpolateSelector(
+          'longPress' in cmd ? cmd.longPress : cmd.longPressOn,
+          ctx,
+        ) as Parameters<typeof normalizeSelector>[0],
       );
       const { x, y } = await resolveCenter(ctx, sel);
       // Long press = tap with hold duration. Maestro default 1500ms;

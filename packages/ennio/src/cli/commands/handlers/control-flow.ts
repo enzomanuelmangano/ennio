@@ -27,7 +27,7 @@ interface RunFlowCmd {
       };
 }
 interface RunScriptCmd {
-  runScript: { file: string; env?: Record<string, string> };
+  runScript: string | { file: string; env?: Record<string, string> };
 }
 
 function has<T extends string>(
@@ -121,7 +121,10 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & RunScriptCmd => has(c, 'runScript'),
     async (cmd, { ctx }) => {
-      await runMaestroScript(ctx as RunContext, cmd.runScript);
+      // Maestro shorthand: `runScript: file.js` == `{ file: file.js }`.
+      const script =
+        typeof cmd.runScript === 'string' ? { file: cmd.runScript } : cmd.runScript;
+      await runMaestroScript(ctx as RunContext, script);
     },
   );
 }
