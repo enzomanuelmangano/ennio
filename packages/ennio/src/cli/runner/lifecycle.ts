@@ -11,6 +11,7 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { diagnoseSocketFailure } from '../crash-detector';
 import { tap as hidTap } from '../hid';
 import { findDylib, getAppContainer, terminateApp } from '../sim';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
@@ -160,6 +161,7 @@ export async function relaunchAndReconnect(
     ],
     { stdio: 'pipe' },
   );
+  const launchedAt = Date.now();
   execFileSync(
     'xcrun',
     ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
@@ -170,7 +172,10 @@ export async function relaunchAndReconnect(
   );
   const reopen = new EnnioSocketClient(ctx.udid);
   if (!(await reopen.connectWithRetry(15_000))) {
-    throw new Error('socket reconnect failed after launchApp');
+    const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
+    throw new Error(
+      'socket reconnect failed after launchApp' + (diagnosis ? `\n${diagnosis}` : ''),
+    );
   }
   ctx.client = reopen;
   const deadline = Date.now() + 5000;
@@ -316,6 +321,7 @@ export async function clearStateAndRelaunch(
     ],
     { stdio: 'pipe' },
   );
+  const launchedAt = Date.now();
   execFileSync(
     'xcrun',
     ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
@@ -326,7 +332,10 @@ export async function clearStateAndRelaunch(
   );
   const reopen = new EnnioSocketClient(ctx.udid);
   if (!(await reopen.connectWithRetry(15_000))) {
-    throw new Error('socket reconnect failed after clearState relaunch');
+    const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
+    throw new Error(
+      'socket reconnect failed after clearState relaunch' + (diagnosis ? `\n${diagnosis}` : ''),
+    );
   }
   ctx.client = reopen;
   getAppContainer(ctx.udid, ctx.bundleId);
