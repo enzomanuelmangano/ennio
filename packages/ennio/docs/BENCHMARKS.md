@@ -208,10 +208,10 @@ The Bluesky mock can't sustain a clean run (cold per-flow PDS). The
 mock, no Metro) is the trustworthy environment — both runners, same app,
 same iPhone 16 Pro / iOS 18.
 
-| Flow | ennio | Maestro | ennio speedup |
-|---|---:|---:|---:|
-| **03-cart-management** (both PASS) | **36.5 s** | 90.5 s | **2.48×** |
-| **02-shopping-flow** (~60 actions) | **39.1 s** ✅ | 101.5 s ❌ | **2.6×** |
+| Flow                               |         ennio |    Maestro | ennio speedup |
+| ---------------------------------- | ------------: | ---------: | ------------: |
+| **03-cart-management** (both PASS) |    **36.5 s** |     90.5 s |     **2.48×** |
+| **02-shopping-flow** (~60 actions) | **39.1 s** ✅ | 101.5 s ❌ |      **2.6×** |
 
 - **ennio is ~2.5× faster end-to-end** on identical flows.
 - **ennio also more reliable here**: it passes 02-shopping; Maestro fails
@@ -221,12 +221,12 @@ same iPhone 16 Pro / iOS 18.
 
 ### Per-action (02-shopping, Maestro per-command from timestamps)
 
-| | ennio | Maestro |
-|---|---:|---:|
-| per-action | ~0.51 s/step | 1.17 s/cmd (median) |
-| slowest Maestro cmds | — | products-list assert 17.6s (the fail), filter 8.35s, Hide Keyboard 5.15s, sort-dropdown 2.09s |
+|                      |        ennio |                                                                                       Maestro |
+| -------------------- | -----------: | --------------------------------------------------------------------------------------------: |
+| per-action           | ~0.51 s/step |                                                                           1.17 s/cmd (median) |
+| slowest Maestro cmds |            — | products-list assert 17.6s (the fail), filter 8.35s, Hide Keyboard 5.15s, sort-dropdown 2.09s |
 
-**This reconciles §1–2:** raw gesture is 12–21× faster, but a flow *action*
+**This reconciles §1–2:** raw gesture is 12–21× faster, but a flow _action_
 is find + settle + gesture. End-to-end that nets **~2.5×** on a real,
 interaction-mixed flow — consistent, repeatable, mock-free. The 12–21×
 ceiling shows on pure gesture bursts; ~2.5× is the realistic full-flow win.
