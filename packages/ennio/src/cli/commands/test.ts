@@ -52,7 +52,8 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('Usage: ennio test <flow.yaml | dir | glob> [options]');
     console.error('');
     console.error('Options:');
-    console.error('  --verbose             Per-step inline output');
+    console.error('  --verbose, -v         Per-step inline output (on by default)');
+    console.error('  --quiet, -q           Suppress per-step inline output');
     console.error('  --lenient             Skip unknown commands with a warning');
     console.error('  --reporter=<kind>     pretty (default) | json');
     console.error('  --safe-mode           Disable all in-app hooks (swizzles/observers).');
@@ -72,11 +73,15 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   }
 
   const reporterKind = (flags.reporter as 'pretty' | 'json' | undefined) ?? 'pretty';
+  // Verbose is the default — per-step inline output is the whole point
+  // of a pretty run. --quiet/-q opts out. An explicit --verbose still
+  // means something: it wins over --quiet when both are passed.
+  const verbose = flags.verbose ? true : !flags.quiet;
   const runner = new EnnioRunner({
     udid: process.env.ENNIO_UDID,
     dylibPath: process.env.ENNIO_DYLIB_PATH || undefined,
     reporterKind,
-    verbose: flags.verbose ?? false,
+    verbose,
     lenient: flags.lenient ?? false,
     safeMode: flags.safeMode ?? false,
   });
