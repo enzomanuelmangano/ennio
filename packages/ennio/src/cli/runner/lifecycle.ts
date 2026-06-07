@@ -224,46 +224,46 @@ export async function clearStateAndRelaunch(
       /* privacy grant not available on older Xcode */
     }
     await sleep(300);
-  // Override photo access to full (auth_value=2). simctl grants limited
-  // (auth_value=3) on iOS 26 which shows a "Limited Access" picker.
-  try {
-    const homePath = process.env.HOME || '';
-    const dbPath = join(
-      homePath,
-      'Library/Developer/CoreSimulator/Devices',
-      ctx.udid,
-      'data/Library/TCC/TCC.db',
-    );
-    const services = [
-      'kTCCServicePhotoLibrary',
-      'kTCCServicePhotos',
-      'kTCCServicePhotosAdd',
-      'kTCCServiceCamera',
-      'kTCCServiceMicrophone',
-    ];
-    // SQLite string-literal escaping: double any single quote. bundleId
-    // is attacker-controllable in principle (it comes from the flow's
-    // appId), so escape it rather than interpolate raw — otherwise a
-    // crafted appId could break out of the literal into arbitrary SQL.
-    const sqlLiteral = (s: string) => `'${s.replace(/'/g, "''")}'`;
-    const client = sqlLiteral(ctx.bundleId);
-    for (const svc of services) {
-      // Row shape matters: write what iOS itself writes when the user
-      // taps "Allow Full Access" (observed on iOS 18.2:
-      // auth_value=2, auth_reason=2 /user consent/, auth_version=2,
-      // flags=16). The previous auth_version=1/flags=0 row was ignored
-      // by tccd and the Photos limited-access upgrade prompt appeared
-      // anyway — which only an on-screen Simulator window (ennioax)
-      // could dismiss, breaking headless runs.
-      execFileSync(
-        'sqlite3',
-        [
-          dbPath,
-          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES (${sqlLiteral(svc)}, ${client}, 0, 2, 2, 2, 16);`,
-        ],
-        { stdio: 'pipe' },
+    // Override photo access to full (auth_value=2). simctl grants limited
+    // (auth_value=3) on iOS 26 which shows a "Limited Access" picker.
+    try {
+      const homePath = process.env.HOME || '';
+      const dbPath = join(
+        homePath,
+        'Library/Developer/CoreSimulator/Devices',
+        ctx.udid,
+        'data/Library/TCC/TCC.db',
       );
-    }
+      const services = [
+        'kTCCServicePhotoLibrary',
+        'kTCCServicePhotos',
+        'kTCCServicePhotosAdd',
+        'kTCCServiceCamera',
+        'kTCCServiceMicrophone',
+      ];
+      // SQLite string-literal escaping: double any single quote. bundleId
+      // is attacker-controllable in principle (it comes from the flow's
+      // appId), so escape it rather than interpolate raw — otherwise a
+      // crafted appId could break out of the literal into arbitrary SQL.
+      const sqlLiteral = (s: string) => `'${s.replace(/'/g, "''")}'`;
+      const client = sqlLiteral(ctx.bundleId);
+      for (const svc of services) {
+        // Row shape matters: write what iOS itself writes when the user
+        // taps "Allow Full Access" (observed on iOS 18.2:
+        // auth_value=2, auth_reason=2 /user consent/, auth_version=2,
+        // flags=16). The previous auth_version=1/flags=0 row was ignored
+        // by tccd and the Photos limited-access upgrade prompt appeared
+        // anyway — which only an on-screen Simulator window (ennioax)
+        // could dismiss, breaking headless runs.
+        execFileSync(
+          'sqlite3',
+          [
+            dbPath,
+            `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES (${sqlLiteral(svc)}, ${client}, 0, 2, 2, 2, 16);`,
+          ],
+          { stdio: 'pipe' },
+        );
+      }
       // tccd caches the DB in memory — a direct sqlite write is invisible
       // to the running daemon until it restarts. Kickstart it so the next
       // permission query re-reads our rows; launchd respawns it instantly.

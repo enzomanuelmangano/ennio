@@ -758,26 +758,26 @@ export async function execTapOn(
       // round-trip). Text-only taps stay on the original gate — they
       // already get the unconditional tap_tab fallback below.
       if (!finalChanged) {
-      if (sel.id) {
-        await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
-      } else if (sel.text) {
-        // Text-only tap whose retap loop never moved the hash —
-        // find_by_text often returns the LABEL rect inside a button
-        // (e.g. a 21×12 px "Cart" label inside a tab-bar button).
-        // The HID tap lands on the label, iOS hit-test stays on the
-        // label view, and the parent button's onPress is never
-        // dispatched. activate_by_text walks accessibilityElements
-        // and invokes the button's accessibilityActivate, which RN
-        // wires to the React-side onPress.
-        await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
-      }
-      // Native sheet / context-menu / picker: the in-app finder returned
-      // a rect in a separate SheetViewController window's coordinate
-      // space, so the device-space HID tap (and the in-app activation
-      // above) both no-op'd. The element is still frontmost, so the
-      // cross-process AX tree has it at the correct device-screen coords
-      // — re-tap there. Self-guarding: if the original tap actually
-      // worked, the element is gone from the AX tree and this is a no-op.
+        if (sel.id) {
+          await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
+        } else if (sel.text) {
+          // Text-only tap whose retap loop never moved the hash —
+          // find_by_text often returns the LABEL rect inside a button
+          // (e.g. a 21×12 px "Cart" label inside a tab-bar button).
+          // The HID tap lands on the label, iOS hit-test stays on the
+          // label view, and the parent button's onPress is never
+          // dispatched. activate_by_text walks accessibilityElements
+          // and invokes the button's accessibilityActivate, which RN
+          // wires to the React-side onPress.
+          await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
+        }
+        // Native sheet / context-menu / picker: the in-app finder returned
+        // a rect in a separate SheetViewController window's coordinate
+        // space, so the device-space HID tap (and the in-app activation
+        // above) both no-op'd. The element is still frontmost, so the
+        // cross-process AX tree has it at the correct device-screen coords
+        // — re-tap there. Self-guarding: if the original tap actually
+        // worked, the element is gone from the AX tree and this is a no-op.
         const stillNoChange = await ctx.client
           .call('wait_hash_change', { sinceHash: baseHash, maxMs: 60 })
           .catch(() => undefined);
