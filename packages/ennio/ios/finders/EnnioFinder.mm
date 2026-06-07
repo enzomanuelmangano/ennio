@@ -852,6 +852,24 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     return out;
 }
 
++ (BOOL)isBehindTopmostPresentation:(UIView *)view {
+    if (!view) return NO;
+    UIViewController *host = finderHostingVC(view);
+    UIViewController *top = finderTopmostPresentedVC();
+    if (!host || !top) return NO; // fail-open: can't tell
+    return !finderVCInTopmost(host, top);
+}
+
++ (BOOL)isViewTransitioning:(UIView *)view {
+    if (!view) return NO;
+    UIViewController *vc = finderHostingVC(view);
+    for (; vc; vc = vc.parentViewController) {
+        if (vc.isBeingDismissed || vc.isBeingPresented) return YES;
+        if (vc.isMovingFromParentViewController || vc.isMovingToParentViewController) return YES;
+    }
+    return NO;
+}
+
 + (BOOL)isOnScreen:(UIView *)view {
     if (!view) return NO;
     UIWindow *win = view.window;

@@ -267,6 +267,51 @@ void RegisterEnnioFindHandlers(void) {
         return EnnioRectJson(rect);
     });
 
+    // behind_modal: YES when the matched view's hosting VC is NOT in
+    // the topmost presented VC's subtree — a modal floats over it and
+    // a HID tap at its coords would land on the modal. Used by the
+    // runner's tap occlusion gate to wait (signal-driven) for an
+    // async-dismissing modal (composer publish → server round-trip)
+    // instead of firing a blind tap into the occluder.
+    EnnioControlSocket::registerHandler("behind_modal", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = EnnioArgString(a, @"testID");
+        NSString *text = EnnioArgString(a, @"text");
+        if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
+        BOOL behind = NO;
+        EnnioOnMainVoid([&]() {
+            UIView *v = nil;
+            if (testID.length) v = [EnnioFinder findViewByTestID:testID];
+            if (!v && text.length) v = [EnnioFinder findViewByText:text];
+            if (v) behind = [EnnioFinder isBehindTopmostPresentation:v];
+        });
+        return std::string("{\"behind\":") + (behind ? "true" : "false") + "}";
+    });
+
+    // target_transitioning: YES while the matched view's hosting VC is
+    // mid present/dismiss/push/pop. A HID tap dispatched into a
+    // transitioning VC is swallowed by UIKit (feed-reorder: "Go back"
+    // tapped while the edit-feeds screen was dismissing — the tap died
+    // with it and the flow never left the Feeds screen). The runner
+    // checks this right before dispatch and re-resolves after
+    // wait_presentation_idle instead of firing a doomed tap.
+    EnnioControlSocket::registerHandler("target_transitioning", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = EnnioArgString(a, @"testID");
+        NSString *text = EnnioArgString(a, @"text");
+        if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
+        BOOL transitioning = NO;
+        EnnioOnMainVoid([&]() {
+            UIView *v = nil;
+            if (testID.length) v = [EnnioFinder findViewByTestID:testID];
+            if (!v && text.length) v = [EnnioFinder findViewByText:text];
+            if (v) transitioning = [EnnioFinder isViewTransitioning:v];
+        });
+        return std::string("{\"transitioning\":") + (transitioning ? "true" : "false") + "}";
+    });
+
     // Debug: returns top presented VC class chain for the active
     // window. Used to figure out which class names to whitelist in
     // EnnioFinder's cross-process VC synth fallback.

@@ -64,6 +64,19 @@ typedef struct {
 /// visible bounds (i.e. a real finger could reach it).
 + (BOOL)isOnScreen:(UIView *)view;
 
+/// YES when the view's hosting VC is NOT inside the topmost presented
+/// VC's subtree — i.e. a modal floats over it and a HID tap at its
+/// coords would hit the modal instead. Fail-open: NO when either VC
+/// can't be resolved.
++ (BOOL)isBehindTopmostPresentation:(UIView *)view;
+
+/// YES while the view's hosting VC (or an ancestor VC) is mid
+/// present/dismiss/push/pop. A HID tap dispatched into a transitioning
+/// VC is swallowed by UIKit — the caller should wait for presentation
+/// idle and re-resolve the target instead. Fail-open: NO when the
+/// hosting VC can't be resolved.
++ (BOOL)isViewTransitioning:(UIView *)view;
+
 /// Invalidate the entire testID → UIView cache. Called from clear_state
 /// and whenever the cache is suspected stale.
 + (void)invalidateCache;

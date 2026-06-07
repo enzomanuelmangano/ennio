@@ -137,18 +137,38 @@ export async function execTapOn(
     // match / no effect / off-box.
     const axEl = sel.childOf ? null : await axResolve(ctx.udid, { text: sel.text });
     if (axEl) {
-      const { w, h } = await getScreenSize(ctx.udid);
-      const baseHash = preHash ?? (await captureHash(ctx));
-      await ctx.driver.tap(ctx.udid, axEl.cx * w, axEl.cy * h, { intent });
-      const hc = await ctx.client
-        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 500 })
+      // Doomed-tap gate for the AX fast path: a VC transition in flight
+      // at dispatch time swallows the touch AND means the AX snapshot
+      // (taken ~300-800 ms ago) likely located the OUTGOING screen's
+      // instance of the label (feed-reorder: "Go back" on the dismissing
+      // edit-feeds screen). The ambient dismiss animation then satisfies
+      // the hash check below, masking the lost tap. If we had to wait,
+      // the coords are stale — skip the fast path and fall through to
+      // the standard find, which re-resolves on the settled hierarchy.
+      const pi = await ctx.client
+        .call('wait_presentation_idle', { maxMs: 2500 })
         .catch(() => undefined);
-      if (hc && hc.ok && (hc.data as { ok?: boolean })?.ok) {
-        // A native bottom-sheet menu row was tapped; let its dismiss
-        // animation finish so the NEXT tap (often a button that re-opens
-        // a sibling sheet) doesn't race the transition and miss.
-        await sleep(400);
-        return;
+      const axWaitedMs = Number((pi?.data as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
+      if (axWaitedMs <= 50) {
+        const { w, h } = await getScreenSize(ctx.udid);
+        const baseHash = preHash ?? (await captureHash(ctx));
+        await ctx.driver.tap(ctx.udid, axEl.cx * w, axEl.cy * h, { intent });
+        const hc = await ctx.client
+          .call('wait_hash_change', { sinceHash: baseHash, maxMs: 500 })
+          .catch(() => undefined);
+        if (hc && hc.ok && (hc.data as { ok?: boolean })?.ok) {
+          // A native bottom-sheet menu row was tapped; wait for its
+          // dismiss transition to actually END (signal, not a fixed
+          // sleep) so the NEXT tap (often a button that re-opens a
+          // sibling sheet) doesn't race the animation and miss.
+          await ctx.client
+            .call('wait_presentation_idle', { maxMs: 1200 })
+            .catch(() => undefined);
+          await ctx.client
+            .call('wait_commit', { maxMs: 800, stableMs: 150 })
+            .catch(() => undefined);
+          return;
+        }
       }
     }
   }
@@ -439,6 +459,42 @@ export async function execTapOn(
           confirmedExposed = await checkExposed();
         });
       }
+      // Modal-occlusion gate: the target's hosting VC sits BEHIND the
+      // topmost presented VC — a modal floats over it, and (pageSheet)
+      // the presentation also TRANSFORMS the root, so the cached rect
+      // is doubly wrong. The 800 ms exposure wait above assumes a
+      // transition-in-flight; a modal that dismisses only after an
+      // async action (composer publish → server round-trip) outlives
+      // it and the blind tap lands on the modal (thread-muting:
+      // e2eSignOut fired into the still-open composer). Wait on the
+      // exposure SIGNAL until the modal clears — bounded poll, no
+      // blind sleep; bail early the moment the occluding modal is gone.
+      if (!confirmedExposed) {
+        const bm = await ctx.client.call('behind_modal', exposureSel).catch(() => undefined);
+        if (bm && bm.ok && (bm.data as { behind?: boolean } | undefined)?.behind) {
+          await timedAsync(ctx, 'tap.waitModalClear', async () => {
+            const deadline = Date.now() + 8000;
+            while (Date.now() < deadline) {
+              if (await checkExposed()) {
+                confirmedExposed = true;
+                break;
+              }
+              const still = await ctx.client.call('behind_modal', exposureSel).catch(() => undefined);
+              if (!(still && still.ok && (still.data as { behind?: boolean } | undefined)?.behind)) {
+                // Modal gone but target still unexposed (tab-bar edge
+                // cover, transform settling) — re-check exposure once
+                // after the next commit, then proceed either way.
+                await ctx.client
+                  .call('wait_commit', { maxMs: 800, stableMs: 150 })
+                  .catch(() => undefined);
+                confirmedExposed = await checkExposed();
+                break;
+              }
+              await sleep(100);
+            }
+          });
+        }
+      }
     }
     // Re-sample rect post-exposure. The position-stability gate can
     // lock onto a transient steady frame during a spring animation
@@ -494,6 +550,33 @@ export async function execTapOn(
   {
     const sz = await getScreenSize(ctx.udid);
     await clearKeyboardOverTarget(ctx, center.x / sz.w, center.y / sz.h);
+  }
+  // Doomed-tap gate: a VC transition is in flight at dispatch time —
+  // UIKit disables window touch delivery for the duration of a
+  // present/dismiss/push/pop, so the tap would be swallowed outright.
+  // Worse, the find above may have matched the OUTGOING screen's
+  // instance of the label (feed-reorder: "Go back" resolved on the
+  // dismissing edit-feeds screen; the tap died with it and the flow
+  // never left Feeds). The transition starts ASYNC (a prior tap's JS →
+  // dismiss), so the handler-level pre-tap settle can run too early to
+  // see it — re-check at the last moment: wait for presentation idle,
+  // then re-resolve the selector so the SURVIVING screen's instance is
+  // the one tapped. Zero-cost when no transition is active.
+  if (sel.id || sel.text) {
+    const pi = await timedAsync(ctx, 'tap.waitPresentationIdle', () =>
+      ctx.client.call('wait_presentation_idle', { maxMs: 2500 }).catch(() => undefined),
+    );
+    const waitedMs = Number((pi?.data as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
+    if (waitedMs > 50) {
+      // A transition really was in flight — the cached rect may belong
+      // to the outgoing screen. Re-resolve on the settled hierarchy.
+      const re = await sampleRect();
+      if (re) {
+        stableRect = re;
+        center.x = re.x + re.w / 2;
+        center.y = re.y + re.h / 2;
+      }
+    }
   }
   // The driver picks the mechanism from intent + exposure: a focus
   // tap needs a real touch (activation can't focus native inputs);
