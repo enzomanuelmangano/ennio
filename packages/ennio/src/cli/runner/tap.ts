@@ -24,7 +24,7 @@ import { getScreenSize } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
-import { captureHash, parsePoint, resolveRect } from './find';
+import { captureHash, captureReactTs, parsePoint, resolveRect } from './find';
 
 interface KeyboardFrame {
   visible: boolean;
@@ -653,13 +653,17 @@ export async function execTapOn(
     const baseHash = preHash ?? (await captureHash(ctx));
     const chainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
     const chain = ((chainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
-    const isLateRecogniserHost = chain.some(
-      (cls) =>
-        cls.includes('CropViewController') ||
-        cls.includes('Mantis') ||
-        cls.includes('PHPicker') ||
-        cls.includes('PhotoPicker'),
-    );
+    const isAsyncPayloadHost = (cls: string): boolean =>
+      cls.includes('CropViewController') ||
+      cls.includes('Mantis') ||
+      cls.includes('PHPicker') ||
+      cls.includes('PhotoPicker');
+    const isLateRecogniserHost = chain.some(isAsyncPayloadHost);
+    // Captured BEFORE the retap loop: the cropper/picker dismissal is
+    // pure UIKit (no react commits), so the first commit after this
+    // timestamp IS the dismissal's payload (bsky avatar crop: the image
+    // reaches JS ~1-2 s post-dismissal).
+    const preLoopReact = isLateRecogniserHost ? await captureReactTs(ctx) : null;
     const maxRetaps = isLateRecogniserHost ? 5 : 1;
     for (let i = 0; i < maxRetaps; i++) {
       const hc = await ctx.client
@@ -751,6 +755,27 @@ export async function execTapOn(
     // (no-op when the target tab is already selected).
     if (sel.text && !sel.id) {
       await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
+    }
+    // Async-payload dismissal settle: this tap fired INTO a cropper /
+    // picker host (chain captured pre-tap). Its "Done" hands the result
+    // to JS only AFTER the VC fully dismisses, and the NEXT step often
+    // reads that state (bsky: Save persists newUserAvatar — pressed
+    // before the payload commit it silently drops the image). Wait for
+    // the host to leave the VC chain, then for the payload commit.
+    // Only crop/picker dismissals pay this; ordinary taps skip.
+    if (isLateRecogniserHost && preLoopReact) {
+      await timedAsync(ctx, 'tap.waitAsyncPayload', async () => {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const cr = await ctx.client.call('top_vc_chain').catch(() => undefined);
+          const cls = ((cr?.data as { chain?: string[] })?.chain ?? []) as string[];
+          if (!cls.some(isAsyncPayloadHost)) break;
+          await sleep(80);
+        }
+        await ctx.client
+          .call('wait_react_commit', { sinceMs: preLoopReact.ts, maxMs: 4000 })
+          .catch(() => undefined);
+      });
     }
   }
 }

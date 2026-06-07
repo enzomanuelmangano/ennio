@@ -117,6 +117,20 @@ export class HidDriver implements GestureDriver {
         // No commit fired — likely a no-op tap; fall back to hash-change.
         await bestEffort(client, 'wait_hash_change', { sinceHash: preTapHash, maxMs: 400 });
       }
+      // Dismissal-payload settle: when the tap kicked off a VC
+      // dismissal (cropper "Done", sheet row), the dismissal's PAYLOAD
+      // often lands as a react commit AFTER the transition ends —
+      // bsky's avatar crop delivers the image to JS ~1-2 s
+      // post-dismissal, and a Save fired before that commit silently
+      // drops the avatar. Chain the signals: only when a presentation
+      // transition was actually in flight (presentation-idle had to
+      // wait), also wait for the next react commit since the tap.
+      // Zero cost on the common no-transition path.
+      const pi = await bestEffort(client, 'wait_presentation_idle', { maxMs: 1500 });
+      const transitionWaitMs = Number((pi as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
+      if (transitionWaitMs > 50) {
+        await bestEffort(client, 'wait_react_commit', { sinceMs: reactSinceMs, maxMs: 2500 });
+      }
       await bestEffort(client, 'wait_commit', { maxMs: 1500, stableMs: 200 });
       return;
     }
