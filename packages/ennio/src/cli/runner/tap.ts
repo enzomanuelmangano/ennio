@@ -498,6 +498,28 @@ export async function execTapOn(
         }
       }
     }
+    // Disabled-control gate: the target is exposed but advertises
+    // NotEnabled (RN accessibilityState.disabled / Button disabled) — a
+    // tap would land and be swallowed without firing onPress. The
+    // enable flips on a SIGNAL the app controls (bsky's Save goes
+    // enabled when the async avatar-crop state lands and the form turns
+    // dirty), so wait on it: bounded poll, proceed at the cap either
+    // way (a flow that really wants to tap a disabled control gets the
+    // same no-op it would get from a finger).
+    {
+      const en = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
+      const enabledNow = (en?.data as { enabled?: boolean } | undefined)?.enabled;
+      if (enabledNow === false) {
+        await timedAsync(ctx, 'tap.waitEnabled', async () => {
+          const deadline = Date.now() + 4000;
+          while (Date.now() < deadline) {
+            const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
+            if ((r?.data as { enabled?: boolean } | undefined)?.enabled !== false) return;
+            await sleep(80);
+          }
+        });
+      }
+    }
     // Re-sample rect post-exposure. The position-stability gate can
     // lock onto a transient steady frame during a spring animation
     // (overshoot, low-velocity inflection points). The view's final

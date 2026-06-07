@@ -38,12 +38,29 @@ void RegisterEnnioFindHandlers(void) {
         BOOL exposed = NO;
         BOOL found = NO;
         BOOL childHijack = NO;
+        BOOL enabled = YES;
         EnnioOnMainVoid([&]() {
             UIView *target = testID.length
                 ? [EnnioFinder findViewByTestID:testID]
                 : [EnnioFinder findViewByText:text];
             if (!target || ![EnnioFinder isOnScreen:target]) return;
             found = YES;
+            // enabled: NO when the target (or a near ancestor — the
+            // traits often live on the wrapping Pressable when the find
+            // matched an inner label) advertises NotEnabled. RN maps
+            // accessibilityState.disabled / Button disabled to this
+            // trait, and a disabled control swallows the press — the
+            // tap "lands" but onPress never fires (bsky Save while the
+            // avatar is still processing). Callers wait on this signal
+            // instead of firing a dead tap.
+            for (UIView *p = target; p; p = p.superview) {
+                if (p.accessibilityTraits & UIAccessibilityTraitNotEnabled) { enabled = NO; break; }
+                if ([p isKindOfClass:UIControl.class] && !((UIControl *)p).isEnabled) {
+                    enabled = NO;
+                    break;
+                }
+                if (p == target.window) break;
+            }
             UIWindow *win = target.window;
             if (!win) return;
             CGRect r = [win convertRect:target.bounds fromView:target];
@@ -79,12 +96,13 @@ void RegisterEnnioFindHandlers(void) {
                 }
             }
         });
-        char buf[128];
+        char buf[160];
         std::snprintf(buf, sizeof(buf),
-                      "{\"found\":%s,\"exposed\":%s,\"childHijack\":%s}",
+                      "{\"found\":%s,\"exposed\":%s,\"childHijack\":%s,\"enabled\":%s}",
                       found ? "true" : "false",
                       exposed ? "true" : "false",
-                      childHijack ? "true" : "false");
+                      childHijack ? "true" : "false",
+                      enabled ? "true" : "false");
         return std::string(buf);
     });
 
