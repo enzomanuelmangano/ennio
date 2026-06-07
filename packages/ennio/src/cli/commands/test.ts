@@ -58,6 +58,8 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('  --reporter=<kind>     pretty (default) | json');
     console.error('  --safe-mode           Disable all in-app hooks (swizzles/observers).');
     console.error('                        Slower settle, but survives injection conflicts.');
+    console.error('  --fast                In-process taps/swipes (dylib activation),');
+    console.error('                        per-gesture fallback to real HID');
     console.error('');
     console.error('Auto-detection:');
     console.error('  - booted iOS simulator (or auto-boots one)');
@@ -84,6 +86,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     verbose,
     lenient: flags.lenient ?? false,
     safeMode: flags.safeMode ?? false,
+    fast: flags.fast ?? false,
   });
 
   try {

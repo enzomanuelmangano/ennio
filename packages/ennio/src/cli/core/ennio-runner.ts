@@ -40,6 +40,9 @@ export interface EnnioRunnerOptions {
    *  hooks (testID index, settle ticker, RN observer). Escape hatch
    *  for injection conflicts (issue #44). */
   safeMode?: boolean;
+  /** Route taps/swipes through in-process dylib ops with per-gesture
+   *  HID fallback (the fast driver). Default: real HID every gesture. */
+  fast?: boolean;
   /** Reporter kind when no explicit reporter is passed. Default 'pretty'. */
   reporterKind?: 'pretty' | 'json';
 }
@@ -59,7 +62,7 @@ export class EnnioRunner {
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
     this.safeMode = opts.safeMode ?? false;
-    this.driver = createDriver(false);
+    this.driver = createDriver(opts.fast ?? false);
     this.reporter =
       opts.reporter ?? pickReporter({ kind: opts.reporterKind ?? 'pretty', verbose: this.verbose });
   }
