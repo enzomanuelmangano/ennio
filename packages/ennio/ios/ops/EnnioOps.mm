@@ -685,6 +685,15 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
     CGPoint startInWin = CGPointMake(x1, y1);
     UIView *hit = [win hitTest:startInWin withEvent:nil];
     UIScrollView *sv = hit ? findEnclosingScrollView(hit) : nil;
+    // Pagers need a REAL gesture: a paging scroll view's page state is
+    // driven by drag/momentum delegate events (RN pagers advance on
+    // onMomentumScrollEnd), which setContentOffset:animated:NO never
+    // emits — the offset moves but the JS page index stays stale (bsky
+    // onboarding: swipe LEFT "advanced" the carousel visually while the
+    // pager still reported page 1, so "Complete onboarding" never
+    // mounted). Decline so the CLI falls back to a real HID drag, whose
+    // velocity-driven page snap is the semantics the pager expects.
+    if (sv && sv.isPagingEnabled) sv = nil;
     if (sv) {
         CGFloat dx = x1 - x2;
         CGFloat dy = y1 - y2;
