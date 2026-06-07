@@ -165,7 +165,11 @@ export class FastDriver implements GestureDriver {
     sel: { id?: string; text?: string },
   ): Promise<boolean> {
     if (!sel.id && !sel.text) return false;
-    const args: Record<string, unknown> = { maxMs: 800, steadyFrames: 3 };
+    // With --no-animations CALayer animations are suppressed, so position
+    // stability needs only 1 frame confirmation instead of 3. Saves ~32 ms
+    // per tap (3 frames × 16 ms − 1 frame).
+    const steadyFrames = process.env.ENNIO_NO_ANIMATIONS === '1' ? 1 : 3;
+    const args: Record<string, unknown> = { maxMs: 800, steadyFrames };
     if (sel.id) args.testID = sel.id;
     else args.text = sel.text;
     const r = await bestEffort(client, 'wait_view_steady', args);
@@ -237,33 +241,42 @@ export class FastDriver implements GestureDriver {
   }
 
   /**
-   * Event-driven post-tap settle. wait_hash_change returns the instant
-   * the visible tree differs (the tap's effect landed); a tight commit
-   * cap smooths mid-layout reads. Animation tails are absorbed by the
-   * NEXT command's own guards (pre-tap animations poll, stability
-   * gate, assert polling). On screens with perpetual animation the
-   * hash never stabilises, so a long stable window would just burn its
-   * full budget.
+   * Event-driven post-tap settle. The signal we actually need is "the
+   * app re-rendered in response to this tap" — that commit mounts
+   * whatever the next find/assert looks for. ANIMATION FRAMES AFTER THE
+   * COMMIT ARE IRRELEVANT to finding an element, so we do NOT wait for
+   * the view-hash to stop changing (the old wait_commit stable-window
+   * burned ~250ms/tap waiting out toast/spring tails that no step
+   * reads). When the RN commit observer is attached, wait_react_commit
+   * fires the instant React commits — typically 16-50ms — and we're
+   * done. Falls back to the hash signal for native-only changes (UIKit
+   * nav with no React commit) and for apps with no observer.
    */
   async settleAfterTap(client: EnnioSocketClient, snap: PreTapSnapshot): Promise<void> {
-    await bestEffort(client, 'wait_hash_change', { sinceHash: snap.preTapHash, maxMs: 500 });
-    if (snap.nextEditsField) {
-      await bestEffort(client, 'wait_react_commit', { sinceMs: snap.reactSinceMs, maxMs: 250 });
+    let committed = false;
+    if (snap.reactAttach !== 'none') {
+      const rc = await bestEffort(client, 'wait_react_commit', {
+        sinceMs: snap.reactSinceMs,
+        maxMs: 600,
+      });
+      committed = !!(rc as { ok?: boolean } | undefined)?.ok;
     }
-    // Dismissal-payload settle: when the tap kicked off a VC dismissal
-    // (cropper "Done", sheet row), the dismissal's PAYLOAD often lands
-    // as a react commit AFTER the transition ends — bsky's avatar crop
-    // delivers the image to JS ~1-2 s post-dismissal, and a Save fired
-    // before that commit silently drops the avatar. Chain the signals:
-    // only when a presentation transition was actually in flight
-    // (presentation-idle had to wait), also wait for the next react
-    // commit since the tap. Zero cost on the common no-transition path.
-    const pi = await bestEffort(client, 'wait_presentation_idle', { maxMs: 1500 });
+    if (!committed) {
+      // No React commit fired (no observer, or a native-only change like
+      // a UIKit push) — fall back to the visible-tree hash signal.
+      await bestEffort(client, 'wait_hash_change', { sinceHash: snap.preTapHash, maxMs: 500 });
+    }
+    // Transition tail: only when a VC actually moved (present/dismiss/
+    // push). A dismissal's PAYLOAD can land as a LATER react commit
+    // (bsky avatar crop delivers the image ~1-2s after the cropper
+    // dismisses, and a Save fired before that commit drops the avatar),
+    // so chain one more react-commit wait — but only on the rare step
+    // that triggered a transition. Zero cost on the common tap.
+    const pi = await bestEffort(client, 'wait_presentation_idle', { maxMs: 800 });
     const transitionWaitMs = Number((pi as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
     if (transitionWaitMs > 50) {
       await bestEffort(client, 'wait_react_commit', { sinceMs: snap.reactSinceMs, maxMs: 2500 });
     }
-    await bestEffort(client, 'wait_commit', { maxMs: 250, stableMs: 60 });
   }
 
   async settleAfterSwipe(client: EnnioSocketClient, outcome: SwipeOutcome): Promise<void> {

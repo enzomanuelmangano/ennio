@@ -128,6 +128,13 @@ export interface RunFlowCommand {
   commands?: MaestroCommand[];
 }
 
+export interface EnnioFlowConfig {
+  /** When true, animations are restored for this flow even when the
+   *  runner is started with --no-animations. Useful for flows that
+   *  assert mid-animation state or test animation behaviour. */
+  animations?: boolean;
+}
+
 export interface MaestroFlow {
   appId?: string;
   name?: string;
@@ -148,6 +155,8 @@ export interface MaestroFlow {
   onFlowComplete?: MaestroCommand[];
   commands: MaestroCommand[];
   filePath: string;
+  /** ennio-specific metadata block. Ignored by Maestro. */
+  ennio?: EnnioFlowConfig;
 }
 
 // ============================================
@@ -217,6 +226,7 @@ export function parseMaestroFile(filePath: string): MaestroFlow {
     onFlowComplete: metadata.onFlowComplete as MaestroCommand[] | undefined,
     commands,
     filePath: absolutePath,
+    ennio: metadata.ennio as EnnioFlowConfig | undefined,
   };
 }
 

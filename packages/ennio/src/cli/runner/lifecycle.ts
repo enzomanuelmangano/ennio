@@ -7,13 +7,14 @@
 // pass completes before the next command tries to find anything.
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { diagnoseSocketFailure } from '../crash-detector';
 import { dismissSystemSheet } from '../ennio-ax';
-import { findDylib, getAppContainer, terminateApp } from '../sim';
+import { warmActuator } from '../hid';
+import { findDylib, getAppContainer, setSimLaunchEnv, terminateApp } from '../sim';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 
 import { RunContext, sleep } from './context';
@@ -33,17 +34,60 @@ export async function dismissPermissionDialogs(udid: string): Promise<boolean> {
 }
 
 export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void> {
-  await client.call('wait_commit', { maxMs: 8000, stableMs: 250 }).catch(() => undefined);
-  // Wait for the first React commit instead of a fixed 2s sleep.
-  // Falls back to 2s if no React observer is attached.
+  // The app is "painted" when React first commits content (post-splash).
+  // That commit IS the signal — wait for the EVENT, not a stable window.
+  // The old path led with wait_commit(8000, stableMs:250): on a booting
+  // app whose splash→content swap keeps the view-hash moving, the 250ms
+  // stable window alone burned multiple seconds before the real content
+  // was even up. Lead with the commit event; a brief settle then catches
+  // the layout tail.
   const r = await client
-    .call('wait_react_commit', { sinceMs: 0, maxMs: 2000 })
+    .call('wait_react_commit', { sinceMs: 0, maxMs: 8000 })
     .catch(() => undefined);
   const committed = !!(r && r.ok && r.data && (r.data as { ok: boolean }).ok);
-  if (!committed) {
-    await sleep(2000);
+  if (committed) {
+    // Content rendered — one short stability check for the layout tail.
+    await client.call('wait_commit', { maxMs: 1200, stableMs: 150 }).catch(() => undefined);
+    return;
   }
-  await client.call('wait_commit', { maxMs: 3000, stableMs: 300 }).catch(() => undefined);
+  // No RN observer (or it never committed) — fall back to the view-hash
+  // stable window, the only signal available.
+  await client.call('wait_commit', { maxMs: 5000, stableMs: 250 }).catch(() => undefined);
+}
+
+/**
+ * Suite-level fast reset (--reuse-app): wipe the app's data sandbox and
+ * reload the JS bundle IN PLACE — fresh data + fresh React tree — without
+ * a process relaunch. The native dylib + its Unix socket survive a JS
+ * reload, so the same client keeps working. This is what makes a suite
+ * pay the ~6s app boot ONCE instead of per flow: on a Hermes build the
+ * reload re-runs precompiled bytecode against the already-loaded native
+ * stack in ~1-2s.
+ *
+ * Falls back to a full clearState relaunch when the app lacks RN's reload
+ * symbol (older / fully bridgeless RN), so behaviour is never worse than
+ * the relaunch path — only faster when reload is available.
+ */
+export async function softResetAndReload(ctx: RunContext): Promise<void> {
+  const pre = await ctx.client.call('react_commit_ts').catch(() => undefined);
+  const since = Number((pre?.data as { ts?: number } | undefined)?.ts ?? 0);
+  // Wipe the sandbox first (in-process — it's the app's own container),
+  // then reload so the new JS boots against empty storage.
+  await ctx.client.call('clear_state').catch(() => undefined);
+  const r = await ctx.client.call('reload_rn').catch(() => undefined);
+  const ok = !!(r && r.ok && (r.data as { ok?: boolean } | undefined)?.ok);
+  if (!ok) {
+    // No reload symbol — fall back to the real relaunch.
+    await clearStateAndRelaunch(ctx);
+    return;
+  }
+  // The reload tears down and rebuilds the React root; wait for the
+  // bundle's first commit after our pre-reload timestamp, then a short
+  // stability check for the initial layout.
+  await ctx.client
+    .call('wait_react_commit', { sinceMs: since, maxMs: 8000 })
+    .catch(() => undefined);
+  await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
 }
 
 /// Re-launch the app with DYLD inject and re-open the control socket.
@@ -84,6 +128,9 @@ export async function relaunchAndReconnect(
     ],
     { stdio: 'pipe' },
   );
+  // Propagate --no-animations (sticky launchctl env; set OR clear so a
+  // prior run can't leak it). Source of truth: the CLI's process env.
+  setSimLaunchEnv(ctx.udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
   const launchedAt = Date.now();
   execFileSync(
     'xcrun',
@@ -112,6 +159,7 @@ export async function relaunchAndReconnect(
     }
     await sleep(100);
   }
+  void warmActuator(ctx.udid);
   await waitForFirstPaint(reopen);
 }
 
@@ -119,7 +167,15 @@ export async function clearStateAndRelaunch(
   ctx: RunContext,
   launchArgs: string[] = [],
 ): Promise<void> {
-  // Full app reset: copy .app → simctl uninstall → simctl install → launch.
+  // App reset. Default fast path: wipe the data container in place and
+  // relaunch the SAME install — no uninstall/reinstall. The reinstall
+  // (copy .app → uninstall → install, with two 1s settles) cost ~8-10s
+  // per flow and its only extra over a data wipe is an OS-level Keychain
+  // / group-container reset. Most flows only need fresh UserDefaults +
+  // sandbox files, which the wipe gives. Keychain-sensitive flows (a
+  // session persisted in the keychain) opt into the full reinstall with
+  // ENNIO_FULL_CLEARSTATE=1.
+  const fullReinstall = process.env.ENNIO_FULL_CLEARSTATE === '1';
   ctx.client.close();
   // Remove stale socket so the new process binds cleanly.
   try {
@@ -128,7 +184,7 @@ export async function clearStateAndRelaunch(
     /* ok */
   }
 
-  // Grab the installed .app bundle path BEFORE uninstalling.
+  // Grab the installed .app bundle path BEFORE any teardown.
   let appBundle: string | null = null;
   try {
     appBundle = execFileSync(
@@ -143,7 +199,7 @@ export async function clearStateAndRelaunch(
   // Terminate via simctl (app may not be running — terminateApp swallows that).
   terminateApp(ctx.udid, ctx.bundleId);
 
-  if (appBundle) {
+  if (fullReinstall && appBundle) {
     const tmp = mkdtempSync(join(tmpdir(), 'ennio-cs-'));
     const copy = join(tmp, 'App.app');
     cpSync(appBundle, copy, { recursive: true });
@@ -156,69 +212,104 @@ export async function clearStateAndRelaunch(
     // Reinstall via simctl.
     execFileSync('xcrun', ['simctl', 'install', ctx.udid, copy], { stdio: 'pipe' });
     await sleep(1000);
+  } else if (appBundle) {
+    // Fast path: wipe the data sandbox in place. The app is terminated,
+    // so the container is quiescent; iOS recreates Library/Caches,
+    // Library/Preferences, etc. on the next launch. Wipe the CONTENTS of
+    // Documents / Library / tmp rather than the dirs themselves so the
+    // container's own permissions/structure stay intact.
+    let dataContainer: string | null = null;
+    try {
+      dataContainer = execFileSync(
+        'xcrun',
+        ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'data'],
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+      ).trim();
+    } catch {
+      /* no data container yet — nothing to wipe */
+    }
+    if (dataContainer) {
+      for (const sub of ['Documents', 'Library', 'tmp']) {
+        const dir = join(dataContainer, sub);
+        try {
+          for (const entry of readdirSync(dir)) {
+            rmSync(join(dir, entry), { recursive: true, force: true });
+          }
+        } catch {
+          /* dir may not exist; iOS recreates on launch */
+        }
+      }
+    }
   }
 
-  // Re-grant permissions wiped by the uninstall. simctl privacy grant
-  // sets most permissions, but grants photo access as "limited" (auth=3)
-  // on iOS 26. Override via TCC sqlite AFTER simctl to force full access.
-  try {
-    execFileSync('xcrun', ['simctl', 'privacy', ctx.udid, 'grant', 'all', ctx.bundleId], {
-      stdio: 'pipe',
-    });
-  } catch {
-    /* privacy grant not available on older Xcode */
-  }
-  await sleep(300);
-  // Override photo access to full (auth_value=2). simctl grants limited
-  // (auth_value=3) on iOS 26 which shows a "Limited Access" picker.
-  try {
-    const homePath = process.env.HOME || '';
-    const dbPath = join(
-      homePath,
-      'Library/Developer/CoreSimulator/Devices',
-      ctx.udid,
-      'data/Library/TCC/TCC.db',
-    );
-    const services = [
-      'kTCCServicePhotoLibrary',
-      'kTCCServicePhotos',
-      'kTCCServicePhotosAdd',
-      'kTCCServiceCamera',
-      'kTCCServiceMicrophone',
-    ];
-    // SQLite string-literal escaping: double any single quote. bundleId
-    // is attacker-controllable in principle (it comes from the flow's
-    // appId), so escape it rather than interpolate raw — otherwise a
-    // crafted appId could break out of the literal into arbitrary SQL.
-    const sqlLiteral = (s: string) => `'${s.replace(/'/g, "''")}'`;
-    const client = sqlLiteral(ctx.bundleId);
-    for (const svc of services) {
-      // Row shape matters: write what iOS itself writes when the user
-      // taps "Allow Full Access" (observed on iOS 18.2:
-      // auth_value=2, auth_reason=2 /user consent/, auth_version=2,
-      // flags=16). The previous auth_version=1/flags=0 row was ignored
-      // by tccd and the Photos limited-access upgrade prompt appeared
-      // anyway — which only an on-screen Simulator window (ennioax)
-      // could dismiss, breaking headless runs.
+  // Permission re-grant is ONLY needed after a full reinstall — the
+  // uninstall wipes TCC. The fast data-wipe path leaves TCC intact, so
+  // the grant + tccd kickstart below (a system-wide daemon restart,
+  // ~1-2s) would be pure per-flow overhead. Skip it entirely there.
+  if (fullReinstall) {
+    // Re-grant permissions wiped by the uninstall. simctl privacy grant
+    // sets most permissions, but grants photo access as "limited"
+    // (auth=3) on iOS 26. Override via TCC sqlite AFTER simctl to force
+    // full access.
+    try {
+      execFileSync('xcrun', ['simctl', 'privacy', ctx.udid, 'grant', 'all', ctx.bundleId], {
+        stdio: 'pipe',
+      });
+    } catch {
+      /* privacy grant not available on older Xcode */
+    }
+    await sleep(300);
+    // Override photo access to full (auth_value=2). simctl grants limited
+    // (auth_value=3) on iOS 26 which shows a "Limited Access" picker.
+    try {
+      const homePath = process.env.HOME || '';
+      const dbPath = join(
+        homePath,
+        'Library/Developer/CoreSimulator/Devices',
+        ctx.udid,
+        'data/Library/TCC/TCC.db',
+      );
+      const services = [
+        'kTCCServicePhotoLibrary',
+        'kTCCServicePhotos',
+        'kTCCServicePhotosAdd',
+        'kTCCServiceCamera',
+        'kTCCServiceMicrophone',
+      ];
+      // SQLite string-literal escaping: double any single quote. bundleId
+      // is attacker-controllable in principle (it comes from the flow's
+      // appId), so escape it rather than interpolate raw — otherwise a
+      // crafted appId could break out of the literal into arbitrary SQL.
+      const sqlLiteral = (s: string) => `'${s.replace(/'/g, "''")}'`;
+      const client = sqlLiteral(ctx.bundleId);
+      for (const svc of services) {
+        // Row shape matters: write what iOS itself writes when the user
+        // taps "Allow Full Access" (observed on iOS 18.2:
+        // auth_value=2, auth_reason=2 /user consent/, auth_version=2,
+        // flags=16). The previous auth_version=1/flags=0 row was ignored
+        // by tccd and the Photos limited-access upgrade prompt appeared
+        // anyway — which only an on-screen Simulator window (ennioax)
+        // could dismiss, breaking headless runs.
+        execFileSync(
+          'sqlite3',
+          [
+            dbPath,
+            `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES (${sqlLiteral(svc)}, ${client}, 0, 2, 2, 2, 16);`,
+          ],
+          { stdio: 'pipe' },
+        );
+      }
+      // tccd caches the DB in memory — a direct sqlite write is invisible
+      // to the running daemon until it restarts. Kickstart it so the next
+      // permission query re-reads our rows; launchd respawns it instantly.
       execFileSync(
-        'sqlite3',
-        [
-          dbPath,
-          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES (${sqlLiteral(svc)}, ${client}, 0, 2, 2, 2, 16);`,
-        ],
+        'xcrun',
+        ['simctl', 'spawn', ctx.udid, 'launchctl', 'kickstart', '-k', 'system/com.apple.tccd'],
         { stdio: 'pipe' },
       );
+    } catch {
+      /* TCC direct grant failed */
     }
-    // tccd caches the DB in memory — a direct sqlite write is invisible
-    // to the running daemon until it restarts. Kickstart it so the next
-    // permission query re-reads our rows; launchd respawns it instantly.
-    execFileSync(
-      'xcrun',
-      ['simctl', 'spawn', ctx.udid, 'launchctl', 'kickstart', '-k', 'system/com.apple.tccd'],
-      { stdio: 'pipe' },
-    );
-  } catch {
-    /* TCC direct grant failed */
   }
 
   if (!ctx.dylibPath) {
@@ -246,6 +337,9 @@ export async function clearStateAndRelaunch(
     ],
     { stdio: 'pipe' },
   );
+  // Propagate --no-animations (sticky launchctl env; set OR clear so a
+  // prior run can't leak it). Source of truth: the CLI's process env.
+  setSimLaunchEnv(ctx.udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
   const launchedAt = Date.now();
   execFileSync(
     'xcrun',
@@ -264,4 +358,8 @@ export async function clearStateAndRelaunch(
   }
   ctx.client = reopen;
   getAppContainer(ctx.udid, ctx.bundleId);
+  // Pre-spawn the HID helper in the background — it arms while the app
+  // finishes booting, so the first real gesture doesn't pay the ~700ms
+  // spawn (observed as a slow first nav tap).
+  void warmActuator(ctx.udid);
 }

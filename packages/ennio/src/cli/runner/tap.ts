@@ -659,20 +659,55 @@ export async function execTapOn(
       cls.includes('PHPicker') ||
       cls.includes('PhotoPicker');
     const isLateRecogniserHost = chain.some(isAsyncPayloadHost);
-    // Captured BEFORE the retap loop: the cropper/picker dismissal is
-    // pure UIKit (no react commits), so the first commit after this
-    // timestamp IS the dismissal's payload (bsky avatar crop: the image
-    // reaches JS ~1-2 s post-dismissal).
-    const preLoopReact = isLateRecogniserHost ? await captureReactTs(ctx) : null;
+    // Captured BEFORE the retap loop. Two uses: (1) the cropper/picker
+    // dismissal is pure UIKit (no react commits), so the first commit
+    // after this timestamp IS the dismissal's payload (bsky avatar crop:
+    // image reaches JS ~1-2s post-dismissal); (2) the truest "did the
+    // tap register" signal is the React commit its onPress fired — it
+    // lands a frame before the visible view-hash changes, and is a real
+    // signal (onPress ran) rather than an inference from pixels moving.
+    const preLoopReact = await captureReactTs(ctx);
+    const hasObserver = preLoopReact.attach !== 'none';
     const maxRetaps = isLateRecogniserHost ? 5 : 1;
+    // Hoisted so the post-loop fallback can skip itself when the tap
+    // already confirmed it landed.
+    let registered = false;
     for (let i = 0; i < maxRetaps; i++) {
-      const hc = await ctx.client
-        .call('wait_hash_change', {
-          sinceHash: baseHash,
-          maxMs: isLateRecogniserHost ? 800 : 1500,
-        })
-        .catch(() => undefined);
-      const hashChanged = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
+      // Registration signal: prefer the React commit the tap caused
+      // (event, fires ~16-50ms when onPress runs). Fall back to the
+      // visible-tree hash for native-only changes (UIKit nav) or apps
+      // with no observer. Late-recogniser hosts keep the hash signal —
+      // their continuous repaints make commit timing unreliable.
+      // Registration signal: the visible-tree hash change is the
+      // reliable, fast confirm here — wait_hash_change returns the
+      // INSTANT the tap's effect renders (~tens of ms). (An earlier
+      // react-commit-first attempt regressed badly: the RN observer
+      // doesn't fire for many state-only taps in real apps, so it
+      // burned the full 600ms cap before falling back to this hash
+      // check, which then returned in ~1ms. Hash-first, react as a
+      // backup only.)
+      const hc = await timedAsync(ctx, 'tap.confirm', () =>
+        ctx.client
+          .call('wait_hash_change', {
+            sinceHash: baseHash,
+            maxMs: isLateRecogniserHost ? 800 : 600,
+          })
+          .catch(() => undefined),
+      );
+      registered = !!(hc && hc.ok && (hc.data as { ok?: boolean })?.ok);
+      // Confirmed on the first signal → the tap landed; nothing more to
+      // do. Break BEFORE the re-find + exposure round-trips below (they
+      // only exist to position the next RETAP, which won't happen).
+      if (registered && !isLateRecogniserHost) break;
+      if (!registered && hasObserver && !isLateRecogniserHost) {
+        // No visible change yet — a commit may still be in flight
+        // (async onPress). Give the react observer a SHORT window.
+        const rc = await ctx.client
+          .call('wait_react_commit', { sinceMs: preLoopReact.ts, maxMs: 250 })
+          .catch(() => undefined);
+        registered = !!(rc && rc.ok && (rc.data as { ok?: boolean })?.ok);
+        if (registered) break;
+      }
       const re = await sampleRect();
       if (!re) break;
       let stillExposed = true;
@@ -683,7 +718,7 @@ export async function execTapOn(
         }
       }
       if (!stillExposed) break;
-      if (hashChanged && !isLateRecogniserHost) break;
+      if (registered && !isLateRecogniserHost) break;
       const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
       await timedAsync(ctx, 'tap.selfHealRetap', () =>
         isTextOnlyTap
@@ -691,56 +726,64 @@ export async function execTapOn(
           : ctx.driver.tap(ctx.udid, c.x, c.y, { intent, exposed: stillExposed }),
       );
     }
-    // Last-resort: if the entire retap loop above never moved the
-    // hash AND the target is still in the same place, the gesture
-    // recogniser likely never armed (RN onPress wired late after a
-    // remount, RNGH Pressable still in its initial layout pass).
-    // Invoke the accessibility activation handler directly — bypasses
-    // the gesture chain entirely. UIView's
-    // _accessibilityHandleUserTouchActivate is what VoiceOver fires
-    // when it double-taps an element, and React-Native Pressable
-    // hooks into accessibilityActivate so the React-side onPress runs
-    // through the same path. Costs one extra round-trip when the
-    // normal tap worked (exits the loop early via hashChanged), and
-    // recovers the cases where it didn't.
-    const finalHc = await ctx.client
-      .call('wait_hash_change', { sinceHash: baseHash, maxMs: 80 })
-      .catch(() => undefined);
-    let finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
-    // For testID taps only: confirm the hash change DIDN'T revert
-    // to baseline within ~80 ms. iOS press-feedback bumps the hash
-    // transiently even when onPress never fires; a single
-    // wait_hash_change returns true on that transient bump and the
-    // activate_testid recovery is then skipped. CI runners hit this
-    // on slow-handler buttons (next-btn → submit, add-to-cart → API
-    // round-trip). Text-only taps stay on the original gate — they
-    // already get the unconditional tap_tab fallback below.
-    if (!finalChanged) {
-      if (sel.id) {
-        await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
-      } else if (sel.text) {
-        // Text-only tap whose retap loop never moved the hash —
-        // find_by_text often returns the LABEL rect inside a button
-        // (e.g. a 21×12 px "Cart" label inside a tab-bar button).
-        // The HID tap lands on the label, iOS hit-test stays on the
-        // label view, and the parent button's onPress is never
-        // dispatched. activate_by_text walks accessibilityElements
-        // and invokes the button's accessibilityActivate, which RN
-        // wires to the React-side onPress.
-        await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
-      }
-      // Native sheet / context-menu / picker: the in-app finder returned
-      // a rect in a separate SheetViewController window's coordinate
-      // space, so the device-space HID tap (and the in-app activation
-      // above) both no-op'd. The element is still frontmost, so the
-      // cross-process AX tree has it at the correct device-screen coords
-      // — re-tap there. Self-guarding: if the original tap actually
-      // worked, the element is gone from the AX tree and this is a no-op.
-      const stillNoChange = await ctx.client
-        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 60 })
+    // Fast exit: the tap already confirmed it landed (hash moved in the
+    // loop). The whole last-resort fallback below — a second hash wait
+    // plus activate_testid / activate_by_text / cross-process AX retap —
+    // exists ONLY to recover taps that did NOT register. Skipping it
+    // when registered saves ~140ms+ of dead round-trips per tap, which
+    // is the bulk of every successful tap's remaining cost. tap_tab and
+    // the cropper-payload settle below still run (they're conditional
+    // and cheap / load-bearing for their specific cases).
+    if (!registered) {
+      // Last-resort: if the entire retap loop above never moved the
+      // hash AND the target is still in the same place, the gesture
+      // recogniser likely never armed (RN onPress wired late after a
+      // remount, RNGH Pressable still in its initial layout pass).
+      // Invoke the accessibility activation handler directly — bypasses
+      // the gesture chain entirely. UIView's
+      // _accessibilityHandleUserTouchActivate is what VoiceOver fires
+      // when it double-taps an element, and React-Native Pressable
+      // hooks into accessibilityActivate so the React-side onPress runs
+      // through the same path.
+      const finalHc = await ctx.client
+        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 80 })
         .catch(() => undefined);
-      if (!(stillNoChange && stillNoChange.ok && (stillNoChange.data as { ok?: boolean })?.ok)) {
-        await axTapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false);
+      const finalChanged = !!(finalHc && finalHc.ok && (finalHc.data as { ok?: boolean })?.ok);
+      // For testID taps only: confirm the hash change DIDN'T revert
+      // to baseline within ~80 ms. iOS press-feedback bumps the hash
+      // transiently even when onPress never fires; a single
+      // wait_hash_change returns true on that transient bump and the
+      // activate_testid recovery is then skipped. CI runners hit this
+      // on slow-handler buttons (next-btn → submit, add-to-cart → API
+      // round-trip). Text-only taps stay on the original gate — they
+      // already get the unconditional tap_tab fallback below.
+      if (!finalChanged) {
+        if (sel.id) {
+          await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
+        } else if (sel.text) {
+          // Text-only tap whose retap loop never moved the hash —
+          // find_by_text often returns the LABEL rect inside a button
+          // (e.g. a 21×12 px "Cart" label inside a tab-bar button).
+          // The HID tap lands on the label, iOS hit-test stays on the
+          // label view, and the parent button's onPress is never
+          // dispatched. activate_by_text walks accessibilityElements
+          // and invokes the button's accessibilityActivate, which RN
+          // wires to the React-side onPress.
+          await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
+        }
+        // Native sheet / context-menu / picker: the in-app finder returned
+        // a rect in a separate SheetViewController window's coordinate
+        // space, so the device-space HID tap (and the in-app activation
+        // above) both no-op'd. The element is still frontmost, so the
+        // cross-process AX tree has it at the correct device-screen coords
+        // — re-tap there. Self-guarding: if the original tap actually
+        // worked, the element is gone from the AX tree and this is a no-op.
+        const stillNoChange = await ctx.client
+          .call('wait_hash_change', { sinceHash: baseHash, maxMs: 60 })
+          .catch(() => undefined);
+        if (!(stillNoChange && stillNoChange.ok && (stillNoChange.data as { ok?: boolean })?.ok)) {
+          await axTapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false);
+        }
       }
     }
     // Tab-bar resilience: iOS 26's liquid-glass tab bar drops HID

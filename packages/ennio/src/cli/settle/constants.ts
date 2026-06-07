@@ -19,6 +19,12 @@ export {
   POST_LAUNCH_SETTLE_MS,
 } from '../runner/context';
 
+// When --no-animations is active, UI state settles immediately after
+// React commits (no transition tails). Tighten the stability windows
+// so we don't wait 200-350 ms for a hash that's already been quiet
+// for the past 50 ms.
+const noAnimations = process.env.ENNIO_NO_ANIMATIONS === '1';
+
 /**
  * Policy-level settle constants. Values are byte-identical to the inline
  * numbers in the legacy runner so the extracted policies preserve
@@ -53,7 +59,10 @@ export const SETTLE = {
     // If hash didn't change: full budget only when animating, else half.
     settleMsAnimating: POST_TAP_SETTLE_MS,
     settleMsStatic: Math.min(POST_TAP_SETTLE_MS, 400),
-    finalCommit: { maxMs: 800, stableMs: 350 },
+    // With --no-animations, layout quiesces almost immediately after the
+    // React commit. 150 ms stable window is sufficient vs 350 ms with
+    // live transitions.
+    finalCommit: { maxMs: noAnimations ? 500 : 800, stableMs: noAnimations ? 150 : 350 },
     presentationIdleMaxMs: 500,
   },
 
@@ -64,7 +73,7 @@ export const SETTLE = {
   repeatTapGapMs: 120,
 
   /** After inputText: catch the post-insert layout + onChangeText commit. */
-  afterTextInput: { commit: { maxMs: 500, stableMs: 80 } },
+  afterTextInput: { commit: { maxMs: 500, stableMs: noAnimations ? 30 : 80 } },
 
   /** After pressKey (Enter often triggers a submit → re-render). */
   afterPressKey: { preSleepMs: 80, reactCommitMaxMs: 800, commit: { maxMs: 1500, stableMs: 150 } },
@@ -95,4 +104,4 @@ export const SETTLE = {
     crossProcessDismissCapMs: 2500,
     crossProcessPollStepMs: 80,
   },
-} as const;
+};

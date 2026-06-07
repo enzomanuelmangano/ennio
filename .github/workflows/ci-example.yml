@@ -27,6 +27,14 @@ on:
         description: 'Run with --fast (in-process taps/swipes, HID fallback)'
         type: boolean
         default: false
+      no_animations:
+        description: 'Run with --no-animations (suppress app animations)'
+        type: boolean
+        default: false
+      reuse_app:
+        description: 'Run with --reuse-app (JS reload between flows, skip relaunch)'
+        type: boolean
+        default: false
   # pull_request:
   #   branches: [main]
   #   paths:
@@ -122,23 +130,30 @@ jobs:
           ENNIO_UDID: ${{ steps.sim.outputs.udid }}
           ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
           ENNIO_FAST_FLAG: ${{ inputs.fast && '--fast' || '' }}
+          ENNIO_NOANIM_FLAG: ${{ inputs.no_animations && '--no-animations' || '' }}
+          ENNIO_REUSE_FLAG: ${{ inputs.reuse_app && '--reuse-app' || '' }}
+          # GitHub Actions macos runners are ~1.5-2× slower than a dev Mac
+          # for simulator workloads. Give assertVisible / waitFor more headroom
+          # so slow dark-mode re-renders and logout navigations don't timeout.
+          ENNIO_DEFAULT_WAIT_MS: '25000'
         run: |
           set -uo pipefail
           mkdir -p /tmp/ennio-logs
-          echo "mode: ${ENNIO_FAST_FLAG:-hid}"
+          FLAGS="$ENNIO_FAST_FLAG $ENNIO_NOANIM_FLAG $ENNIO_REUSE_FLAG"
+          echo "mode:${FLAGS:- hid}"
           PASS=0; FAIL=0; FAILED=""
           for f in example/maestro-e2e/*.yaml; do
             base=$(basename "$f")
             [[ "$base" == _* ]] && continue
             [[ "$base" == 00-* ]] && continue
-            if node packages/ennio/dist/cli.js test "$f" --verbose $ENNIO_FAST_FLAG > "/tmp/ennio-logs/$base.log" 2>&1; then
+            if node packages/ennio/dist/cli.js test "$f" --verbose $FLAGS > "/tmp/ennio-logs/$base.log" 2>&1; then
               echo "PASS  $base"
               PASS=$((PASS+1))
             else
               # Retry once — absorbs transient runner slowness without
               # masking real regressions (a real bug fails twice).
               echo "RETRY $base"
-              if node packages/ennio/dist/cli.js test "$f" --verbose $ENNIO_FAST_FLAG > "/tmp/ennio-logs/$base.retry.log" 2>&1; then
+              if node packages/ennio/dist/cli.js test "$f" --verbose $FLAGS > "/tmp/ennio-logs/$base.retry.log" 2>&1; then
                 echo "PASS  $base (retry)"
                 PASS=$((PASS+1))
               else

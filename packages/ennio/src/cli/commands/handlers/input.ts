@@ -140,7 +140,10 @@ export function registerInputHandlers(registry: CommandRegistry): void {
         if (!ok) await sleep(300); // let the composer settle before retrying
       }
       if (!ok) await hidType(ctx.udid, text);
-      await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 80 });
+      // With --no-animations, React re-renders from onChangeText settle in
+      // ~1 frame. 30ms stability window sufficient vs 80ms with animations.
+      const textStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 30 : 80;
+      await ctx.client.call('wait_commit', { maxMs: 500, stableMs: textStableMs });
       ctx.lastWasTextInput = true;
     },
   );

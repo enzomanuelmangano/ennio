@@ -26,6 +26,11 @@ export type Flags = {
   quiet?: boolean;
   /** --fast: in-process taps/swipes (dylib activation), per-gesture HID fallback. */
   fast?: boolean;
+  /** --no-animations: suppress app animations (ENNIO_NO_ANIMATIONS) for speed. */
+  noAnimations?: boolean;
+  /** --reuse-app: clearState soft-resets (data wipe + JS reload) instead of
+   *  relaunching, when the app is already running. Suite-level speed. */
+  reuseApp?: boolean;
 };
 
 export type ParsedArgs = {
@@ -44,9 +49,15 @@ const BOOL_FLAGS = new Set([
   'safe-mode',
   'quiet',
   'fast',
+  'no-animations',
+  'reuse-app',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
-const FLAG_KEY_ALIASES: Record<string, string> = { 'safe-mode': 'safeMode' };
+const FLAG_KEY_ALIASES: Record<string, string> = {
+  'safe-mode': 'safeMode',
+  'no-animations': 'noAnimations',
+  'reuse-app': 'reuseApp',
+};
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];

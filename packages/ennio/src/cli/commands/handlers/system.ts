@@ -104,7 +104,9 @@ export function registerSystemHandlers(registry: CommandRegistry): void {
 
   registry.register(isHideKeyboard, async (_cmd, { ctx }) => {
     await ctx.client.call('hide_keyboard');
-    await sleep(150);
+    // With --no-animations, in-app layout after keyboard resign settles
+    // in ~1 frame. 50ms sufficient vs 150ms with live animations.
+    await sleep(process.env.ENNIO_NO_ANIMATIONS === '1' ? 50 : 150);
   });
 
   registry.register(isDismissAlert, async (_cmd, { ctx }) => {

@@ -14,6 +14,7 @@ import {
   clearStateAndRelaunch,
   dismissPermissionDialogs,
   relaunchAndReconnect,
+  softResetAndReload,
 } from '../../runner/lifecycle';
 import { terminateApp } from '../../sim';
 
@@ -83,7 +84,22 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         }
       }
       if (opts.clearState) {
-        await clearStateAndRelaunch(ctx, launchArgs);
+        // --reuse-app: when the app is ALREADY running (the runner
+        // reconnected to the prior flow's process) and there are no
+        // launch arguments (those need a real relaunch to take effect),
+        // soft-reset in place — wipe data + reload the JS bundle —
+        // instead of paying the ~6s relaunch. Falls back to relaunch
+        // inside softResetAndReload if the reload symbol is missing.
+        const canReuse =
+          process.env.ENNIO_REUSE_APP === '1' &&
+          ctx.client.isConnected() &&
+          launchArgs.length === 0 &&
+          !opts.clearKeychain;
+        if (canReuse) {
+          await softResetAndReload(ctx);
+        } else {
+          await clearStateAndRelaunch(ctx, launchArgs);
+        }
       } else if (!ctx.client.isConnected()) {
         // Socket dropped — app was killed (stopApp/killApp) or crashed.
         // Re-launch with DYLD inject so the dylib reattaches.

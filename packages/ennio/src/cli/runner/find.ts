@@ -124,6 +124,28 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     );
     if (r && r.ok && r.data) return r.data as Rect;
   } else if (sel.text && !sel.id) {
+    // Quick synchronous probe — if the element is already on screen skip
+    // the 2.5 s in-process wait entirely (~20 ms vs 2500 ms on a miss).
+    const quick = await findOnce(ctx, sel);
+    if (quick) return quick;
+    // Tab-bar early detection: if the label matches a UITabBarItem the
+    // element is buried under a pushed nav stack, not absent. Unwind
+    // immediately via backs rather than burning 2.5 s polling a view
+    // tree that will never surface the hidden tab bar.
+    const tabResp = await ctx.client.call('find_tab', { name: sel.text! }).catch(() => undefined);
+    if (tabResp?.ok && (tabResp.data as { present?: boolean } | undefined)?.present) {
+      // With --no-animations, nav pop completes in ~16ms — 450ms was an animation guard.
+      const backSleepMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 50 : 450;
+      for (let i = 0; i < 4; i++) {
+        await ctx.client.call('back').catch(() => undefined);
+        await sleep(backSleepMs);
+        await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined);
+        const found = await findOnce(ctx, sel);
+        if (found) return found;
+      }
+      return null; // tab recovery exhausted — element genuinely absent
+    }
+    // Not a tab — poll in-process until the element mounts.
     const r = await timedAsync(ctx, 'tap.findFast', () =>
       ctx.client.call('wait_find_by_text', { text: sel.text!, maxMs: 2500 }).catch(() => undefined),
     );
@@ -170,31 +192,6 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     }
     await sleep(POLL_MS);
   }
-  // Tab-bar destinations: pop the navigation stack until the label
-  // becomes findable. Long flows leave the user buried in a stack
-  // screen whose tab bar is hidden — a single explicit `back` in the
-  // YAML can't always reach the tab root. "Is this a tab?" is the
-  // dylib's question, not a name list's: find_tab resolves the text
-  // against the app's actual UITabBarItems, so any app's tabs get the
-  // recovery and non-tab labels never trigger spurious back-presses.
-  if (sel.text && !sel.id) {
-    const tabResp = await ctx.client.call('find_tab', { name: sel.text }).catch(() => undefined);
-    const tabish = !!(
-      tabResp &&
-      tabResp.ok &&
-      (tabResp.data as { present?: boolean } | undefined)?.present
-    );
-    if (tabish) {
-      for (let i = 0; i < 4; i++) {
-        await ctx.client.call('back').catch(() => undefined);
-        await sleep(450);
-        await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined);
-        const r = await findOnce(ctx, sel);
-        if (r) return r;
-      }
-    }
-  }
-
   // Skip auto-scroll for childOf selectors — scrolling shifts the
   // parent out of view, turning a "parent not yet mounted" race into
   // a wrong-target tap.
