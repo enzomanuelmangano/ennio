@@ -193,15 +193,30 @@ export async function clearStateAndRelaunch(
     const sqlLiteral = (s: string) => `'${s.replace(/'/g, "''")}'`;
     const client = sqlLiteral(ctx.bundleId);
     for (const svc of services) {
+      // Row shape matters: write what iOS itself writes when the user
+      // taps "Allow Full Access" (observed on iOS 18.2:
+      // auth_value=2, auth_reason=2 /user consent/, auth_version=2,
+      // flags=16). The previous auth_version=1/flags=0 row was ignored
+      // by tccd and the Photos limited-access upgrade prompt appeared
+      // anyway — which only an on-screen Simulator window (ennioax)
+      // could dismiss, breaking headless runs.
       execFileSync(
         'sqlite3',
         [
           dbPath,
-          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES (${sqlLiteral(svc)}, ${client}, 0, 2, 4, 1, 0);`,
+          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES (${sqlLiteral(svc)}, ${client}, 0, 2, 2, 2, 16);`,
         ],
         { stdio: 'pipe' },
       );
     }
+    // tccd caches the DB in memory — a direct sqlite write is invisible
+    // to the running daemon until it restarts. Kickstart it so the next
+    // permission query re-reads our rows; launchd respawns it instantly.
+    execFileSync(
+      'xcrun',
+      ['simctl', 'spawn', ctx.udid, 'launchctl', 'kickstart', '-k', 'system/com.apple.tccd'],
+      { stdio: 'pipe' },
+    );
   } catch {
     /* TCC direct grant failed */
   }

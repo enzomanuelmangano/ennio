@@ -140,9 +140,31 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
  * path stays the default; this is an augmentation). Backed by a
  * persistent ennioax process (spawn + arm paid once).
  */
+// Cross-process AX going blind is a CAPABILITY loss, not an error — a
+// headless sim (no Simulator.app window) or missing Accessibility trust
+// degrades silently: system permission dialogs become undismissable and
+// flows fail later with a generic "element not found". Say it ONCE, the
+// first time the capability is actually consulted and comes back empty,
+// so the eventual failure log carries its real cause.
+let warnedBlind = false;
+function warnBlindOnce(reason: string): void {
+  if (warnedBlind) return;
+  warnedBlind = true;
+  process.stderr.write(
+    `[ennio] cross-process AX unavailable (${reason}) — system permission ` +
+      `dialogs (Photos, notifications, …) cannot be detected or dismissed. ` +
+      `Open a Simulator.app window for this device (open -a Simulator) and ` +
+      `ensure the terminal has Accessibility permission, or pre-grant the ` +
+      `app's permissions so no dialog appears.\n`,
+  );
+}
+
 export async function axTree(udid: string): Promise<AxTree | null> {
   const helper = findHelper();
-  if (!helper) return null;
+  if (!helper) {
+    warnBlindOnce('ennioax helper binary not found');
+    return null;
+  }
   let h = axHelpers.get(udid);
   if (!h) {
     h = new AxHelperProcess(udid, helper);
@@ -154,7 +176,12 @@ export async function axTree(udid: string): Promise<AxTree | null> {
     const data = JSON.parse(out) as AxTree & { error?: string };
     if (data.error) {
       trace(`ax: ${data.error}`);
+      warnBlindOnce(data.error);
       return null;
+    }
+    if (!data.elements?.length) {
+      warnBlindOnce('Simulator window not visible or Accessibility trust missing');
+      return data;
     }
     return data;
   } catch (e) {
