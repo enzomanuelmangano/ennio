@@ -3,6 +3,7 @@
 //
 
 #import "EnnioSystemHandlers.h"
+#import <dlfcn.h>
 #import <objc/runtime.h>
 #import "EnnioHandlerUtils.h"
 
@@ -300,5 +301,39 @@ void RegisterEnnioSystemHandlers(void) {
             ok = [EnnioOps clearAppData];
         });
         return std::string("{\"cleared\":") + (ok ? "true" : "false") + "}";
+    });
+
+    // reload_rn: re-run the JS bundle in place — fresh React tree + reset
+    // in-memory stores — WITHOUT killing the process. Backs the
+    // suite-level soft reset: re-launching per flow pays process spawn +
+    // dyld + framework load + socket reconnect (~6s); a Hermes reload
+    // re-runs precompiled bytecode against the already-loaded native
+    // stack (~1-2s). Calls RN's RCTTriggerReloadCommandListeners, the
+    // same path Cmd-R / the dev-menu reload uses, resolved by dlsym so
+    // the dylib needs no RN link (works Paper + Fabric, any RN version
+    // that ships the symbol). Pair with clear_state first when the flow
+    // needs a wiped sandbox too. Returns ok=false when the symbol isn't
+    // present (older RN / fully bridgeless) so the caller falls back to a
+    // full relaunch.
+    // set_no_animations {enabled}: flip the animation suppressor at
+    // runtime — no relaunch — so a per-flow override (a flow tagged
+    // keep-animations restoring motion inside a --no-animations suite)
+    // works even with the --reuse-app soft reset, which never relaunches.
+    EnnioControlSocket::registerHandler("set_no_animations", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        BOOL enabled = a[@"enabled"] ? [a[@"enabled"] boolValue] : YES;
+        EnnioOnMainVoid([&]() { [EnnioNoAnimations setEnabled:enabled]; });
+        return std::string("{\"ok\":true,\"enabled\":") + (enabled ? "true" : "false") + "}";
+    });
+
+    EnnioControlSocket::registerHandler("reload_rn", [](const std::string &) -> std::string {
+        using ReloadFn = void (*)(NSString *);
+        ReloadFn reload = (ReloadFn)dlsym(RTLD_DEFAULT, "RCTTriggerReloadCommandListeners");
+        if (!reload) return std::string("{\"ok\":false,\"reason\":\"symbol-absent\"}");
+        EnnioOnMainVoid([&]() {
+            [EnnioFinder invalidateCache];
+            reload(@"ennio soft-reset");
+        });
+        return std::string("{\"ok\":true}");
     });
 }

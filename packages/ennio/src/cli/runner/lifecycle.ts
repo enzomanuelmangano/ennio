@@ -55,6 +55,39 @@ export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void
   await client.call('wait_commit', { maxMs: 5000, stableMs: 250 }).catch(() => undefined);
 }
 
+/**
+ * Suite-level fast reset (--reuse-app): wipe the app's data sandbox and
+ * reload the JS bundle IN PLACE — fresh data + fresh React tree — without
+ * a process relaunch. The native dylib + its Unix socket survive a JS
+ * reload, so the same client keeps working. This is what makes a suite
+ * pay the ~6s app boot ONCE instead of per flow: on a Hermes build the
+ * reload re-runs precompiled bytecode against the already-loaded native
+ * stack in ~1-2s.
+ *
+ * Falls back to a full clearState relaunch when the app lacks RN's reload
+ * symbol (older / fully bridgeless RN), so behaviour is never worse than
+ * the relaunch path — only faster when reload is available.
+ */
+export async function softResetAndReload(ctx: RunContext): Promise<void> {
+  const pre = await ctx.client.call('react_commit_ts').catch(() => undefined);
+  const since = Number((pre?.data as { ts?: number } | undefined)?.ts ?? 0);
+  // Wipe the sandbox first (in-process — it's the app's own container),
+  // then reload so the new JS boots against empty storage.
+  await ctx.client.call('clear_state').catch(() => undefined);
+  const r = await ctx.client.call('reload_rn').catch(() => undefined);
+  const ok = !!(r && r.ok && (r.data as { ok?: boolean } | undefined)?.ok);
+  if (!ok) {
+    // No reload symbol — fall back to the real relaunch.
+    await clearStateAndRelaunch(ctx);
+    return;
+  }
+  // The reload tears down and rebuilds the React root; wait for the
+  // bundle's first commit after our pre-reload timestamp, then a short
+  // stability check for the initial layout.
+  await ctx.client.call('wait_react_commit', { sinceMs: since, maxMs: 8000 }).catch(() => undefined);
+  await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
+}
+
 /// Re-launch the app with DYLD inject and re-open the control socket.
 /// Used after a stopApp/killApp followed by launchApp — the original
 /// process is dead, but the YAML expects a fresh app instance.
