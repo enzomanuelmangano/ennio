@@ -132,6 +132,10 @@ jobs:
           ENNIO_FAST_FLAG: ${{ inputs.fast && '--fast' || '' }}
           ENNIO_NOANIM_FLAG: ${{ inputs.no_animations && '--no-animations' || '' }}
           ENNIO_REUSE_FLAG: ${{ inputs.reuse_app && '--reuse-app' || '' }}
+          # GitHub Actions macos runners are ~1.5-2× slower than a dev Mac
+          # for simulator workloads. Give assertVisible / waitFor more headroom
+          # so slow dark-mode re-renders and logout navigations don't timeout.
+          ENNIO_DEFAULT_WAIT_MS: '25000'
         run: |
           set -uo pipefail
           mkdir -p /tmp/ennio-logs
