@@ -11,5 +11,5 @@ appId: org.wikimedia.wikipedia
       - waitForAnimationToEnd
 - tapOn: Get started
 - tapOn:
-    text: "Non existent view"
+    text: 'Non existent view'
     optional: true
