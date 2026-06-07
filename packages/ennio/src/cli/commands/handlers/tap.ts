@@ -143,7 +143,9 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         // With --no-animations the in-app render after focus settles in
         // ~1 frame — 50ms stability window is sufficient vs 200ms.
         const focusStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 50 : 200;
-        await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: focusStableMs }).catch(() => undefined);
+        await ctx.client
+          .call('wait_commit', { maxMs: 1000, stableMs: focusStableMs })
+          .catch(() => undefined);
         ctx.lastTapKey = tapKey;
         ctx.lastTapTestID = sel.id;
         return;
