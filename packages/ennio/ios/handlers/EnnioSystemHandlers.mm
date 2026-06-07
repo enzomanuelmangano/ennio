@@ -8,6 +8,7 @@
 #import "EnnioHandlerUtils.h"
 
 #import "EnnioBootstrap.h"
+#import "../bootstrap/EnnioNoAnimations.h"
 #import "EnnioFinder.h"
 #import "EnnioFinderManager.h"
 #import "EnnioOps.h"
