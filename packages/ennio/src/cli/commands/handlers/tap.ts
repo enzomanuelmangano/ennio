@@ -140,7 +140,10 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       if (focusedViaTestId) {
         // Field is firstResponder — skip the HID tap so the
         // mid-animation keyboard doesn't intercept the touch.
-        await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 200 }).catch(() => undefined);
+        // With --no-animations the in-app render after focus settles in
+        // ~1 frame — 50ms stability window is sufficient vs 200ms.
+        const focusStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 50 : 200;
+        await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: focusStableMs }).catch(() => undefined);
         ctx.lastTapKey = tapKey;
         ctx.lastTapTestID = sel.id;
         return;

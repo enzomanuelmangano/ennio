@@ -73,7 +73,7 @@ export const SETTLE = {
   repeatTapGapMs: 120,
 
   /** After inputText: catch the post-insert layout + onChangeText commit. */
-  afterTextInput: { commit: { maxMs: 500, stableMs: 80 } },
+  afterTextInput: { commit: { maxMs: 500, stableMs: noAnimations ? 30 : 80 } },
 
   /** After pressKey (Enter often triggers a submit → re-render). */
   afterPressKey: { preSleepMs: 80, reactCommitMaxMs: 800, commit: { maxMs: 1500, stableMs: 150 } },
