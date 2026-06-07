@@ -27,8 +27,14 @@ describe('parseArgs boolean flags', () => {
     expect(r.flags.lenient).toBe(true);
   });
 
-  it('surfaces unknown flags as positionals', () => {
+  it('parses --fast as a boolean flag', () => {
     const r = parseArgs(['test', 'e2e/', '--fast']);
-    expect(r.positional).toContain('--fast');
+    expect(r.flags.fast).toBe(true);
+    expect(r.positional).toEqual(['e2e/']);
+  });
+
+  it('surfaces unknown flags as positionals', () => {
+    const r = parseArgs(['test', 'e2e/', '--definitely-not-a-flag']);
+    expect(r.positional).toContain('--definitely-not-a-flag');
   });
 });
