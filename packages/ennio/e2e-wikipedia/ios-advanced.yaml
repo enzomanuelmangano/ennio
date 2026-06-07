@@ -7,9 +7,9 @@ appId: org.wikimedia.wikipedia
 - runFlow: subflows/onboarding-ios.yaml
 - runFlow:
     when:
-      visible: "Cancel"
+      visible: 'Cancel'
     commands:
-      - tapOn: "Cancel"
+      - tapOn: 'Cancel'
     label: Dismiss 25th-birthday promo, if visible
 - runFlow:
     when:
@@ -19,14 +19,14 @@ appId: org.wikimedia.wikipedia
       - tapOn: Done
 - runFlow:
     when:
-      visible: "You have been logged out"
+      visible: 'You have been logged out'
     commands:
       - tapOn:
-          text: "Continue without logging in"
+          text: 'Continue without logging in'
 - tapOn:
-    text: "Non existent view"
+    text: 'Non existent view'
     optional: true
-- tapOn: "Search"
+- tapOn: 'Search'
 - tapOn: Search Wikipedia
 - runScript: scripts/getSearchQuery.js
 - inputText: ${output.result}
