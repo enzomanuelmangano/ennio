@@ -60,6 +60,8 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('                        Slower settle, but survives injection conflicts.');
     console.error('  --fast                In-process taps/swipes (dylib activation),');
     console.error('                        per-gesture fallback to real HID');
+    console.error('  --no-animations       Suppress app animations (transitions snap to');
+    console.error('                        final frame) — faster, but alters animated UI');
     console.error('');
     console.error('Auto-detection:');
     console.error('  - booted iOS simulator (or auto-boots one)');
@@ -73,6 +75,11 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('No Maestro YAML files found');
     return 1;
   }
+
+  // --no-animations propagates to the app via launchctl env at every
+  // launch site (set there from this process env). Set it here so all
+  // three launch paths see a single source of truth.
+  if (flags.noAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
 
   const reporterKind = (flags.reporter as 'pretty' | 'json' | undefined) ?? 'pretty';
   // Verbose is the default — per-step inline output is the whole point

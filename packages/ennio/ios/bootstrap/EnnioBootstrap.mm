@@ -30,6 +30,7 @@
 
 #import "EnnioBootstrap.h"
 #import "EnnioControlSocket.h"
+#import "EnnioNoAnimations.h"
 #import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
 #import "EnnioTestIDIndex.h"
@@ -227,6 +228,10 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
     } else {
         [EnnioReactObserver start];
     }
+
+    // Opt-in animation suppressor (ENNIO_NO_ANIMATIONS) — collapses CA
+    // transitions so the runner doesn't wait out 300-500ms slides/fades.
+    [EnnioNoAnimations installIfEnabled];
 
     g_ennioReady = YES;
     NSLog(@"[Ennio] Bootstrap ready — socket dispatching commands (RN observer: %@)",

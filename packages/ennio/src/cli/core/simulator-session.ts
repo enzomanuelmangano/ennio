@@ -83,6 +83,18 @@ export class SimulatorSession {
         stdio: 'pipe',
       });
     } catch {
+      /* non-fatal */
+    }
+    // Same sticky-env hygiene for ENNIO_NO_ANIMATIONS (--no-animations).
+    const noAnimArgs =
+      process.env.ENNIO_NO_ANIMATIONS === '1'
+        ? ['setenv', 'ENNIO_NO_ANIMATIONS', '1']
+        : ['unsetenv', 'ENNIO_NO_ANIMATIONS'];
+    try {
+      execFileSync('xcrun', ['simctl', 'spawn', this.udid, 'launchctl', ...noAnimArgs], {
+        stdio: 'pipe',
+      });
+    } catch {
       /* unsetenv on a never-set name can fail on some launchctl builds */
     }
     execFileSync(
