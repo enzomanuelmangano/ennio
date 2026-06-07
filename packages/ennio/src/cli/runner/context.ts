@@ -19,7 +19,8 @@ import type { EnnioSocketClient } from '../socket-client';
 /// screen + UIKit layout pass + RNGH gesture acceptance). Tests pass
 /// the same flow definitions Maestro accepts; we just give the runtime
 /// more headroom.
-export const DEFAULT_WAIT_MS = Number(process.env.ENNIO_DEFAULT_WAIT_MS) || 15000;
+const _envWait = parseInt(process.env.ENNIO_DEFAULT_WAIT_MS ?? '', 10);
+export const DEFAULT_WAIT_MS = Number.isFinite(_envWait) && _envWait > 0 ? _envWait : 15000;
 
 /// Coarse poll interval for legacy retry loops. Most modern paths
 /// poll inside the dylib on a CADisplayLink tick (~16 ms) instead.
