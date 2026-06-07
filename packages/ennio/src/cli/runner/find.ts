@@ -173,10 +173,16 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   // Tab-bar destinations: pop the navigation stack until the label
   // becomes findable. Long flows leave the user buried in a stack
   // screen whose tab bar is hidden — a single explicit `back` in the
-  // YAML can't always reach the tab root.
+  // YAML can't always reach the tab root. "Is this a tab?" is the
+  // dylib's question, not a name list's: find_tab resolves the text
+  // against the app's actual UITabBarItems, so any app's tabs get the
+  // recovery and non-tab labels never trigger spurious back-presses.
   if (sel.text && !sel.id) {
-    const tabish = ['Home', 'Cart', 'Products', 'Profile', 'Gauntlet'].some(
-      (t) => t.toLowerCase() === String(sel.text).toLowerCase(),
+    const tabResp = await ctx.client.call('find_tab', { name: sel.text }).catch(() => undefined);
+    const tabish = !!(
+      tabResp &&
+      tabResp.ok &&
+      (tabResp.data as { present?: boolean } | undefined)?.present
     );
     if (tabish) {
       for (let i = 0; i < 4; i++) {
