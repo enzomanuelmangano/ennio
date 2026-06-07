@@ -1,0 +1,163 @@
+# Wikipedia e2e — ennio against Maestro's official sample app.
+#
+# Real-world third-party UIKit app, zero ennio instrumentation. One
+# lightweight macOS job: direct-clang dylib build (no xcodebuild), CLI
+# bundle, pinned-hash app download, 2 flows run one at a time.
+#
+# Cost: $0 — public repo, standard GitHub-hosted runner.
+#
+# Security posture:
+#   - permissions: contents: read — the job can't write to the repo,
+#     issues, or packages even if a step is compromised.
+#   - every third-party action pinned to a full commit SHA (a hijacked
+#     tag can't inject code).
+#   - checkout with persist-credentials: false — no token left on disk
+#     for later steps to exfiltrate.
+#   - the app binary download is verified against a pinned SHA-256
+#     before anything is unzipped or installed; a tampered or rotated
+#     upstream bundle fails the job instead of executing.
+#   - no secrets consumed anywhere in this workflow.
+#
+# Trigger: manual only for now (same policy as ci-fast-build) — run with
+#   gh workflow run ci-wikipedia.yml
+# Re-enable the pull_request block once flake rate proves low enough to
+# gate merges on it.
+name: ci-wikipedia
+
+on:
+  workflow_dispatch: {}
+  # pull_request:
+  #   branches: [main]
+  #   paths:
+  #     - 'packages/ennio/src/**'
+  #     - 'packages/ennio/ios/**'
+  #     - 'packages/ennio/cpp/**'
+  #     - 'packages/ennio/native-hid/**'
+  #     - 'packages/ennio/e2e-wikipedia/**'
+  #     - '.github/workflows/ci-wikipedia.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wikipedia-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # SHA-256 of the inner wikipedia.zip from Maestro's samples bundle.
+  # To re-pin after an upstream rotation: download, `shasum -a 256
+  # wikipedia.zip`, validate the flows locally, update this value.
+  WIKIPEDIA_ZIP_SHA256: 8ee09a8e88e69b7495f8e065eb748c3e3e3250ad47f21a5697305e1aa6ce93cd
+
+jobs:
+  wikipedia:
+    name: Wikipedia flows (iOS sim)
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      - name: Cache bun
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      # Direct clang compile of every source into /tmp/ennio-build —
+      # the CLI's dev-mode lookup path. Seconds, no xcodebuild.
+      - name: Build dylib + HID helper
+        working-directory: packages/ennio
+        run: |
+          set -euo pipefail
+          bash scripts/build-dylib-local.sh
+          bash scripts/build-hid-helper.sh
+
+      - name: Cache Wikipedia.app
+        id: wiki-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/wikiapp
+          key: wikipedia-app-${{ env.WIKIPEDIA_ZIP_SHA256 }}
+
+      - name: Download Wikipedia app (cache miss)
+        if: steps.wiki-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/samples.zip \
+            https://storage.googleapis.com/mobile.dev/samples/samples.zip
+          unzip -j -o /tmp/samples.zip wikipedia.zip -d /tmp
+          echo "${WIKIPEDIA_ZIP_SHA256}  /tmp/wikipedia.zip" | shasum -a 256 -c -
+          unzip -q /tmp/wikipedia.zip -d /tmp/wikiapp
+          test -d /tmp/wikiapp/Wikipedia.app
+
+      - name: Boot simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
+          xcrun simctl bootstatus booted -b
+          UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
+          test -n "$UDID" || { echo "No sim booted"; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Install Wikipedia app
+        run: xcrun simctl install "${{ steps.sim.outputs.udid }}" /tmp/wikiapp/Wikipedia.app
+
+      - name: Run Wikipedia flows
+        env:
+          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+          ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/ennio-logs
+          PASS=0; FAIL=0
+          for f in packages/ennio/e2e-wikipedia/*.yaml; do
+            base=$(basename "$f")
+            if node packages/ennio/dist/cli.js test "$f" --verbose > "/tmp/ennio-logs/$base.log" 2>&1; then
+              echo "PASS  $base"
+              PASS=$((PASS+1))
+            else
+              # Retry once — absorbs transient runner slowness without
+              # masking real regressions (a real bug fails twice).
+              echo "RETRY $base"
+              if node packages/ennio/dist/cli.js test "$f" --verbose > "/tmp/ennio-logs/$base.retry.log" 2>&1; then
+                echo "PASS  $base (retry)"
+                PASS=$((PASS+1))
+              else
+                echo "FAIL  $base"
+                tail -40 "/tmp/ennio-logs/$base.retry.log"
+                FAIL=$((FAIL+1))
+              fi
+            fi
+          done
+          echo ""
+          echo "Wikipedia: Pass=$PASS Fail=$FAIL"
+          [ "$FAIL" -eq 0 ]
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wikipedia-logs
+          path: |
+            /tmp/ennio-logs/
+            /tmp/ennio-shots/
+          retention-days: 7
+          if-no-files-found: warn

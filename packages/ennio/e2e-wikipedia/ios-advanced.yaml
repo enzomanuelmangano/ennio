@@ -1,0 +1,35 @@
+# Maestro's ios-advanced-flow.yaml, adapted for current Wikipedia HEAD:
+#   + dismiss the time-limited "25th birthday" promo modal (postdates sample)
+#   + Search is now a tab, then the "Search Wikipedia" field
+# Every command is from the original; only stale UI labels/modals updated.
+appId: org.wikimedia.wikipedia
+---
+- runFlow: subflows/onboarding-ios.yaml
+- runFlow:
+    when:
+      visible: "Cancel"
+    commands:
+      - tapOn: "Cancel"
+    label: Dismiss 25th-birthday promo, if visible
+- runFlow:
+    when:
+      visible:
+        text: Explore your Wikipedia Year in Review
+    commands:
+      - tapOn: Done
+- runFlow:
+    when:
+      visible: "You have been logged out"
+    commands:
+      - tapOn:
+          text: "Continue without logging in"
+- tapOn:
+    text: "Non existent view"
+    optional: true
+- tapOn: "Search"
+- tapOn: Search Wikipedia
+- runScript: scripts/getSearchQuery.js
+- inputText: ${output.result}
+- eraseText
+- inputText: qwerty
+- assertVisible: ${output.result}

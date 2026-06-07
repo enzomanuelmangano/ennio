@@ -1,0 +1,9 @@
+# Minimal cold-start smoke: clearState launch lands on the first
+# onboarding card. Catches dylib injection / socket / launch breakage
+# in seconds, before the advanced flow spends time on real interactions.
+appId: org.wikimedia.wikipedia
+---
+- launchApp:
+    clearState: true
+- assertVisible: 'Next'
+- assertVisible: 'Skip'
