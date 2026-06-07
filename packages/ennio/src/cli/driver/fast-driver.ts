@@ -165,7 +165,11 @@ export class FastDriver implements GestureDriver {
     sel: { id?: string; text?: string },
   ): Promise<boolean> {
     if (!sel.id && !sel.text) return false;
-    const args: Record<string, unknown> = { maxMs: 800, steadyFrames: 3 };
+    // With --no-animations CALayer animations are suppressed, so position
+    // stability needs only 1 frame confirmation instead of 3. Saves ~32 ms
+    // per tap (3 frames × 16 ms − 1 frame).
+    const steadyFrames = process.env.ENNIO_NO_ANIMATIONS === '1' ? 1 : 3;
+    const args: Record<string, unknown> = { maxMs: 800, steadyFrames };
     if (sel.id) args.testID = sel.id;
     else args.text = sel.text;
     const r = await bestEffort(client, 'wait_view_steady', args);

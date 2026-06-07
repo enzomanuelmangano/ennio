@@ -49,9 +49,8 @@ export const SETTLE = {
     nextEditsFieldCommitMaxMs: 250,
     // No commit fired → fall back to a hash-change signal.
     fallbackHashChangeMaxMs: 400,
-    // Smooth the transition tail. With --no-animations the hash is
-    // already quiet after the React commit, so 100 ms stability is ample.
-    finalCommit: { maxMs: noAnimations ? 600 : 1500, stableMs: noAnimations ? 100 : 200 },
+    // Smooth the transition tail.
+    finalCommit: { maxMs: 1500, stableMs: 200 },
   },
 
   /** Post-tap settle, NO React observer attached (event-driven hash). */
