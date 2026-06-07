@@ -134,9 +134,11 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     // tree that will never surface the hidden tab bar.
     const tabResp = await ctx.client.call('find_tab', { name: sel.text! }).catch(() => undefined);
     if (tabResp?.ok && (tabResp.data as { present?: boolean } | undefined)?.present) {
+      // With --no-animations, nav pop completes in ~16ms — 450ms was an animation guard.
+      const backSleepMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 50 : 450;
       for (let i = 0; i < 4; i++) {
         await ctx.client.call('back').catch(() => undefined);
-        await sleep(450);
+        await sleep(backSleepMs);
         await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined);
         const found = await findOnce(ctx, sel);
         if (found) return found;
