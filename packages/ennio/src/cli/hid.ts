@@ -35,6 +35,7 @@ interface HidBackend {
   doubleTap(x: number, y: number): Promise<void>;
   swipe(x1: number, y1: number, x2: number, y2: number, durationSec: number): Promise<void>;
   typeText(text: string): Promise<void>;
+  warm(): Promise<void>;
 }
 
 export function getActuator(udid: string): HidBackend {
@@ -44,6 +45,12 @@ export function getActuator(udid: string): HidBackend {
     ennioHidCache.set(udid, c);
   }
   return c;
+}
+
+/** Pre-spawn the HID helper so the first real gesture doesn't pay the
+ *  ~700ms process-spawn. Fire-and-forget; call right after launch. */
+export async function warmActuator(udid: string): Promise<void> {
+  await getActuator(udid).warm();
 }
 
 const screenSizeCache = new Map<string, { w: number; h: number }>();

@@ -78,7 +78,7 @@ class HelperProcess {
     for (const w of pending) w.reject(new Error(reason));
   }
 
-  private start(): Promise<void> {
+  start(): Promise<void> {
     if (this.ready) return this.ready;
     this.ready = new Promise<void>((resolve, reject) => {
       const bin = findHelper();
@@ -216,6 +216,17 @@ export class EnnioHidClient {
   private readonly h: HelperProcess;
   constructor(private readonly udid: string) {
     this.h = helperFor(udid);
+  }
+
+  /** Spawn + arm the helper now so the FIRST real gesture doesn't pay
+   *  the ~700ms process-spawn cost. Safe to call repeatedly (start() is
+   *  idempotent); failures are swallowed — the gesture path retries. */
+  async warm(): Promise<void> {
+    try {
+      await this.h.start();
+    } catch {
+      /* helper will spawn lazily on first gesture if this missed */
+    }
   }
 
   private async norm(x: number, y: number): Promise<{ nx: number; ny: number }> {

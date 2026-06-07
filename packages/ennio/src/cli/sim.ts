@@ -79,6 +79,20 @@ export function terminateApp(udid: string, bundleId: string): void {
   }
 }
 
+/**
+ * Set or clear a launchctl env var on the sim (sim-wide, sticky across
+ * launches). Used for ENNIO_* flags that SIMCTL_CHILD_* won't forward.
+ * Always set OR unset explicitly so a previous run's value can't leak.
+ */
+export function setSimLaunchEnv(udid: string, name: string, on: boolean): void {
+  const args = on ? ['setenv', name, '1'] : ['unsetenv', name];
+  try {
+    execFileSync('xcrun', ['simctl', 'spawn', udid, 'launchctl', ...args], { stdio: 'pipe' });
+  } catch {
+    /* unsetenv on a never-set name can fail on some launchctl builds */
+  }
+}
+
 export function installApp(udid: string, appPath: string): void {
   execFileSync('xcrun', ['simctl', 'install', udid, appPath], { stdio: 'inherit' });
 }
