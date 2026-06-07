@@ -647,7 +647,20 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
         }
         if (inner) v = inner;
     }
-    return [v becomeFirstResponder];
+    if (![v becomeFirstResponder]) return NO;
+    // Verify the focus actually landed on a TEXT INPUT inside the
+    // target. becomeFirstResponder can return YES for non-input views
+    // (a Pressable like replyBtn) — the CLI uses ok=true to SKIP the
+    // real tap entirely, so a false positive here swallows the press
+    // (thread-muting: tapOn replyBtn + next inputText never opened the
+    // composer). Identity, not existence: the UIKeyInput responder must
+    // live within the target's subtree.
+    UIResponder *first = EnnioFindKeyInputResponder();
+    if (!first || ![first isKindOfClass:UIView.class]) return NO;
+    for (UIView *cur = (UIView *)first; cur; cur = cur.superview) {
+        if (cur == v) return YES;
+    }
+    return NO;
 }
 
 + (BOOL)insertText:(NSString *)text {

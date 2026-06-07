@@ -126,7 +126,16 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       let focusedViaTestId = false;
       if (sel.id && nextEditsField) {
         const r = await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
-        focusedViaTestId = !!(r && r.ok);
+        // r.ok is the TRANSPORT result; the handler reports whether the
+        // focus actually landed in r.data.ok. Conflating them made every
+        // focus_testid "succeed" and skip the real tap (thread-muting:
+        // tapOn replyBtn + next inputText never pressed the button).
+        focusedViaTestId = !!(r && r.ok && (r.data as { ok?: boolean } | undefined)?.ok);
+        if (process.env.ENNIO_PHASE_TRACE) {
+          process.stderr.write(
+            `[dbg] focus_testid id=${sel.id} ok=${focusedViaTestId} raw=${JSON.stringify(r?.data ?? null)}\n`,
+          );
+        }
       }
       if (focusedViaTestId) {
         // Field is firstResponder — skip the HID tap so the
