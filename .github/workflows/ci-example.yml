@@ -31,6 +31,10 @@ on:
         description: 'Run with --no-animations (suppress app animations)'
         type: boolean
         default: false
+      reuse_app:
+        description: 'Run with --reuse-app (JS reload between flows, skip relaunch)'
+        type: boolean
+        default: false
   # pull_request:
   #   branches: [main]
   #   paths:
@@ -127,10 +131,11 @@ jobs:
           ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
           ENNIO_FAST_FLAG: ${{ inputs.fast && '--fast' || '' }}
           ENNIO_NOANIM_FLAG: ${{ inputs.no_animations && '--no-animations' || '' }}
+          ENNIO_REUSE_FLAG: ${{ inputs.reuse_app && '--reuse-app' || '' }}
         run: |
           set -uo pipefail
           mkdir -p /tmp/ennio-logs
-          FLAGS="$ENNIO_FAST_FLAG $ENNIO_NOANIM_FLAG"
+          FLAGS="$ENNIO_FAST_FLAG $ENNIO_NOANIM_FLAG $ENNIO_REUSE_FLAG"
           echo "mode:${FLAGS:- hid}"
           PASS=0; FAIL=0; FAILED=""
           for f in example/maestro-e2e/*.yaml; do
