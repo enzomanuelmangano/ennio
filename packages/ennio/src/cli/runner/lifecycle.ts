@@ -84,7 +84,9 @@ export async function softResetAndReload(ctx: RunContext): Promise<void> {
   // The reload tears down and rebuilds the React root; wait for the
   // bundle's first commit after our pre-reload timestamp, then a short
   // stability check for the initial layout.
-  await ctx.client.call('wait_react_commit', { sinceMs: since, maxMs: 8000 }).catch(() => undefined);
+  await ctx.client
+    .call('wait_react_commit', { sinceMs: since, maxMs: 8000 })
+    .catch(() => undefined);
   await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
 }
 

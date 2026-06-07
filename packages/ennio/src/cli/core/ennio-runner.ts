@@ -149,7 +149,21 @@ export class EnnioRunner {
         lenient: this.lenient,
         driver: this.driver,
       });
-      return await executor.run(flow);
+      // ennio: { animations: true } restores animations for this flow
+      // when --no-animations is the global default. Useful for flows
+      // that test animation behaviour or assert mid-animation state.
+      const restoreAnimations =
+        process.env.ENNIO_NO_ANIMATIONS === '1' && flow.ennio?.animations === true;
+      if (restoreAnimations) {
+        await connection.call('set_no_animations', { enabled: false }).catch(() => undefined);
+      }
+      try {
+        return await executor.run(flow);
+      } finally {
+        if (restoreAnimations) {
+          await connection.call('set_no_animations', { enabled: true }).catch(() => undefined);
+        }
+      }
     } finally {
       connection.close();
     }
