@@ -6,8 +6,8 @@
  *     libennio dylib: discovery, reads, and settle coordination
  *     (find_by_testid, visible, wait_commit, insert_text, …) via
  *     line-delimited JSON. See socket-client.ts.
- *   - idb gRPC HID: every tap / swipe / long-press is a real
- *     IOHIDEvent at the CoreSimulator level (see hid.ts / idb-grpc.ts).
+ *   - in-house HID: every tap / swipe / long-press is a real
+ *     IOHIDEvent at the CoreSimulator level (see hid.ts / ennio-hid.ts).
  *   No XCTest helper, no xcodebuild cold-start, no Metro/CDP.
  *
  * Subcommands live in ./commands. Bare invocation with a yaml/dir/glob

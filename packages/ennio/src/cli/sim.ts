@@ -22,7 +22,7 @@ import { join, resolve, dirname } from 'node:path';
  * iOS Settings) exposes NOTHING to an in-process walk: the rows are
  * drawn, not UILabels, and no a11y nodes exist yet. Flipping this on
  * makes SwiftUI materialize its tree, which ennio's in-process
- * find_ax_by_text then reads directly (~50ms) — no idb, no XCUITest.
+ * find_ax_by_text then reads directly (~50ms) — no XCUITest.
  * Idempotent + best-effort; runs once per flow.
  */
 export function enableAccessibility(udid: string): void {
@@ -173,40 +173,53 @@ export function findDylib(): string | null {
 }
 
 /**
- * Verify a dylib's SHA-256 against the manifest.json sitting next to
- * it, when one exists. Scope is deliberate:
+ * Verify a prebuilt artifact's SHA-256 against the manifest.json
+ * sitting next to it, when one exists. Scope is deliberate:
  *
- *   - <pkg>/prebuilt/libennio.dylib ships WITH a manifest — a hash
- *     mismatch means a corrupted install or a tampered binary we're
- *     about to inject into the user's app. Refuse loudly.
- *   - /tmp/ennio-build (local dev builds) and ENNIO_DYLIB_PATH have no
- *     manifest next to them — nothing to check, returns silently.
+ *   - <pkg>/prebuilt/ artifacts ship WITH a manifest — a hash mismatch
+ *     means a corrupted install or a tampered binary we're about to
+ *     inject into the user's app (dylib) or spawn on the host (hid).
+ *     Refuse loudly.
+ *   - /tmp/ennio-build (local dev builds) and explicit env-var
+ *     overrides have no manifest next to them — nothing to check,
+ *     returns silently.
  *
+ * `key` selects the manifest entry: 'dylib' | 'hid' | 'shim'.
  * Exported for tests.
  */
-export function verifyDylibIntegrity(dylibPath: string, manifestPath?: string): void {
-  const manifest = manifestPath ?? join(dirname(dylibPath), 'manifest.json');
+export function verifyPrebuiltIntegrity(
+  artifactPath: string,
+  key: 'dylib' | 'hid' | 'shim' = 'dylib',
+  manifestPath?: string,
+): void {
+  const manifest = manifestPath ?? join(dirname(artifactPath), 'manifest.json');
   if (!existsSync(manifest)) return;
   let expected: string | undefined;
   try {
-    const parsed = JSON.parse(readFileSync(manifest, 'utf-8')) as {
-      dylib?: { file?: string; sha256?: string };
-    };
-    expected = parsed.dylib?.sha256;
+    const parsed = JSON.parse(readFileSync(manifest, 'utf-8')) as Record<
+      string,
+      { file?: string; sha256?: string } | undefined
+    >;
+    expected = parsed[key]?.sha256;
   } catch {
     return; // unreadable manifest — don't block on our own packaging bug
   }
   if (!expected) return;
-  const actual = createHash('sha256').update(readFileSync(dylibPath)).digest('hex');
+  const actual = createHash('sha256').update(readFileSync(artifactPath)).digest('hex');
   if (actual !== expected) {
     throw new Error(
-      `libennio.dylib SHA-256 mismatch at ${dylibPath}\n` +
+      `${key} artifact SHA-256 mismatch at ${artifactPath}\n` +
         `  expected ${expected}\n  actual   ${actual}\n` +
-        'The prebuilt dylib does not match the package manifest — corrupted ' +
+        'The prebuilt artifact does not match the package manifest — corrupted ' +
         'install or tampered binary. Reinstall @reactiive/ennio. ' +
-        'To inject a custom build instead, set ENNIO_DYLIB_PATH.',
+        'To use a custom build instead, set ENNIO_DYLIB_PATH / ENNIO_HID_HELPER.',
     );
   }
+}
+
+/** Back-compat alias for the dylib-specific call sites/tests. */
+export function verifyDylibIntegrity(dylibPath: string, manifestPath?: string): void {
+  verifyPrebuiltIntegrity(dylibPath, 'dylib', manifestPath);
 }
 
 /**

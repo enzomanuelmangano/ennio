@@ -5,6 +5,7 @@
 #import "EnnioWaitHandlers.h"
 #import "EnnioHandlerUtils.h"
 
+#import "EnnioFinder.h"
 #import "EnnioOps.h"
 #import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
@@ -16,8 +17,99 @@
 #include <cstdio>
 #include <string>
 
+// True when `v` (or one of its first `hops` ancestors) is visibly
+// animating at the CALayer level: CAAnimations attached, or the
+// presentation layer diverging from the model layer (UIView.animate
+// sets the model to its final value immediately; only the
+// presentation layer moves). Per-frame drivers (Reanimated) update
+// the model directly, so callers must ALSO compare the model frame
+// across display frames — this check alone can't see them.
+static BOOL EnnioLayerChainAnimating(UIView *v, int hops) {
+    UIView *cur = v;
+    for (int i = 0; cur && i < hops; i++, cur = cur.superview) {
+        CALayer *layer = cur.layer;
+        if (layer.animationKeys.count > 0) return YES;
+        CALayer *pres = layer.presentationLayer;
+        if (pres) {
+            CGPoint mp = layer.position;
+            CGPoint pp = pres.position;
+            if (fabs(mp.x - pp.x) > 0.5 || fabs(mp.y - pp.y) > 0.5) return YES;
+        }
+    }
+    return NO;
+}
+
 void RegisterEnnioWaitHandlers(void) {
     using namespace ennio;
+
+    // Signal-based target steadiness. Replaces the CLI's timing-window
+    // position-stability gate (sample rects over the socket and hope
+    // the spacing outwits spring inflection points) with the two
+    // ground-truth signals the process actually has:
+    //   1. model frame unchanged for `steadyFrames` consecutive
+    //      ~16 ms samples — catches Reanimated / any per-frame driver
+    //      that writes layer properties directly;
+    //   2. no CAAnimations + presentation == model along the ancestor
+    //      chain — catches UIKit animations whose model frame is
+    //      already final.
+    // Returns {ok:true, elapsedMs} once steady; {ok:false} when the
+    // budget expires or the view disappears mid-wait.
+    EnnioControlSocket::registerHandler("wait_view_steady", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        NSString *testID = EnnioArgString(a, @"testID");
+        NSString *text = EnnioArgString(a, @"text");
+        uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 800);
+        int needFrames = EnnioArgInt(a, @"steadyFrames", 3);
+        if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
+
+        NSDate *start = [NSDate date];
+        NSDate *deadline = [start dateByAddingTimeInterval:maxMs / 1000.0];
+        CGRect lastFrame = CGRectNull;
+        int streak = 0;
+        BOOL steady = NO;
+        BOOL everFound = NO;
+
+        while ([deadline timeIntervalSinceNow] > 0) {
+            BOOL found = NO;
+            BOOL animating = NO;
+            CGRect frame = CGRectZero;
+            EnnioOnMainVoid([&]() {
+                UIView *v = testID.length ? [EnnioFinder findViewByTestID:testID]
+                                          : [EnnioFinder findViewByText:text];
+                if (!v || !v.window) return;
+                found = YES;
+                frame = [v convertRect:v.bounds toView:nil];
+                animating = EnnioLayerChainAnimating(v, 8);
+            });
+            if (!found) {
+                // Target gone mid-wait (remount, navigation). Caller
+                // re-finds; nothing to be steady about.
+                if (everFound) break;
+            } else {
+                everFound = YES;
+                BOOL same = !CGRectIsNull(lastFrame) &&
+                    fabs(frame.origin.x - lastFrame.origin.x) < 0.5 &&
+                    fabs(frame.origin.y - lastFrame.origin.y) < 0.5 &&
+                    fabs(frame.size.width - lastFrame.size.width) < 0.5 &&
+                    fabs(frame.size.height - lastFrame.size.height) < 0.5;
+                if (same && !animating) {
+                    streak++;
+                    if (streak + 1 >= needFrames) { // first matching sample counts
+                        steady = YES;
+                        break;
+                    }
+                } else {
+                    streak = 0;
+                }
+                lastFrame = frame;
+            }
+            [NSThread sleepForTimeInterval:0.016];
+        }
+        int elapsed = (int)(-[start timeIntervalSinceNow] * 1000.0);
+        char buf[96];
+        snprintf(buf, sizeof(buf), "{\"ok\":%s,\"elapsedMs\":%d}", steady ? "true" : "false", elapsed);
+        return std::string(buf);
+    });
 
     // CALayer-level animation introspection. Frame-hash polling can
     // get stuck on background re-renders (RN idle work, scroll
@@ -66,6 +158,123 @@ void RegisterEnnioWaitHandlers(void) {
             }
         });
         return std::string("{\"active\":") + (active ? "true" : "false") + "}";
+    });
+
+    // Scroll-idle gate. A touch delivered while ANY UIScrollView is
+    // mid-scroll gets swallowed by the scroll view as "stop scrolling"
+    // and never reaches the subview — taps fired right after a
+    // keyboard-driven setContentOffset(animated:) focus NOTHING (the
+    // checkout-form regression: fast in-house HID beats the animation
+    // that idb's gRPC latency used to accidentally outlive). Idle =
+    // no scroll view tracking/dragging/decelerating AND no scroll
+    // view's bounds animating (presentation == model — catches
+    // setContentOffset:animated: and keyboard avoidance), held for 2
+    // consecutive ~16ms samples. Returns {ok, elapsedMs}; ok:false
+    // when the budget expires (continuous scroller — caller proceeds,
+    // the tap-retry self-heal is the backstop).
+    // scroll_offset: contentOffset of the largest on-screen
+    // UIScrollView (by area). The reliable "did a navigational swipe
+    // advance?" signal — frame_hash misses carousel page turns when
+    // pages carry no testID'd content (Wikipedia onboarding: only the
+    // persistent Skip/Next buttons are hashed, so the hash is constant
+    // across pages). Returns {ok, x, y} or {ok:false} when no scroll
+    // view is present.
+    EnnioControlSocket::registerHandler("scroll_offset", [](const std::string &) -> std::string {
+        double ox = 0, oy = 0;
+        BOOL found = NO;
+        EnnioOnMainVoid([&]() {
+            double bestArea = 0;
+            UIScrollView *best = nil;
+            NSMutableArray<UIView *> *stack = [NSMutableArray new];
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    if (!w.hidden) [stack addObject:w];
+                }
+            }
+            while (stack.count) {
+                UIView *v = stack.lastObject;
+                [stack removeLastObject];
+                for (UIView *sub in v.subviews) [stack addObject:sub];
+                if (![v isKindOfClass:UIScrollView.class]) continue;
+                if (![EnnioFinder isOnScreen:v]) continue;
+                double area = v.bounds.size.width * v.bounds.size.height;
+                if (area > bestArea) {
+                    bestArea = area;
+                    best = (UIScrollView *)v;
+                }
+            }
+            if (best) {
+                ox = best.contentOffset.x;
+                oy = best.contentOffset.y;
+                found = YES;
+            }
+        });
+        char buf[96];
+        snprintf(buf, sizeof(buf), "{\"ok\":%s,\"x\":%.1f,\"y\":%.1f}",
+                 found ? "true" : "false", ox, oy);
+        return std::string(buf);
+    });
+
+    EnnioControlSocket::registerHandler("wait_scroll_idle", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 1200);
+        NSDate *start = [NSDate date];
+        NSDate *deadline = [start dateByAddingTimeInterval:maxMs / 1000.0];
+        int streak = 0;
+        BOOL idle = NO;
+
+        while ([deadline timeIntervalSinceNow] > 0) {
+            BOOL scrolling = NO;
+            EnnioOnMainVoid([&scrolling]() {
+                // Walk every window's view tree for scroll views.
+                NSMutableArray<UIView *> *stack = [NSMutableArray new];
+                for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                    if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                    for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                        if (!w.hidden) [stack addObject:w];
+                    }
+                }
+                while (stack.count && !scrolling) {
+                    UIView *v = stack.lastObject;
+                    [stack removeLastObject];
+                    if ([v isKindOfClass:UIScrollView.class]) {
+                        UIScrollView *sv = (UIScrollView *)v;
+                        if (sv.isTracking || sv.isDragging || sv.isDecelerating) {
+                            scrolling = YES;
+                            break;
+                        }
+                        // setContentOffset:animated: / keyboard avoidance
+                        // animate bounds.origin — model jumps to final,
+                        // presentation lags while the animation runs.
+                        CALayer *pres = sv.layer.presentationLayer;
+                        if (pres) {
+                            CGPoint mo = sv.layer.bounds.origin;
+                            CGPoint po = pres.bounds.origin;
+                            if (fabs(mo.x - po.x) > 0.5 || fabs(mo.y - po.y) > 0.5) {
+                                scrolling = YES;
+                                break;
+                            }
+                        }
+                    }
+                    for (UIView *sub in v.subviews) [stack addObject:sub];
+                }
+            });
+            if (!scrolling) {
+                streak++;
+                if (streak >= 2) {
+                    idle = YES;
+                    break;
+                }
+            } else {
+                streak = 0;
+            }
+            [NSThread sleepForTimeInterval:0.016];
+        }
+        int elapsed = (int)(-[start timeIntervalSinceNow] * 1000.0);
+        char buf[96];
+        snprintf(buf, sizeof(buf), "{\"ok\":%s,\"elapsedMs\":%d}", idle ? "true" : "false", elapsed);
+        return std::string(buf);
     });
 
     EnnioControlSocket::registerHandler("wait_idle", [](const std::string &args) -> std::string {

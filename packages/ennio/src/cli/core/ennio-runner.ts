@@ -7,7 +7,7 @@
 //   1. Pick reporter (default PrettyReporter).
 //   2. For each flow:
 //      a. Build SimulatorSession (UDID + bundleId + dylib path).
-//      b. Build EnnioConnection (Unix socket + idb pool).
+//      b. Build EnnioConnection (Unix socket).
 //      c. If connection.open() fails, the dylib isn't loaded yet —
 //         have SimulatorSession launch the app with DYLD injection,
 //         then retry the connection.
@@ -19,7 +19,8 @@ import { execFileSync } from 'node:child_process';
 
 import { diagnoseSocketFailure } from '../crash-detector';
 import { enableAccessibility } from '../sim';
-import { ensureIdb, defaultIdbDeps } from '../idb-setup';
+import { createDriver } from '../driver';
+import type { GestureDriver } from '../driver';
 import type { MaestroFlow } from '../maestro-parser';
 import { parseMaestroFile } from '../maestro-parser';
 import { pickReporter } from '../reporters';
@@ -39,6 +40,9 @@ export interface EnnioRunnerOptions {
    *  hooks (testID index, settle ticker, RN observer). Escape hatch
    *  for injection conflicts (issue #44). */
   safeMode?: boolean;
+  /** Route taps/swipes through in-process dylib ops with per-gesture
+   *  HID fallback (the fast driver). Default: real HID every gesture. */
+  fast?: boolean;
   /** Reporter kind when no explicit reporter is passed. Default 'pretty'. */
   reporterKind?: 'pretty' | 'json';
 }
@@ -50,6 +54,7 @@ export class EnnioRunner {
   private verbose: boolean;
   private lenient: boolean;
   private safeMode: boolean;
+  private driver: GestureDriver;
 
   constructor(opts: EnnioRunnerOptions = {}) {
     this.udid = opts.udid;
@@ -57,6 +62,7 @@ export class EnnioRunner {
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
     this.safeMode = opts.safeMode ?? false;
+    this.driver = createDriver(opts.fast ?? false);
     this.reporter =
       opts.reporter ?? pickReporter({ kind: opts.reporterKind ?? 'pretty', verbose: this.verbose });
   }
@@ -67,11 +73,6 @@ export class EnnioRunner {
    */
   async run(flowFiles: string[]): Promise<SuiteResult> {
     const flows = flowFiles.map((f) => parseMaestroFile(f));
-
-    // Preflight: idb_companion + the idb CLI back every tap and the app
-    // lifecycle. Check once up front and (with consent) install what's
-    // missing, so a fresh machine doesn't fail cryptically at the first tap.
-    await ensureIdb(defaultIdbDeps());
 
     this.reporter.suiteStart(flows);
     const suiteStart = Date.now();
@@ -146,6 +147,7 @@ export class EnnioRunner {
         reporter: this.reporter,
         verbose: this.verbose,
         lenient: this.lenient,
+        driver: this.driver,
       });
       return await executor.run(flow);
     } finally {

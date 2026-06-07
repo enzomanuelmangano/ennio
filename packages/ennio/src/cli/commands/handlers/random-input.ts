@@ -8,6 +8,7 @@ import { createContext, runInContext } from 'node:vm';
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
+import { interpolateSelector } from '../../runner/context';
 
 interface InputRandomTextCmd {
   inputRandomText: true | { length?: number };
@@ -108,12 +109,20 @@ export function registerRandomInputHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & CopyTextFromCmd => has(c, 'copyTextFrom'),
     async (cmd, { ctx }) => {
-      const sel = normalizeSelector(cmd.copyTextFrom as Parameters<typeof normalizeSelector>[0]);
+      const raw = interpolateSelector(cmd.copyTextFrom, ctx) as Parameters<
+        typeof normalizeSelector
+      >[0];
+      const sel = normalizeSelector(raw);
+      const index =
+        typeof raw === 'object' && raw && 'index' in raw ? (raw as { index?: number }).index : 0;
       const r = await ctx.client
-        .call('get_text', { testID: sel.id, text: sel.text })
+        .call('get_text', { testID: sel.id, text: sel.text, index: index ?? 0 })
         .catch(() => undefined);
       if (r && r.ok && r.data) {
         const text = String((r.data as { text: string }).text);
+        // Expose to flows as ${maestro.copiedText} (Maestro magic var)
+        // AND mirror to the device pasteboard so pasteText works too.
+        ctx.copiedText = text;
         execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], {
           input: text,
           stdio: ['pipe', 'pipe', 'pipe'],

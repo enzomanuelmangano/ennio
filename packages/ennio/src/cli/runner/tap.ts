@@ -18,21 +18,68 @@
 //         _accessibilityHandleUserTouchActivate directly when the
 //         gesture chain never armed)
 
-import {
-  tap as hidTap,
-  tapFast as hidTapFast,
-  tapPureFast as hidTapPureFast,
-  press as hidPress,
-} from '../hid';
+import type { TapIntent } from '../driver/types';
+import { axResolve, axTapTarget, dismissSystemSheet } from '../ennio-ax';
+import { getScreenSize } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
-import { captureHash, parsePoint, resolveRect } from './find';
+import { captureHash, captureReactTs, parsePoint, resolveRect } from './find';
+
+interface KeyboardFrame {
+  visible: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Query the software-keyboard window rect (separate high-level
+ *  UIWindow that is_exposed can't see). Returns null when no op /
+ *  not visible. */
+async function keyboardFrame(ctx: RunContext): Promise<KeyboardFrame | null> {
+  const r = await ctx.client.call('keyboard_frame').catch(() => undefined);
+  const d = r?.data as KeyboardFrame | undefined;
+  return d && d.visible ? d : null;
+}
+
+/** Wait for the keyboard window to actually retract after a
+ *  hide_keyboard. wait_commit tracks the app view-hash, not the
+ *  keyboard window's dismiss animation, so a tap could fire while the
+ *  keyboard still covers the target. Poll the keyboard frame until it's
+ *  gone (cap 1200ms). */
+async function waitKeyboardHidden(ctx: RunContext): Promise<void> {
+  const deadline = Date.now() + 1200;
+  while (Date.now() < deadline) {
+    if (!(await keyboardFrame(ctx))) return;
+    await sleep(50);
+  }
+}
+
+/** If the software keyboard covers `center`, dismiss it and wait for it
+ *  to retract before tapping. is_exposed hit-tests the app window only,
+ *  so a button beneath the (separate-window) keyboard reads as exposed
+ *  while a real HID touch lands on the keyboard. Normalized center in
+ *  [0,1]. */
+async function clearKeyboardOverTarget(
+  ctx: RunContext,
+  centerNx: number,
+  centerNy: number,
+): Promise<void> {
+  const kb = await keyboardFrame(ctx);
+  if (!kb) return;
+  const covered =
+    centerNx >= kb.x && centerNx <= kb.x + kb.w && centerNy >= kb.y && centerNy <= kb.y + kb.h;
+  if (!covered) return;
+  await ctx.client.call('hide_keyboard').catch(() => undefined);
+  await waitKeyboardHidden(ctx);
+}
 
 export async function execTapOn(
   ctx: RunContext,
   sel: MaestroSelector,
   preHash?: string,
+  intent: TapIntent = 'press',
 ): Promise<void> {
   // Point-tap fast path — no discovery needed. Wait for commits to
   // quiesce before firing: the YAML emits literal-coord taps right
@@ -53,7 +100,7 @@ export async function execTapOn(
       }
     }
     const { x, y } = parsePoint(sel.point, winW, winH);
-    await hidTap(ctx.udid, x, y);
+    await ctx.driver.tap(ctx.udid, x, y, { intent });
     return;
   }
   // UIAlertController auto-handler: button labels never make it into
@@ -70,10 +117,127 @@ export async function execTapOn(
     } catch {
       /* fall through to normal find */
     }
+    // Tab-bar routing is a driver decision: fast routes text matching
+    // a tab item through tap_tab up front (in-process, deterministic,
+    // idempotent — re-tapping the CURRENT tab produces zero visual
+    // change, which would otherwise trip the phantom detector into a
+    // pointless HID redo); baseline keeps the probe in the retap loop
+    // only.
+    if (await ctx.driver.tryTabTap(ctx.client, sel.text)) return;
+    // (Skipped when childOf is set — the cross-process AX can't scope by
+    // parent, and a bare testID/label match would pick the wrong sibling.)
+    // Text tap onto a testID'd interactive container the in-app finder
+    // mis-locates: it returns the inner Text label's rect (a pager tab,
+    // a segmented control), so the HID tap lands on the label and the
+    // Pressable's onPress never fires. The cross-process AX tree carries
+    // the FULL interactive element (with its testID) at device-correct
+    // coords — when the label resolves there to a testID'd element, tap
+    // it and verify the frame moved. High-confidence (testID-backed) and
+    // text-only, so the hot path is unaffected; falls through on no
+    // match / no effect / off-box.
+    const axEl = sel.childOf ? null : await axResolve(ctx.udid, { text: sel.text });
+    if (axEl) {
+      // Doomed-tap gate for the AX fast path: a VC transition in flight
+      // at dispatch time swallows the touch AND means the AX snapshot
+      // (taken ~300-800 ms ago) likely located the OUTGOING screen's
+      // instance of the label (feed-reorder: "Go back" on the dismissing
+      // edit-feeds screen). The ambient dismiss animation then satisfies
+      // the hash check below, masking the lost tap. If we had to wait,
+      // the coords are stale — skip the fast path and fall through to
+      // the standard find, which re-resolves on the settled hierarchy.
+      const pi = await ctx.client
+        .call('wait_presentation_idle', { maxMs: 2500 })
+        .catch(() => undefined);
+      const axWaitedMs = Number((pi?.data as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
+      if (axWaitedMs <= 50) {
+        const { w, h } = await getScreenSize(ctx.udid);
+        const baseHash = preHash ?? (await captureHash(ctx));
+        await ctx.driver.tap(ctx.udid, axEl.cx * w, axEl.cy * h, { intent });
+        const hc = await ctx.client
+          .call('wait_hash_change', { sinceHash: baseHash, maxMs: 500 })
+          .catch(() => undefined);
+        if (hc && hc.ok && (hc.data as { ok?: boolean })?.ok) {
+          // A native bottom-sheet menu row was tapped; wait for its
+          // dismiss transition to actually END (signal, not a fixed
+          // sleep) so the NEXT tap (often a button that re-opens a
+          // sibling sheet) doesn't race the animation and miss.
+          await ctx.client.call('wait_presentation_idle', { maxMs: 1200 }).catch(() => undefined);
+          await ctx.client
+            .call('wait_commit', { maxMs: 800, stableMs: 150 })
+            .catch(() => undefined);
+          return;
+        }
+      }
+    }
   }
   let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
   if (!rect) {
+    // A cross-process system sheet (Photo Library, tracking, a
+    // SpringBoard confirmation) may be floating over the app and hiding
+    // the in-app target. Clear it via the macOS AX tree + a real HID
+    // tap, then resolve once more before giving up.
+    if (await dismissSystemSheet(ctx.udid).catch(() => false)) {
+      await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
+      rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+    }
+  }
+  if (!rect && (sel.id || sel.text) && !sel.childOf) {
+    // The target may live in a native bottom-sheet / popover the in-app
+    // dylib doesn't traverse (Bluesky's Dialog/Prompt + composer render
+    // in a separate SheetViewController window). It's still on screen,
+    // so the cross-process AX tree sees it — match by testID (bridged
+    // AXIdentifier) or label and tap it directly. Soft-fails off-box.
+    if (await axTapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false)) {
+      return;
+    }
+  }
+  if (!rect) {
     throw new Error(`element not found: ${JSON.stringify(sel)}`);
+  }
+  // Coordinate cross-check: the in-app rect can be a mislocated sub-rect
+  // — the inner Text label of a tab-bar button or pager tab, where a tap
+  // hits the label and the Pressable's onPress never fires — or a rect in
+  // a native sheet window's coordinate space. If the cross-process AX
+  // places the SAME element (by testID, or exact label) far from the
+  // in-app center, the AX coords are device-authoritative; tap there and
+  // return on a confirmed frame change. Only diverges when the two
+  // disagree, so correctly-located taps fall straight through untouched.
+  // Ambiguity guard: when a testID has MORE THAN ONE on-screen match
+  // (a reply notification + a "followed you" row both tagged
+  // feedItem-by-bob.test), find_by_testid already picked the right
+  // topmost instance — but the cross-process AX surfaces only one of
+  // them, so a coord cross-check would mis-correct to the wrong row.
+  // Skip the AX override entirely for ambiguous testIDs.
+  let ambiguousId = false;
+  if (sel.id && !sel.childOf) {
+    const nth = await ctx.client
+      .call('find_by_testid_nth', { testID: sel.id, index: 1 })
+      .catch(() => undefined);
+    ambiguousId = !!(nth && nth.ok && nth.data);
+  }
+  if ((sel.id || sel.text) && !sel.childOf && !ambiguousId) {
+    const axEl = await axResolve(ctx.udid, { id: sel.id, text: sel.text });
+    // Only correct SMALL interactive elements (buttons, tabs, menu rows
+    // — height < ~12% of the screen). For a large container (a feed item,
+    // a card) the AX "center" can sit on an inner sub-link (the avatar →
+    // profile) while the in-app rect already targets the right body
+    // region; overriding there would mis-route the tap.
+    if (axEl && axEl.nh > 0 && axEl.nh < 0.12) {
+      const { w, h } = await getScreenSize(ctx.udid);
+      const axCx = axEl.cx * w;
+      const axCy = axEl.cy * h;
+      const inCx = rect.x + rect.w / 2;
+      const inCy = rect.y + rect.h / 2;
+      if (Math.hypot(axCx - inCx, axCy - inCy) > 44) {
+        const baseHash = preHash ?? (await captureHash(ctx));
+        await ctx.driver.tap(ctx.udid, axCx, axCy, { intent });
+        if (sel.id) ctx.lastTapTestID = sel.id;
+        const hc = await ctx.client
+          .call('wait_hash_change', { sinceHash: baseHash, maxMs: 500 })
+          .catch(() => undefined);
+        if (hc && hc.ok && (hc.data as { ok?: boolean })?.ok) return;
+      }
+    }
   }
   // Off-viewport auto-scroll: the testID resolved, but the rect
   // sits outside the window's visible bounds — common when a YAML
@@ -143,7 +307,7 @@ export async function execTapOn(
   }
   // Hidden test-only controls: some apps expose 1×1 px elements
   // (TextInput and Pressable variants) as side-channels for e2e
-  // harnesses. idb HID taps round to int — a 1×1 rect at
+  // harnesses. HID taps round to int — a 1×1 rect at
   // (401, 101) has its FP-center at (401.5, 101.5) which rounds
   // to (402, 102) — landing on the sibling button 1 px below.
   // Fall back to focus_testid for tiny TextInputs so the next
@@ -192,13 +356,36 @@ export async function execTapOn(
     Math.abs(a.w - b.w) < 1 &&
     Math.abs(a.h - b.h) < 1;
   let stableRect: Rect = rect;
-  {
+  // Scroll-idle gate FIRST. A HID touch delivered while any scroll
+  // view is mid-scroll (keyboard-driven setContentOffset, momentum)
+  // is swallowed by the scroll view as "stop scrolling" and never
+  // reaches the target — the tap "lands" but focuses nothing. The
+  // in-house HID path is fast enough to beat those animations (idb's
+  // gRPC latency used to accidentally outlive them), so wait for the
+  // signal, not luck. Soft cap: a continuously-scrolling screen falls
+  // through to the retap self-heal.
+  await timedAsync(ctx, 'tap.waitScrollIdle', () =>
+    ctx.client.call('wait_scroll_idle', { maxMs: 1200 }).catch(() => undefined),
+  );
+  // Position-stability gate. Preferred: the driver's signal-based
+  // steadiness (wait_view_steady — frame-locked native sampling +
+  // CALayer animation introspection; immune to spring inflection
+  // points that fool socket-roundtrip sampling). Fallback: the legacy
+  // CLI-side rect-sampling loop (HID driver, or the op missed).
+  const steady = await timedAsync(ctx, 'tap.waitSteady', () =>
+    ctx.driver.waitTargetSteady(ctx.client, { id: sel.id, text: sel.text }),
+  );
+  if (steady) {
+    const cur = await sampleRect();
+    if (cur) stableRect = cur;
+  } else {
     const deadline = Date.now() + 800;
+    const gapMs = ctx.driver.stabilityGateGapMs;
     let s1: Rect | null = rect;
     let s2: Rect | null = null;
     let s3: Rect | null = null;
     while (Date.now() < deadline) {
-      await sleep(10);
+      await sleep(gapMs);
       const cur = await sampleRect();
       if (cur) {
         s3 = s2;
@@ -227,10 +414,20 @@ export async function execTapOn(
     : sel.text
       ? { text: sel.text }
       : null;
+  // When the exposure wait expires without the target ever becoming
+  // exposed, the point is covered by another layer (tab bar, overlay).
+  // In fast mode the activation hitTest would land on — and activate —
+  // that occluder (observed: g-pan row half under the tab bar fired
+  // the tab button). Force a real HID tap for this gesture; UIKit
+  // touch routing handles edge-covered rows far more gracefully.
+  let confirmedExposed = true;
   if (exposureSel) {
-    const ex = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
-    const exposed = !!(ex && ex.ok && ex.data && (ex.data as { exposed?: boolean }).exposed);
-    if (!exposed) {
+    const checkExposed = async (): Promise<boolean> => {
+      const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
+      return !!(r && r.ok && r.data && (r.data as { exposed?: boolean }).exposed);
+    };
+    if (!(await checkExposed())) {
+      confirmedExposed = false;
       await timedAsync(ctx, 'tap.waitExposed', async () => {
         // 800 ms cap: RN animations (sheet present/dismiss, modal
         // slide) are typically 300-500 ms. The retap-self-heal loop
@@ -238,11 +435,90 @@ export async function execTapOn(
         const deadline = Date.now() + 800;
         while (Date.now() < deadline) {
           await sleep(80);
-          const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
-          const ok = !!(r && r.ok && r.data && (r.data as { exposed?: boolean }).exposed);
-          if (ok) break;
+          if (await checkExposed()) {
+            confirmedExposed = true;
+            break;
+          }
         }
       });
+      // Occlusion self-heal: still covered after the wait AND we have
+      // a testID → the cover is positional (target parked under the
+      // tab bar / nav header), not transitional. scroll_to drives
+      // scrollRectToVisible:, which respects adjusted contentInset on
+      // any layout — UIKit moves the row clear of its own chrome.
+      // This is checked at TAP time (not in scrollUntilVisible) so the
+      // answer can't decay between scroll and tap.
+      if (!confirmedExposed && sel.id) {
+        await timedAsync(ctx, 'tap.scrollToExpose', async () => {
+          await ctx.client.call('scroll_to', { elementTestID: sel.id }).catch(() => undefined);
+          await ctx.client
+            .call('wait_commit', { maxMs: 600, stableMs: 100 })
+            .catch(() => undefined);
+          confirmedExposed = await checkExposed();
+        });
+      }
+      // Modal-occlusion gate: the target's hosting VC sits BEHIND the
+      // topmost presented VC — a modal floats over it, and (pageSheet)
+      // the presentation also TRANSFORMS the root, so the cached rect
+      // is doubly wrong. The 800 ms exposure wait above assumes a
+      // transition-in-flight; a modal that dismisses only after an
+      // async action (composer publish → server round-trip) outlives
+      // it and the blind tap lands on the modal (thread-muting:
+      // e2eSignOut fired into the still-open composer). Wait on the
+      // exposure SIGNAL until the modal clears — bounded poll, no
+      // blind sleep; bail early the moment the occluding modal is gone.
+      if (!confirmedExposed) {
+        const bm = await ctx.client.call('behind_modal', exposureSel).catch(() => undefined);
+        if (bm && bm.ok && (bm.data as { behind?: boolean } | undefined)?.behind) {
+          await timedAsync(ctx, 'tap.waitModalClear', async () => {
+            const deadline = Date.now() + 8000;
+            while (Date.now() < deadline) {
+              if (await checkExposed()) {
+                confirmedExposed = true;
+                break;
+              }
+              const still = await ctx.client
+                .call('behind_modal', exposureSel)
+                .catch(() => undefined);
+              if (
+                !(still && still.ok && (still.data as { behind?: boolean } | undefined)?.behind)
+              ) {
+                // Modal gone but target still unexposed (tab-bar edge
+                // cover, transform settling) — re-check exposure once
+                // after the next commit, then proceed either way.
+                await ctx.client
+                  .call('wait_commit', { maxMs: 800, stableMs: 150 })
+                  .catch(() => undefined);
+                confirmedExposed = await checkExposed();
+                break;
+              }
+              await sleep(100);
+            }
+          });
+        }
+      }
+    }
+    // Disabled-control gate: the target is exposed but advertises
+    // NotEnabled (RN accessibilityState.disabled / Button disabled) — a
+    // tap would land and be swallowed without firing onPress. The
+    // enable flips on a SIGNAL the app controls (bsky's Save goes
+    // enabled when the async avatar-crop state lands and the form turns
+    // dirty), so wait on it: bounded poll, proceed at the cap either
+    // way (a flow that really wants to tap a disabled control gets the
+    // same no-op it would get from a finger).
+    {
+      const en = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
+      const enabledNow = (en?.data as { enabled?: boolean } | undefined)?.enabled;
+      if (enabledNow === false) {
+        await timedAsync(ctx, 'tap.waitEnabled', async () => {
+          const deadline = Date.now() + 4000;
+          while (Date.now() < deadline) {
+            const r = await ctx.client.call('is_exposed', exposureSel).catch(() => undefined);
+            if ((r?.data as { enabled?: boolean } | undefined)?.enabled !== false) return;
+            await sleep(80);
+          }
+        });
+      }
     }
     // Re-sample rect post-exposure. The position-stability gate can
     // lock onto a transient steady frame during a spring animation
@@ -290,7 +566,49 @@ export async function execTapOn(
   // gesture, closing the sheet instead of selecting the row. The
   // retap-self-heal loop covers any single-miss case.
   const isTextOnlyTap = !!sel.text && !sel.id;
-  await timedAsync(ctx, 'tap.hidTap', () => hidTapFast(ctx.udid, center.x, center.y));
+  // Keyboard-cover gate: is_exposed hit-tests the app window only, so a
+  // target beneath the software keyboard (a separate high-level
+  // UIWindow) reads as exposed while a real HID touch would land on the
+  // keyboard. If the keyboard covers this point, dismiss + wait for it
+  // to retract first (the custom-server "Done" under the keyboard).
+  {
+    const sz = await getScreenSize(ctx.udid);
+    await clearKeyboardOverTarget(ctx, center.x / sz.w, center.y / sz.h);
+  }
+  // Doomed-tap gate: a VC transition is in flight at dispatch time —
+  // UIKit disables window touch delivery for the duration of a
+  // present/dismiss/push/pop, so the tap would be swallowed outright.
+  // Worse, the find above may have matched the OUTGOING screen's
+  // instance of the label (feed-reorder: "Go back" resolved on the
+  // dismissing edit-feeds screen; the tap died with it and the flow
+  // never left Feeds). The transition starts ASYNC (a prior tap's JS →
+  // dismiss), so the handler-level pre-tap settle can run too early to
+  // see it — re-check at the last moment: wait for presentation idle,
+  // then re-resolve the selector so the SURVIVING screen's instance is
+  // the one tapped. Zero-cost when no transition is active.
+  if (sel.id || sel.text) {
+    const pi = await timedAsync(ctx, 'tap.waitPresentationIdle', () =>
+      ctx.client.call('wait_presentation_idle', { maxMs: 2500 }).catch(() => undefined),
+    );
+    const waitedMs = Number((pi?.data as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
+    if (waitedMs > 50) {
+      // A transition really was in flight — the cached rect may belong
+      // to the outgoing screen. Re-resolve on the settled hierarchy.
+      const re = await sampleRect();
+      if (re) {
+        stableRect = re;
+        center.x = re.x + re.w / 2;
+        center.y = re.y + re.h / 2;
+      }
+    }
+  }
+  // The driver picks the mechanism from intent + exposure: a focus
+  // tap needs a real touch (activation can't focus native inputs);
+  // an unexposed target means an in-process activation would hit the
+  // occluding layer.
+  await timedAsync(ctx, 'tap.hidTap', () =>
+    ctx.driver.tap(ctx.udid, center.x, center.y, { intent, exposed: confirmedExposed }),
+  );
   // Tiny ≤5 px test-harness Pressables (Bluesky's TestCtrls.e2e.tsx
   // stack of 1×1 px Pressables at top:100 right:0 zIndex:100): integer
   // rounding misses the hit-box ~30 % of taps. Fire pure DOWN+UP and
@@ -299,12 +617,12 @@ export async function execTapOn(
   // dismissing sibling controls when the first tap succeeded.
   if (rect.w <= 5 && rect.h <= 5) {
     const baseHash = preHash ?? (await captureHash(ctx));
-    await hidTapPureFast(ctx.udid, center.x, center.y);
+    await ctx.driver.tap(ctx.udid, center.x, center.y, { intent, exposed: confirmedExposed });
     for (let i = 1; i < 3; i++) {
       await sleep(80);
       const h = await captureHash(ctx);
       if (h !== baseHash) return;
-      await hidTapPureFast(ctx.udid, center.x, center.y);
+      await ctx.driver.tap(ctx.udid, center.x, center.y, { intent, exposed: confirmedExposed });
     }
     return;
   }
@@ -335,13 +653,17 @@ export async function execTapOn(
     const baseHash = preHash ?? (await captureHash(ctx));
     const chainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
     const chain = ((chainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
-    const isLateRecogniserHost = chain.some(
-      (cls) =>
-        cls.includes('CropViewController') ||
-        cls.includes('Mantis') ||
-        cls.includes('PHPicker') ||
-        cls.includes('PhotoPicker'),
-    );
+    const isAsyncPayloadHost = (cls: string): boolean =>
+      cls.includes('CropViewController') ||
+      cls.includes('Mantis') ||
+      cls.includes('PHPicker') ||
+      cls.includes('PhotoPicker');
+    const isLateRecogniserHost = chain.some(isAsyncPayloadHost);
+    // Captured BEFORE the retap loop: the cropper/picker dismissal is
+    // pure UIKit (no react commits), so the first commit after this
+    // timestamp IS the dismissal's payload (bsky avatar crop: the image
+    // reaches JS ~1-2 s post-dismissal).
+    const preLoopReact = isLateRecogniserHost ? await captureReactTs(ctx) : null;
     const maxRetaps = isLateRecogniserHost ? 5 : 1;
     for (let i = 0; i < maxRetaps; i++) {
       const hc = await ctx.client
@@ -364,7 +686,9 @@ export async function execTapOn(
       if (hashChanged && !isLateRecogniserHost) break;
       const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
       await timedAsync(ctx, 'tap.selfHealRetap', () =>
-        isTextOnlyTap ? hidPress(ctx.udid, c.x, c.y) : hidTapFast(ctx.udid, c.x, c.y),
+        isTextOnlyTap
+          ? ctx.driver.press(ctx.udid, c.x, c.y)
+          : ctx.driver.tap(ctx.udid, c.x, c.y, { intent, exposed: stillExposed }),
       );
     }
     // Last-resort: if the entire retap loop above never moved the
@@ -405,6 +729,19 @@ export async function execTapOn(
         // wires to the React-side onPress.
         await ctx.client.call('activate_by_text', { text: sel.text }).catch(() => undefined);
       }
+      // Native sheet / context-menu / picker: the in-app finder returned
+      // a rect in a separate SheetViewController window's coordinate
+      // space, so the device-space HID tap (and the in-app activation
+      // above) both no-op'd. The element is still frontmost, so the
+      // cross-process AX tree has it at the correct device-screen coords
+      // — re-tap there. Self-guarding: if the original tap actually
+      // worked, the element is gone from the AX tree and this is a no-op.
+      const stillNoChange = await ctx.client
+        .call('wait_hash_change', { sinceHash: baseHash, maxMs: 60 })
+        .catch(() => undefined);
+      if (!(stillNoChange && stillNoChange.ok && (stillNoChange.data as { ok?: boolean })?.ok)) {
+        await axTapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false);
+      }
     }
     // Tab-bar resilience: iOS 26's liquid-glass tab bar drops HID
     // taps when the host is mid-transition (slow CI runners reproduce
@@ -418,6 +755,27 @@ export async function execTapOn(
     // (no-op when the target tab is already selected).
     if (sel.text && !sel.id) {
       await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
+    }
+    // Async-payload dismissal settle: this tap fired INTO a cropper /
+    // picker host (chain captured pre-tap). Its "Done" hands the result
+    // to JS only AFTER the VC fully dismisses, and the NEXT step often
+    // reads that state (bsky: Save persists newUserAvatar — pressed
+    // before the payload commit it silently drops the image). Wait for
+    // the host to leave the VC chain, then for the payload commit.
+    // Only crop/picker dismissals pay this; ordinary taps skip.
+    if (isLateRecogniserHost && preLoopReact) {
+      await timedAsync(ctx, 'tap.waitAsyncPayload', async () => {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const cr = await ctx.client.call('top_vc_chain').catch(() => undefined);
+          const cls = ((cr?.data as { chain?: string[] })?.chain ?? []) as string[];
+          if (!cls.some(isAsyncPayloadHost)) break;
+          await sleep(80);
+        }
+        await ctx.client
+          .call('wait_react_commit', { sinceMs: preLoopReact.ts, maxMs: 4000 })
+          .catch(() => undefined);
+      });
     }
   }
 }

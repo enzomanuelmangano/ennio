@@ -9,15 +9,22 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand, MaestroSelector } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { swipe as hidSwipe, longPressDrag as hidLongPressDrag } from '../../hid';
-import { DEFAULT_WIN_H, DEFAULT_WIN_W, sleep } from '../../runner/context';
+import { DEFAULT_WIN_H, DEFAULT_WIN_W, interpolateSelector, sleep } from '../../runner/context';
 import { resolveRect } from '../../runner/find';
 import { isVisible } from '../../runner/visibility';
 
 interface ScrollUntilVisibleCmd {
   scrollUntilVisible:
     | MaestroSelector
-    | { element: MaestroSelector; direction?: string; timeout?: number };
+    | {
+        element: MaestroSelector;
+        direction?: string;
+        timeout?: number;
+        // Accepted for Maestro parity; advisory (speed) or no-op
+        // (visibilityPercentage — ennio asserts real on-screen visibility).
+        speed?: number;
+        visibilityPercentage?: number;
+      };
 }
 interface SwipeCmd {
   swipe: {
@@ -43,7 +50,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & ScrollUntilVisibleCmd => has(c, 'scrollUntilVisible'),
     async (cmd, { ctx }) => {
-      const arg = cmd.scrollUntilVisible;
+      const arg = interpolateSelector(cmd.scrollUntilVisible, ctx);
       const target = 'element' in arg ? arg.element : (arg as MaestroSelector);
       const dir = ('direction' in arg && arg.direction ? arg.direction : 'DOWN').toUpperCase();
       const timeout = ('timeout' in arg && arg.timeout) || 15000;
@@ -60,17 +67,37 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       const NUDGE_DISTANCE = Math.round(winH / 6);
       // Bottom 20% of screen overlaps with the tab bar.
       const TAB_BAR_THRESHOLD = (winH * 4) / 5;
+      const isFastDriver = ctx.driver.name === 'fast';
+      // True only after a swipe that ran in-process (instant, no
+      // momentum). Deliberately false before the first swipe: the
+      // found-branch's settle also guards against the PREVIOUS
+      // command's animation tail (tab-entry transition) — skipping it
+      // fired the tab-bar nudge mid-transition and scrolled nothing
+      // (g-pan).
+      let noMomentum = false;
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await isVisible(ctx, target)) {
-          await sleep(600);
-          await ctx.client
-            .call('wait_commit', { maxMs: 2000, stableMs: 300 })
-            .catch(() => undefined);
+          await ctx.driver.settleScrollFound(ctx.client, noMomentum);
+          // Fast + id targets: replace the geometry-threshold nudges
+          // with scroll_to — UIKit's scrollRectToVisible plus the
+          // occlusion-aware correction loop in the dylib. Idempotent
+          // when the target is already fully visible; deterministic
+          // placement when an exact-jump swipe parked it on the
+          // visibility boundary or under floating chrome. Tap-time
+          // exposure self-heal covers anything that shifts after this.
+          if (isFastDriver && target.id) {
+            await ctx.client.call('scroll_to', { elementTestID: target.id }).catch(() => undefined);
+            await ctx.client
+              .call('wait_commit', { maxMs: 600, stableMs: 100 })
+              .catch(() => undefined);
+            return;
+          }
           const rect = await resolveRect(ctx, target);
           if (rect && rect.y + rect.h / 2 > TAB_BAR_THRESHOLD) {
+            let nudgeOutcome = { inProcess: true };
             if (dir === 'DOWN') {
-              await hidSwipe(
+              nudgeOutcome = await ctx.driver.swipe(
                 ctx.udid,
                 SWIPE_CENTER_X,
                 SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
@@ -79,7 +106,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
                 250,
               );
             } else if (dir === 'UP') {
-              await hidSwipe(
+              nudgeOutcome = await ctx.driver.swipe(
                 ctx.udid,
                 SWIPE_CENTER_X,
                 SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
@@ -88,10 +115,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
                 250,
               );
             }
-            await sleep(500);
-            await ctx.client
-              .call('wait_commit', { maxMs: 1500, stableMs: 200 })
-              .catch(() => undefined);
+            await ctx.driver.settleAfterNudge(ctx.client, nudgeOutcome);
           }
           return;
         }
@@ -113,8 +137,9 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           x1 = SWIPE_CENTER_X - dist / 2;
           x2 = SWIPE_CENTER_X + dist / 2;
         }
-        await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-        await ctx.client.call('wait_commit', { maxMs: 2000, stableMs: 300 }).catch(() => undefined);
+        const outcome = await ctx.driver.swipe(ctx.udid, x1, y1, x2, y2, 250);
+        noMomentum = outcome.inProcess;
+        await ctx.driver.settleScrollStep(ctx.client, outcome);
       }
       throw new Error(`scrollUntilVisible: target never visible within ${timeout}ms`);
     },
@@ -124,6 +149,14 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & SwipeCmd => has(c, 'swipe'),
     async (cmd, { ctx }) => {
       const sw = cmd.swipe;
+      // Pre-swipe scroll-idle gate. A swipe fired before a pager/
+      // scrollview is interactive (e.g. the first carousel swipe right
+      // after launchApp, before the onboarding pager mounts) is
+      // swallowed — the gesture lands on a still-animating or
+      // not-yet-ready surface and the page doesn't advance. ennio's
+      // fast actuation hits this where Maestro's gRPC latency didn't.
+      // Soft cap; continuous scrollers fall through.
+      await ctx.client.call('wait_scroll_idle', { maxMs: 1200 }).catch(() => undefined);
       // Query real device dims so `%` coords land on actual pixels —
       // hardcoded 390×844 was 12-30 pt off on iPhone 17 Pro / Air / iPad.
       const sizeResp = await ctx.client.call('window_size').catch(() => undefined);
@@ -232,6 +265,14 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           return;
         }
         ctx.lastRefreshAtMs = now;
+        // Firing mechanism is a driver decision: fast tries the
+        // in-process trigger_refresh (a setContentOffset jump can't
+        // produce the over-scroll drag UIRefreshControl needs), with
+        // a real HID drag as fallback; baseline declines and runs the
+        // shared path below.
+        if (await ctx.driver.tryPullToRefresh(ctx.client, ctx.udid, from, to, sw.duration ?? 400)) {
+          return;
+        }
       }
       // Drag-to-sort: RN draggable-flatlist needs a ~500 ms hold before
       // drag mode. Long-press-then-drag fires when YAML provides
@@ -241,7 +282,7 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
         const totalDur = sw.duration ?? 1000;
         const holdMs = 800;
         const moveMs = Math.max(500, totalDur - holdMs);
-        await hidLongPressDrag(ctx.udid, from.x, from.y, to.x, to.y, holdMs, moveMs);
+        await ctx.driver.longPressDrag(ctx.udid, from.x, from.y, to.x, to.y, holdMs, moveMs);
         await sleep(500);
         await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
         return;
@@ -249,13 +290,54 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       // Pre-swipe settle: wait for animation to end so the gesture
       // lands on a stable target (RN-Nav push spring, FlatList layout,
       // expo-router tab change). stableMs 350 / maxMs 2500 covers
-      // the typical worst case.
+      // the typical worst case. NOT trimmed in fast mode — this wait
+      // is what makes the gesture (and the in-process hitTest) land on
+      // the right scroll view; firing early just downgrades the swipe
+      // to a momentum HID fallback that costs more than the wait.
       await ctx.client.call('wait_commit', { maxMs: 2500, stableMs: 350 }).catch(() => undefined);
       await ctx.client.call('wait_presentation_idle', { maxMs: 800 }).catch(() => undefined);
-      // Maestro default swipe is 400 ms.
-      await hidSwipe(ctx.udid, from.x, from.y, to.x, to.y, sw.duration ?? 400);
-      await sleep(500);
-      await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
+      // Maestro default swipe is 400 ms. Directional swipes (no
+      // explicit coords) are usually navigational — a carousel page
+      // turn, a tab change. A fast HID swipe fired in rapid succession
+      // (onboarding pagers: swipe → waitForAnimationToEnd → swipe) can
+      // be dropped if the previous page glide hadn't committed: the
+      // gesture lands mid-transition and the pager ignores it. Verify
+      // the screen actually changed; if not, the swipe was a no-op —
+      // wait for scroll-idle and fire once more. Guarded to the
+      // directional, no-coordinate form so explicit-coordinate swipes
+      // (drag-to-dismiss, precise drags) are untouched.
+      // Navigational (no explicit coords) swipes verify they advanced
+      // via the scroll view's contentOffset — the reliable signal
+      // (frame_hash misses carousel turns whose pages carry no testID'd
+      // content). A swipe fired in rapid succession (onboarding pagers:
+      // swipe → waitForAnimationToEnd → swipe) can be swallowed if the
+      // previous glide hadn't committed; retry up to 3x until the offset
+      // moves. Explicit-coordinate swipes (drag-to-dismiss, precise
+      // drags) skip this — their effect isn't an offset change.
+      const verifyAdvance = !sw.start && !sw.end && !!sw.direction;
+      const durMs = sw.duration ?? 400;
+      const offset = async (): Promise<{ x: number; y: number } | null> => {
+        const r = await ctx.client.call('scroll_offset').catch(() => undefined);
+        const d = r?.data as { ok?: boolean; x?: number; y?: number } | undefined;
+        return d?.ok ? { x: d.x ?? 0, y: d.y ?? 0 } : null;
+      };
+      const moved = (a: { x: number; y: number } | null, b: { x: number; y: number } | null) =>
+        !!a && !!b && (Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1);
+
+      const pre = verifyAdvance ? await offset() : null;
+      let outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, durMs);
+      await ctx.driver.settleAfterSwipe(ctx.client, outcome);
+      // Only retry when we had a baseline offset (a scroll view is
+      // present) and it didn't move — i.e. the swipe was genuinely
+      // swallowed, not "there's nothing to scroll".
+      if (verifyAdvance && pre) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (moved(pre, await offset())) break;
+          await ctx.client.call('wait_scroll_idle', { maxMs: 1200 }).catch(() => undefined);
+          outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, durMs);
+          await ctx.driver.settleAfterSwipe(ctx.client, outcome);
+        }
+      }
     },
   );
 
@@ -284,8 +366,12 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
         x1 = cx - dist / 2;
         x2 = cx + dist / 2;
       }
-      await hidSwipe(ctx.udid, x1, y1, x2, y2, 250);
-      await sleep(400);
+      const outcome = await ctx.driver.swipe(ctx.udid, x1, y1, x2, y2, 250);
+      if (outcome.inProcess) {
+        await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 100 }).catch(() => undefined);
+      } else {
+        await sleep(400);
+      }
     },
   );
 }

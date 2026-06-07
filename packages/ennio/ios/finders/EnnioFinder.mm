@@ -372,12 +372,28 @@ static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
     UIView *cur = v.superview;
     for (int hop = 0; hop < 6 && cur; hop++, cur = cur.superview) {
         if (!cur.userInteractionEnabled) continue;
+        // A scroll view is never THE tappable control — it scrolls. Its
+        // private touch recognizers (UIScrollViewDelayedTouchesBegan…,
+        // knob long-press) are not "this is a button" signals, and
+        // promoting to one re-centers the tap on the container (bsky
+        // home pager tab bar). The real Pressable, when present, sits
+        // at an earlier hop and wins before we ever reach the scroller.
+        if ([cur isKindOfClass:UIScrollView.class]) continue;
         if (viewWindowArea(cur) > areaCap) return v;
         if ([cur isKindOfClass:UISegmentedControl.class]) return v;
         if ([cur isKindOfClass:UIControl.class]) return cur;
         if ([cur isKindOfClass:UIButton.class]) return cur;
         for (UIGestureRecognizer *g in cur.gestureRecognizers) {
-            if (g.isEnabled) return cur;
+            if (!g.isEnabled) continue;
+            // Pan/pinch recognizers mean "this container scrolls/zooms",
+            // not "this is the tappable control". Promoting to a scroll
+            // view re-centers the tap on the CONTAINER — bsky's home
+            // pager: "Feeds ✨" label promoted to the full-width
+            // RCTCustomScrollView tab bar, tap fired at x=center on the
+            // divider between the two tabs and the pager never switched.
+            if ([g isKindOfClass:UIPanGestureRecognizer.class]) continue;
+            if ([g isKindOfClass:UIPinchGestureRecognizer.class]) continue;
+            return cur;
         }
         UIAccessibilityTraits t = cur.accessibilityTraits;
         if ((t & UIAccessibilityTraitButton) || (t & UIAccessibilityTraitLink)) return cur;
@@ -834,6 +850,24 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     CGRect r = [view.window convertRect:view.bounds fromView:view];
     EnnioRect out = {r.origin.x, r.origin.y, r.size.width, r.size.height};
     return out;
+}
+
++ (BOOL)isBehindTopmostPresentation:(UIView *)view {
+    if (!view) return NO;
+    UIViewController *host = finderHostingVC(view);
+    UIViewController *top = finderTopmostPresentedVC();
+    if (!host || !top) return NO; // fail-open: can't tell
+    return !finderVCInTopmost(host, top);
+}
+
++ (BOOL)isViewTransitioning:(UIView *)view {
+    if (!view) return NO;
+    UIViewController *vc = finderHostingVC(view);
+    for (; vc; vc = vc.parentViewController) {
+        if (vc.isBeingDismissed || vc.isBeingPresented) return YES;
+        if (vc.isMovingFromParentViewController || vc.isMovingToParentViewController) return YES;
+    }
+    return NO;
 }
 
 + (BOOL)isOnScreen:(UIView *)view {

@@ -45,6 +45,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Existence query — same matching rules as +tapTabByName, no tap.
 + (BOOL)findTabByName:(NSString *)name;
 
+/// True when the named tab is the CURRENTLY selected one. Re-tapping
+/// the current tab has pop-to-root semantics that synthetic selection
+/// can't reproduce faithfully — callers route that case to a real tap.
++ (BOOL)isTabSelectedByName:(NSString *)name;
+
 // ─── Navigation ─────────────────────────────────────────────────────
 
 + (BOOL)backGesture;
@@ -78,11 +83,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Send a literal string to the firstResponder via UIKeyInput. Bypasses
 /// the simulator's hardware-keyboard locale, so unicode characters and
-/// special chars (@, è, accents) survive intact — idb's `ui text` is
+/// special chars (@, è, accents) survive intact — a synthesized key
 /// translated through the active keyboard layout and corrupts them.
 + (BOOL)insertText:(NSString *)text;
 
-/// Make the view bearing `testID` the firstResponder. Bypasses idb
+/// Make the view bearing `testID` the firstResponder. Bypasses the
 /// HID taps that can't focus a 1×1 px hidden input (a common
 /// e2e-only pattern in apps that need a side-channel to inject
 /// metadata into the app — Bluesky's e2eProxyHeaderInput etc.).
@@ -123,7 +128,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 
 /// Trigger UIRefreshControl on the scroll view containing (x, y).
-/// idb HID swipes don't reliably cross UIRefreshControl's pan-distance
+/// HID swipes don't reliably cross UIRefreshControl's pan-distance
 /// threshold on iOS 26 simulators (touch events arrive in two endpoint
 /// chunks without enough interpolated Moves). This synthesises the
 /// refresh by calling `beginRefreshing` + sending `valueChanged`
@@ -134,7 +139,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// Returns YES if the scroll view containing (x, y) has a
 /// UIRefreshControl currently in the refreshing state. The CLI uses
 /// this to throttle YAML "warm-up + trigger" double-swipe patterns —
-/// without it, two idb HID swipes both cross the pan threshold on
+/// without it, two HID swipes both cross the pan threshold on
 /// iOS 26 sim and fire onRefresh twice.
 + (BOOL)isRefreshingAtX:(double)x y:(double)y;
 

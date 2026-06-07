@@ -19,7 +19,7 @@ name: 'Gauntlet — RefreshControl pull-to-refresh'
 # UIScrollView pan recognizer (single swipe alone is flaky on iOS 26
 # simulator HID — touch begin/end timing doesn't always cross
 # RefreshControl's trigger threshold). Second swipe pulls the
-# spinner past trigger. Explicit start/end uses idb HID (real
+# spinner past trigger. Explicit start/end uses real HID (
 # touches the pan recogniser sees) instead of setContentOffset.
 - swipe:
     start: '50%,25%'

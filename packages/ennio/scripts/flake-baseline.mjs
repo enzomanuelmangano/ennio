@@ -12,7 +12,7 @@
 //
 // Defaults: --dir ../../example/maestro-e2e  --runs 5  --out reports/flake-baseline.json
 //
-// Requires a booted iOS sim + idb (same prerequisites as `ennio test`).
+// Requires a booted iOS sim (same prerequisites as `ennio test`).
 // Env passthrough: ENNIO_UDID, ENNIO_DYLIB_PATH.
 
 import { spawnSync } from 'node:child_process';

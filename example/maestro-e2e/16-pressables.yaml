@@ -73,7 +73,7 @@ name: Pressables — every RN pressable variant
     id: 'hit-last'
     text: 'GestureDetector'
 
-# Switch (toggle) — Ennio gap: idb tap on RCTSwitch doesn't fire
+# Switch (toggle) — Ennio gap: a HID tap on RCTSwitch doesn't fire
 # onValueChange, fiber walker bails because Switch has no `onPress` prop.
 # Skipping until writer learns to dispatch a synthetic toggle.
 # - swipe:

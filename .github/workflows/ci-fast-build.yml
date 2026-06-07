@@ -81,6 +81,8 @@ jobs:
           done
           bash "$ENNIO/scripts/build-shim.sh"
           ENNIO_OBJECTS_DIR="$OBJ_DIR" bash "$ENNIO/scripts/build-dylib.sh"
+          bash "$ENNIO/scripts/build-hid-helper.sh"
+          cp /tmp/ennio-build/enniohid "$ENNIO/prebuilt/enniohid"
           bash "$ENNIO/scripts/regen-manifest.sh"
 
       - name: Cache ennio prebuilt dylibs (save)
@@ -197,17 +199,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: Select Xcode
         run: sudo xcode-select -switch /Applications/Xcode_26.0.app
 
-      - name: Install idb + coreutils
-        run: |
-          brew install facebook/fb/idb-companion coreutils
-          pip3 install fb-idb
+      - name: Install coreutils
+        run: brew install coreutils
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -219,6 +215,7 @@ jobs:
         run: |
           mkdir -p packages/ennio/prebuilt packages/ennio/dist /tmp/ennio-app-cache
           cp -r /tmp/e2e-build/prebuilt/* packages/ennio/prebuilt/
+          chmod +x packages/ennio/prebuilt/enniohid || true
           cp -r /tmp/e2e-build/dist/* packages/ennio/dist/
           cp -r /tmp/e2e-build/app/EnnioExample.app /tmp/ennio-app-cache/
           ls -la packages/ennio/prebuilt/ packages/ennio/dist/ /tmp/ennio-app-cache/
@@ -234,27 +231,6 @@ jobs:
 
       - name: Install example app
         run: xcrun simctl install "${{ steps.sim.outputs.udid }}" /tmp/ennio-app-cache/EnnioExample.app
-
-      - name: Start idb_companion
-        run: |
-          set -uxo pipefail
-          UDID="${{ steps.sim.outputs.udid }}"
-          mkdir -p /tmp/idb
-          SOCK="/tmp/idb/${UDID}_companion.sock"
-          for attempt in 1 2 3; do
-            rm -f "$SOCK"
-            nohup idb_companion --udid "$UDID" --grpc-domain-sock "$SOCK" \
-              > "/tmp/idb-companion-$attempt.log" 2>&1 &
-            COMPANION_PID=$!
-            for i in $(seq 1 45); do [ -S "$SOCK" ] && break; sleep 1; done
-            if [ -S "$SOCK" ]; then
-              echo "idb_companion listening (pid $COMPANION_PID, attempt $attempt)"
-              exit 0
-            fi
-            kill -9 $COMPANION_PID 2>/dev/null || true
-            sleep 5
-          done
-          echo "idb_companion failed" >&2; exit 1
 
       - name: Assign test shard
         id: tests

@@ -21,7 +21,7 @@ are seeing.
 2. Confirm you are on the **latest** `@reactiive/ennio`.
 3. Confirm the environment matches the supported matrix in the
    [README](README.md#getting-started): RN ≥ 0.81 (New Arch / Fabric),
-   iOS 17+ simulator, Xcode 16+, Node 18+, `idb-companion` + `fb-idb`
+   iOS 17+ simulator, Xcode 16+, Node 18+
    installed.
 4. Make a minimal repro YAML if you can. A 5-line failing flow is
    worth more than a paragraph of description.

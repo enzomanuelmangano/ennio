@@ -8,8 +8,16 @@
 
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
-import { tapFast as hidTapFast, typeText as hidType } from '../../hid';
+import { typeText as hidType, getActuator } from '../../hid';
+import { axFocusTextField, axTextFieldId } from '../../ennio-ax';
 import { interpolate, sleep } from '../../runner/context';
+
+// Fields whose value is driven by an onChangeText handler that
+// UIKeyInput.insertText doesn't trigger (rich-text editors). For these
+// we must type via REAL keyboard HID events so the controlled value
+// updates — Bluesky's composer is the canonical case: its publish button
+// stays disabled (canPost=false) under insert_text on a reopened sheet.
+const REAL_KEYBOARD_FIELDS = new Set(['composerTextInput']);
 
 interface InputTextCmd {
   inputText: string | number;
@@ -36,31 +44,100 @@ export function registerInputHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & InputTextCmd => has(c, 'inputText'),
     async (cmd, { ctx }) => {
       const text = interpolate(String(cmd.inputText), ctx);
+
+      // Rich-text composer: insert_text won't fire its onChangeText, so
+      // canPost never flips. Focus the field, then type via REAL keyboard
+      // HID events (host Indigo keyboard builder) which traverse the full
+      // text-input delegate chain.
+      const liveField = await axTextFieldId(ctx.udid);
+      if (liveField && REAL_KEYBOARD_FIELDS.has(liveField)) {
+        await ctx.client.call('focus_testid', { testID: liveField }).catch(() => undefined);
+        await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
+        await getActuator(ctx.udid).typeText(text);
+        await ctx.client.call('wait_commit', { maxMs: 600, stableMs: 100 }).catch(() => undefined);
+        ctx.lastWasTextInput = true;
+        return;
+      }
+
       // Try insert_text (UIKeyInput on the current firstResponder) up
-      // to 3 times. Between attempts, if the prior tap target was a
-      // testID, re-tap via the dylib activate path to recover when the
-      // original tap didn't actually move focus into the field.
-      let ok = false;
-      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
-        if (attempt > 0 && ctx.lastTapTestID) {
-          const rect = await ctx.client
-            .call('find_by_testid', { testID: ctx.lastTapTestID })
-            .catch(() => undefined);
-          if (rect && rect.ok && rect.data) {
-            const r = rect.data as { x: number; y: number; w: number; h: number };
-            await hidTapFast(ctx.udid, r.x + r.w / 2, r.y + r.h / 2);
-          }
-        }
+      // to 3 times. Focus is verified by IDENTITY, not existence: when
+      // the previous tap targeted a testID, readiness requires that
+      // exact field to hold first responder. RN switches focus
+      // asynchronously after the tap — during the switch the PREVIOUS
+      // field still answers "a field is focused", and typing lands in
+      // the old field (the checkout-form cascade; in-house HID's speed
+      // exposed what idb's gRPC latency used to mask).
+      const expectedField = ctx.lastTapTestID;
+      const responderReady = async (maxMs: number): Promise<boolean> => {
         const fr = await ctx.client
-          .call('first_responder_ready', { maxMs: 500 })
+          .call('first_responder_ready', {
+            maxMs,
+            ...(expectedField ? { testID: expectedField } : {}),
+          })
           .catch(() => undefined);
-        void fr;
+        return !!(fr && fr.ok && fr.data && (fr.data as { ready?: boolean }).ready);
+      };
+      let ok = false;
+      for (let attempt = 0; attempt < 4 && !ok; attempt++) {
+        let focused = await responderReady(800);
+        if (!focused) {
+          // Wrong field focused, or none. Recovery order:
+          //   1. The INTENDED field (last tap's testID) via the dylib
+          //      focus path, rect-tap fallback.
+          //   2. The live text field per the cross-process AX tree —
+          //      composer/sheet inputs without a prior testID tap.
+          //      Deliberately second: during a focus switch AX still
+          //      reports the OLD field; preferring it typed into the
+          //      wrong input.
+          //   3. axFocusTextField as the last resort.
+          // Never re-tap the opener here — that toggles an open sheet
+          // SHUT (the bug behind consecutive replies failing).
+          let focusTap = false;
+          if (expectedField) {
+            const r = await ctx.client
+              .call('focus_testid', { testID: expectedField })
+              .catch(() => undefined);
+            focusTap = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
+            if (!focusTap) {
+              const rect = await ctx.client
+                .call('find_by_testid', { testID: expectedField })
+                .catch(() => undefined);
+              if (rect && rect.ok && rect.data) {
+                const rr = rect.data as { x: number; y: number; w: number; h: number };
+                await ctx.driver.tap(ctx.udid, rr.x + rr.w / 2, rr.y + rr.h / 2, {
+                  intent: 'focus',
+                });
+                focusTap = true;
+              }
+            }
+          }
+          if (!focusTap) {
+            const fieldId = await axTextFieldId(ctx.udid);
+            if (fieldId) {
+              const r = await ctx.client
+                .call('find_by_testid', { testID: fieldId })
+                .catch(() => undefined);
+              if (r && r.ok && r.data) {
+                const rr = r.data as { x: number; y: number; w: number; h: number };
+                await ctx.driver.tap(ctx.udid, rr.x + rr.w / 2, rr.y + rr.h / 2, {
+                  intent: 'focus',
+                });
+                focusTap = true;
+              }
+            }
+          }
+          if (!focusTap) {
+            await axFocusTextField(ctx.udid).catch(() => false);
+          }
+          await responderReady(800);
+        }
         try {
           const r = await ctx.client.call('insert_text', { text });
           ok = !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
         } catch {
           /* retry */
         }
+        if (!ok) await sleep(300); // let the composer settle before retrying
       }
       if (!ok) await hidType(ctx.udid, text);
       await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 80 });

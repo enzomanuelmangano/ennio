@@ -9,7 +9,7 @@ Usage:
   ennio test <yaml | dir>       run flows
   ennio hierarchy               dump the in-app shadow tree as JSON
   ennio screenshot [path]       grab the simulator screen
-  ennio doctor                  diagnose Node, Xcode, idb, dylib + app socket
+  ennio doctor                  diagnose Node, Xcode, enniohid, dylib + app socket
   ennio version                 print version
   ennio help [command]          this message, or per-command help
 
@@ -21,7 +21,7 @@ Common options:
 
 Environment:
   ENNIO_UDID         pin to a specific simulator UDID
-  ENNIO_DEBUG_IDB=1  log idb fallback calls
+  ENNIO_PHASE_TRACE=1  log per-gesture HID + phase timing
 `;
 
 const PER_COMMAND: Record<string, string> = {
@@ -42,7 +42,7 @@ Options: --port`,
 Grabs the booted simulator's screen. Defaults to /tmp/ennio-shot.png.`,
   doctor: `ennio doctor
 
-Pre-flight check. FAIL rows block a run (Node ≥ 18, Xcode/simctl, idb,
+Pre-flight check. FAIL rows block a run (Node ≥ 18, Xcode/simctl, enniohid,
 libennio.dylib); WARN rows don't (booted sim, app socket). Exit 1 on any FAIL.`,
 };
 

@@ -9,9 +9,10 @@ Maestro-compatible E2E test runner for React Native iOS.
 
 The CLI injects a prebuilt ObjC dylib into your simulator app via
 `DYLD_INSERT_LIBRARIES` and drives it through a Unix socket. Real
-CoreSimulator touches are dispatched via `idb` gRPC HID — the gesture
-goes through the same path a finger would. No XCTest, no CDP, no
-companion driver.
+CoreSimulator touches are dispatched by an in-house host helper that
+posts Indigo HID events straight to the simulator — the gesture goes
+through the same path a finger would. No XCTest, no CDP, no companion
+driver.
 
 ```bash
 bun add -D @reactiive/ennio          # or npm install --save-dev
@@ -34,14 +35,9 @@ it at simulator launch time.
   and Enterprise distribution builds.
 - iOS simulator (tested on iOS 17–18; bleeding-edge OS/RN combos may
   hit injection issues — see the issue tracker)
-- Xcode 16+, Node 18+
-- Facebook's `idb` toolchain — checked at startup and installed with
-  your consent if missing. To install manually:
-
-  ```bash
-  brew install facebook/fb/idb-companion
-  pip3 install fb-idb
-  ```
+- Xcode 16+, Node 18+ — and nothing else. Touches use Xcode's own
+  CoreSimulator / SimulatorKit frameworks; no Homebrew, no pip, no
+  idb.
 
 ## How it works
 
@@ -83,7 +79,8 @@ promotion.
 
 ### Touch delivery
 
-Touches go through `idb_companion`'s gRPC HID service, which
+Touches go through an in-house host helper (`enniohid`) that posts
+Indigo HID events via CoreSimulator / SimulatorKit, which
 synthesizes `IOHIDEvent`s at the CoreSimulator level. Same touch
 pipeline as a physical finger — UIKit gesture recognizers, React
 Native's responder system, and RNGH all see a real touch.

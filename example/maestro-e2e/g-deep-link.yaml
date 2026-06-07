@@ -3,12 +3,11 @@ name: 'Gauntlet — Deep link route'
 ---
 # Validates the deep-link route resolves and renders the target screen.
 # Note: `openLink` from `xcrun simctl openurl` triggers iOS 26+
-# SpringBoard's "Open in <App>?" confirmation alert, which is rendered
-# out-of-process. idb_companion's XCTest helper doesn't surface that
-# alert on iOS 26 sim (`idb ui describe-all` returns root node only),
-# so we can't dismiss it programmatically. Until idb iOS 26 support
-# lands, we navigate to the same route via in-app Pressable instead —
-# this still exercises the deep-link route's resolver + renderer.
+# SpringBoard's "Open in <App>?" confirmation alert, rendered
+# out-of-process (SpringBoard). ennio's in-app dylib + in-house HID
+# can't introspect that cross-process sheet to dismiss it, so we
+# navigate to the same route via an in-app Pressable instead — this
+# still exercises the deep-link route's resolver + renderer.
 - launchApp:
     clearState: true
 - tapOn: 'Gauntlet'

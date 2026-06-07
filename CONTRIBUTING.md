@@ -23,7 +23,8 @@ packages/
                       built by CI, ships in npm tarball)
     src/cli/          TypeScript CLI:
       socket-client   Unix-domain socket transport
-      hid.ts          idb gRPC HID client (touch actuation)
+      hid.ts          HID actuation (in-house enniohid helper)
+      ennio-hid.ts    enniohid host-helper client (CoreSimulator Indigo)
       maestro-parser  YAML → AST
       runner/         Executes the AST (commands + lifecycle + tap)
 example/              Sample RN app + maestro-e2e/ regression suite
@@ -39,12 +40,10 @@ A read-only architectural overview lives in the root `README.md`
    - Node 18+, bun 1.2+ (`packageManager` in root package.json pins
      bun; npm/yarn also work)
    - iOS 17+ simulator
-   - Facebook's `idb` toolchain — both the gRPC server and the Python
-     client used by Ennio's HID daemon:
-     ```bash
-     brew install facebook/fb/idb-companion
-     pip3 install fb-idb
-     ```
+   - No extra toolchain: touches are driven by the in-house `enniohid`
+     helper, which links Xcode's own CoreSimulator / SimulatorKit
+     frameworks (built via `scripts/build-hid-helper.sh`). No
+     Homebrew formula or pip.
 
 2. **Clone + install**:
 
@@ -104,7 +103,7 @@ fails:
   ```
 - Add `ENNIO_VERBOSE=1` for runner-side step tracing.
 - Add `ENNIO_DEBUG_TAP=1` for prepareTap coord resolution logs.
-- Add `ENNIO_DEBUG_IDB=1` for HID daemon traffic logs.
+- Add `ENNIO_PHASE_TRACE=1` for per-gesture HID + phase-timing logs.
 
 ### Adding a new Maestro command
 

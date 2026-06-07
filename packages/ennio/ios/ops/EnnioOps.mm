@@ -18,7 +18,7 @@
 //     the slide-from-edge gesture that's hard to drive cleanly.
 //
 // For "real touch" semantics (Pressable, RNGH BaseButton, etc.) the
-// CLI drives idb HID after EnnioFinder hands back coords. This file
+// CLI drives HID after EnnioFinder hands back coords. This file
 // only handles the special cases where UIKit-direct beats HID.
 //
 
@@ -241,6 +241,14 @@ static NSInteger findTabIndex(UITabBarController *tbc, NSString *name) {
     return findTabIndex(tbc, name) != NSNotFound;
 }
 
++ (BOOL)isTabSelectedByName:(NSString *)name {
+    UITabBarController *tbc = findTabBarController();
+    if (!tbc) return NO;
+    NSInteger idx = findTabIndex(tbc, name);
+    if (idx == NSNotFound) return NO;
+    return tbc.selectedIndex == (NSUInteger)idx;
+}
+
 // ─── Navigation ─────────────────────────────────────────────────────
 
 + (BOOL)backGesture {
@@ -348,6 +356,46 @@ static BOOL anyVCInTransition(UIViewController *root) {
     if (!sv) return NO;
     CGRect rectInSv = [target convertRect:target.bounds toView:sv];
     [sv scrollRectToVisible:rectInSv animated:NO];
+
+    // scrollRectToVisible trusts adjustedContentInset — but RN sets
+    // contentInsetAdjustmentBehavior=never by default, so the scroll
+    // view believes it is full-bleed while the floating tab bar / nav
+    // header overlays its content. Occlusion-aware correction: hitTest
+    // at the target's center; if the hit lands OUTSIDE the target's
+    // subtree, measure the occluder's overlap and scroll exactly past
+    // it. Signal-driven (the occluder's real frame), no magic
+    // distances; capped at 4 iterations.
+    UIWindow *win = target.window;
+    if (!win) return YES;
+    for (int i = 0; i < 4; i++) {
+        [sv layoutIfNeeded];
+        CGRect inWin = [target convertRect:target.bounds toView:nil];
+        CGPoint center = CGPointMake(CGRectGetMidX(inWin), CGRectGetMidY(inWin));
+        UIView *hit = [win hitTest:center withEvent:nil];
+        BOOL exposed = NO;
+        for (UIView *cur = hit; cur; cur = cur.superview) {
+            if (cur == target) { exposed = YES; break; }
+        }
+        if (exposed || !hit) break;
+        CGRect occluder = [hit convertRect:hit.bounds toView:nil];
+        CGPoint offset = sv.contentOffset;
+        if (CGRectGetMinY(occluder) > CGRectGetMidY(inWin) - 1 ||
+            CGRectGetMaxY(occluder) > CGRectGetMaxY(inWin)) {
+            // Occluder below/overlapping bottom (tab bar): scroll the
+            // content up by the overlap so the target clears its top.
+            offset.y += CGRectGetMaxY(inWin) - CGRectGetMinY(occluder) + 8;
+        } else {
+            // Occluder above (nav header): scroll content down.
+            offset.y -= CGRectGetMaxY(occluder) - CGRectGetMinY(inWin) + 8;
+        }
+        CGSize content = sv.contentSize;
+        CGSize frame = sv.frame.size;
+        UIEdgeInsets ins = sv.adjustedContentInset;
+        CGFloat maxY = MAX(0, content.height - frame.height + ins.bottom);
+        offset.y = MAX(-ins.top, MIN(offset.y, maxY));
+        if (fabs(offset.y - sv.contentOffset.y) < 0.5) break; // clamped, can't improve
+        [sv setContentOffset:offset animated:NO];
+    }
     return YES;
 }
 
@@ -372,20 +420,29 @@ static BOOL anyVCInTransition(UIViewController *root) {
     return [app sendAction:@selector(paste:) to:nil from:view forEvent:nil];
 }
 
-// ─── Hardware key ───────────────────────────────────────────────────
-
-+ (BOOL)pressHardwareKey:(int)keyCode {
-    // Find the current first responder by descending the view tree
-    // from every window. The responder-chain *upward* path goes
-    // view → … → window → app → nil; firstResponder lives DOWN in
-    // the subview tree (typically a UITextField/UITextView), so the
-    // upward walk from a window never sees it.
+// ─── First-responder resolution (shared by text/key ops) ────────────
+//
+// Find the UIKeyInput first responder by descending the view tree
+// from every window + presented-VC chain. Two subtleties:
+//   1. The responder-chain *upward* path (view → … → window → app)
+//      never reaches it — firstResponder lives DOWN in the subview
+//      tree, so we walk down.
+//   2. Acceptance requires UIKeyInput, not just isFirstResponder:
+//      wrapper views proxy isFirstResponder for their inner field
+//      (UISearchBar reports YES but can't take keys; its descendant
+//      UISearchBarTextField also reports YES and can). Stopping at
+//      the wrapper made every native-search-bar insert/backspace
+//      fail (g-search-bar).
+static UIResponder *EnnioFindKeyInputResponder(void) {
     __block UIResponder *first = nil;
     void (^findFirst)(UIView *) = nil;
     __block __weak void (^weakFind)(UIView *);
     weakFind = findFirst = ^(UIView *v) {
         if (first) return;
-        if (v.isFirstResponder) { first = v; return; }
+        if (v.isFirstResponder && [v conformsToProtocol:@protocol(UIKeyInput)]) {
+            first = v;
+            return;
+        }
         for (UIView *sub in v.subviews) {
             weakFind(sub);
             if (first) return;
@@ -396,6 +453,17 @@ static BOOL anyVCInTransition(UIViewController *root) {
         for (UIWindow *w in ((UIWindowScene *)scene).windows) {
             findFirst(w);
             if (first) break;
+            // Walk the rootVC's presented-VC chain. Sheet presentation
+            // controllers host their content detached from the window's
+            // literal subview tree — the firstResponder lives there but
+            // findFirst(window) misses it.
+            UIViewController *vc = w.rootViewController;
+            while (vc && !first) {
+                UIView *vcView = vc.viewIfLoaded;
+                if (vcView) findFirst(vcView);
+                vc = vc.presentedViewController;
+            }
+            if (first) break;
         }
         if (first) break;
     }
@@ -403,7 +471,17 @@ static BOOL anyVCInTransition(UIViewController *root) {
         UIWindow *win = [EnnioBootstrap keyWindow];
         if (win) findFirst(win);
     }
-    if (![first conformsToProtocol:@protocol(UIKeyInput)]) return NO;
+    return first;
+}
+
+// ─── Hardware key ───────────────────────────────────────────────────
+
++ (BOOL)pressHardwareKey:(int)keyCode {
+    UIResponder *first = EnnioFindKeyInputResponder();
+    if (!first) {
+        NSLog(@"[Ennio] pressHardwareKey: no UIKeyInput first responder");
+        return NO;
+    }
     id<UIKeyInput> input = (id<UIKeyInput>)first;
     switch (keyCode) {
         case 42: // backspace
@@ -542,7 +620,15 @@ static BOOL anyVCInTransition(UIViewController *root) {
 }
 
 + (BOOL)focusByTestID:(NSString *)testID {
-    UIView *v = [EnnioFinder findViewByTestID:testID];
+    // Prefer the on-screen match (topmost in Y), NOT findViewByTestID's
+    // last-registered entry — after a composer publishes and reopens
+    // (consecutive replies) that's the DETACHED previous field; focusing
+    // it "succeeds" but the live composer stays empty so canPost never
+    // flips and the publish button never shows.
+    NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
+    UIView *v = nil;
+    for (UIView *cand in all) { if ([EnnioFinder isOnScreen:cand]) { v = cand; break; } }
+    if (!v) v = all.firstObject ?: [EnnioFinder findViewByTestID:testID];
     if (!v) return NO;
     // RCTBaseTextInputView wraps the actual UITextField/UITextView in a
     // child; ask becomeFirstResponder on the wrapper and let UIKit
@@ -561,47 +647,28 @@ static BOOL anyVCInTransition(UIViewController *root) {
         }
         if (inner) v = inner;
     }
-    return [v becomeFirstResponder];
+    if (![v becomeFirstResponder]) return NO;
+    // Verify the focus actually landed on a TEXT INPUT inside the
+    // target. becomeFirstResponder can return YES for non-input views
+    // (a Pressable like replyBtn) — the CLI uses ok=true to SKIP the
+    // real tap entirely, so a false positive here swallows the press
+    // (thread-muting: tapOn replyBtn + next inputText never opened the
+    // composer). Identity, not existence: the UIKeyInput responder must
+    // live within the target's subtree.
+    UIResponder *first = EnnioFindKeyInputResponder();
+    if (!first || ![first isKindOfClass:UIView.class]) return NO;
+    for (UIView *cur = (UIView *)first; cur; cur = cur.superview) {
+        if (cur == v) return YES;
+    }
+    return NO;
 }
 
 + (BOOL)insertText:(NSString *)text {
-    __block UIResponder *first = nil;
-    void (^findFirst)(UIView *) = nil;
-    __block __weak void (^weakFind)(UIView *);
-    weakFind = findFirst = ^(UIView *v) {
-        if (first) return;
-        if (v.isFirstResponder) { first = v; return; }
-        for (UIView *sub in v.subviews) {
-            weakFind(sub);
-            if (first) return;
-        }
-    };
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if (![scene isKindOfClass:UIWindowScene.class]) continue;
-        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-            findFirst(w);
-            if (first) break;
-            // Walk the rootVC's presented-VC chain. UISheetPresentationController
-            // hosts its content view detached from the window's literal
-            // subview tree — the firstResponder lives there but
-            // findFirst(window) misses it. Bluesky's @discord/bottom-sheet
-            // routes every modal form (create-list, edit-profile, etc.)
-            // through this path.
-            UIViewController *vc = w.rootViewController;
-            while (vc && !first) {
-                UIView *vcView = vc.viewIfLoaded;
-                if (vcView) findFirst(vcView);
-                vc = vc.presentedViewController;
-            }
-            if (first) break;
-        }
-        if (first) break;
-    }
+    UIResponder *first = EnnioFindKeyInputResponder();
     if (!first) {
-        UIWindow *win = [EnnioBootstrap keyWindow];
-        if (win) findFirst(win);
+        NSLog(@"[Ennio] insertText: no UIKeyInput first responder");
+        return NO;
     }
-    if (![first conformsToProtocol:@protocol(UIKeyInput)]) return NO;
     id<UIKeyInput> input = (id<UIKeyInput>)first;
     [input insertText:text];
     return YES;
@@ -618,6 +685,15 @@ static BOOL anyVCInTransition(UIViewController *root) {
     CGPoint startInWin = CGPointMake(x1, y1);
     UIView *hit = [win hitTest:startInWin withEvent:nil];
     UIScrollView *sv = hit ? findEnclosingScrollView(hit) : nil;
+    // Pagers need a REAL gesture: a paging scroll view's page state is
+    // driven by drag/momentum delegate events (RN pagers advance on
+    // onMomentumScrollEnd), which setContentOffset:animated:NO never
+    // emits — the offset moves but the JS page index stays stale (bsky
+    // onboarding: swipe LEFT "advanced" the carousel visually while the
+    // pager still reported page 1, so "Complete onboarding" never
+    // mounted). Decline so the CLI falls back to a real HID drag, whose
+    // velocity-driven page snap is the semantics the pager expects.
+    if (sv && sv.isPagingEnabled) sv = nil;
     if (sv) {
         CGFloat dx = x1 - x2;
         CGFloat dy = y1 - y2;
@@ -636,7 +712,7 @@ static BOOL anyVCInTransition(UIViewController *root) {
     }
 
     // Slow path: not over a scroll view. Return NO so the CLI falls
-    // back to idb HID for a real UITouch sequence — synthesising
+    // back to host HID for a real UITouch sequence — synthesising
     // UITouch from native land requires private API (UIInternalEvent /
     // _UIPhysicalKeyboardEvent equivalents). Honest "unsupported in
     // this code path" so the orchestration layer routes correctly.

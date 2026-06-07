@@ -38,12 +38,29 @@ void RegisterEnnioFindHandlers(void) {
         BOOL exposed = NO;
         BOOL found = NO;
         BOOL childHijack = NO;
+        BOOL enabled = YES;
         EnnioOnMainVoid([&]() {
             UIView *target = testID.length
                 ? [EnnioFinder findViewByTestID:testID]
                 : [EnnioFinder findViewByText:text];
             if (!target || ![EnnioFinder isOnScreen:target]) return;
             found = YES;
+            // enabled: NO when the target (or a near ancestor — the
+            // traits often live on the wrapping Pressable when the find
+            // matched an inner label) advertises NotEnabled. RN maps
+            // accessibilityState.disabled / Button disabled to this
+            // trait, and a disabled control swallows the press — the
+            // tap "lands" but onPress never fires (bsky Save while the
+            // avatar is still processing). Callers wait on this signal
+            // instead of firing a dead tap.
+            for (UIView *p = target; p; p = p.superview) {
+                if (p.accessibilityTraits & UIAccessibilityTraitNotEnabled) { enabled = NO; break; }
+                if ([p isKindOfClass:UIControl.class] && !((UIControl *)p).isEnabled) {
+                    enabled = NO;
+                    break;
+                }
+                if (p == target.window) break;
+            }
             UIWindow *win = target.window;
             if (!win) return;
             CGRect r = [win convertRect:target.bounds fromView:target];
@@ -79,12 +96,13 @@ void RegisterEnnioFindHandlers(void) {
                 }
             }
         });
-        char buf[128];
+        char buf[160];
         std::snprintf(buf, sizeof(buf),
-                      "{\"found\":%s,\"exposed\":%s,\"childHijack\":%s}",
+                      "{\"found\":%s,\"exposed\":%s,\"childHijack\":%s,\"enabled\":%s}",
                       found ? "true" : "false",
                       exposed ? "true" : "false",
-                      childHijack ? "true" : "false");
+                      childHijack ? "true" : "false",
+                      enabled ? "true" : "false");
         return std::string(buf);
     });
 
@@ -256,15 +274,69 @@ void RegisterEnnioFindHandlers(void) {
         BOOL relaxed = [a[@"relaxed"] boolValue];
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
+        NSString *cls = nil;
         EnnioOnMainVoid([&]() {
             UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed];
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
+                cls = NSStringFromClass(v.class);
             }
         });
         if (!found) throw std::runtime_error("text not found");
-        return EnnioRectJson(rect);
+        // cls: matched view's class — diagnostic for "tap landed at the
+        // wrong rect" investigations (which view actually won the walk).
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"x\":%.2f,\"y\":%.2f,\"w\":%.2f,\"h\":%.2f,\"cls\":\"%s\"}",
+                      rect.x, rect.y, rect.w, rect.h,
+                      cls ? cls.UTF8String : "");
+        return std::string(buf);
+    });
+
+    // behind_modal: YES when the matched view's hosting VC is NOT in
+    // the topmost presented VC's subtree — a modal floats over it and
+    // a HID tap at its coords would land on the modal. Used by the
+    // runner's tap occlusion gate to wait (signal-driven) for an
+    // async-dismissing modal (composer publish → server round-trip)
+    // instead of firing a blind tap into the occluder.
+    EnnioControlSocket::registerHandler("behind_modal", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = EnnioArgString(a, @"testID");
+        NSString *text = EnnioArgString(a, @"text");
+        if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
+        BOOL behind = NO;
+        EnnioOnMainVoid([&]() {
+            UIView *v = nil;
+            if (testID.length) v = [EnnioFinder findViewByTestID:testID];
+            if (!v && text.length) v = [EnnioFinder findViewByText:text];
+            if (v) behind = [EnnioFinder isBehindTopmostPresentation:v];
+        });
+        return std::string("{\"behind\":") + (behind ? "true" : "false") + "}";
+    });
+
+    // target_transitioning: YES while the matched view's hosting VC is
+    // mid present/dismiss/push/pop. A HID tap dispatched into a
+    // transitioning VC is swallowed by UIKit (feed-reorder: "Go back"
+    // tapped while the edit-feeds screen was dismissing — the tap died
+    // with it and the flow never left the Feeds screen). The runner
+    // checks this right before dispatch and re-resolves after
+    // wait_presentation_idle instead of firing a doomed tap.
+    EnnioControlSocket::registerHandler("target_transitioning", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = EnnioArgString(a, @"testID");
+        NSString *text = EnnioArgString(a, @"text");
+        if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
+        BOOL transitioning = NO;
+        EnnioOnMainVoid([&]() {
+            UIView *v = nil;
+            if (testID.length) v = [EnnioFinder findViewByTestID:testID];
+            if (!v && text.length) v = [EnnioFinder findViewByText:text];
+            if (v) transitioning = [EnnioFinder isViewTransitioning:v];
+        });
+        return std::string("{\"transitioning\":") + (transitioning ? "true" : "false") + "}";
     });
 
     // Debug: returns top presented VC class chain for the active
@@ -311,6 +383,106 @@ void RegisterEnnioFindHandlers(void) {
         });
         if (!found) throw std::runtime_error("ax-text not found");
         return EnnioRectJson(rect);
+    });
+
+    // get_text: return the text of a matched element. Backs Maestro's
+    // copyTextFrom. testID → exact accessibilityIdentifier; text → regex
+    // (Maestro treats selector text as regex), else case-insensitive
+    // substring, matched against accessibilityLabel/Value and
+    // UILabel/UITextView/UITextField text. `index` picks among matches
+    // in screen reading order (top→bottom, left→right). Returns {text}.
+    EnnioControlSocket::registerHandler("get_text", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        NSString *testID = EnnioArgString(a, @"testID");
+        NSString *text = EnnioArgString(a, @"text");
+        int index = EnnioArgInt(a, @"index", 0);
+        if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
+
+        NSString *result = nil;
+        EnnioOnMainVoid([&]() {
+            NSRegularExpression *re = nil;
+            if (text.length) {
+                NSError *err = nil;
+                re = [NSRegularExpression regularExpressionWithPattern:text
+                                                              options:NSRegularExpressionCaseInsensitive
+                                                                error:&err];
+                if (err) re = nil;
+            }
+            NSMutableArray<NSDictionary *> *hits = [NSMutableArray new];
+            NSMutableArray<UIView *> *stack = [NSMutableArray new];
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    if (!w.hidden) [stack addObject:w];
+                }
+            }
+            while (stack.count) {
+                UIView *v = stack.lastObject;
+                [stack removeLastObject];
+                for (UIView *sub in v.subviews) [stack addObject:sub];
+                if (![EnnioFinder isOnScreen:v]) continue;
+
+                NSMutableArray<NSString *> *cands = [NSMutableArray new];
+                if ([v isKindOfClass:UILabel.class]) {
+                    NSString *t = ((UILabel *)v).text;
+                    if (t.length) [cands addObject:t];
+                } else if ([v isKindOfClass:UITextView.class]) {
+                    NSString *t = ((UITextView *)v).text;
+                    if (t.length) [cands addObject:t];
+                } else if ([v isKindOfClass:UITextField.class]) {
+                    NSString *t = ((UITextField *)v).text;
+                    if (t.length) [cands addObject:t];
+                }
+                if (v.accessibilityLabel.length) [cands addObject:v.accessibilityLabel];
+                if ([v.accessibilityValue isKindOfClass:NSString.class] &&
+                    [(NSString *)v.accessibilityValue length]) {
+                    [cands addObject:(NSString *)v.accessibilityValue];
+                }
+
+                BOOL matched = NO;
+                NSString *matchedText = nil;
+                if (testID.length) {
+                    if ([v.accessibilityIdentifier isEqualToString:testID] && cands.count) {
+                        matched = YES;
+                        matchedText = cands.firstObject;
+                    }
+                } else {
+                    for (NSString *cand in cands) {
+                        BOOL ok = NO;
+                        if (re) {
+                            ok = [re numberOfMatchesInString:cand
+                                                     options:0
+                                                       range:NSMakeRange(0, cand.length)] > 0;
+                        } else {
+                            ok = [cand rangeOfString:text
+                                             options:NSCaseInsensitiveSearch].location != NSNotFound;
+                        }
+                        if (ok) {
+                            matched = YES;
+                            matchedText = cand;
+                            break;
+                        }
+                    }
+                }
+                if (matched && matchedText) {
+                    EnnioRect r = [EnnioFinder windowRectFor:v];
+                    [hits addObject:@{ @"text": matchedText, @"y": @(r.y), @"x": @(r.x) }];
+                }
+            }
+            [hits sortUsingComparator:^NSComparisonResult(NSDictionary *p, NSDictionary *q) {
+                double dy = [p[@"y"] doubleValue] - [q[@"y"] doubleValue];
+                if (fabs(dy) > 1.0) return dy < 0 ? NSOrderedAscending : NSOrderedDescending;
+                double dx = [p[@"x"] doubleValue] - [q[@"x"] doubleValue];
+                return dx < 0 ? NSOrderedAscending : (dx > 0 ? NSOrderedDescending : NSOrderedSame);
+            }];
+            if (index >= 0 && index < (int)hits.count) {
+                result = hits[index][@"text"];
+            }
+        });
+        if (!result) throw std::runtime_error("get_text: no match");
+        NSData *d = [NSJSONSerialization dataWithJSONObject:@{ @"text": result } options:0 error:nil];
+        return std::string((const char *)d.bytes, d.length);
     });
 
     EnnioControlSocket::registerHandler("frame", [](const std::string &args) -> std::string {

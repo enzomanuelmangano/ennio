@@ -18,14 +18,16 @@ interface RetryCmd {
   retry: { maxRetries?: number; commands: MaestroCommand[] };
 }
 interface RunFlowCmd {
-  runFlow: {
-    when?: { visible?: unknown; notVisible?: unknown; platform?: string };
-    commands?: MaestroCommand[];
-    file?: string;
-  };
+  runFlow:
+    | string
+    | {
+        when?: { visible?: unknown; notVisible?: unknown; platform?: string };
+        commands?: MaestroCommand[];
+        file?: string;
+      };
 }
 interface RunScriptCmd {
-  runScript: { file: string; env?: Record<string, string> };
+  runScript: string | { file: string; env?: Record<string, string> };
 }
 
 function has<T extends string>(
@@ -69,7 +71,10 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & RunFlowCmd => has(c, 'runFlow'),
     async (cmd, { ctx, dispatch }) => {
-      const sub = cmd.runFlow;
+      // Maestro shorthand: `runFlow: path.yaml` (bare string) ==
+      // `runFlow: { file: path.yaml }`. Without this the string fell
+      // through every branch below and silently ran nothing.
+      const sub = typeof cmd.runFlow === 'string' ? { file: cmd.runFlow } : cmd.runFlow;
       // `when:` predicate — skip subflow if not satisfied.
       if (sub.when) {
         let satisfied = true;
@@ -116,7 +121,9 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & RunScriptCmd => has(c, 'runScript'),
     async (cmd, { ctx }) => {
-      await runMaestroScript(ctx as RunContext, cmd.runScript);
+      // Maestro shorthand: `runScript: file.js` == `{ file: file.js }`.
+      const script = typeof cmd.runScript === 'string' ? { file: cmd.runScript } : cmd.runScript;
+      await runMaestroScript(ctx as RunContext, script);
     },
   );
 }

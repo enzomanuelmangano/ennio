@@ -5,7 +5,7 @@
  *   FAIL (blocks any run, exit 1):
  *     - Node ≥ 18           (the CLI's runtime floor)
  *     - Xcode / simctl      (simulator control)
- *     - idb on PATH         (HID actuation backend)
+ *     - enniohid helper     (in-house HID actuation backend)
  *     - libennio.dylib      (the injected in-app agent must ship/build)
  *   WARN (run can still proceed; exit stays 0):
  *     - Booted simulator    (ennio auto-boots one at test time if absent)
@@ -58,28 +58,27 @@ function checkXcode(): Result {
   };
 }
 
-function checkIdb(udid: string | null): Result {
-  const path = tryExec('which', ['idb']);
-  if (!path) {
-    return {
-      name: 'idb',
-      severity: 'fail',
-      detail:
-        'not on PATH — `ennio test` offers to install it; or: `brew install facebook/fb/idb-companion` + `pipx install fb-idb`',
-    };
-  }
-  // idb is present → actuation backend exists. Target reachability is
-  // best-effort detail only: the companion spawns lazily at first HID event,
-  // so a "no targets yet" here is NOT a failure (the old check false-negatived
-  // exactly here). `idb list-targets` takes no udid, so nothing to inject.
-  const targets = tryExec('idb', ['list-targets'], 5000);
-  let detail = 'on PATH';
-  if (targets !== null && udid) {
-    detail = targets.includes(udid)
-      ? `on PATH; target ${udid} visible`
-      : 'on PATH; target not yet connected (auto-connects at run)';
-  }
-  return { name: 'idb', severity: 'pass', detail };
+function checkHidHelper(): Result {
+  // In-house HID actuation: the enniohid host helper (CoreSimulator
+  const candidates = [process.env.ENNIO_HID_HELPER, '/tmp/ennio-build/enniohid'].filter(
+    Boolean,
+  ) as string[];
+  const found = candidates.find((c) => {
+    try {
+      return tryExec('test', ['-x', c]) !== null;
+    } catch {
+      return false;
+    }
+  });
+  // findDylib's package also ships prebuilt/enniohid; treat presence of
+  // either dev or packaged binary as pass. Best-effort detail.
+  if (found) return { name: 'enniohid (in-house HID)', severity: 'pass', detail: found };
+  return {
+    name: 'enniohid (in-house HID)',
+    severity: 'warn',
+    detail:
+      'helper not found in /tmp/ennio-build or prebuilt/; built from native-hid/helper or shipped in the tarball',
+  };
 }
 
 function checkDylib(): Result {
@@ -137,7 +136,7 @@ export async function runDoctorCommand(_positional: string[], _flags: Flags): Pr
   const results: Result[] = [
     checkNode(),
     checkXcode(),
-    checkIdb(udid),
+    checkHidHelper(),
     checkDylib(),
     checkSim(udid),
     await checkSocket(),

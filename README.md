@@ -8,8 +8,9 @@
 Maestro-compatible E2E test runner for React Native iOS. The CLI
 injects a prebuilt ObjC dylib into your simulator app via
 `DYLD_INSERT_LIBRARIES` and drives it through a Unix socket. Real
-CoreSimulator touches are dispatched via `idb` gRPC HID — the gesture
-goes through the same path a finger would.
+CoreSimulator touches are dispatched by an in-house host helper that
+posts Indigo HID events straight to the simulator — the gesture goes
+through the same path a finger would.
 
 No XCTest, no CDP, no Metro required, no companion driver.
 
@@ -23,12 +24,9 @@ https://github.com/user-attachments/assets/8734572f-f90c-4658-9cba-98642d0da2d5
 ## Getting started
 
 Requires a React Native app (New Architecture, Fabric), iOS 17+
-simulator, Xcode 16+, Node 18+, and Facebook's `idb` toolchain:
-
-```bash
-brew install facebook/fb/idb-companion
-pip3 install fb-idb
-```
+simulator, Xcode 16+, and Node 18+. No extra toolchain — touches are
+driven by an in-house helper that links Xcode's own CoreSimulator /
+SimulatorKit frameworks. No Homebrew formula, no pip.
 
 ### Install
 
@@ -88,10 +86,13 @@ promotion.
 
 ### Touch delivery
 
-Touches go through `idb_companion`'s gRPC HID service, which
-synthesizes `IOHIDEvent`s at the CoreSimulator level. Same touch
+Touches go through an in-house host helper (`enniohid`) that posts
+Indigo HID events to the simulator via CoreSimulator / SimulatorKit
+(`SimDeviceLegacyHIDClient`), built with a vendored (MIT, from Meta's
+FBSimulatorControl) Indigo message struct + builder. Same touch
 pipeline as a physical finger — UIKit gesture recognizers, React
-Native's responder system, and RNGH all see a real touch.
+Native's responder system, and RNGH all see a real touch. No external
+daemon.
 
 Three special cases bypass HID — tab-bar taps, native-alert button
 taps, and the iOS back gesture — because driving those through UIKit
@@ -109,10 +110,11 @@ a tap's side effects have settled before proceeding to the next step.
 ```
 +-- host machine -------------------------------------------+
 |  ennio CLI (Node)                                         |
-|    Unix socket client ---- gRPC ---> idb_companion        |
-+-------------------------------|---------------------------+
-                                |
-                   +-- iOS Simulator --+
+|    Unix socket client                                     |
+|    enniohid helper -- CoreSimulator Indigo HID ---------+ |
++-------------------------------|-------------------------|-+
+                                |                         |
+                   +-- iOS Simulator --+ <----------------+
                    |                   |
                    |  CoreSim IOHID    |
                    |  (real UITouch)   |
@@ -142,9 +144,11 @@ Two channels:
   JSON-envelope commands (`find_by_testid`, `visible`, `wait_commit`,
   `insert_text`, etc.) over a Unix domain socket to the in-process
   dylib. Responses are synchronous per-request.
-- **idb gRPC HID — touch actuation.** Every tap, long-press, swipe,
-  and type delivers a real `IOHIDEvent` through the simulator's HID
-  layer. One persistent gRPC channel; calls cost ~5 ms.
+- **enniohid host helper — touch actuation.** Every tap, long-press,
+  and swipe delivers a real Indigo HID event through CoreSimulator's
+  HID layer. One persistent helper process per run, fed `down/move/up`
+  over stdin; calls cost ~5 ms. (Typing goes over the Unix socket via
+  the dylib's `insert_text`.)
 
 ## Security
 

@@ -1,4 +1,4 @@
-# Exercise tapOn + idb HID + post-tap settle + assertVisible.
+# Exercise tapOn + HID + post-tap settle + assertVisible.
 #
 # Cart screen has a tab bar with Home / Products / Cart / Profile /
 # Gauntlet. Tap on Home, then assert we're on the Home screen via a

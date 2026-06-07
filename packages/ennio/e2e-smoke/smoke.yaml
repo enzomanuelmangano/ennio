@@ -1,7 +1,7 @@
 # Smoke test for the v2 architecture.
 #
 # Pure Maestro YAML — runnable in maestro/maestro-runner against the
-# same app. With ennio v0.1 (socket + idb), we verify:
+# same app. With ennio (socket + in-house HID), we verify:
 #   - launchApp (no clearState — app is already booted via outer harness)
 #   - assertVisible by text on the Cart screen
 #   - tap a tab

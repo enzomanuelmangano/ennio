@@ -6,6 +6,7 @@
 // the next step's pre/post-tap settle path uses to disambiguate
 // transitions from no-ops. Everything here is pure data — no I/O.
 
+import type { GestureDriver } from '../driver/types';
 import type { EnnioSocketClient } from '../socket-client';
 
 // =====================================================================
@@ -60,6 +61,10 @@ export interface RunContext {
   /** When true, unknown/unsupported commands are skipped with a warning
    *  instead of failing the flow. Useful during incremental Maestro migration. */
   lenient: boolean;
+  /** Gesture mechanism + settle policy for this run. HidDriver
+   *  (baseline, real IOHIDEvents) or FastDriver (in-process-first with
+   *  per-gesture HID fallback). Decided once by EnnioRunner. */
+  driver: GestureDriver;
   /** Path to the currently-executing flow file. Used for runFlow
    *  subflow path resolution. */
   flowPath: string;
@@ -97,6 +102,12 @@ export interface RunContext {
    *  substitution in subsequent inputText / tapOn text args. Mirrors
    *  Maestro's `output` global available inside its JS sandbox. */
   outputs: Record<string, unknown>;
+  /** Last text captured by copyTextFrom. Exposed to flows as the
+   *  Maestro magic var `${maestro.copiedText}`. */
+  copiedText?: string;
+  /** Flow-level `env:` block + runFlow-passed overrides. Resolved by
+   *  `${VAR}` bare interpolation in command args. */
+  flowEnv?: Record<string, string>;
 }
 
 export interface RunResult {
@@ -117,17 +128,41 @@ export interface Rect {
 // Helpers
 // =====================================================================
 
-/// Replace Maestro-style `${output.X}` placeholders with values from
-/// `ctx.outputs`. Also handles `${env.X}` → `process.env.X`.
+/// Replace Maestro-style placeholders:
+///   ${output.X}           → ctx.outputs.X (runScript results)
+///   ${env.X}              → process.env.X
+///   ${maestro.copiedText} → ctx.copiedText (last copyTextFrom)
+///   ${VAR}                → flow env block / runFlow-passed var, else
+///                           process.env.VAR (bare Maestro constant)
 export function interpolate(str: string, ctx: RunContext): string {
   if (typeof str !== 'string') return str;
-  return str.replace(/\$\{(output|env)\.([A-Za-z0-9_]+)\}/g, (_, scope, key) => {
-    if (scope === 'output') {
-      const v = ctx.outputs[key];
-      return v == null ? '' : String(v);
-    }
-    return process.env[key] ?? '';
-  });
+  return str
+    .replace(/\$\{maestro\.copiedText\}/g, () => ctx.copiedText ?? '')
+    .replace(/\$\{(output|env)\.([A-Za-z0-9_]+)\}/g, (_, scope, key) => {
+      if (scope === 'output') {
+        const v = ctx.outputs[key];
+        return v == null ? '' : String(v);
+      }
+      return process.env[key] ?? '';
+    })
+    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, name: string) => {
+      const v = ctx.flowEnv?.[name] ?? process.env[name];
+      return v !== undefined ? String(v) : match;
+    });
+}
+
+/// Interpolate every string field of a selector-like object against
+/// the run context. Used by tap/assert/scroll handlers so ${VAR} /
+/// ${maestro.copiedText} resolve in id/text args, not just inputText.
+export function interpolateSelector<T>(sel: T, ctx: RunContext): T {
+  if (typeof sel === 'string') return interpolate(sel, ctx) as T;
+  if (Array.isArray(sel)) return sel.map((s) => interpolateSelector(s, ctx)) as T;
+  if (sel && typeof sel === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(sel)) out[k] = interpolateSelector(v, ctx);
+    return out as T;
+  }
+  return sel;
 }
 
 export function recordPhase(ctx: RunContext, name: string, ms: number): void {

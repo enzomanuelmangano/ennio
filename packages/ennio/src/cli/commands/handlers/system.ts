@@ -1,4 +1,4 @@
-// System-level command handlers — anything that talks to simctl/idb
+// System-level command handlers — anything that talks to simctl
 // directly without going through the dylib (plus a few simple
 // single-op dylib calls like hide_keyboard / alert_dismiss / back).
 //

@@ -24,6 +24,8 @@ export type Flags = {
   safeMode?: boolean;
   /** --quiet / -q: suppress per-step inline output (verbose is the default). */
   quiet?: boolean;
+  /** --fast: in-process taps/swipes (dylib activation), per-gesture HID fallback. */
+  fast?: boolean;
 };
 
 export type ParsedArgs = {
@@ -41,6 +43,7 @@ const BOOL_FLAGS = new Set([
   'version',
   'safe-mode',
   'quiet',
+  'fast',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = { 'safe-mode': 'safeMode' };

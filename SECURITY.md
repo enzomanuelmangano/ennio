@@ -43,7 +43,7 @@ Out of scope:
   installed on the device, plus Metro running, plus physical
   simulator access. That is the standard threat model — Ennio
   intentionally trades isolation for fidelity in Debug.
-- Vulnerabilities in `idb_companion`, `fb-idb`, Hermes, Metro, React
+- Vulnerabilities in Hermes, Metro, React
   Native, or Expo themselves — report those upstream.
 
 ## Disclosure

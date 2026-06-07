@@ -8,8 +8,6 @@
   },
   "main": "lib/index.js",
   "dependencies": {
-    "@grpc/grpc-js": "^1.14.4",
-    "@grpc/proto-loader": "^0.8.1",
     "glob": "^10.0.0",
     "js-yaml": "^4.1.0"
   },
@@ -63,7 +61,9 @@
     "scripts/build-dylib.sh",
     "scripts/regen-manifest.sh",
     "native-shim/",
-    "proto/"
+    "ios/hid/",
+    "native-hid/helper/",
+    "scripts/build-hid-helper.sh"
   ],
   "keywords": [
     "react-native",
