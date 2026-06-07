@@ -161,9 +161,7 @@ export async function execTapOn(
           // dismiss transition to actually END (signal, not a fixed
           // sleep) so the NEXT tap (often a button that re-opens a
           // sibling sheet) doesn't race the animation and miss.
-          await ctx.client
-            .call('wait_presentation_idle', { maxMs: 1200 })
-            .catch(() => undefined);
+          await ctx.client.call('wait_presentation_idle', { maxMs: 1200 }).catch(() => undefined);
           await ctx.client
             .call('wait_commit', { maxMs: 800, stableMs: 150 })
             .catch(() => undefined);
@@ -479,8 +477,12 @@ export async function execTapOn(
                 confirmedExposed = true;
                 break;
               }
-              const still = await ctx.client.call('behind_modal', exposureSel).catch(() => undefined);
-              if (!(still && still.ok && (still.data as { behind?: boolean } | undefined)?.behind)) {
+              const still = await ctx.client
+                .call('behind_modal', exposureSel)
+                .catch(() => undefined);
+              if (
+                !(still && still.ok && (still.data as { behind?: boolean } | undefined)?.behind)
+              ) {
                 // Modal gone but target still unexposed (tab-bar edge
                 // cover, transform settling) — re-check exposure once
                 // after the next commit, then proceed either way.
