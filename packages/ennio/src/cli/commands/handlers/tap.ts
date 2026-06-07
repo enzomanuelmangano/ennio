@@ -90,7 +90,16 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       const tapIsIntoInput = sel.id && /Input$/i.test(sel.id);
       if (ctx.lastWasTextInput && !tapIsIntoInput) {
         await ctx.client.call('hide_keyboard').catch(() => undefined);
-        await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
+        // Wait for the keyboard window to actually retract — wait_commit
+        // tracks the app view-hash, not the separate keyboard window's
+        // dismiss animation, so a tap could fire while it still covers
+        // the target (the custom-server "Done" case).
+        const kbDeadline = Date.now() + 1200;
+        while (Date.now() < kbDeadline) {
+          const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
+          if (!(kr?.data as { visible?: boolean } | undefined)?.visible) break;
+          await sleep(50);
+        }
       }
       ctx.lastWasTextInput = false;
       if (!isRepeatTap) {

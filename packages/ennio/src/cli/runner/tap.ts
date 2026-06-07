@@ -26,6 +26,55 @@ import { MaestroSelector } from '../maestro-parser';
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, parsePoint, resolveRect } from './find';
 
+interface KeyboardFrame {
+  visible: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Query the software-keyboard window rect (separate high-level
+ *  UIWindow that is_exposed can't see). Returns null when no op /
+ *  not visible. */
+async function keyboardFrame(ctx: RunContext): Promise<KeyboardFrame | null> {
+  const r = await ctx.client.call('keyboard_frame').catch(() => undefined);
+  const d = r?.data as KeyboardFrame | undefined;
+  return d && d.visible ? d : null;
+}
+
+/** Wait for the keyboard window to actually retract after a
+ *  hide_keyboard. wait_commit tracks the app view-hash, not the
+ *  keyboard window's dismiss animation, so a tap could fire while the
+ *  keyboard still covers the target. Poll the keyboard frame until it's
+ *  gone (cap 1200ms). */
+async function waitKeyboardHidden(ctx: RunContext): Promise<void> {
+  const deadline = Date.now() + 1200;
+  while (Date.now() < deadline) {
+    if (!(await keyboardFrame(ctx))) return;
+    await sleep(50);
+  }
+}
+
+/** If the software keyboard covers `center`, dismiss it and wait for it
+ *  to retract before tapping. is_exposed hit-tests the app window only,
+ *  so a button beneath the (separate-window) keyboard reads as exposed
+ *  while a real HID touch lands on the keyboard. Normalized center in
+ *  [0,1]. */
+async function clearKeyboardOverTarget(
+  ctx: RunContext,
+  centerNx: number,
+  centerNy: number,
+): Promise<void> {
+  const kb = await keyboardFrame(ctx);
+  if (!kb) return;
+  const covered =
+    centerNx >= kb.x && centerNx <= kb.x + kb.w && centerNy >= kb.y && centerNy <= kb.y + kb.h;
+  if (!covered) return;
+  await ctx.client.call('hide_keyboard').catch(() => undefined);
+  await waitKeyboardHidden(ctx);
+}
+
 export async function execTapOn(
   ctx: RunContext,
   sel: MaestroSelector,
@@ -437,6 +486,15 @@ export async function execTapOn(
   // gesture, closing the sheet instead of selecting the row. The
   // retap-self-heal loop covers any single-miss case.
   const isTextOnlyTap = !!sel.text && !sel.id;
+  // Keyboard-cover gate: is_exposed hit-tests the app window only, so a
+  // target beneath the software keyboard (a separate high-level
+  // UIWindow) reads as exposed while a real HID touch would land on the
+  // keyboard. If the keyboard covers this point, dismiss + wait for it
+  // to retract first (the custom-server "Done" under the keyboard).
+  {
+    const sz = await getScreenSize(ctx.udid);
+    await clearKeyboardOverTarget(ctx, center.x / sz.w, center.y / sz.h);
+  }
   // The driver picks the mechanism from intent + exposure: a focus
   // tap needs a real touch (activation can't focus native inputs);
   // an unexposed target means an in-process activation would hit the

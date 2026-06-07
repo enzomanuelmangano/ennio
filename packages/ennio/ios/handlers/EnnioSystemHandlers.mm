@@ -3,6 +3,7 @@
 //
 
 #import "EnnioSystemHandlers.h"
+#import <objc/runtime.h>
 #import "EnnioHandlerUtils.h"
 
 #import "EnnioBootstrap.h"
@@ -177,6 +178,72 @@ void RegisterEnnioSystemHandlers(void) {
         BOOL ok = NO;
         EnnioOnMainVoid([&]() { ok = [EnnioOps hideKeyboard]; });
         return std::string("{\"hidden\":") + (ok ? "true" : "false") + "}";
+    });
+
+    // keyboard_frame: on-screen rect of the software keyboard window, in
+    // normalized [0,1] coords, or {visible:false}. The keyboard lives in
+    // a SEPARATE high-level UIWindow (UIRemoteKeyboardWindow /
+    // UITextEffectsWindow), so the app-window hit-test in is_exposed is
+    // blind to it — a button under the keyboard reads as "exposed" while
+    // a real touch lands on the keyboard. Callers use this to (a) wait
+    // for the keyboard to actually retract after hide_keyboard, and (b)
+    // detect when a tap target sits under the keyboard. Frame is the
+    // keyboard's input view bounds; an off-screen (retracting/hidden)
+    // keyboard reports visible:false.
+    EnnioControlSocket::registerHandler("keyboard_frame", [](const std::string &) -> std::string {
+        BOOL visible = NO;
+        double nx = 0, ny = 0, nw = 0, nh = 0;
+        EnnioOnMainVoid([&]() {
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+                UIWindowScene *ws = (UIWindowScene *)scene;
+                CGRect screen = ws.coordinateSpace.bounds;
+                if (screen.size.width <= 0 || screen.size.height <= 0) continue;
+                for (UIWindow *w in ws.windows) {
+                    const char *cls = class_getName(w.class);
+                    BOOL isKbWindow = strstr(cls, "Keyboard") != NULL ||
+                                      strstr(cls, "TextEffects") != NULL;
+                    if (!isKbWindow || w.hidden || w.alpha < 0.01) continue;
+                    // Find the actual keyboard input view inside the window
+                    // (the window spans the screen; the keyboard is its
+                    // bottom portion). Walk for UIInputSetHostView /
+                    // UIKBKeyplaneView, else fall back to the window frame's
+                    // on-screen intersection.
+                    __block CGRect kb = CGRectNull;
+                    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:w];
+                    while (stack.count) {
+                        UIView *v = stack.lastObject;
+                        [stack removeLastObject];
+                        const char *vc = class_getName(v.class);
+                        if (strstr(vc, "UIInputSetHostView") || strstr(vc, "Keyplane") ||
+                            strstr(vc, "UIKBKeyplaneView")) {
+                            CGRect f = [v convertRect:v.bounds toView:nil];
+                            kb = CGRectIsNull(kb) ? f : CGRectUnion(kb, f);
+                        }
+                        for (UIView *sub in v.subviews) [stack addObject:sub];
+                    }
+                    CGRect onScreen = CGRectIsNull(kb)
+                        ? CGRectIntersection(w.frame, screen)
+                        : CGRectIntersection(kb, screen);
+                    // A retracted keyboard sits below the screen → empty
+                    // intersection, or a sliver. Require it to cover real
+                    // bottom area to count as visible.
+                    if (!CGRectIsEmpty(onScreen) && onScreen.size.height > screen.size.height * 0.05 &&
+                        CGRectGetMaxY(onScreen) >= screen.size.height - 2) {
+                        visible = YES;
+                        nx = onScreen.origin.x / screen.size.width;
+                        ny = onScreen.origin.y / screen.size.height;
+                        nw = onScreen.size.width / screen.size.width;
+                        nh = onScreen.size.height / screen.size.height;
+                    }
+                }
+            }
+        });
+        char buf[128];
+        snprintf(buf, sizeof(buf),
+                 "{\"visible\":%s,\"x\":%.4f,\"y\":%.4f,\"w\":%.4f,\"h\":%.4f}",
+                 visible ? "true" : "false", nx, ny, nw, nh);
+        return std::string(buf);
     });
 
     // ─── Refresh control ──────────────────────────────────────────────
