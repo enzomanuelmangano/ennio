@@ -10,6 +10,7 @@
 //   4. Cross-process AX fallback (find_ax_by_text) — for content
 //      rendered by remote view services (PHPicker, share sheet).
 
+import { dismissSystemSheet } from '../ennio-ax';
 import { axQueryByText, swipe as hidSwipe } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
@@ -143,10 +144,30 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   }
   // CLI-side implicit-wait top-up for elements that are mounting (RN
   // commit lag, React-Nav push tail) — re-poll the UIView/index finder.
-  const deadline = Date.now() + 2500;
+  let deadline = Date.now() + 2500;
+  // A cross-process system permission sheet (Photo Library limited-
+  // access upgrade, notifications, tracking) floats over the app and
+  // swallows every touch — the in-app dylib can't see it, so the find
+  // would spin to timeout while the target sits behind the sheet
+  // (profile-screen-edit: tapOn "Done" blocked by the Photos
+  // "Requesting Additional Access" prompt). The fast path above already
+  // burned its budget, so probe once on the first poll-loop miss; on a
+  // successful dismissal extend the deadline so the now-unblocked UI
+  // has time to finish presenting.
+  let permProbed = false;
   while (Date.now() < deadline) {
     const r = await findOnce(ctx, sel);
     if (r) return r;
+    if (!permProbed) {
+      permProbed = true;
+      const dismissed = await dismissSystemSheet(ctx.udid).catch(() => false);
+      if (dismissed) {
+        process.stderr.write('[ennio] dismissed system permission sheet during find\n');
+        deadline = Date.now() + 4000;
+        await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
+        continue;
+      }
+    }
     await sleep(POLL_MS);
   }
   // Tab-bar destinations: pop the navigation stack until the label
