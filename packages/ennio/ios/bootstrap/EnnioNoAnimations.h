@@ -21,6 +21,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// ENNIO_NO_ANIMATIONS env flag is set.
 + (void)installIfEnabled;
 
+/// Toggle suppression at runtime. Installs the swizzle on first enable, so
+/// a flow can flip animations on/off without a relaunch (composes with the
+/// --reuse-app soft reset). Backs the set_no_animations socket op.
++ (void)setEnabled:(BOOL)enabled;
+
 /// Whether the suppressor is currently active.
 + (BOOL)isEnabled;
 

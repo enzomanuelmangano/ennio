@@ -35,29 +35,32 @@ static void ennio_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString *k
 + (void)installIfEnabled {
     const char *v = getenv("ENNIO_NO_ANIMATIONS");
     BOOL want = v != NULL && v[0] != '\0' && strcmp(v, "0") != 0;
-    if (!want) return;
-    if (g_enabled) return; // idempotent
+    if (want) [self setEnabled:YES];
+}
 
-    // Swizzle -[CALayer addAnimation:forKey:] once. After this, g_enabled
-    // gates the behaviour so it can be toggled without re-swizzling.
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        Class cls = [CALayer class];
-        SEL sel = @selector(addAnimation:forKey:);
-        Method m = class_getInstanceMethod(cls, sel);
-        if (m) {
-            g_origAddAnimation =
-                (void (*)(id, SEL, CAAnimation *, NSString *))method_getImplementation(m);
-            method_setImplementation(m, (IMP)ennio_addAnimation);
-        }
-        // Also disable UIView block animations app-wide — belt and braces
-        // for the few paths that check +areAnimationsEnabled before even
-        // building a CAAnimation.
-        [UIView setAnimationsEnabled:NO];
-    });
-
-    g_enabled = YES;
-    NSLog(@"[Ennio] animations SUPPRESSED (ENNIO_NO_ANIMATIONS) — transitions snap to final frame");
++ (void)setEnabled:(BOOL)enabled {
+    if (enabled) {
+        // Swizzle -[CALayer addAnimation:forKey:] once. After this,
+        // g_enabled gates the behaviour so it toggles without re-swizzling.
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            Class cls = [CALayer class];
+            SEL sel = @selector(addAnimation:forKey:);
+            Method m = class_getInstanceMethod(cls, sel);
+            if (m) {
+                g_origAddAnimation =
+                    (void (*)(id, SEL, CAAnimation *, NSString *))method_getImplementation(m);
+                method_setImplementation(m, (IMP)ennio_addAnimation);
+            }
+        });
+    }
+    if (g_enabled == enabled) return;
+    g_enabled = enabled;
+    // UIView block animations app-wide too — belt and braces for paths
+    // that check +areAnimationsEnabled before building a CAAnimation.
+    [UIView setAnimationsEnabled:!enabled];
+    NSLog(@"[Ennio] animations %@", enabled ? @"SUPPRESSED — transitions snap to final frame"
+                                            : @"RESTORED");
 }
 
 @end
