@@ -256,15 +256,24 @@ void RegisterEnnioFindHandlers(void) {
         BOOL relaxed = [a[@"relaxed"] boolValue];
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
+        NSString *cls = nil;
         EnnioOnMainVoid([&]() {
             UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed];
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
+                cls = NSStringFromClass(v.class);
             }
         });
         if (!found) throw std::runtime_error("text not found");
-        return EnnioRectJson(rect);
+        // cls: matched view's class — diagnostic for "tap landed at the
+        // wrong rect" investigations (which view actually won the walk).
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"x\":%.2f,\"y\":%.2f,\"w\":%.2f,\"h\":%.2f,\"cls\":\"%s\"}",
+                      rect.x, rect.y, rect.w, rect.h,
+                      cls ? cls.UTF8String : "");
+        return std::string(buf);
     });
 
     // behind_modal: YES when the matched view's hosting VC is NOT in
