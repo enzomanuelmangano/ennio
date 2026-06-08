@@ -138,7 +138,12 @@ jobs:
           script: |
             set -u
             adb wait-for-device
-            adb root && adb wait-for-device # ptrace injection runs as root
+            # ptrace injection runs as root. `adb root` restarts adbd, which
+            # resets the client connection and makes the command itself return
+            # non-zero even on success — tolerate it, then wait for adbd back.
+            adb root || true
+            adb wait-for-device
+            sleep 3
             adb install -r -g /tmp/exampleapk/app-release.apk
             UDID=$(adb devices | awk '/emulator-/{print $1; exit}')
             test -n "$UDID" || { echo "no emulator serial"; exit 1; }
