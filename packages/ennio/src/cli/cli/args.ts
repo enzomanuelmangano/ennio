@@ -24,13 +24,16 @@ export type Flags = {
   safeMode?: boolean;
   /** --quiet / -q: suppress per-step inline output (verbose is the default). */
   quiet?: boolean;
-  /** --fast: in-process taps/swipes (dylib activation), per-gesture HID fallback. */
-  fast?: boolean;
-  /** --no-animations: suppress app animations (ENNIO_NO_ANIMATIONS) for speed. */
+  /** --in-process-tap: actuate taps via in-process activation (dylib), with a
+   *  per-gesture real-HID fallback. iOS-only; opt-in. Default actuation is real
+   *  HID touches (exercises the full gesture path). (Deprecated alias: --fast.) */
+  inProcessTap?: boolean;
+  /** --disable-animations: suppress app animations (ENNIO_NO_ANIMATIONS) for
+   *  speed. (Deprecated alias: --no-animations.) */
   noAnimations?: boolean;
-  /** --reuse-app: clearState soft-resets (data wipe + JS reload) instead of
-   *  relaunching, when the app is already running. Suite-level speed. */
-  reuseApp?: boolean;
+  /** --disable-reuse-app: force a full relaunch on clearState instead of the
+   *  default soft-reset (data wipe + JS reload). Reuse is ON by default. */
+  disableReuseApp?: boolean;
   /** --android: target an Android emulator/device via adb. Default: iOS. */
   android?: boolean;
   /** --ios: force the iOS simulator backend (default). */
@@ -52,17 +55,18 @@ const BOOL_FLAGS = new Set([
   'version',
   'safe-mode',
   'quiet',
-  'fast',
-  'no-animations',
-  'reuse-app',
+  'in-process-tap',
+  'disable-animations',
+  'disable-reuse-app',
   'android',
   'ios',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {
   'safe-mode': 'safeMode',
-  'no-animations': 'noAnimations',
-  'reuse-app': 'reuseApp',
+  'in-process-tap': 'inProcessTap',
+  'disable-animations': 'noAnimations',
+  'disable-reuse-app': 'disableReuseApp',
 };
 
 export function parseArgs(argv: string[]): ParsedArgs {

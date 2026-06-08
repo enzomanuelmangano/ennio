@@ -27,10 +27,22 @@ describe('parseArgs boolean flags', () => {
     expect(r.flags.lenient).toBe(true);
   });
 
-  it('parses --fast as a boolean flag', () => {
-    const r = parseArgs(['test', 'e2e/', '--fast']);
-    expect(r.flags.fast).toBe(true);
+  it('parses --in-process-tap as a boolean flag', () => {
+    const r = parseArgs(['test', 'e2e/', '--in-process-tap']);
+    expect(r.flags.inProcessTap).toBe(true);
     expect(r.positional).toEqual(['e2e/']);
+  });
+
+  it('maps kebab flags to camelCase keys (--disable-reuse-app, --disable-animations)', () => {
+    const r = parseArgs(['test', 'e2e/', '--disable-reuse-app', '--disable-animations']);
+    expect(r.flags.disableReuseApp).toBe(true);
+    expect(r.flags.noAnimations).toBe(true);
+  });
+
+  it('drops removed legacy flags (--fast) to positionals', () => {
+    const r = parseArgs(['test', 'e2e/', '--fast']);
+    expect(r.flags.inProcessTap).toBeUndefined();
+    expect(r.positional).toContain('--fast');
   });
 
   it('surfaces unknown flags as positionals', () => {

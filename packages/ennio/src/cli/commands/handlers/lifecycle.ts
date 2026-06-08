@@ -81,14 +81,14 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         }
       }
       if (opts.clearState) {
-        // --reuse-app: when the app is ALREADY running (the runner
-        // reconnected to the prior flow's process) and there are no
-        // launch arguments (those need a real relaunch to take effect),
-        // soft-reset in place — wipe data + reload the JS bundle —
-        // instead of paying the ~6s relaunch. Falls back to relaunch
+        // App reuse (default ON; --disable-reuse-app sets ENNIO_REUSE_APP=0):
+        // when the app is ALREADY running (the runner reconnected to the prior
+        // flow's process) and there are no launch arguments (those need a real
+        // relaunch to take effect), soft-reset in place — wipe data + reload the
+        // JS bundle — instead of paying the ~6s relaunch. Falls back to relaunch
         // inside softResetAndReload if the reload symbol is missing.
         const canReuse =
-          process.env.ENNIO_REUSE_APP === '1' &&
+          process.env.ENNIO_REUSE_APP !== '0' &&
           ctx.client.isConnected() &&
           launchArgs.length === 0 &&
           !opts.clearKeychain;
