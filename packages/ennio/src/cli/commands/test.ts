@@ -15,7 +15,6 @@ import { glob } from 'glob';
 import type { Flags } from '../cli/args';
 import { EnnioRunner } from '../core';
 import { selectPlatform } from '../platform';
-import { currentVersion, printUpdateNotice } from '../update-check';
 
 function isMaestroFile(filePath: string): boolean {
   return filePath.endsWith('.yaml') || filePath.endsWith('.yml');
@@ -111,9 +110,6 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
 
   try {
     const result = await runner.run(files);
-    // Nudge about updates after the run, but never on the json path — that
-    // reporter owns stdout and the notice goes to stderr regardless.
-    if (reporterKind !== 'json') printUpdateNotice(currentVersion());
     return result.passed ? 0 : 1;
   } catch (err) {
     console.error(`✗ ERROR  ${err instanceof Error ? err.message : String(err)}`);

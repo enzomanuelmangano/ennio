@@ -20,11 +20,14 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { accessSync, constants, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { bold, box, cyan, dim, green, yellow } from './ui/ansi';
+
 const PKG_NAME = '@reactiive/ennio';
+const RELEASES_URL = 'https://github.com/enzomanuelmangano/ennio/releases';
 // %2f is an encoded slash — the npm registry's per-version endpoint for a
 // scoped package. Returns just the dist-tag's manifest, not the full doc.
 const LATEST_URL = 'https://registry.npmjs.org/@reactiive%2fennio/latest';
@@ -135,14 +138,31 @@ export function isNewer(a: string, b: string): boolean {
   return false;
 }
 
+/**
+ * When running from a global install, whether that dir is writable — i.e.
+ * whether `npm i -g` will work without sudo. null when not a global install
+ * (dev/source), where the question doesn't apply.
+ */
+function globalDirWritable(): boolean | null {
+  if (!__dirname.includes('node_modules')) return null;
+  try {
+    accessSync(__dirname, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function formatNotice(current: string, latest: string): string {
-  return [
-    '',
-    `Update available: ${current} → ${latest}`,
-    `Run \`npm i -g ${PKG_NAME}\` to update.`,
-    `(silence with ENNIO_NO_UPDATE_CHECK=1)`,
-    '',
-  ].join('\n');
+  const lines = [
+    `${cyan('⬆')} ${bold('ennio')} ${dim(current)} ${dim('→')} ${bold(green(latest))}`,
+    `${dim('npm i -g')} ${PKG_NAME}@latest`,
+  ];
+  if (globalDirWritable() === false) {
+    lines.push(yellow('global npm dir not writable — may need sudo or a user-owned prefix'));
+  }
+  lines.push(dim(RELEASES_URL));
+  return ['', ...box(lines, cyan), ''].join('\n');
 }
 
 /**
@@ -169,10 +189,17 @@ export function getUpdateNotice(currentVersion: string): string | null {
   return null;
 }
 
-/** Print the notice to stderr (keeps stdout clean for JSON/pipes). */
+let printedNotice = false;
+
+/** Print the notice to stderr (keeps stdout clean for JSON/pipes). Prints at
+ *  most once per process so a startup call + a version-command call can't double. */
 export function printUpdateNotice(currentVersion: string): void {
+  if (printedNotice) return;
   const notice = getUpdateNotice(currentVersion);
-  if (notice) console.error(notice);
+  if (notice) {
+    console.error(notice);
+    printedNotice = true;
+  }
 }
 
 /** Resolve the running CLI's version from the bundled package.json. */

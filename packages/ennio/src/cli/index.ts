@@ -22,9 +22,19 @@ import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
 import { printCrashReport } from './crash-reporter';
+import { currentVersion, printUpdateNotice } from './update-check';
+import { warnVersionDrift } from './version-context';
 
 async function main() {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
+
+  // Up front, for every command: recommend an update if one is available
+  // (cached, non-blocking, once per process, TTY-only) and flag a global CLI
+  // that differs from the project's pinned ennio. Skipped for JSON output.
+  if (flags.reporter !== 'json') {
+    printUpdateNotice(currentVersion());
+    warnVersionDrift();
+  }
 
   // Global --version / -V → print version, exit 0. Checked before the
   // no-args/help short-circuits so `ennio --version` works standalone and
