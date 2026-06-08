@@ -22,7 +22,7 @@ import {
   dismissPermissionDialogs,
   relaunchAndReconnect as iosRelaunchAndReconnect,
 } from '../runner/lifecycle';
-import { enableAccessibility } from '../sim';
+import { enableAccessibility, disableAutocorrect } from '../sim';
 import { POST_LAUNCH_SETTLE_MS, sleep } from '../runner/context';
 import type { RunContext } from '../runner/context';
 
@@ -72,6 +72,10 @@ export class IosPlatform implements Platform {
     // SwiftUI / native screens only build their a11y tree when an a11y
     // client is active — flip it on so find_ax_by_text can read them.
     enableAccessibility(session.udid);
+
+    // Make typing deterministic: a non-English keyboard's autocorrect
+    // intermittently rewrites typed text (e.g. "Reply 1" → "Replay 1").
+    disableAutocorrect(session.udid);
 
     const connection = new EnnioConnection({ udid: session.udid });
     if (!(await connection.open(2_000))) {

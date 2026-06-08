@@ -67,7 +67,17 @@ export function disableAutocorrect(udid: string): void {
     try {
       execFileSync(
         'xcrun',
-        ['simctl', 'spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', key, '-bool', val],
+        [
+          'simctl',
+          'spawn',
+          udid,
+          'defaults',
+          'write',
+          'com.apple.keyboard.preferences',
+          key,
+          '-bool',
+          val,
+        ],
         { stdio: 'pipe' },
       );
     } catch {
