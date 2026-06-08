@@ -15,7 +15,11 @@ import { writeFileSync } from 'node:fs';
 
 const ABSTRACT_SOCKET_NAME = 'ennio';
 
-function adb(serial: string | undefined, args: string[], opts: { encoding?: 'utf-8' } = {}): string {
+function adb(
+  serial: string | undefined,
+  args: string[],
+  opts: { encoding?: 'utf-8' } = {},
+): string {
   const full = serial ? ['-s', serial, ...args] : args;
   return execFileSync('adb', full, {
     encoding: opts.encoding ?? 'utf-8',
@@ -66,7 +70,15 @@ export function removeForward(serial: string, port: number): void {
 export function launchAndroidApp(serial: string, pkg: string): void {
   // Prefer explicit component (faster, no monkey noise); fall back to monkey.
   try {
-    adb(serial, ['shell', 'am', 'start', '-n', `${pkg}/.MainActivity`, '-a', 'android.intent.action.MAIN']);
+    adb(serial, [
+      'shell',
+      'am',
+      'start',
+      '-n',
+      `${pkg}/.MainActivity`,
+      '-a',
+      'android.intent.action.MAIN',
+    ]);
     return;
   } catch {
     /* component name may differ — fall back */
@@ -125,7 +137,12 @@ export function pushAgentToTmp(serial: string, hostSoPath: string): string {
  * which, unlike the /data/app/~~<base64>==/ install dir, contains no "=" for
  * the am argument parser to truncate.
  */
-export function stageAndAttachAgent(serial: string, pkg: string, pid: string, tmpSoPath: string): void {
+export function stageAndAttachAgent(
+  serial: string,
+  pkg: string,
+  pid: string,
+  tmpSoPath: string,
+): void {
   const codeCache = `/data/data/${pkg}/code_cache/libennio.so`;
   // Pass the run-as body as ONE shell string: `adb shell` joins argv with
   // spaces and the device shell re-parses, so the && chain and the sh -c
@@ -229,7 +246,11 @@ export function getClipboard(serial: string): string {
  *  --no-animations; far cleaner than the iOS swizzle). */
 export function setNoAnimations(serial: string, on: boolean): void {
   const scale = on ? '0' : '1';
-  for (const k of ['window_animation_scale', 'transition_animation_scale', 'animator_duration_scale']) {
+  for (const k of [
+    'window_animation_scale',
+    'transition_animation_scale',
+    'animator_duration_scale',
+  ]) {
     try {
       adb(serial, ['shell', 'settings', 'put', 'global', k, scale]);
     } catch {

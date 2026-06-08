@@ -186,7 +186,9 @@ export async function execTapOn(
     // in a separate SheetViewController window). It's still on screen,
     // so the cross-process AX tree sees it — match by testID (bridged
     // AXIdentifier) or label and tap it directly. Soft-fails off-box.
-    if (await ctx.platform.ax.tapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false)) {
+    if (
+      await ctx.platform.ax.tapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false)
+    ) {
       return;
     }
   }
@@ -781,7 +783,9 @@ export async function execTapOn(
           .call('wait_hash_change', { sinceHash: baseHash, maxMs: 60 })
           .catch(() => undefined);
         if (!(stillNoChange && stillNoChange.ok && (stillNoChange.data as { ok?: boolean })?.ok)) {
-          await ctx.platform.ax.tapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false);
+          await ctx.platform.ax
+            .tapTarget(ctx.udid, { id: sel.id, text: sel.text })
+            .catch(() => false);
         }
       }
     }

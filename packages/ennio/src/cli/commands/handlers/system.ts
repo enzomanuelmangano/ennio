@@ -6,7 +6,6 @@
 // is a small focused function; the registry binds them to matcher
 // predicates on the MaestroCommand shape.
 
-
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 
@@ -76,7 +75,8 @@ function sleep(ms: number): Promise<void> {
  */
 export function registerSystemHandlers(registry: CommandRegistry): void {
   registry.register(isTakeScreenshot, async (cmd, { ctx }) => {
-    let path = typeof cmd.takeScreenshot === 'string' ? cmd.takeScreenshot : cmd.takeScreenshot.path;
+    let path =
+      typeof cmd.takeScreenshot === 'string' ? cmd.takeScreenshot : cmd.takeScreenshot.path;
     // Maestro lets you omit the extension; the platform writers expect one.
     if (!/\.(png|jpe?g)$/i.test(path)) path += '.png';
     ctx.platform.system.screenshot(ctx.udid, path);

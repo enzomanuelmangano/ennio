@@ -48,7 +48,10 @@ export class IosPlatform implements Platform {
       execFileSync('xcrun', ['simctl', 'keychain', udid, 'reset'], { stdio: 'pipe' });
     },
     setClipboard: (udid, text) => {
-      execFileSync('xcrun', ['simctl', 'pbcopy', udid], { input: text, stdio: ['pipe', 'pipe', 'pipe'] });
+      execFileSync('xcrun', ['simctl', 'pbcopy', udid], {
+        input: text,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
     },
     getClipboard: (udid) =>
       execFileSync('xcrun', ['simctl', 'pbpaste', udid], { encoding: 'utf-8' }).toString(),
@@ -109,7 +112,9 @@ export class IosPlatform implements Platform {
   async openUrl(ctx: RunContext, url: string): Promise<void> {
     execFileSync('xcrun', ['simctl', 'openurl', ctx.udid, url]);
     if (url.includes('expo-development-client')) {
-      await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 20000 }).catch(() => undefined);
+      await ctx.client
+        .call('wait_react_commit', { sinceMs: 0, maxMs: 20000 })
+        .catch(() => undefined);
       await ctx.client.call('wait_commit', { maxMs: 5000, stableMs: 500 }).catch(() => undefined);
       const permDeadline = Date.now() + 8000;
       while (Date.now() < permDeadline) {

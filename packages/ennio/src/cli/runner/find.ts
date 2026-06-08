@@ -230,7 +230,8 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
       const beforeHash = await captureHash(ctx);
       // Route through the driver so the mechanism is platform-correct
       // (iOS HID / Android in-process MotionEvent).
-      if (dir === 'DOWN') await ctx.driver.swipe(ctx.udid, cx, cy + dist / 2, cx, cy - dist / 2, 250);
+      if (dir === 'DOWN')
+        await ctx.driver.swipe(ctx.udid, cx, cy + dist / 2, cx, cy - dist / 2, 250);
       else await ctx.driver.swipe(ctx.udid, cx, cy - dist / 2, cx, cy + dist / 2, 250);
       await sleep(300);
       await ctx.client.call('wait_commit', { maxMs: 1200, stableMs: 200 }).catch(() => undefined);

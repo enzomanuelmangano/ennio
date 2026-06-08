@@ -40,13 +40,7 @@ import {
   waitForAppPid,
 } from '../android/adb';
 
-import type {
-  AxBridge,
-  ConnectOptions,
-  OpenConnection,
-  Platform,
-  SystemBridge,
-} from './types';
+import type { AxBridge, ConnectOptions, OpenConnection, Platform, SystemBridge } from './types';
 
 export class AndroidPlatform implements Platform {
   readonly name = 'android' as const;
