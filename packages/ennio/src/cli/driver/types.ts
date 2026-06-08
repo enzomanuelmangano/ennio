@@ -49,7 +49,7 @@ export interface PreTapSnapshot {
 }
 
 export interface GestureDriver {
-  readonly name: 'hid' | 'fast';
+  readonly name: 'hid' | 'fast' | 'android';
 
   /**
    * Whether two consecutive same-target tapOns should collapse into a

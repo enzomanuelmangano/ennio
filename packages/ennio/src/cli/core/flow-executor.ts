@@ -15,17 +15,19 @@ import { diagnoseSocketFailure } from '../crash-detector';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
+import type { DeviceSession, Platform } from '../platform';
+import { selectPlatform } from '../platform';
 import type { RunContext } from '../runner/context';
 import { describeCommand } from '../runner/index';
 
 import { CommandRegistry } from './command-registry';
 import type { EnnioConnection } from './ennio-connection';
 import type { FlowResult, Reporter } from '../reporters';
-import type { SimulatorSession } from './simulator-session';
 
 export interface FlowExecutorOptions {
-  session: SimulatorSession;
+  session: DeviceSession;
   connection: EnnioConnection;
+  platform?: Platform;
   reporter: Reporter;
   registry?: CommandRegistry;
   verbose?: boolean;
@@ -40,8 +42,9 @@ interface StepTiming {
 }
 
 export class FlowExecutor {
-  private session: SimulatorSession;
+  private session: DeviceSession;
   private connection: EnnioConnection;
+  private platform: Platform;
   private reporter: Reporter;
   private registry: CommandRegistry;
   private verbose: boolean;
@@ -51,6 +54,7 @@ export class FlowExecutor {
   constructor(opts: FlowExecutorOptions) {
     this.session = opts.session;
     this.connection = opts.connection;
+    this.platform = opts.platform ?? selectPlatform('ios');
     this.reporter = opts.reporter;
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
@@ -85,6 +89,7 @@ export class FlowExecutor {
       verbose: this.verbose,
       lenient: this.lenient,
       driver: this.driver,
+      platform: this.platform,
       flowPath: flow.filePath,
       outputs: {},
       flowEnv: { ...(flow.env ?? {}) },

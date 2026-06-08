@@ -14,6 +14,7 @@ import { glob } from 'glob';
 
 import type { Flags } from '../cli/args';
 import { EnnioRunner } from '../core';
+import { selectPlatform } from '../platform';
 import { currentVersion, printUpdateNotice } from '../update-check';
 
 function isMaestroFile(filePath: string): boolean {
@@ -92,6 +93,10 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   // of a pretty run. --quiet/-q opts out. An explicit --verbose still
   // means something: it wins over --quiet when both are passed.
   const verbose = flags.verbose ? true : !flags.quiet;
+  // Backend: --android targets an emulator/device over adb; default iOS.
+  // ENNIO_PLATFORM=android is an env-level equivalent for CI.
+  const platformName =
+    flags.android || process.env.ENNIO_PLATFORM === 'android' ? 'android' : 'ios';
   const runner = new EnnioRunner({
     udid: process.env.ENNIO_UDID,
     dylibPath: process.env.ENNIO_DYLIB_PATH || undefined,
@@ -100,6 +105,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     lenient: flags.lenient ?? false,
     safeMode: flags.safeMode ?? false,
     fast: flags.fast ?? false,
+    platform: selectPlatform(platformName),
   });
 
   try {

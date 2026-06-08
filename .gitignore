@@ -19,6 +19,14 @@ dist/
 packages/ennio/prebuilt/*.dylib
 packages/ennio/prebuilt/manifest.json
 
+# Ennio Android injection — build artifacts. The agent dex is regenerated as a
+# C byte-array header and the JVMTI agent .so is compiled by
+# packages/ennio/android-inject/scripts/build-android.sh. The CLI pushes the
+# .so to the device and attaches it with `am attach-agent` (nothing is bundled
+# into the target APK), so these never need committing.
+packages/ennio/android-inject/native/agent_dex.h
+/tmp/ennio-android/
+
 drivers
 reports
 

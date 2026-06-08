@@ -7,6 +7,7 @@
 // transitions from no-ops. Everything here is pure data — no I/O.
 
 import type { GestureDriver } from '../driver/types';
+import type { Platform } from '../platform/types';
 import type { EnnioSocketClient } from '../socket-client';
 
 // =====================================================================
@@ -66,6 +67,10 @@ export interface RunContext {
    *  (baseline, real IOHIDEvents) or FastDriver (in-process-first with
    *  per-gesture HID fallback). Decided once by EnnioRunner. */
   driver: GestureDriver;
+  /** Device backend (iOS simulator or Android emulator). Owns app
+   *  lifecycle (clearState/relaunch/terminate/openUrl) so command
+   *  handlers stay platform-agnostic. */
+  platform: Platform;
   /** Path to the currently-executing flow file. Used for runFlow
    *  subflow path resolution. */
   flowPath: string;

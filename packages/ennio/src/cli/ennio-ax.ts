@@ -160,6 +160,10 @@ function warnBlindOnce(reason: string): void {
 }
 
 export async function axTree(udid: string): Promise<AxTree | null> {
+  // ennioax is the macOS Simulator accessibility helper — iOS-only. On Android
+  // the in-app agent already walks every window (dialogs included), so there is
+  // no cross-process tree and the "open Simulator.app" warning would be wrong.
+  if (process.env.ENNIO_PLATFORM === 'android') return null;
   const helper = findHelper();
   if (!helper) {
     warnBlindOnce('ennioax helper binary not found');

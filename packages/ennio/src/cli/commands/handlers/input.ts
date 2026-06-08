@@ -9,7 +9,6 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { typeText as hidType, getActuator } from '../../hid';
-import { axFocusTextField, axTextFieldId } from '../../ennio-ax';
 import { interpolate, sleep } from '../../runner/context';
 
 // Fields whose value is driven by an onChangeText handler that
@@ -49,7 +48,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
       // canPost never flips. Focus the field, then type via REAL keyboard
       // HID events (host Indigo keyboard builder) which traverse the full
       // text-input delegate chain.
-      const liveField = await axTextFieldId(ctx.udid);
+      const liveField = await ctx.platform.ax.textFieldId(ctx.udid);
       if (liveField && REAL_KEYBOARD_FIELDS.has(liveField)) {
         await ctx.client.call('focus_testid', { testID: liveField }).catch(() => undefined);
         await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
@@ -112,7 +111,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
             }
           }
           if (!focusTap) {
-            const fieldId = await axTextFieldId(ctx.udid);
+            const fieldId = await ctx.platform.ax.textFieldId(ctx.udid);
             if (fieldId) {
               const r = await ctx.client
                 .call('find_by_testid', { testID: fieldId })
@@ -127,7 +126,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
             }
           }
           if (!focusTap) {
-            await axFocusTextField(ctx.udid).catch(() => false);
+            await ctx.platform.ax.focusTextField(ctx.udid).catch(() => false);
           }
           await responderReady(800);
         }

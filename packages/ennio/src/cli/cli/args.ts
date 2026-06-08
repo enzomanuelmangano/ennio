@@ -31,6 +31,10 @@ export type Flags = {
   /** --reuse-app: clearState soft-resets (data wipe + JS reload) instead of
    *  relaunching, when the app is already running. Suite-level speed. */
   reuseApp?: boolean;
+  /** --android: target an Android emulator/device via adb. Default: iOS. */
+  android?: boolean;
+  /** --ios: force the iOS simulator backend (default). */
+  ios?: boolean;
 };
 
 export type ParsedArgs = {
@@ -51,6 +55,8 @@ const BOOL_FLAGS = new Set([
   'fast',
   'no-animations',
   'reuse-app',
+  'android',
+  'ios',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {

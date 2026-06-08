@@ -19,7 +19,6 @@
 //         gesture chain never armed)
 
 import type { TapIntent } from '../driver/types';
-import { axResolve, axTapTarget, dismissSystemSheet } from '../ennio-ax';
 import { getScreenSize } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
@@ -135,7 +134,7 @@ export async function execTapOn(
     // it and verify the frame moved. High-confidence (testID-backed) and
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
-    const axEl = sel.childOf ? null : await axResolve(ctx.udid, { text: sel.text });
+    const axEl = sel.childOf ? null : await ctx.platform.ax.resolve(ctx.udid, { text: sel.text });
     if (axEl) {
       // Doomed-tap gate for the AX fast path: a VC transition in flight
       // at dispatch time swallows the touch AND means the AX snapshot
@@ -176,7 +175,7 @@ export async function execTapOn(
     // SpringBoard confirmation) may be floating over the app and hiding
     // the in-app target. Clear it via the macOS AX tree + a real HID
     // tap, then resolve once more before giving up.
-    if (await dismissSystemSheet(ctx.udid).catch(() => false)) {
+    if (await ctx.platform.ax.dismissSystemSheet(ctx.udid).catch(() => false)) {
       await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 200 }).catch(() => undefined);
       rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
     }
@@ -187,7 +186,9 @@ export async function execTapOn(
     // in a separate SheetViewController window). It's still on screen,
     // so the cross-process AX tree sees it — match by testID (bridged
     // AXIdentifier) or label and tap it directly. Soft-fails off-box.
-    if (await axTapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false)) {
+    if (
+      await ctx.platform.ax.tapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false)
+    ) {
       return;
     }
   }
@@ -216,7 +217,7 @@ export async function execTapOn(
     ambiguousId = !!(nth && nth.ok && nth.data);
   }
   if ((sel.id || sel.text) && !sel.childOf && !ambiguousId) {
-    const axEl = await axResolve(ctx.udid, { id: sel.id, text: sel.text });
+    const axEl = await ctx.platform.ax.resolve(ctx.udid, { id: sel.id, text: sel.text });
     // Only correct SMALL interactive elements (buttons, tabs, menu rows
     // — height < ~12% of the screen). For a large container (a feed item,
     // a card) the AX "center" can sit on an inner sub-link (the avatar →
@@ -782,7 +783,9 @@ export async function execTapOn(
           .call('wait_hash_change', { sinceHash: baseHash, maxMs: 60 })
           .catch(() => undefined);
         if (!(stillNoChange && stillNoChange.ok && (stillNoChange.data as { ok?: boolean })?.ok)) {
-          await axTapTarget(ctx.udid, { id: sel.id, text: sel.text }).catch(() => false);
+          await ctx.platform.ax
+            .tapTarget(ctx.udid, { id: sel.id, text: sel.text })
+            .catch(() => false);
         }
       }
     }

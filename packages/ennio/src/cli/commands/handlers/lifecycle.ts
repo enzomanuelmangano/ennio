@@ -10,13 +10,10 @@ import { execFileSync } from 'node:child_process';
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { POST_LAUNCH_SETTLE_MS, sleep } from '../../runner/context';
-import {
-  clearStateAndRelaunch,
-  dismissPermissionDialogs,
-  relaunchAndReconnect,
-  softResetAndReload,
-} from '../../runner/lifecycle';
-import { terminateApp } from '../../sim';
+// Relaunch / terminate now route through ctx.platform (the iOS/Android
+// backend abstraction); only the iOS soft-reset optimization is still a
+// direct helper call.
+import { softResetAndReload } from '../../runner/lifecycle';
 
 interface LaunchAppCmd {
   launchApp:
@@ -61,10 +58,10 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
               clearKeychain?: boolean;
               arguments?: Record<string, string | boolean | number>;
             });
-      // Maestro clearKeychain: wipe the SIM-WIDE keychain before
-      // launch. simctl has a first-class verb for it; app must not be
-      // mid-launch, so do it before clearState/relaunch.
-      if (opts.clearKeychain) {
+      // Maestro clearKeychain: wipe the SIM-WIDE keychain before launch.
+      // iOS-only system feature (simctl has a first-class verb); no
+      // Android equivalent, so it no-ops there.
+      if (opts.clearKeychain && ctx.platform.name === 'ios') {
         try {
           execFileSync('xcrun', ['simctl', 'keychain', ctx.udid, 'reset'], { stdio: 'pipe' });
         } catch {
@@ -73,7 +70,7 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
       }
       // iOS NSUserDefaults launch arguments need flat `-Key Value`
       // pairs. Bare key gets silently ignored. Booleans as YES/NO
-      // (iOS convention).
+      // (iOS convention). Android ignores these.
       const launchArgs: string[] = [];
       if (opts.arguments) {
         for (const [k, v] of Object.entries(opts.arguments)) {
@@ -98,12 +95,12 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         if (canReuse) {
           await softResetAndReload(ctx);
         } else {
-          await clearStateAndRelaunch(ctx, launchArgs);
+          await ctx.platform.clearStateAndRelaunch(ctx, launchArgs);
         }
       } else if (!ctx.client.isConnected()) {
         // Socket dropped — app was killed (stopApp/killApp) or crashed.
-        // Re-launch with DYLD inject so the dylib reattaches.
-        await relaunchAndReconnect(ctx, launchArgs);
+        // Re-launch so the agent reattaches.
+        await ctx.platform.relaunchAndReconnect(ctx, launchArgs);
       }
       await sleep(POST_LAUNCH_SETTLE_MS);
     },
@@ -112,7 +109,7 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & ClearStateCmd => has(c, 'clearState'),
     async (_cmd, { ctx }) => {
-      await clearStateAndRelaunch(ctx);
+      await ctx.platform.clearStateAndRelaunch(ctx);
       await sleep(POST_LAUNCH_SETTLE_MS);
     },
   );
@@ -124,7 +121,7 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
       // Close socket BEFORE killing the app so the FIN from the dying
       // process doesn't race the next launchApp's isConnected() check.
       ctx.client.close();
-      terminateApp(ctx.udid, ctx.bundleId);
+      ctx.platform.terminate(ctx.udid, ctx.bundleId);
     },
   );
 
@@ -132,24 +129,7 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & OpenLinkCmd => has(c, 'openLink'),
     async (cmd, { ctx }) => {
       const link = typeof cmd.openLink === 'string' ? cmd.openLink : cmd.openLink.link;
-      execFileSync('xcrun', ['simctl', 'openurl', ctx.udid, link]);
-      // Dev-client deep links trigger a Metro connection + JS bundle
-      // load. Default 1.5s sleep isn't enough for cold Metro.
-      if (link.includes('expo-development-client')) {
-        await ctx.client
-          .call('wait_react_commit', { sinceMs: 0, maxMs: 20000 })
-          .catch(() => undefined);
-        await ctx.client.call('wait_commit', { maxMs: 5000, stableMs: 500 }).catch(() => undefined);
-        // System permission sheets (Photo Library etc.) render in
-        // another process — dylib can't see them but they eat the
-        // next tap. Poll for grant briefly before any flow tap.
-        const permDeadline = Date.now() + 8000;
-        while (Date.now() < permDeadline) {
-          if (await dismissPermissionDialogs(ctx.udid).catch(() => false)) break;
-          await sleep(1000);
-        }
-      }
-      await sleep(POST_LAUNCH_SETTLE_MS);
+      await ctx.platform.openUrl(ctx, link);
     },
   );
 
