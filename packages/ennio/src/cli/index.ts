@@ -21,9 +21,20 @@ import { runVersionCommand } from './commands/version';
 import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
+import { printCrashReport } from './crash-reporter';
+import { currentVersion, printUpdateNotice } from './update-check';
+import { warnVersionDrift } from './version-context';
 
 async function main() {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
+
+  // Up front, for every command: recommend an update if one is available
+  // (cached, non-blocking, once per process, TTY-only) and flag a global CLI
+  // that differs from the project's pinned ennio. Skipped for JSON output.
+  if (flags.reporter !== 'json') {
+    printUpdateNotice(currentVersion());
+    warnVersionDrift();
+  }
 
   // Global --version / -V → print version, exit 0. Checked before the
   // no-args/help short-circuits so `ennio --version` works standalone and
@@ -78,9 +89,21 @@ async function main() {
   }
 }
 
+// Unexpected throws anywhere → a crash. Print the error + a one-click
+// pre-filled GitHub issue link. (Normal test failures don't throw — they
+// resolve with a non-zero exit code below, so they never land here.)
+process.on('uncaughtException', (err) => {
+  printCrashReport(err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  printCrashReport(err);
+  process.exit(1);
+});
+
 main()
   .then((code) => process.exit(code ?? 0))
   .catch((err) => {
-    console.error(err);
+    printCrashReport(err);
     process.exit(1);
   });

@@ -37,6 +37,10 @@ export interface Reporter {
   /** Called when a single flow starts. */
   flowStart(flow: MaestroFlow): void;
 
+  /** Called just before a step is dispatched. Lets a live reporter show the
+   *  in-flight step (spinner + running timer); ignorable by others. */
+  stepStart?(step: number, cmd: MaestroCommand): void;
+
   /** Called when a step completes successfully. */
   stepPass(step: number, cmd: MaestroCommand, durationMs: number): void;
 

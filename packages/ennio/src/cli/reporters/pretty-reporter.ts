@@ -1,77 +1,14 @@
-// Human-friendly TTY reporter. Colored output when stdout is a TTY,
-// plain otherwise. Mirrors the current default output style so the
-// migration is invisible to existing users.
+// Append-only reporter — the non-TTY / CI fallback (interactive TTYs use the
+// live reporter). Colored when stdout is a TTY; styling + command formatting
+// come from the shared ui/ansi + reporters/format modules (one source each).
 
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
+import { bold, cyan, dim, fmtMs, green, hyperlink, red, yellow } from '../ui/ansi';
 
+import { formatCommand as describe } from './format';
 import type { FlowResult, Reporter, SuiteResult } from './reporter';
 
-const isTty = process.stdout.isTTY === true && !process.env.NO_COLOR;
-
-function color(code: string, s: string): string {
-  return isTty ? `[${code}m${s}[0m` : s;
-}
-
-/**
- * OSC 8 hyperlink. Supported by iTerm2, VSCode terminal, kitty,
- * WezTerm. Other terminals render as plain text (graceful fallback).
- */
-function hyperlink(target: string, label?: string): string {
-  if (!isTty) return target;
-  const url = target.startsWith('/') ? `file://${target}` : target;
-  const text = label ?? target;
-  return `]8;;${url}\\${text}]8;;\\`;
-}
-
-const c = {
-  green: (s: string) => color('32', s),
-  red: (s: string) => color('31', s),
-  yellow: (s: string) => color('33', s),
-  dim: (s: string) => color('2', s),
-  bold: (s: string) => color('1', s),
-  cyan: (s: string) => color('36', s),
-};
-
-/**
- * Smart time formatter. <1s → `42ms`, <60s → `5.2s`, otherwise `2.5m`.
- */
-function fmtMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60_000).toFixed(1)}m`;
-}
-
-/**
- * Readable command description — strip JSON.stringify noise.
- *   tapOn: {"id":"foo"}              → tapOn id:foo
- *   assertVisible: {"text":"Welcome"}→ assertVisible text:"Welcome"
- *   scrollUntilVisible: {...}        → scrollUntilVisible id:foo ↓
- */
-function describe(cmd: MaestroCommand): string {
-  const key = Object.keys(cmd)[0];
-  const value = (cmd as Record<string, unknown>)[key];
-
-  if (typeof value === 'string') return `${key} ${JSON.stringify(value)}`;
-  if (typeof value === 'boolean') return key;
-
-  if (value && typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    const parts: string[] = [];
-    if (typeof obj.id === 'string') parts.push(`id:${obj.id}`);
-    if (typeof obj.text === 'string') parts.push(`text:${JSON.stringify(obj.text)}`);
-    if (obj.element && typeof obj.element === 'object') {
-      const el = obj.element as Record<string, unknown>;
-      if (typeof el.id === 'string') parts.push(`id:${el.id}`);
-      if (typeof el.text === 'string') parts.push(`text:${JSON.stringify(el.text)}`);
-    }
-    if (obj.direction === 'DOWN') parts.push('↓');
-    if (obj.direction === 'UP') parts.push('↑');
-    if (obj.clearState === true) parts.push('{clearState}');
-    if (parts.length === 0) return `${key} ${JSON.stringify(value)}`;
-    return `${key} ${parts.join(' ')}`;
-  }
-  return key;
-}
+const c = { green, red, yellow, dim, bold, cyan };
 
 export interface PrettyReporterOptions {
   /** Print every step inline. Default false (only summary + slow steps). */
