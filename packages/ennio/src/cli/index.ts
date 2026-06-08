@@ -21,6 +21,7 @@ import { runVersionCommand } from './commands/version';
 import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
+import { printCrashReport } from './crash-reporter';
 
 async function main() {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
@@ -78,9 +79,21 @@ async function main() {
   }
 }
 
+// Unexpected throws anywhere → a crash. Print the error + a one-click
+// pre-filled GitHub issue link. (Normal test failures don't throw — they
+// resolve with a non-zero exit code below, so they never land here.)
+process.on('uncaughtException', (err) => {
+  printCrashReport(err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  printCrashReport(err);
+  process.exit(1);
+});
+
 main()
   .then((code) => process.exit(code ?? 0))
   .catch((err) => {
-    console.error(err);
+    printCrashReport(err);
     process.exit(1);
   });
