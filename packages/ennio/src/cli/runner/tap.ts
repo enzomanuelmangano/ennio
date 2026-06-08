@@ -55,11 +55,25 @@ async function waitKeyboardHidden(ctx: RunContext): Promise<void> {
   }
 }
 
-/** If the software keyboard covers `center`, dismiss it and wait for it
- *  to retract before tapping. is_exposed hit-tests the app window only,
- *  so a button beneath the (separate-window) keyboard reads as exposed
- *  while a real HID touch lands on the keyboard. Normalized center in
- *  [0,1]. */
+/** Dismiss the software keyboard before a tap when it would otherwise
+ *  swallow that tap, and wait for it to retract. Two ways a tap dies to
+ *  the keyboard:
+ *
+ *   1. COVERAGE — the target sits under the keyboard window. is_exposed
+ *      hit-tests the app window only (the keyboard is a separate
+ *      high-level window), so the target reads as exposed while a real
+ *      HID touch lands on the keyboard.
+ *   2. PERSIST-TAPS — even when the target is ABOVE the keyboard, RN's
+ *      default keyboardShouldPersistTaps consumes the first tap on a
+ *      NON-input view to dismiss the keyboard; the target's onPress never
+ *      fires (the custom-server "Done" button: visible above the keyboard,
+ *      yet the first tap only closes the keyboard). Real-user parity.
+ *
+ *  So: if the keyboard is up, dismiss it first UNLESS the target itself is
+ *  a text input (tapping another field just moves focus — keyboard stays,
+ *  no swallow) or the target sits inside the keyboard area (covered → also
+ *  dismiss). Leaving the keyboard up for text-input targets preserves
+ *  input-accessory / autocomplete behaviour. Normalized center in [0,1]. */
 async function clearKeyboardOverTarget(
   ctx: RunContext,
   centerNx: number,
@@ -69,7 +83,14 @@ async function clearKeyboardOverTarget(
   if (!kb) return;
   const covered =
     centerNx >= kb.x && centerNx <= kb.x + kb.w && centerNy >= kb.y && centerNy <= kb.y + kb.h;
-  if (!covered) return;
+  if (!covered) {
+    // Target is above the keyboard. Only the persist-taps swallow applies,
+    // and only to non-input targets — leave the keyboard up when tapping
+    // another text input (focus move, no swallow).
+    const r = await ctx.client.call('is_text_input_at', { nx: centerNx, ny: centerNy }).catch(() => undefined);
+    const isTextInput = !!(r?.ok && (r.data as { isTextInput?: boolean })?.isTextInput);
+    if (isTextInput) return;
+  }
   await ctx.client.call('hide_keyboard').catch(() => undefined);
   await waitKeyboardHidden(ctx);
 }

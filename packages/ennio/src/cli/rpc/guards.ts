@@ -74,6 +74,7 @@ export const decoders: OpDecoders = {
   visible: shape({ visible: 'bool' }),
   is_exposed: shape({ found: 'bool', exposed: 'bool', childHijack: 'bool?' }),
   first_responder_ready: shape({ ready: 'bool' }),
+  is_text_input_at: shape({ isTextInput: 'bool', hit: 'bool' }),
   // settle / timing
   frame_hash: shape({ hash: 'str' }),
   animations_active: shape({ active: 'bool' }),

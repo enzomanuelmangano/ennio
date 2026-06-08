@@ -76,6 +76,47 @@ void RegisterEnnioSystemHandlers(void) {
         return std::string(buf);
     });
 
+    // is_text_input_at: hit-test the app key window at a normalized point
+    // and report whether the resolved view (or an ancestor) is a text
+    // input. The keyboard lives in a SEPARATE high-level window, so this
+    // app-window hit-test is blind to it and resolves the real underlying
+    // target. The keyboard gate uses this to decide whether tapping the
+    // target would be eaten by RN's keyboardShouldPersistTaps (a tap on a
+    // NON-input while the keyboard is up is consumed dismissing the
+    // keyboard instead of activating the target) — if the target isn't a
+    // text input, the caller dismisses the keyboard first so the tap lands.
+    EnnioControlSocket::registerHandler("is_text_input_at", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        if (!a) throw std::runtime_error("invalid args");
+        double nx = EnnioArgDouble(a, @"nx", -1);
+        double ny = EnnioArgDouble(a, @"ny", -1);
+        BOOL isInput = NO;
+        BOOL hit = NO;
+        EnnioOnMainVoid([&]() {
+            UIWindow *win = [EnnioBootstrap keyWindow];
+            if (!win) return;
+            CGRect b = win.bounds;
+            if (b.size.width <= 0 || b.size.height <= 0) return;
+            CGPoint p = CGPointMake(nx * b.size.width, ny * b.size.height);
+            UIView *v = [win hitTest:p withEvent:nil];
+            hit = v != nil;
+            for (; v && v != win.superview; v = v.superview) {
+                if ([v isKindOfClass:UITextField.class] || [v isKindOfClass:UITextView.class] ||
+                    [v conformsToProtocol:@protocol(UITextInput)]) { isInput = YES; break; }
+                const char *cls = class_getName(v.class);
+                // RN's backed text inputs (RCTUITextField / RCTUITextView /
+                // RCTBaseTextInputView) and search bars.
+                if (strstr(cls, "TextField") || strstr(cls, "TextView") ||
+                    strstr(cls, "TextInput") || strstr(cls, "SearchBar")) { isInput = YES; break; }
+                if (v == win) break;
+            }
+        });
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "{\"isTextInput\":%s,\"hit\":%s}",
+                      isInput ? "true" : "false", hit ? "true" : "false");
+        return std::string(buf);
+    });
+
     // Debug-only: dump every view in the key window that has any text
     // hook (accessibilityLabel / value, or KVC-readable `text`). Used
     // to diagnose "element not found" issues when the view tree shape

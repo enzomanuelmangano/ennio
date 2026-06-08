@@ -89,6 +89,20 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       // tap is another text input.
       const tapIsIntoInput = sel.id && /Input$/i.test(sel.id);
       if (ctx.lastWasTextInput && !tapIsIntoInput) {
+        // The keyboard may still be animating UP from the prior inputText.
+        // Hiding it mid-presentation is a no-op (resignFirstResponder
+        // before becomeFirstResponder settles), AND the retract poll below
+        // would exit immediately on the not-yet-docked frame — then the
+        // keyboard finishes rising and eats this tap (the flaky
+        // custom-server "Done" case). So first wait for it to finish
+        // presenting (docked = keyboard_frame visible), bounded; the common
+        // already-docked path breaks on the first probe (near-zero cost).
+        const upDeadline = Date.now() + 700;
+        while (Date.now() < upDeadline) {
+          const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
+          if ((kr?.data as { visible?: boolean } | undefined)?.visible) break;
+          await sleep(30);
+        }
         await ctx.client.call('hide_keyboard').catch(() => undefined);
         // Wait for the keyboard window to actually retract — wait_commit
         // tracks the app view-hash, not the separate keyboard window's
