@@ -43,6 +43,10 @@ export interface RpcOps {
     result: { found: boolean; exposed: boolean; childHijack: boolean };
   };
   first_responder_ready: { args: { maxMs: number }; result: { ready: boolean } };
+  is_text_input_at: {
+    args: { nx: number; ny: number };
+    result: { isTextInput: boolean; hit: boolean };
+  };
 
   // ---- settle / timing ------------------------------------------------
   frame_hash: { args: Record<string, never>; result: { hash: string } };

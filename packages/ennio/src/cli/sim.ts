@@ -50,6 +50,47 @@ export function enableAccessibility(udid: string): void {
   }
 }
 
+/**
+ * Make on-device typing deterministic by disabling the keyboard's
+ * autocorrect / predictive / auto-capitalize / spell-check. These are
+ * ENVIRONMENT noise, not app behaviour under test: with an Italian (or any
+ * non-English) keyboard active, autocorrect intermittently rewrites typed
+ * text — e.g. "Reply 1" → "Replay 1" — and the corruption is timing-
+ * dependent (it surfaces when the run is slow enough to widen the
+ * correction window), so it reads as a flaky test failure. Detox/Maestro
+ * disable these on their test sims for the same reason. Idempotent +
+ * best-effort; runs once per flow before launch so the freshly-launched
+ * app's keyboard session reads the updated prefs.
+ */
+export function disableAutocorrect(udid: string): void {
+  const setBool = (key: string, val: 'YES' | 'NO') => {
+    try {
+      execFileSync(
+        'xcrun',
+        [
+          'simctl',
+          'spawn',
+          udid,
+          'defaults',
+          'write',
+          'com.apple.keyboard.preferences',
+          key,
+          '-bool',
+          val,
+        ],
+        { stdio: 'pipe' },
+      );
+    } catch {
+      /* best effort */
+    }
+  };
+  setBool('KeyboardAutocorrection', 'NO');
+  setBool('KeyboardPrediction', 'NO');
+  setBool('KeyboardShowPredictionBar', 'NO');
+  setBool('KeyboardAutocapitalization', 'NO');
+  setBool('KeyboardCheckSpelling', 'NO');
+}
+
 export function getTargetUdid(): string | null {
   if (process.env.ENNIO_UDID) return process.env.ENNIO_UDID;
   try {
