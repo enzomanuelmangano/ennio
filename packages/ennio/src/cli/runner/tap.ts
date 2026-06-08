@@ -87,7 +87,9 @@ async function clearKeyboardOverTarget(
     // Target is above the keyboard. Only the persist-taps swallow applies,
     // and only to non-input targets — leave the keyboard up when tapping
     // another text input (focus move, no swallow).
-    const r = await ctx.client.call('is_text_input_at', { nx: centerNx, ny: centerNy }).catch(() => undefined);
+    const r = await ctx.client
+      .call('is_text_input_at', { nx: centerNx, ny: centerNy })
+      .catch(() => undefined);
     const isTextInput = !!(r?.ok && (r.data as { isTextInput?: boolean })?.isTextInput);
     if (isTextInput) return;
   }
