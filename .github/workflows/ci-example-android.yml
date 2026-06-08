@@ -1,9 +1,10 @@
 # Example-app e2e (Android) — full maestro-e2e suite against a prebuilt APK.
 #
 # Android sibling of ci-example.yml (iOS). Same contract: the suite tests the
-# RUNNER, not the app. The app is built here as an ordinary, UNMODIFIED release
-# APK (no debuggable flag, no config plugin, no Metro — Hermes bundle embedded),
-# then ennio injects its agent at runtime via ptrace.
+# RUNNER, not the app, so the app is a PREBUILT fixture — a universal, UNMODIFIED
+# release APK (no debuggable flag, no config plugin, no Metro — Hermes bundle
+# embedded) downloaded from the e2e-fixtures release and cached. CI never builds
+# it. ennio injects its agent at runtime via ptrace.
 #
 # Why ptrace + a rootable emulator: ennio's "any app" injection (ptrace remote
 # dlopen, see ptrace_inject.cpp) works on a NON-debuggable release build,
@@ -44,7 +45,14 @@ env:
   ANDROID_API: '34'
   NDK_VERSION: '27.1.12297006'
   BUILD_TOOLS: '35.0.0'
-
+  # Prebuilt UNIVERSAL release APK (all ABIs → runs on the x86_64 emulator),
+  # non-debuggable so ennio drives it via ptrace. Published once as an
+  # e2e-fixtures release asset — same model as the iOS .app fixture in
+  # ci-example.yml. The suite tests the runner, not the app, so the binary is
+  # stable; CI never builds it. Refresh: rebuild the example release APK, upload
+  # to e2e-fixtures-v1, update this SHA.
+  EXAMPLE_APK_SHA256: 2b3dbea63888a9670d276911797c969f5aeafeba6ada26ba4eb39e37f5aa152c
+  EXAMPLE_APK_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v1/EnnioExample-android.apk
 jobs:
   example-android:
     name: Example suite (Android emulator, ptrace inject)
@@ -90,14 +98,22 @@ jobs:
       - name: Build agent .so + ptrace injector (x86_64)
         run: ENNIO_ABI=x86_64 bash packages/ennio/android-inject/scripts/build-android.sh
 
-      - name: Generate native android project (expo prebuild)
-        working-directory: example
-        run: CI=1 npx expo prebuild --platform android --no-install
+      # The example APK is a prebuilt FIXTURE (hosted release asset), never built
+      # in CI — cache it across runs keyed by its SHA, download on a cache miss.
+      - name: Cache example APK fixture
+        id: apk-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/exampleapk
+          key: example-apk-${{ env.EXAMPLE_APK_SHA256 }}
 
-      - name: Build release APK (Metro-less, Hermes bundle embedded)
-        working-directory: example/android
-        # Sign the release with the debug keystore so it installs (test build).
-        run: ./gradlew --no-daemon assembleRelease
+      - name: Download example APK fixture (cache miss)
+        if: steps.apk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -eu
+          mkdir -p /tmp/exampleapk
+          curl -fsSL --retry 3 -o /tmp/exampleapk/app-release.apk "$EXAMPLE_APK_URL"
+          echo "${EXAMPLE_APK_SHA256}  /tmp/exampleapk/app-release.apk" | sha256sum -c -
 
       - name: Enable KVM
         run: |
@@ -117,12 +133,13 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
+          # NOTE: the action runs this with /bin/sh (dash) — keep it POSIX (no
+          # `set -o pipefail`, no `[[ ]]`).
           script: |
-            set -uo pipefail
+            set -u
             adb wait-for-device
             adb root && adb wait-for-device # ptrace injection runs as root
-            APK=example/android/app/build/outputs/apk/release/app-release.apk
-            adb install -r -g "$APK"
+            adb install -r -g /tmp/exampleapk/app-release.apk
             UDID=$(adb devices | awk '/emulator-/{print $1; exit}')
             test -n "$UDID" || { echo "no emulator serial"; exit 1; }
             echo "emulator: $UDID  mode: ${ENNIO_NO_ANIM_FLAG:-default}"
@@ -133,8 +150,7 @@ jobs:
             PASS=0; FAIL=0; FAILED=""
             for f in example/maestro-e2e/*.yaml; do
               base=$(basename "$f")
-              [[ "$base" == _* ]] && continue
-              [[ "$base" == 00-* ]] && continue
+              case "$base" in _*|00-*) continue;; esac
               ok=0
               for attempt in 1 2; do
                 if node packages/ennio/dist/cli.js test "$f" --verbose $ENNIO_NO_ANIM_FLAG \
