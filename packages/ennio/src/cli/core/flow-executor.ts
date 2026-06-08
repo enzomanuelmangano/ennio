@@ -133,6 +133,7 @@ export class FlowExecutor {
         ctx.lastTapKey = undefined;
       }
       const t0 = Date.now();
+      this.reporter.stepStart?.(i + 1, cmd);
 
       try {
         await this.registry.dispatch(cmd, buildDctx(nextCmd));
