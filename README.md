@@ -2,8 +2,9 @@
 
 > [!WARNING]
 > **Experimental.** APIs, package names, internals, and behavior may
-> change without notice. iOS only. Expect rough edges; do not rely on
-> it for production-critical test suites yet.
+> change without notice. iOS is the primary target and further along;
+> **Android is earlier-stage** (opt-in via `--android`). Expect rough
+> edges on both; do not rely on it for production-critical test suites yet.
 
 Maestro-compatible E2E test runner for React Native iOS. The CLI
 injects a prebuilt ObjC dylib into your simulator app via
@@ -223,7 +224,10 @@ The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
 
 ## Limitations
 
-- **iOS only.** No Android support.
+- **iOS** is the primary target — the most coverage so far (still experimental).
+- **Android** is **earlier-stage** — opt-in via `--android` (or
+  `ENNIO_PLATFORM=android`). In-process agent injection (JVMTI attach / ptrace);
+  less exercised than the iOS path.
 
 ## License
 
