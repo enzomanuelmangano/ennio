@@ -13,17 +13,24 @@
 import { registerAllHandlers } from '../commands/handlers';
 import { CommandRegistry } from '../core/command-registry';
 import type { EnnioConnection } from '../core/ennio-connection';
-import { axTreeSnapshot, getScreenSize } from '../hid';
-import type { MaestroCommand } from '../maestro-parser';
+import { getScreenSize } from '../hid';
+import type { MaestroCommand, MaestroSelector } from '../maestro-parser';
 import type { Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { DeviceSession } from '../platform/types';
 import type { RunContext } from '../runner/context';
 
-import { describeTree } from './describe';
+import { describeViews } from './describe';
 import type { ScreenDescription } from './describe';
 import { classifyError, err, ok } from './result';
 import type { EnnioResult } from './result';
+
+export interface FoundElement {
+  /** Element bounds, normalized [0,1]. */
+  rect: { x: number; y: number; w: number; h: number };
+  /** Tap point at the rect center, normalized [0,1]. */
+  center: { x: number; y: number };
+}
 
 export interface EnnioMcpSessionOptions {
   platform?: Platform;
@@ -151,16 +158,57 @@ export class EnnioMcpSession {
     }
   }
 
-  /** Interactable element tree, rects normalized to [0,1]. */
+  /** On-screen element inventory (role / testID / text / value). */
   async describe(): Promise<EnnioResult<ScreenDescription>> {
     const a = this.attachment;
     if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
     try {
-      const [raw, size] = await Promise.all([
-        axTreeSnapshot(a.session.udid),
+      const [views, size] = await Promise.all([
+        a.connection.socket.call('dump_views'),
         getScreenSize(a.session.udid),
       ]);
-      return ok(describeTree(raw, size));
+      if (!views.ok) return err('infra', views.err ?? 'dump_views failed');
+      const lines = Array.isArray(views.data) ? (views.data as string[]) : [];
+      return ok(describeViews(lines, size));
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /**
+   * Resolve a single selector to its on-screen rect, normalized to [0,1],
+   * plus the tap center. One roundtrip via the in-process finder — the
+   * precise-geometry counterpart to describe's inventory. A miss is a
+   * not_found, not a failure.
+   */
+  async find(sel: MaestroSelector): Promise<EnnioResult<FoundElement>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const [resp, size] = await Promise.all([
+        sel.id !== undefined
+          ? a.connection.socket.call('find_by_testid', { testID: sel.id })
+          : a.connection.socket.call('find_by_text', { text: sel.text ?? '' }),
+        getScreenSize(a.session.udid),
+      ]);
+      if (!resp.ok) {
+        return /not found|no match|no element/i.test(resp.err ?? '')
+          ? err('not_found', 'no matching element')
+          : err('infra', resp.err ?? 'find failed');
+      }
+      const r = resp.data as { x: number; y: number; w: number; h: number };
+      const sw = size.w || 1;
+      const sh = size.h || 1;
+      const rect = {
+        x: +(r.x / sw).toFixed(4),
+        y: +(r.y / sh).toFixed(4),
+        w: +(r.w / sw).toFixed(4),
+        h: +(r.h / sh).toFixed(4),
+      };
+      return ok({
+        rect,
+        center: { x: +(rect.x + rect.w / 2).toFixed(4), y: +(rect.y + rect.h / 2).toFixed(4) },
+      });
     } catch (e) {
       return classifyError(e);
     }

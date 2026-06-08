@@ -62,13 +62,35 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
     {
       name: 'ennio_describe',
       description:
-        'Return the on-screen interactable element tree: role, testID, text, a ' +
-        'normalized [0,1] rect, and enabled state for every targetable element. Pure ' +
-        'read — this is how you see the app, instead of guessing from a screenshot. ' +
-        'Coordinates here match the point selector used by ennio_tap.',
+        'Return the on-screen element inventory: role, testID, text, and value for ' +
+        'every targetable element. Pure read — this is how you see the app, instead ' +
+        'of guessing from a screenshot. Pick an element here, then target it with ' +
+        'ennio_tap by testID or text. For a precise normalized rect, use ennio_find.',
       inputSchema: NO_ARGS,
       readOnly: true,
       handler: () => session.describe(),
+    },
+    {
+      name: 'ennio_find',
+      description:
+        'Resolve one element to its normalized [0,1] rect and tap center. Pure read. ' +
+        'Use when you need exact coordinates (e.g. to reason spatially or tap a point). ' +
+        'A not_found result is a normal answer. Example: ' +
+        '{ "selector": { "text": "Following" } }.',
+      inputSchema: {
+        type: 'object',
+        properties: { selector: SELECTOR_SCHEMA },
+        required: ['selector'],
+      },
+      readOnly: true,
+      handler: (args) => {
+        const sel = toMaestroSelector(args.selector as McpSelector | undefined);
+        if (!sel.ok) return sel;
+        if (sel.data.point !== undefined) {
+          return err('invalid', 'ennio_find takes a testID or text selector, not a point');
+        }
+        return session.find(sel.data);
+      },
     },
     {
       name: 'ennio_screenshot',
