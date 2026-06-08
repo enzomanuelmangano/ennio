@@ -116,13 +116,17 @@ export class LiveReporter implements Reporter {
       lines.push(`  ${cyan('▸')} ${bold(f.name)}`);
       for (const s of f.steps.slice(-2)) {
         const icon = s.ok ? green('✓') : red('✗');
-        lines.push(`      ${icon} ${dim(String(s.step).padStart(3))}  ${dim(truncate(s.text, this.cols() - 14))}`);
+        lines.push(
+          `      ${icon} ${dim(String(s.step).padStart(3))}  ${dim(truncate(s.text, this.cols() - 14))}`,
+        );
       }
       if (f.active) {
         const spinner = cyan(SPINNER[this.tick % SPINNER.length]);
         const elapsed = dim(fmtMs(this.now() - f.active.startedAt));
         const text = truncate(f.active.text, this.cols() - 22);
-        lines.push(`      ${spinner} ${dim(String(f.active.step).padStart(3))}  ${text}  ${elapsed}`);
+        lines.push(
+          `      ${spinner} ${dim(String(f.active.step).padStart(3))}  ${text}  ${elapsed}`,
+        );
       }
     }
     return lines;
@@ -159,6 +163,10 @@ export class LiveReporter implements Reporter {
     const head = result.passed
       ? green(`  ✔ ${result.flowsPassed} passed`)
       : red(`  ✖ ${result.flowsFailed} failed`) + dim(` · ${result.flowsPassed} passed`);
-    return ['', `${head}${dim(` · ${result.totalFlows} ${word} · ${fmtMs(result.durationMs)}`)}`, ''];
+    return [
+      '',
+      `${head}${dim(` · ${result.totalFlows} ${word} · ${fmtMs(result.durationMs)}`)}`,
+      '',
+    ];
   }
 }

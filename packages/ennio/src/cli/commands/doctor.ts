@@ -151,6 +151,8 @@ export async function runDoctorCommand(_positional: string[], _flags: Flags): Pr
   if (failed.length > 0) {
     console.log('');
     console.log(`✗ ${failed.length} blocking issue(s) — fix the [FAIL] rows above before running.`);
+    console.log('  If a row looks wrong rather than a local setup problem, please report it:');
+    console.log('  https://github.com/enzomanuelmangano/ennio/issues/new?template=bug_report.yml');
     return 1;
   }
   console.log('');
