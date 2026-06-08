@@ -22,10 +22,9 @@
 name: ci-example-android
 
 on:
-  # TEMPORARY: validate the workflow on the feature branch (workflow_dispatch
-  # only works once a workflow is on the default branch). Remove before merge.
-  push:
-    branches: [feat/android-e2e-runner]
+  # Manual-only — same policy as ci-example / ci-wikipedia / ci-fast-build.
+  # Re-enable a push/pull_request trigger once the Android flake rate is low
+  # enough to gate merges on it.
   workflow_dispatch:
     inputs:
       no_animations:
