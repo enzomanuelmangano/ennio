@@ -98,6 +98,15 @@ export interface Platform {
    *  socket. (YAML: `launchApp: { clearState: true }`, `clearState`.) */
   clearStateAndRelaunch(ctx: RunContext, launchArgs?: string[]): Promise<void>;
 
+  /** Reuse-app fast path for `launchApp: { clearState: true }` when the app
+   *  is already running and there are no launch arguments: wipe data WITHOUT
+   *  a full relaunch where the backend can. iOS soft-resets in place (sandbox
+   *  wipe + JS reload). Android has no in-process JS reload on a release
+   *  bundle, so it just relaunches — the relaunch IS its reset. Keeping this
+   *  on the platform (not an `isAndroid()` branch in the handler) is what
+   *  stops the iOS-only soft-reset from running simctl against an emulator. */
+  softReset(ctx: RunContext): Promise<void>;
+
   /** Relaunch after an explicit stopApp/killApp. Mutates ctx.client.
    *  (YAML: `launchApp` following a `stopApp`.) */
   relaunchAndReconnect(ctx: RunContext, launchArgs?: string[]): Promise<void>;

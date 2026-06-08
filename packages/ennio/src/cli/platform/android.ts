@@ -264,6 +264,13 @@ export class AndroidPlatform implements Platform {
     await this.relaunchInto(ctx, serial);
   }
 
+  // No in-process JS reload on a release bundle, so the reuse-app fast path
+  // can't soft-reset — a full clear+relaunch IS the reset. (iOS soft-resets
+  // via simctl; routing through the platform keeps that off the emulator.)
+  softReset(ctx: RunContext): Promise<void> {
+    return this.clearStateAndRelaunch(ctx);
+  }
+
   async relaunchAndReconnect(ctx: RunContext, _launchArgs: string[] = []): Promise<void> {
     const serial = ctx.udid;
     ctx.client.close();
