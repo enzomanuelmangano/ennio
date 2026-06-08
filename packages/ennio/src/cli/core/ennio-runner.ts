@@ -37,9 +37,9 @@ export interface EnnioRunnerOptions {
    *  hooks (testID index, settle ticker, RN observer). Escape hatch
    *  for injection conflicts (issue #44). */
   safeMode?: boolean;
-  /** Route taps/swipes through in-process dylib ops with per-gesture
-   *  HID fallback (the fast driver). Default: real HID every gesture. */
-  fast?: boolean;
+  /** Actuate taps/swipes via in-process dylib activation with a per-gesture
+   *  real-HID fallback. Default: real HID every gesture (faithful actuation). */
+  inProcessTap?: boolean;
   /** Reporter kind when no explicit reporter is passed. Default 'pretty'. */
   reporterKind?: 'pretty' | 'json';
   /** Device backend. Default: iOS simulator. */
@@ -63,7 +63,7 @@ export class EnnioRunner {
     this.lenient = opts.lenient ?? false;
     this.safeMode = opts.safeMode ?? false;
     this.platform = opts.platform ?? selectPlatform('ios');
-    this.driver = this.platform.createDriver(opts.fast ?? false);
+    this.driver = this.platform.createDriver(opts.inProcessTap ?? false);
     this.reporter =
       opts.reporter ?? pickReporter({ kind: opts.reporterKind ?? 'pretty', verbose: this.verbose });
   }

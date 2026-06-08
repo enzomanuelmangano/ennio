@@ -23,16 +23,16 @@ name: ci-example
 on:
   workflow_dispatch:
     inputs:
-      fast:
-        description: 'Run with --fast (in-process taps/swipes, HID fallback)'
+      in_process_tap:
+        description: 'Run with --in-process-tap (in-process activation, HID fallback)'
         type: boolean
         default: false
       no_animations:
-        description: 'Run with --no-animations (suppress app animations)'
+        description: 'Run with --disable-animations (suppress app animations)'
         type: boolean
         default: false
-      reuse_app:
-        description: 'Run with --reuse-app (JS reload between flows, skip relaunch)'
+      disable_reuse_app:
+        description: 'Run with --disable-reuse-app (full relaunch; reuse is on by default)'
         type: boolean
         default: false
   # pull_request:
@@ -129,9 +129,9 @@ jobs:
         env:
           ENNIO_UDID: ${{ steps.sim.outputs.udid }}
           ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
-          ENNIO_FAST_FLAG: ${{ inputs.fast && '--fast' || '' }}
-          ENNIO_NOANIM_FLAG: ${{ inputs.no_animations && '--no-animations' || '' }}
-          ENNIO_REUSE_FLAG: ${{ inputs.reuse_app && '--reuse-app' || '' }}
+          ENNIO_FAST_FLAG: ${{ inputs.in_process_tap && '--in-process-tap' || '' }}
+          ENNIO_NOANIM_FLAG: ${{ inputs.no_animations && '--disable-animations' || '' }}
+          ENNIO_REUSE_FLAG: ${{ inputs.disable_reuse_app && '--disable-reuse-app' || '' }}
           # GitHub Actions macos runners are ~1.5-2× slower than a dev Mac
           # for simulator workloads. Give assertVisible / waitFor more headroom
           # so slow dark-mode re-renders and logout navigations don't timeout.

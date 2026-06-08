@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       no_animations:
-        description: 'Run with --no-animations (suppress app animations for speed)'
+        description: 'Run with --disable-animations (suppress app animations for speed)'
         type: boolean
         default: false
 
@@ -126,7 +126,7 @@ jobs:
       # in a real bash script the action invokes as ONE command instead.
       - name: Prepare suite script
         env:
-          ENNIO_NO_ANIM_FLAG: ${{ inputs.no_animations && '--no-animations' || '' }}
+          ENNIO_NO_ANIM_FLAG: ${{ inputs.no_animations && '--disable-animations' || '' }}
         run: |
           cat > /tmp/run-suite.sh <<EOF
           #!/usr/bin/env bash
