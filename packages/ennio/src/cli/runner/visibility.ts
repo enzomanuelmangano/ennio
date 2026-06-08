@@ -3,7 +3,7 @@
 // assertNotVisible / waitFor / extendedWaitUntil.
 
 import { axHasText } from '../ennio-ax';
-import { MaestroSelector } from '../maestro-parser';
+import { MaestroSelector, isRegexText } from '../maestro-parser';
 
 import { POLL_MS, RunContext, sleep } from './context';
 import { dismissPermissionDialogs } from './lifecycle';
@@ -18,7 +18,11 @@ export async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<
     if (r.ok && r.data && (r.data as { visible: boolean }).visible) return true;
   }
   if (sel.text) {
-    const r = await ctx.client.call('find_by_text', { text: sel.text, relaxed: true });
+    const r = await ctx.client.call('find_by_text', {
+      text: sel.text,
+      relaxed: true,
+      regex: isRegexText(sel.text),
+    });
     if (r.ok) return true;
     // UIAlertController titles/messages/buttons sit outside the React
     // tree, so find_by_text misses them. Check the alert layer too.
@@ -39,7 +43,7 @@ export async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<
       // exposes the remote content's a11y labels through proxy objects
       // sitting on the UIRemoteView itself.
       const r2 = await ctx.client
-        .call('find_ax_by_text', { text: sel.text })
+        .call('find_ax_by_text', { text: sel.text, regex: isRegexText(sel.text) })
         .catch(() => undefined);
       if (r2 && r2.ok && r2.data) return true;
     } catch {

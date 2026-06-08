@@ -11,7 +11,7 @@
 //      rendered by remote view services (PHPicker, share sheet).
 
 import { axQueryByText } from '../hid';
-import { MaestroSelector } from '../maestro-parser';
+import { MaestroSelector, isRegexText } from '../maestro-parser';
 
 import {
   DEFAULT_WIN_H,
@@ -86,7 +86,10 @@ export async function findOnce(ctx: RunContext, sel: MaestroSelector): Promise<R
     if (r.ok) return r.data as Rect;
   }
   if (sel.text) {
-    const r = await ctx.client.call('find_by_text', { text: sel.text });
+    const r = await ctx.client.call('find_by_text', {
+      text: sel.text,
+      regex: isRegexText(sel.text),
+    });
     if (r.ok) return r.data as Rect;
   }
   return null;
@@ -146,7 +149,9 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     }
     // Not a tab — poll in-process until the element mounts.
     const r = await timedAsync(ctx, 'tap.findFast', () =>
-      ctx.client.call('wait_find_by_text', { text: sel.text!, maxMs: 2500 }).catch(() => undefined),
+      ctx.client
+        .call('wait_find_by_text', { text: sel.text!, maxMs: 2500, regex: isRegexText(sel.text!) })
+        .catch(() => undefined),
     );
     if (r && r.ok && r.data) return r.data as Rect;
   }
@@ -160,7 +165,9 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   // On-screen only, so a still-mounting / off-screen target falls
   // through to the poll + scroll below. Skipped for childOf (own path).
   if (sel.text && !sel.childOf) {
-    const ax = await ctx.client.call('find_ax_by_text', { text: sel.text }).catch(() => undefined);
+    const ax = await ctx.client
+      .call('find_ax_by_text', { text: sel.text, regex: isRegexText(sel.text) })
+      .catch(() => undefined);
     if (ax && ax.ok && ax.data) return ax.data as Rect;
   }
   // CLI-side implicit-wait top-up for elements that are mounting (RN
@@ -260,7 +267,9 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   // cross-process content's a11y labels).
   if (sel.text) {
     const r = await timedAsync(ctx, 'tap.findAxFallback', () =>
-      ctx.client.call('find_ax_by_text', { text: sel.text! }).catch(() => undefined),
+      ctx.client
+        .call('find_ax_by_text', { text: sel.text!, regex: isRegexText(sel.text!) })
+        .catch(() => undefined),
     );
     if (r && r.ok && r.data) return r.data as Rect;
   }
