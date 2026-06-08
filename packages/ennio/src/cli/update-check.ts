@@ -144,9 +144,13 @@ export function isNewer(a: string, b: string): boolean {
  * (dev/source), where the question doesn't apply.
  */
 function globalDirWritable(): boolean | null {
-  if (!__dirname.includes('node_modules')) return null;
+  const i = __dirname.indexOf('node_modules');
+  if (i < 0) return null;
+  // `npm i -g` writes the global node_modules root (and bin) — check that,
+  // not our own dist dir, to predict whether the update needs sudo.
+  const root = __dirname.slice(0, i + 'node_modules'.length);
   try {
-    accessSync(__dirname, constants.W_OK);
+    accessSync(root, constants.W_OK);
     return true;
   } catch {
     return false;
