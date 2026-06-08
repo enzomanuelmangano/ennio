@@ -21,6 +21,10 @@
 name: ci-example-android
 
 on:
+  # TEMPORARY: validate the workflow on the feature branch (workflow_dispatch
+  # only works once a workflow is on the default branch). Remove before merge.
+  push:
+    branches: [feat/android-e2e-runner]
   workflow_dispatch:
     inputs:
       no_animations:
