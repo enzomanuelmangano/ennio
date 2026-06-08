@@ -120,7 +120,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
   // First positional is the subcommand if it doesn't look like a file path
   // or glob. Heuristic: known command name, or no slash + no .yaml/.yml.
-  const KNOWN = new Set(['test', 'run', 'help', 'version', 'hierarchy', 'screenshot', 'doctor']);
+  const KNOWN = new Set([
+    'test',
+    'run',
+    'help',
+    'version',
+    'hierarchy',
+    'screenshot',
+    'doctor',
+    'mcp',
+  ]);
   let command: string | null = null;
   if (positional.length > 0 && KNOWN.has(positional[0])) {
     command = positional.shift()!;

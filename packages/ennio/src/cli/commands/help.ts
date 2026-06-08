@@ -10,6 +10,7 @@ Usage:
   ennio hierarchy               dump the in-app shadow tree as JSON
   ennio screenshot [path]       grab the simulator screen
   ennio doctor                  diagnose Node, Xcode, enniohid, dylib + app socket
+  ennio mcp                     serve ennio over MCP (stdio) for an AI agent
   ennio version                 print version
   ennio help [command]          this message, or per-command help
 
@@ -40,6 +41,16 @@ Options: --port`,
   screenshot: `ennio screenshot [path]
 
 Grabs the booted simulator's screen. Defaults to /tmp/ennio-shot.png.`,
+  mcp: `ennio mcp
+
+Serves ennio as a Model Context Protocol (MCP) server over stdio, so any
+MCP client (Claude Code, Cursor, Cline, a custom agent) can drive a device:
+read the screen with ennio_describe, then act with ennio_tap / ennio_swipe /
+ennio_input_text. Taps and swipes go through the HID driver — ennio is the
+tap path. stdout carries only JSON-RPC; diagnostics go to stderr.
+
+Options: --android (target an emulator), --in-process-tap
+Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
   doctor: `ennio doctor
 
 Pre-flight check. FAIL rows block a run (Node ≥ 18, Xcode/simctl, enniohid,

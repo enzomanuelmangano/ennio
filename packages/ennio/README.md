@@ -94,6 +94,46 @@ Native's responder system, and RNGH all see a real touch.
 `setClipboard`, `pasteText`, `runFlow`, `runScript`,
 `extendedWaitUntil`
 
+## MCP server
+
+`ennio mcp` exposes the runner as a [Model Context Protocol](https://modelcontextprotocol.io)
+server over stdio, so an AI agent can drive a device directly: read the
+screen, decide, act — using the same find → settle → actuate pipeline an
+`ennio test` run uses. Taps and swipes go through the HID driver, so ennio
+is always the tap path, never a passthrough.
+
+The interface is tool-agnostic by design. It works identically with any MCP
+client — Claude Code, Cursor, Cline, or a hand-rolled one — with no
+client-specific coupling. Add it to a client's MCP config:
+
+```jsonc
+{
+  "mcpServers": {
+    "ennio": { "command": "ennio", "args": ["mcp"] },
+  },
+}
+```
+
+**Tools** (`ennio_<verb>`, self-describing via JSON Schema):
+
+- Reads (pure): `ennio_status`, `ennio_describe`, `ennio_screenshot`,
+  `ennio_assert_visible`, `ennio_wait_for`
+- Actions (HID): `ennio_launch_app`, `ennio_stop_app`, `ennio_tap`,
+  `ennio_double_tap`, `ennio_long_press`, `ennio_input_text`,
+  `ennio_erase_text`, `ennio_swipe`, `ennio_scroll`, `ennio_back`
+
+**Resources:** `ennio://screen/hierarchy`, `ennio://screen/screenshot`,
+`ennio://session`.
+
+**Contract.** Every tool returns one structured envelope — `{ ok: true,
+data }` or `{ ok: false, error: { kind, message } }`, where `kind` is one of
+`not_found | timeout | invalid | infra`. A `not_found` is a normal answer,
+not a failure. Selectors take exactly one of `testID`, `text`, or a
+normalized `point`; all coordinates and rects are `[0,1]` fractions of the
+screen. `ennio_status` reports the contract version, platform, and
+capabilities (`attach`, `actuation`, `crossProcessAx`) for capability
+negotiation.
+
 ## License
 
 MIT
