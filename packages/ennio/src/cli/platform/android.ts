@@ -24,16 +24,21 @@ import type { RunContext } from '../runner/context';
 import type { ConnectTarget } from '../socket-client';
 import {
   clearAppData,
+  enableRoot,
   getAndroidSerial,
   getClipboard,
   getDeviceAbi,
   grantAllPermissions,
+  isAppDebuggable,
   pressHardwareBack,
   launchAndroidApp,
   openAndroidUrl,
+  ptraceInjectAgent,
   pushAgentToTmp,
+  pushInjector,
   screenshot,
   setClipboard,
+  setSelinuxPermissive,
   setupForward,
   stageAndAttachAgent,
   terminateAndroidApp,
@@ -144,6 +149,65 @@ export class AndroidPlatform implements Platform {
     return remote;
   }
 
+  // Injection method per serial: 'attach' (am attach-agent — needs a debuggable
+  // app, no root) or 'ptrace' (root + ptrace remote-dlopen — works on ANY app,
+  // incl. a non-debuggable release build). Plus the pushed injector path.
+  private injectMode = new Map<string, 'attach' | 'ptrace'>();
+  private pushedInjector = new Map<string, string>();
+
+  /** Host path to the ptrace injector matching the device ABI. */
+  private resolveInjector(serial: string): string {
+    const override = process.env.ENNIO_ANDROID_INJECTOR;
+    if (override) {
+      if (!existsSync(override)) {
+        throw new Error(`ENNIO_ANDROID_INJECTOR points to a missing file: ${override}`);
+      }
+      return override;
+    }
+    const abi = getDeviceAbi(serial);
+    const candidates = [
+      `${__dirname}/../../prebuilt/ennio_ptrace-${abi}`,
+      `${__dirname}/../../../prebuilt/ennio_ptrace-${abi}`,
+      '/tmp/ennio-android/ennio_ptrace',
+    ];
+    const found = candidates.find((p) => existsSync(p));
+    if (!found) {
+      throw new Error(
+        `No ptrace injector found for ABI ${abi}. Build it with ` +
+          `android-inject/scripts/build-android.sh (ENNIO_ABI=${abi}), or set ENNIO_ANDROID_INJECTOR.`,
+      );
+    }
+    return found;
+  }
+
+  /**
+   * Decide and prepare the injection method for a device, ONCE per serial.
+   *
+   * Auto: a debuggable app uses am attach-agent (clean, no root); a
+   * non-debuggable one needs ptrace. Override with ENNIO_ANDROID_INJECT=attach|ptrace.
+   *
+   * Must run BEFORE any adb forward — enabling root restarts adbd and would drop
+   * forwards. ptrace also flips SELinux permissive and pushes the injector.
+   */
+  private prepareInjection(serial: string, bundleId: string): 'attach' | 'ptrace' {
+    const cached = this.injectMode.get(serial);
+    if (cached) return cached;
+    const forced = process.env.ENNIO_ANDROID_INJECT as 'attach' | 'ptrace' | undefined;
+    const mode = forced ?? (isAppDebuggable(serial, bundleId) ? 'attach' : 'ptrace');
+    if (mode === 'ptrace') {
+      if (!enableRoot(serial)) {
+        throw new Error(
+          `Cannot inject into non-debuggable ${bundleId}: ptrace needs root (adb root), ` +
+            'available on emulators/userdebug. Use a debuggable build, or run on an emulator.',
+        );
+      }
+      setSelinuxPermissive(serial);
+      this.pushedInjector.set(serial, pushInjector(serial, this.resolveInjector(serial)));
+    }
+    this.injectMode.set(serial, mode);
+    return mode;
+  }
+
   createDriver(_fast: boolean): GestureDriver {
     // Android gestures are always in-process MotionEvent dispatch; there
     // is no HID-vs-fast distinction. The flag is accepted for API parity.
@@ -174,8 +238,11 @@ export class AndroidPlatform implements Platform {
     const serial = this.resolveSerial(opts.udid);
     const session = { udid: serial, bundleId: opts.bundleId, dylibPath: null };
 
-    // Already running with a live agent? Use it. Otherwise establish one
-    // (launch + self-heal through bad wrap.sh launches).
+    // Decide attach-agent vs ptrace and (for ptrace) enable root BEFORE any adb
+    // forward is set up — `adb root` restarts adbd and would drop forwards.
+    this.prepareInjection(serial, opts.bundleId);
+
+    // Already running with a live agent? Use it. Otherwise establish one.
     const existing = new EnnioConnection({ udid: serial, target: this.target(serial) });
     if ((await existing.open(2_000)) && (await this.isAgentReady(existing, 3_000))) {
       return { session, connection: existing };
@@ -245,14 +312,18 @@ export class AndroidPlatform implements Platform {
         continue;
       }
       try {
-        // Stage the agent into the freshly-started process' code_cache and
-        // attach it. The agent's own bounded wait covers the brief window
-        // before Application.onCreate. code_cache is wiped by pm clear, so we
-        // re-stage on every (re)launch.
+        // Inject the agent into the freshly-started process. Both paths stage
+        // the .so into the app's code_cache (wiped by pm clear, so re-staged
+        // every launch); the agent's bounded wait covers the brief window
+        // before Application.onCreate.
         const tmpSo = this.ensureAgentPushed(serial);
-        stageAndAttachAgent(serial, bundleId, pid, tmpSo);
+        if (this.injectMode.get(serial) === 'ptrace') {
+          ptraceInjectAgent(serial, bundleId, pid, tmpSo, this.pushedInjector.get(serial)!);
+        } else {
+          stageAndAttachAgent(serial, bundleId, pid, tmpSo);
+        }
       } catch (e) {
-        lastErr = `attach-agent failed: ${e instanceof Error ? e.message : String(e)}`;
+        lastErr = `inject failed: ${e instanceof Error ? e.message : String(e)}`;
         continue;
       }
       const conn = new EnnioConnection({ udid: serial, target: this.target(serial) });

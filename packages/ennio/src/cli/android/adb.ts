@@ -155,6 +155,82 @@ export function stageAndAttachAgent(
   adb(serial, ['shell', 'am', 'attach-agent', pid, codeCache]);
 }
 
+/** Is the installed app debuggable? (dumpsys lists flags by name.) Selects the
+ *  injection path: debuggable → am attach-agent (no root); else → ptrace. */
+export function isAppDebuggable(serial: string, pkg: string): boolean {
+  try {
+    return /\bDEBUGGABLE\b/.test(adb(serial, ['shell', 'dumpsys', 'package', pkg]));
+  } catch {
+    return false;
+  }
+}
+
+/** Restart adbd as root and return whether we got it. Works on userdebug
+ *  emulators/devices (the test-harness target); a no-op "already root" is fine.
+ *  Production user builds refuse — caller then needs a debuggable app. */
+export function enableRoot(serial: string): boolean {
+  try {
+    adb(serial, ['root']);
+  } catch {
+    /* may print "restarting adbd as root" to stderr; ignore */
+  }
+  try {
+    adb(serial, ['wait-for-device']);
+    return /uid=0/.test(adb(serial, ['shell', 'id']));
+  } catch {
+    return false;
+  }
+}
+
+/** Put SELinux in permissive mode. The ptrace path maps the agent .so
+ *  executable from the app sandbox, which enforcing SELinux blocks for a
+ *  non-debuggable app; the emulator is a permissive test context (the parallel
+ *  of the iOS Simulator). Best-effort; needs root. */
+export function setSelinuxPermissive(serial: string): void {
+  try {
+    adb(serial, ['shell', 'setenforce', '0']);
+  } catch {
+    /* not root / already permissive */
+  }
+}
+
+/** Push the on-device ptrace injector and make it executable. */
+export function pushInjector(serial: string, hostPath: string): string {
+  const remote = '/data/local/tmp/ennio_ptrace';
+  adb(serial, ['push', hostPath, remote]);
+  adb(serial, ['shell', 'chmod', '755', remote]);
+  return remote;
+}
+
+/**
+ * Inject the agent via ptrace — the "any app" path. Works on ANY process,
+ * including a non-debuggable release build, because root + ptrace bypass the
+ * runtime debuggable gate that am attach-agent enforces. Needs root (emulator).
+ *
+ * Delivery: as root, copy the .so into the target's code_cache and relabel it
+ * to the app's SELinux context (so the app can map it), then run the injector,
+ * which remote-dlopens it. The agent's constructor finds the VM and starts.
+ */
+export function ptraceInjectAgent(
+  serial: string,
+  pkg: string,
+  pid: string,
+  tmpSoPath: string,
+  injectorPath: string,
+): void {
+  const uid = adb(serial, ['shell', 'stat', '-c', '%u', `/data/data/${pkg}`]).trim();
+  const cc = `/data/data/${pkg}/code_cache/libennio.so`;
+  adb(serial, [
+    'shell',
+    `mkdir -p /data/data/${pkg}/code_cache && cp ${tmpSoPath} ${cc} && ` +
+      `chown ${uid}:${uid} ${cc} && chmod 700 ${cc} && restorecon ${cc}`,
+  ]);
+  const out = adb(serial, ['shell', `${injectorPath} ${pid} ${cc}`]);
+  if (!/OK dlopen/.test(out)) {
+    throw new Error(`ptrace inject failed: ${out.trim().split('\n').slice(-2).join(' ')}`);
+  }
+}
+
 /** Wipe app data (UserDefaults / files / databases). Android's `pm clear`
  *  is the equivalent of the iOS data-container wipe. */
 export function clearAppData(serial: string, pkg: string): void {

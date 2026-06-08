@@ -29,6 +29,8 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <dlfcn.h>
+#include <pthread.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -167,7 +169,15 @@ bool startAgent(JNIEnv *env, jobject application) {
 // Shared entry for both attach paths. The VM is live and started by the time
 // the runtime calls us, so there is no waitForVm / runtime-started polling —
 // the whole probabilistic bootstrap is gone.
+// Start at most once. Both entry paths can fire for a single load — the JVMTI
+// runtime calls Agent_OnAttach AND dlopen runs this library's constructor — so
+// whichever reaches here first wins and the other is a no-op.
+volatile char g_started = 0;
+
 jint attach(JavaVM *vm, const char *how) {
+    if (__atomic_test_and_set(&g_started, __ATOMIC_SEQ_CST)) {
+        return JNI_OK; // already started by the other entry path
+    }
     LOGI("Agent_%s pid=%d", how, getpid());
     JNIEnv *env = nullptr;
     bool weAttached = false;
@@ -202,18 +212,66 @@ jint attach(JavaVM *vm, const char *how) {
     return rc;
 }
 
+// Find the already-running VM. Used by the constructor path (a plain dlopen,
+// e.g. ptrace injection) where nobody hands us a JavaVM. The app is live, so
+// the VM exists — a short retry only covers an injection that lands a beat
+// before the runtime finishes publishing it.
+using GetCreatedVMsFn = jint (*)(JavaVM **, jsize, jsize *);
+
+JavaVM *runningVm() {
+    GetCreatedVMsFn fn =
+        reinterpret_cast<GetCreatedVMsFn>(dlsym(RTLD_DEFAULT, "JNI_GetCreatedJavaVMs"));
+    if (!fn) {
+        void *h = dlopen("libnativehelper.so", RTLD_NOW);
+        if (h) fn = reinterpret_cast<GetCreatedVMsFn>(dlsym(h, "JNI_GetCreatedJavaVMs"));
+    }
+    if (!fn) {
+        LOGE("JNI_GetCreatedJavaVMs unavailable");
+        return nullptr;
+    }
+    for (int i = 0; i < 200; i++) {
+        JavaVM *vm = nullptr;
+        jsize n = 0;
+        if (fn(&vm, 1, &n) == JNI_OK && n > 0 && vm) return vm;
+        usleep(25 * 1000);
+    }
+    return nullptr;
+}
+
+void *bootstrapThread(void *) {
+    JavaVM *vm = runningVm();
+    if (vm) {
+        attach(vm, "ctor");
+    } else {
+        LOGE("no running VM — ctor bootstrap gave up");
+    }
+    return nullptr;
+}
+
 } // namespace
 
-// Runtime-attach entry (`am attach-agent <pid> <so>` / `am start
-// --attach-agent <so>`). This is the path ennio uses.
+// Runtime-attach entry (`am attach-agent <pid> <so>`): the ART runtime calls
+// this with the live VM. Used for a DEBUGGABLE target.
 extern "C" JNIEXPORT jint JNICALL
 Agent_OnAttach(JavaVM *vm, char * /*options*/, void * /*reserved*/) {
     return attach(vm, "OnAttach");
 }
 
-// Load-time entry (`--attach-agent-bind`, or -agentpath). Harmless to support;
-// currentApplication() may not be ready this early, hence the bounded poll.
+// Load-time entry (`--attach-agent-bind`, or -agentpath). Harmless to support.
 extern "C" JNIEXPORT jint JNICALL
 Agent_OnLoad(JavaVM *vm, char * /*options*/, void * /*reserved*/) {
     return attach(vm, "OnLoad");
+}
+
+// Constructor entry: runs on ANY dlopen of this library, including a ptrace
+// injector's remote dlopen into a NON-debuggable process (where am attach-agent
+// is refused). Spawns a thread that finds the running VM and starts the agent —
+// the g_started guard makes this idempotent with Agent_OnAttach.
+__attribute__((constructor)) static void ennio_ctor() {
+    pthread_t t;
+    if (pthread_create(&t, nullptr, bootstrapThread, nullptr) == 0) {
+        pthread_detach(t);
+    } else {
+        LOGE("pthread_create failed in ctor");
+    }
 }

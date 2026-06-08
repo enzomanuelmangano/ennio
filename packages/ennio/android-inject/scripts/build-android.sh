@@ -68,11 +68,10 @@ s+="\n};\nstatic const unsigned int agent_dex_len = "+b.length+";\n";
 fs.writeFileSync(process.argv[2], s);
 ' "$OUT/agent.dex" "$ROOT/native/agent_dex.h"
 
-echo "[4/4] ndk compile → libennio.so ($ABI, $TRIPLE$API)"
-# Static libc++ + no exceptions/rtti: LD_PRELOAD runs before the app's
-# native lib path is set, so the only libs we may depend on are those in
-# app_process's default linker namespace (libc/libm/libdl/liblog). A
-# libc++_shared.so dependency fails to link at inject time — bundle it.
+echo "[4/5] ndk compile → libennio.so ($ABI, $TRIPLE$API)"
+# Static libc++: the agent is loaded into a process whose linker namespace may
+# not expose libc++_shared.so, so a shared-C++ dependency fails at load time —
+# bundle it. Only libc/libm/libdl/liblog are guaranteed.
 "$CLANGXX" -shared -fPIC -O2 -std=c++17 \
   -static-libstdc++ -fno-exceptions -fno-rtti \
   -I"$ROOT/native" \
@@ -80,7 +79,15 @@ echo "[4/4] ndk compile → libennio.so ($ABI, $TRIPLE$API)"
   "$ROOT/native/ennio_inject.cpp" \
   -llog
 
+echo "[5/5] ndk compile → ennio_ptrace ($ABI)"
+# The on-device ptrace injector (runs as root). Loads libennio.so into ANY
+# process — including a non-debuggable release build that am attach-agent
+# refuses. Static libc++ so it runs standalone from /data/local/tmp.
+"$CLANGXX" -O2 -std=c++17 -static-libstdc++ \
+  -o "$OUT/ennio_ptrace" \
+  "$ROOT/native/ptrace_inject.cpp"
+
 echo ""
 echo "Built:"
-ls -la "$OUT/libennio.so" "$OUT/agent.dex"
+ls -la "$OUT/libennio.so" "$OUT/ennio_ptrace" "$OUT/agent.dex"
 echo "dex bytes: $(wc -c < "$OUT/agent.dex")"
