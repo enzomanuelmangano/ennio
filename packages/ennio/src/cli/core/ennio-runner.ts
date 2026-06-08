@@ -17,18 +17,15 @@
 
 import { execFileSync } from 'node:child_process';
 
-import { diagnoseSocketFailure } from '../crash-detector';
-import { enableAccessibility } from '../sim';
-import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import type { MaestroFlow } from '../maestro-parser';
 import { parseMaestroFile } from '../maestro-parser';
+import type { Platform } from '../platform';
+import { selectPlatform } from '../platform';
 import { pickReporter } from '../reporters';
 import type { Reporter, SuiteResult, FlowResult } from '../reporters';
 
-import { EnnioConnection } from './ennio-connection';
 import { FlowExecutor } from './flow-executor';
-import { SimulatorSession } from './simulator-session';
 
 export interface EnnioRunnerOptions {
   udid?: string;
@@ -45,6 +42,8 @@ export interface EnnioRunnerOptions {
   fast?: boolean;
   /** Reporter kind when no explicit reporter is passed. Default 'pretty'. */
   reporterKind?: 'pretty' | 'json';
+  /** Device backend. Default: iOS simulator. */
+  platform?: Platform;
 }
 
 export class EnnioRunner {
@@ -54,6 +53,7 @@ export class EnnioRunner {
   private verbose: boolean;
   private lenient: boolean;
   private safeMode: boolean;
+  private platform: Platform;
   private driver: GestureDriver;
 
   constructor(opts: EnnioRunnerOptions = {}) {
@@ -62,7 +62,8 @@ export class EnnioRunner {
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
     this.safeMode = opts.safeMode ?? false;
-    this.driver = createDriver(opts.fast ?? false);
+    this.platform = opts.platform ?? selectPlatform('ios');
+    this.driver = this.platform.createDriver(opts.fast ?? false);
     this.reporter =
       opts.reporter ?? pickReporter({ kind: opts.reporterKind ?? 'pretty', verbose: this.verbose });
   }
@@ -101,49 +102,25 @@ export class EnnioRunner {
   }
 
   /**
-   * Run a single parsed flow. Manages connection lifecycle around
-   * one flow run.
+   * Run a single parsed flow. The platform establishes a ready
+   * connection (launching the app if needed); we always close it after.
    */
   async runFlow(flow: MaestroFlow): Promise<FlowResult> {
     if (!flow.appId) {
       throw new Error(`Flow ${flow.filePath} is missing top-level appId`);
     }
 
-    const session = new SimulatorSession({
+    const { session, connection } = await this.platform.connect({
       udid: this.udid,
       bundleId: flow.appId,
       dylibPath: this.dylibPath ?? null,
       safeMode: this.safeMode,
     });
-
-    // Make SwiftUI / native apps readable by ennio's in-process AX
-    // walk. Off by default, SwiftUI builds no accessibility tree, so
-    // a screen like iOS Settings is invisible to find_ax_by_text.
-    enableAccessibility(session.udid);
-
-    const connection = new EnnioConnection({ udid: session.udid });
     try {
-      if (!(await connection.open(2_000))) {
-        // App isn't running with the dylib loaded. Launch + retry.
-        session.terminate();
-        const launchedAt = Date.now();
-        session.launch();
-        if (!(await connection.open(15_000))) {
-          const diagnosis = diagnoseSocketFailure(session.udid, session.bundleId, launchedAt);
-          throw new Error(
-            'Auto-launched the app with DYLD injection but libennio socket ' +
-              'never came up.' +
-              (diagnosis
-                ? `\n${diagnosis}`
-                : ' Check the app is a Debug build and the dylib path is correct.'),
-          );
-        }
-        await this.waitBootstrapReady(connection);
-      }
-
       const executor = new FlowExecutor({
         session,
         connection,
+        platform: this.platform,
         reporter: this.reporter,
         verbose: this.verbose,
         lenient: this.lenient,
@@ -170,25 +147,6 @@ export class EnnioRunner {
       }
     } finally {
       connection.close();
-    }
-  }
-
-  /**
-   * Poll for the dylib's `bootstrap=ready` ping reply. Bounded at
-   * 5s. Best-effort — if the ping path isn't available we don't
-   * block the flow.
-   */
-  private async waitBootstrapReady(connection: EnnioConnection): Promise<void> {
-    const deadline = Date.now() + 5_000;
-    while (Date.now() < deadline) {
-      try {
-        const r = await connection.socket.call('ping');
-        const ready = r.ok && r.data && (r.data as { bootstrap?: string }).bootstrap === 'ready';
-        if (ready) return;
-      } catch {
-        /* retry */
-      }
-      await new Promise((res) => setTimeout(res, 100));
     }
   }
 }

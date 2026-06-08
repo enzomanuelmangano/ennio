@@ -116,17 +116,13 @@ async function dumpFailureState(ctx: RunContext, sel: MaestroSelector, op: strin
       const shotsDir = '/tmp/ennio-shots';
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const fs = require('node:fs');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const child = require('node:child_process');
       fs.mkdirSync(shotsDir, { recursive: true });
       const tag = (sel.id ?? sel.text ?? 'sel')
         .toString()
         .replace(/[^a-zA-Z0-9_-]/g, '_')
         .slice(0, 60);
       const path = `${shotsDir}/fail-${Date.now()}-${tag}.png`;
-      child.execFileSync('xcrun', ['simctl', 'io', ctx.udid, 'screenshot', path], {
-        stdio: 'pipe',
-      });
+      ctx.platform.system.screenshot(ctx.udid, path);
       process.stderr.write(`[ennio:diag] screenshot=${path}\n`);
     } catch {
       /* screenshot best-effort */

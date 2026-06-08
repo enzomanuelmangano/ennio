@@ -10,8 +10,7 @@
 //   4. Cross-process AX fallback (find_ax_by_text) — for content
 //      rendered by remote view services (PHPicker, share sheet).
 
-import { dismissSystemSheet } from '../ennio-ax';
-import { axQueryByText, swipe as hidSwipe } from '../hid';
+import { axQueryByText } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
 import {
@@ -182,7 +181,7 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     if (r) return r;
     if (!permProbed) {
       permProbed = true;
-      const dismissed = await dismissSystemSheet(ctx.udid).catch(() => false);
+      const dismissed = await ctx.platform.ax.dismissSystemSheet(ctx.udid).catch(() => false);
       if (dismissed) {
         process.stderr.write('[ennio] dismissed system permission sheet during find\n');
         deadline = Date.now() + 4000;
@@ -229,8 +228,10 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   for (const dir of ['DOWN', 'UP'] as const) {
     for (let i = 0; i < 4; i++) {
       const beforeHash = await captureHash(ctx);
-      if (dir === 'DOWN') await hidSwipe(ctx.udid, cx, cy + dist / 2, cx, cy - dist / 2, 250);
-      else await hidSwipe(ctx.udid, cx, cy - dist / 2, cx, cy + dist / 2, 250);
+      // Route through the driver so the mechanism is platform-correct
+      // (iOS HID / Android in-process MotionEvent).
+      if (dir === 'DOWN') await ctx.driver.swipe(ctx.udid, cx, cy + dist / 2, cx, cy - dist / 2, 250);
+      else await ctx.driver.swipe(ctx.udid, cx, cy - dist / 2, cx, cy + dist / 2, 250);
       await sleep(300);
       await ctx.client.call('wait_commit', { maxMs: 1200, stableMs: 200 }).catch(() => undefined);
       const found = await findOnce(ctx, sel);

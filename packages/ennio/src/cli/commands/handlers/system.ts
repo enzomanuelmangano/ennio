@@ -6,7 +6,6 @@
 // is a small focused function; the registry binds them to matcher
 // predicates on the MaestroCommand shape.
 
-import { execFileSync } from 'node:child_process';
 
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
@@ -77,17 +76,27 @@ function sleep(ms: number): Promise<void> {
  */
 export function registerSystemHandlers(registry: CommandRegistry): void {
   registry.register(isTakeScreenshot, async (cmd, { ctx }) => {
-    const path =
-      typeof cmd.takeScreenshot === 'string' ? cmd.takeScreenshot : cmd.takeScreenshot.path;
-    execFileSync('xcrun', ['simctl', 'io', ctx.udid, 'screenshot', path]);
+    let path = typeof cmd.takeScreenshot === 'string' ? cmd.takeScreenshot : cmd.takeScreenshot.path;
+    // Maestro lets you omit the extension; the platform writers expect one.
+    if (!/\.(png|jpe?g)$/i.test(path)) path += '.png';
+    ctx.platform.system.screenshot(ctx.udid, path);
   });
 
   registry.register(isClearKeychain, async (_cmd, { ctx }) => {
-    execFileSync('xcrun', ['simctl', 'keychain', ctx.udid, 'reset'], { stdio: 'pipe' });
+    ctx.platform.system.clearKeychain(ctx.udid);
   });
 
   registry.register(isBack, async (_cmd, { ctx }) => {
-    await ctx.client.call('back');
+    const r = await ctx.client.call('back');
+    // The agent couldn't pop in-process but the screen IS poppable (a custom
+    // headerLeft replaced the chevron and predictive back owns the gesture).
+    // Inject a real OS BACK from the host — the only thing that reaches the
+    // window's OnBackInvokedDispatcher. Gated on `poppable`, so a navigation
+    // root never gets a hardware back that would exit the app.
+    const data = r?.data as { popped?: boolean; poppable?: boolean } | undefined;
+    if (data && data.popped === false && data.poppable && ctx.platform.system.hardwareBack) {
+      ctx.platform.system.hardwareBack(ctx.udid);
+    }
     // Poll animations_active until the pop transition ends.
     // popViewControllerAnimated's CAAnimation registers on UIKit's
     // transitionCoordinator immediately; the poll exits as soon as
@@ -114,11 +123,7 @@ export function registerSystemHandlers(registry: CommandRegistry): void {
   });
 
   registry.register(isSetClipboard, async (cmd, { ctx }) => {
-    const text = String(cmd.setClipboard);
-    execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], {
-      input: text,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    ctx.platform.system.setClipboard(ctx.udid, String(cmd.setClipboard));
   });
 
   // pasteText reads sim clipboard and types via inputText. We can't

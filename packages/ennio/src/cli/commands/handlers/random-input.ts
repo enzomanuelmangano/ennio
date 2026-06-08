@@ -2,7 +2,6 @@
 // contained, and route through `dispatch` for inputText so we don't
 // duplicate typing logic.
 
-import { execFileSync } from 'node:child_process';
 import { createContext, runInContext } from 'node:vm';
 
 import { CommandRegistry } from '../../core/command-registry';
@@ -99,9 +98,7 @@ export function registerRandomInputHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & PasteTextCmd => has(c, 'pasteText'),
     async (_cmd, { ctx, dispatch }) => {
-      const text = execFileSync('xcrun', ['simctl', 'pbpaste', ctx.udid], {
-        encoding: 'utf-8',
-      }).trim();
+      const text = ctx.platform.system.getClipboard(ctx.udid).trim();
       if (text) await dispatch({ inputText: text } as MaestroCommand);
     },
   );
@@ -123,10 +120,7 @@ export function registerRandomInputHandlers(registry: CommandRegistry): void {
         // Expose to flows as ${maestro.copiedText} (Maestro magic var)
         // AND mirror to the device pasteboard so pasteText works too.
         ctx.copiedText = text;
-        execFileSync('xcrun', ['simctl', 'pbcopy', ctx.udid], {
-          input: text,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        ctx.platform.system.setClipboard(ctx.udid, text);
       }
     },
   );

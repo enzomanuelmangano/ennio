@@ -54,16 +54,34 @@ interface PendingRequest {
   reject(e: Error): void;
 }
 
+/**
+ * Where to dial the in-app agent. iOS speaks over a Unix-domain socket
+ * the simulator shares with the host via /tmp; Android speaks over a TCP
+ * port `adb forward` bridges to the device's abstract socket. The
+ * transport is the only platform difference at this layer — everything
+ * above (framing, op dispatch) is identical.
+ */
+export type ConnectTarget = { kind: 'unix'; path: string } | { kind: 'tcp'; port: number };
+
 export class EnnioSocketClient {
   private socket: Socket | null = null;
   private buf = '';
   private pending = new Map<string, PendingRequest>();
   private idSeq = 0;
   private connecting: Promise<boolean> | null = null;
-  private path: string;
+  private target: ConnectTarget;
 
-  constructor(udid?: string) {
-    this.path = ennioSocketPath(udid);
+  /**
+   * Accepts either a UDID (iOS legacy — resolves to the per-target Unix
+   * path) or an explicit ConnectTarget (Android passes a TCP port). The
+   * UDID overload keeps the many `new EnnioSocketClient(ctx.udid)` call
+   * sites in the iOS lifecycle untouched.
+   */
+  constructor(udidOrTarget?: string | ConnectTarget) {
+    this.target =
+      typeof udidOrTarget === 'object' && udidOrTarget !== null
+        ? udidOrTarget
+        : { kind: 'unix', path: ennioSocketPath(udidOrTarget) };
   }
 
   /**
@@ -82,7 +100,10 @@ export class EnnioSocketClient {
 
   private async doConnect(): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      const s = createConnection(this.path);
+      const s =
+        this.target.kind === 'tcp'
+          ? createConnection({ port: this.target.port, host: '127.0.0.1' })
+          : createConnection(this.target.path);
       const onError = () => {
         s.destroy();
         resolve(false);
@@ -92,7 +113,7 @@ export class EnnioSocketClient {
         s.off('error', onError);
         s.on('data', (chunk) => this.onData(chunk));
         s.on('error', (e) => this.onSocketError(e));
-        s.on('close', () => this.onClose());
+        s.on('close', (hadError) => this.onClose(hadError));
         this.socket = s;
         resolve(true);
       });
@@ -138,7 +159,13 @@ export class EnnioSocketClient {
     this.pending.clear();
   }
 
-  private onClose(): void {
+  private onClose(hadError?: boolean): void {
+    if (process.env.ENNIO_DEBUG) {
+      const tgt = this.target.kind === 'tcp' ? `tcp:${this.target.port}` : this.target.path;
+      process.stderr.write(
+        `[sock] close ${tgt} pending=${this.pending.size} hadError=${!!hadError}\n`,
+      );
+    }
     this.socket = null;
     const err = new Error('socket closed');
     for (const [, p] of this.pending) p.reject(err);
@@ -147,11 +174,39 @@ export class EnnioSocketClient {
 
   /**
    * Dispatch one op. Resolves to the typed response (data depends on
-   * op). If the socket is disconnected when the call is made, attempt
-   * a single reconnect first — the dylib may have terminated + restored
-   * its listener between ops (rare but happens during reload).
+   * op). Absorbs a transient socket drop: a freshly relaunched app
+   * (post-clearState) can close the first accepted connection while its
+   * agent thread settles, so a single mid-flight close triggers one
+   * reconnect + resend. The ops affected are early, idempotent reads
+   * (find / hash / hide_keyboard / back), so a resend is safe.
    */
   async call(op: string, args: Record<string, unknown> = {}): Promise<EnnioSocketResponse> {
+    let lastErr: unknown;
+    // A freshly relaunched app (post-clearState) can leave a short-lived
+    // "zombie" socket: an intermittent wrap.sh throwaway process binds
+    // @ennio, then dies, and every connection cleanly FINs (no response)
+    // until the real app reclaims the abstract socket (~1-2s). Reconnect
+    // and retry across that window. The affected ops are early, idempotent
+    // reads/navigation (find / hash / hide_keyboard / back), so resending
+    // is safe.
+    for (let attempt = 0; attempt < 12; attempt++) {
+      try {
+        return await this.callOnce(op, args);
+      } catch (e) {
+        lastErr = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/socket closed|socket request timeout|ennio socket not connected/.test(msg)) {
+          throw e;
+        }
+        this.close();
+        await new Promise((r) => setTimeout(r, 150));
+        await this.connectWithRetry(3_000);
+      }
+    }
+    throw lastErr;
+  }
+
+  private async callOnce(op: string, args: Record<string, unknown>): Promise<EnnioSocketResponse> {
     if (!this.socket || this.socket.destroyed) {
       const reopened = await this.connectWithRetry(5_000);
       if (!reopened) {
