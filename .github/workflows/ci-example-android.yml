@@ -122,10 +122,55 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Run example suite (boot emulator + drive)
-        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+      # The emulator-runner executes its `script` line-by-line via /bin/sh, so
+      # shell variables/exports do NOT persist across lines. Put the whole suite
+      # in a real bash script the action invokes as ONE command instead.
+      - name: Prepare suite script
         env:
           ENNIO_NO_ANIM_FLAG: ${{ inputs.no_animations && '--no-animations' || '' }}
+        run: |
+          cat > /tmp/run-suite.sh <<EOF
+          #!/usr/bin/env bash
+          set -u
+          adb wait-for-device
+          # adb root restarts adbd → the command's own connection resets and it
+          # returns non-zero even on success; tolerate it, then wait for adbd.
+          adb root || true
+          adb wait-for-device
+          sleep 3
+          adb install -r -g /tmp/exampleapk/app-release.apk
+          export ENNIO_PLATFORM=android
+          export ENNIO_ANDROID_AGENT=/tmp/ennio-android/libennio.so
+          export ENNIO_ANDROID_INJECTOR=/tmp/ennio-android/ennio_ptrace
+          NO_ANIM='${ENNIO_NO_ANIM_FLAG}'
+          mkdir -p /tmp/ennio-logs
+          PASS=0; FAIL=0; FAILED=""
+          for f in example/maestro-e2e/*.yaml; do
+            base=\$(basename "\$f")
+            case "\$base" in _*|00-*) continue;; esac
+            ok=0
+            for attempt in 1 2; do
+              if node packages/ennio/dist/cli.js test "\$f" --verbose \$NO_ANIM \
+                  > "/tmp/ennio-logs/\$base.\$attempt.log" 2>&1; then
+                ok=1; break
+              fi
+              echo "RETRY \$base (attempt \$attempt failed)"
+            done
+            if [ "\$ok" -eq 1 ]; then
+              echo "PASS  \$base"; PASS=\$((PASS+1))
+            else
+              echo "FAIL  \$base"; tail -30 "/tmp/ennio-logs/\$base.2.log"
+              FAIL=\$((FAIL+1)); FAILED="\$FAILED \$base"
+            fi
+          done
+          echo ""
+          echo "Example suite (Android): Pass=\$PASS Fail=\$FAIL\${FAILED:+ — failed:\$FAILED}"
+          [ "\$FAIL" -eq 0 ]
+          EOF
+          chmod +x /tmp/run-suite.sh
+
+      - name: Run example suite (boot emulator + drive)
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
         with:
           api-level: ${{ env.ANDROID_API }}
           arch: x86_64
@@ -133,47 +178,7 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          # NOTE: the action runs this with /bin/sh (dash) — keep it POSIX (no
-          # `set -o pipefail`, no `[[ ]]`).
-          script: |
-            set -u
-            adb wait-for-device
-            # ptrace injection runs as root. `adb root` restarts adbd, which
-            # resets the client connection and makes the command itself return
-            # non-zero even on success — tolerate it, then wait for adbd back.
-            adb root || true
-            adb wait-for-device
-            sleep 3
-            adb install -r -g /tmp/exampleapk/app-release.apk
-            UDID=$(adb devices | awk '/emulator-/{print $1; exit}')
-            test -n "$UDID" || { echo "no emulator serial"; exit 1; }
-            echo "emulator: $UDID  mode: ${ENNIO_NO_ANIM_FLAG:-default}"
-            mkdir -p /tmp/ennio-logs
-            export ENNIO_UDID="$UDID" ENNIO_PLATFORM=android
-            export ENNIO_ANDROID_AGENT=/tmp/ennio-android/libennio.so
-            export ENNIO_ANDROID_INJECTOR=/tmp/ennio-android/ennio_ptrace
-            PASS=0; FAIL=0; FAILED=""
-            for f in example/maestro-e2e/*.yaml; do
-              base=$(basename "$f")
-              case "$base" in _*|00-*) continue;; esac
-              ok=0
-              for attempt in 1 2; do
-                if node packages/ennio/dist/cli.js test "$f" --verbose $ENNIO_NO_ANIM_FLAG \
-                    > "/tmp/ennio-logs/$base.$attempt.log" 2>&1; then
-                  ok=1; break
-                fi
-                echo "RETRY $base (attempt $attempt failed)"
-              done
-              if [ "$ok" -eq 1 ]; then
-                echo "PASS  $base"; PASS=$((PASS+1))
-              else
-                echo "FAIL  $base"; tail -30 "/tmp/ennio-logs/$base.2.log"
-                FAIL=$((FAIL+1)); FAILED="$FAILED $base"
-              fi
-            done
-            echo ""
-            echo "Example suite (Android): Pass=$PASS Fail=$FAIL${FAILED:+ — failed:$FAILED}"
-            [ "$FAIL" -eq 0 ]
+          script: bash /tmp/run-suite.sh
 
       - name: Upload logs
         if: always()
