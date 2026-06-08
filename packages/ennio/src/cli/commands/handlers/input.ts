@@ -131,7 +131,10 @@ export function registerInputHandlers(registry: CommandRegistry): void {
           await responderReady(800);
         }
         try {
-          const r = await ctx.client.call('insert_text', { text });
+          const r = await ctx.client.call('insert_text', {
+            text,
+            ...(expectedField ? { testID: expectedField } : {}),
+          });
           ok = !!(r.ok && r.data && (r.data as { ok: boolean }).ok);
         } catch {
           /* retry */
@@ -143,6 +146,25 @@ export function registerInputHandlers(registry: CommandRegistry): void {
       // ~1 frame. 30ms stability window sufficient vs 80ms with animations.
       const textStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 30 : 80;
       await ctx.client.call('wait_commit', { maxMs: 500, stableMs: textStableMs });
+      // Drain any in-flight request a field change / earlier navigation kicked
+      // off, then let React propagate its result, BEFORE the next step submits.
+      // Closes async-after-navigation races with no blind sleep: bsky login
+      // needs the describeServer lookup to land so "alice" resolves to
+      // "alice.test"; nothing visible marks that arrival, but the RN OkHttp
+      // in-flight count dropping to zero does. No-op (returns fast, idle=known
+      // false) on iOS / non-RN apps where the op is unimplemented.
+      if (ctx.platform.name === 'android') {
+        const netr = await ctx.client
+          .call('wait_network_idle', { maxMs: 4000, idleMs: 120 })
+          .catch(() => undefined);
+        // Only re-settle React when we actually waited for a request to drain
+        // (idle && known); the never-busy fast path returns instantly and
+        // needs no extra commit wait.
+        const nd = netr?.data as { waited?: boolean } | undefined;
+        if (nd?.waited) {
+          await ctx.client.call('wait_commit', { maxMs: 500, stableMs: textStableMs });
+        }
+      }
       ctx.lastWasTextInput = true;
     },
   );
@@ -194,6 +216,24 @@ export function registerInputHandlers(registry: CommandRegistry): void {
         esc: 41,
       };
       const code = map[name];
+      // A submit key (Enter/Return) fires the form's handler, which reads
+      // state populated by an earlier async lookup. On Android, drain any
+      // in-flight (or imminent — grace window) request and let React
+      // propagate its result BEFORE submitting, so the handler sees loaded
+      // data. Closes the bsky login race deterministically: the custom
+      // server's describeServer (kicked off late, in the dialog's
+      // close-animation callback) must land so "alice" → "alice.test"
+      // before createSession fires. No-op on iOS / non-RN (idle:known=false).
+      if (ctx.platform.name === 'android' && (name === 'enter' || name === 'return')) {
+        const netr = await ctx.client
+          .call('wait_network_idle', { maxMs: 6000, idleMs: 120, graceMs: 1200 })
+          .catch(() => undefined);
+        if ((netr?.data as { waited?: boolean } | undefined)?.waited) {
+          await ctx.client
+            .call('wait_commit', { maxMs: 800, stableMs: 120 })
+            .catch(() => undefined);
+        }
+      }
       if (code != null) await ctx.client.call('hardware_key', { keyCode: code });
       // pressKey Enter on a form input typically triggers submit + a
       // chain of React state updates. Wait for commit + UIView stable

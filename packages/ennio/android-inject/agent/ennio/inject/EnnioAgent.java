@@ -307,21 +307,23 @@ public final class EnnioAgent {
             case "window_size": return windowSize();
             case "find_by_testid": return findByTestId(a.getString("testID"), 0);
             case "find_by_testid_nth": return findByTestId(a.getString("testID"), a.optInt("index", 0));
-            case "find_by_text": return findByText(a.getString("text"), a.optBoolean("relaxed", false));
-            case "find_ax_by_text": return findByText(a.getString("text"), true);
+            case "find_by_text": return findByText(a.getString("text"), a.optBoolean("relaxed", false), a.optBoolean("regex", false));
+            case "find_ax_by_text": return findByText(a.getString("text"), true, a.optBoolean("regex", false));
             case "find_child_by_testid":
                 return findChildByTestId(a.getString("childTestID"), a.getString("parentTestID"));
             case "find_tap_target_by_testid": return findTapTarget(a.getString("testID"));
             case "wait_find_by_testid": return waitFind(a.getString("testID"), null, a.optInt("maxMs", 4000));
-            case "wait_find_by_text": return waitFind(null, a.getString("text"), a.optInt("maxMs", 4000));
+            case "wait_find_by_text": return waitFind(null, a.getString("text"), a.optInt("maxMs", 4000), a.optBoolean("regex", false));
             case "get_text": return getText(a.optString("testID", ""), a.optString("text", ""));
             case "visible": return new JSONObject().put("visible", isVisible(a.getString("testID")));
             case "is_exposed": return isExposed(a.optString("testID", ""), a.optString("text", ""));
-            case "first_responder_ready": return new JSONObject().put("ready", firstResponderReady());
+            case "first_responder_ready": return new JSONObject().put("ready", firstResponderReady(a.optString("testID", "")));
             case "frame_hash": return new JSONObject().put("hash", Long.toHexString(currentHash));
             case "animations_active": return new JSONObject().put("active", animationsActive());
             case "react_commit_ts": return new JSONObject().put("ts", 0).put("attach", "none");
             case "wait_commit": return waitCommit(a.optInt("maxMs", 1000), a.optInt("stableMs", 100));
+            case "wait_network_idle": return waitNetworkIdle(a.optInt("maxMs", 4000), a.optInt("idleMs", 120), a.optInt("graceMs", 0));
+            case "net_inflight": return new JSONObject().put("n", netInflight());
             case "wait_react_commit": return waitReactCommit(a.optInt("maxMs", 1000));
             case "wait_hash_change": return waitHashChange(a.optString("sinceHash", ""), a.optInt("maxMs", 1000));
             case "wait_presentation_idle": return waitCommit(a.optInt("maxMs", 1000), 80);
@@ -341,7 +343,7 @@ public final class EnnioAgent {
             case "activate_testid": return activateTestId(a.getString("testID"));
             case "activate_by_text": return activateByText(a.getString("text"));
             case "focus_testid": return focusTestId(a.getString("testID"));
-            case "insert_text": return insertText(a.getString("text"));
+            case "insert_text": return insertText(a.getString("text"), a.optString("testID", ""));
             case "hardware_key": return hardwareKey(a.getInt("keyCode"));
             case "hide_keyboard": return hideKeyboard();
             case "back": return back();
@@ -451,6 +453,28 @@ public final class EnnioAgent {
     }
 
     private static View findByTextOrNull(String text, boolean relaxed) {
+        return findByTextOrNull(text, relaxed, false);
+    }
+
+    private static View findByTextOrNull(String text, boolean relaxed, boolean regex) {
+        // Maestro text selectors are regexes when they carry metacharacters
+        // (e.g. "users[,]? or feeds"). Match partially (Pattern.find), the
+        // same as a substring 'contains', so a placeholder that differs only
+        // by an optional comma still resolves. Compile case-insensitively to
+        // mirror the substring path; fall back to literal contains if the
+        // pattern doesn't compile.
+        final java.util.regex.Pattern pat;
+        if (regex) {
+            java.util.regex.Pattern p;
+            try {
+                p = java.util.regex.Pattern.compile(text, java.util.regex.Pattern.CASE_INSENSITIVE);
+            } catch (Throwable e) {
+                p = null;
+            }
+            pat = p;
+        } else {
+            pat = null;
+        }
         return runOnUi(() -> {
             // Case-INSENSITIVE match: Android applies CSS textTransform
             // (uppercase) to the View's text — getText() returns "ORDERS"
@@ -463,6 +487,10 @@ public final class EnnioAgent {
                 if (!isShown(v)) return;
                 String t = textOf(v);
                 if (t == null) return;
+                if (pat != null) {
+                    if (pat.matcher(t).find() && contains[0] == null) contains[0] = v;
+                    return;
+                }
                 String lt = t.toLowerCase();
                 if (lt.equals(needle) && exact[0] == null) exact[0] = v;
                 if (lt.contains(needle) && contains[0] == null) contains[0] = v;
@@ -471,8 +499,8 @@ public final class EnnioAgent {
         });
     }
 
-    private static JSONObject findByText(String text, boolean relaxed) throws Exception {
-        View v = findByTextOrNull(text, relaxed);
+    private static JSONObject findByText(String text, boolean relaxed, boolean regex) throws Exception {
+        View v = findByTextOrNull(text, relaxed, regex);
         if (v == null) throw new RuntimeException("element not found: text=" + text);
         return runOnUi(() -> rectOf(v));
     }
@@ -509,9 +537,13 @@ public final class EnnioAgent {
     }
 
     private static JSONObject waitFind(String testID, String text, int maxMs) throws Exception {
+        return waitFind(testID, text, maxMs, false);
+    }
+
+    private static JSONObject waitFind(String testID, String text, int maxMs, boolean regex) throws Exception {
         long deadline = SystemClock.uptimeMillis() + maxMs;
         while (SystemClock.uptimeMillis() < deadline) {
-            View v = testID != null ? findByTestIdOrNull(testID, 0) : findByTextOrNull(text, true);
+            View v = testID != null ? findByTestIdOrNull(testID, 0) : findByTextOrNull(text, true, regex);
             if (v != null) return runOnUi(() -> rectOf(v));
             Thread.sleep(50);
         }
@@ -837,8 +869,96 @@ public final class EnnioAgent {
         return f[0];
     }
 
-    private static boolean firstResponderReady() {
-        return runOnUi(() -> findFirst(v -> v instanceof EditText && v.isFocused()) != null);
+    // Readiness is by IDENTITY when a testID is given: the focused EditText
+    // must be THAT field. RN switches focus asynchronously, so during a
+    // sheet-dismiss / focus hand-off the PREVIOUS field still answers
+    // isFocused()=true — without the identity check, inputText lands in the
+    // stale field (bsky login: "Alice" appended to the custom-server URL
+    // because customServerTextInput kept focus while the sheet settled).
+    private static boolean firstResponderReady(String testID) {
+        return runOnUi(() -> {
+            View f = findFirst(v -> v instanceof EditText && v.isFocused());
+            if (f == null) return false;
+            if (testID == null || testID.isEmpty()) return true;
+            return testID.equals(testIdOf(f));
+        });
+    }
+
+    // ── settle: network idle ─────────────────────────────────────────
+    // Count RN's in-flight HTTP calls via the shared OkHttp dispatcher.
+    // Reflection-only (the agent compiles against android.jar; RN/OkHttp
+    // classes exist solely on-device). Returns -1 when the dispatcher
+    // can't be reached (no RN networking, obfuscated build, or a non-RN
+    // app) so the caller can treat the signal as unavailable rather than
+    // "idle". This is what closes async-after-navigation races without a
+    // blind sleep — e.g. bsky login: the form needs describeServer to land
+    // before it can map "alice" → "alice.test", and nothing visible marks
+    // that arrival, but the in-flight count drops to zero exactly when it
+    // does.
+    private static volatile Object okHttpDispatcher = null;
+    private static volatile boolean okHttpResolved = false;
+
+    private static Object okHttpDispatcher() {
+        if (okHttpResolved) return okHttpDispatcher;
+        try {
+            Class<?> prov = Class.forName(
+                    "com.facebook.react.modules.network.OkHttpClientProvider");
+            Object client = prov.getMethod("getOkHttpClient").invoke(null);
+            okHttpDispatcher = client.getClass().getMethod("dispatcher").invoke(client);
+        } catch (Throwable e) {
+            okHttpDispatcher = null;
+        }
+        okHttpResolved = true;
+        return okHttpDispatcher;
+    }
+
+    /** In-flight + queued RN HTTP calls, or -1 if the count is unavailable. */
+    private static int netInflight() {
+        Object d = okHttpDispatcher();
+        if (d == null) return -1;
+        try {
+            int running = (int) d.getClass().getMethod("runningCallsCount").invoke(d);
+            int queued = (int) d.getClass().getMethod("queuedCallsCount").invoke(d);
+            return running + queued;
+        } catch (Throwable e) {
+            return -1;
+        }
+    }
+
+    // graceMs: how long to keep watching for a request to APPEAR before
+    // concluding "never busy". An action's network call often fires a few
+    // frames after the UI settles (bsky: setServiceUrl runs in the dialog's
+    // close-animation callback, so describeServer starts well after the tap).
+    // With grace>0 a caller can gate a submit on a not-yet-started lookup;
+    // grace=0 keeps the cheap "already idle → return now" behaviour.
+    private static JSONObject waitNetworkIdle(int maxMs, int idleMs, int graceMs) throws Exception {
+        long start = SystemClock.uptimeMillis();
+        long deadline = start + maxMs;
+        long idleSince = -1;
+        boolean sawBusy = false;
+        while (SystemClock.uptimeMillis() < deadline) {
+            int n = netInflight();
+            if (n < 0) return new JSONObject().put("idle", false).put("known", false);
+            long now = SystemClock.uptimeMillis();
+            if (n > 0) {
+                sawBusy = true;
+                idleSince = -1;
+            } else {
+                // Nothing in flight. If we've already watched a request drain,
+                // confirm idleMs of quiet and return. Otherwise keep watching
+                // until the grace window elapses — a request may be imminent
+                // (the close-animation callback hasn't fired its fetch yet).
+                if (sawBusy) {
+                    if (idleSince < 0) idleSince = now;
+                    if (now - idleSince >= idleMs)
+                        return new JSONObject().put("idle", true).put("known", true).put("waited", true);
+                } else if (now - start >= graceMs) {
+                    return new JSONObject().put("idle", true).put("known", true).put("waited", false);
+                }
+            }
+            SystemClock.sleep(20);
+        }
+        return new JSONObject().put("idle", false).put("known", true).put("waited", sawBusy);
     }
 
     // ── settle: pre-draw frame hash ──────────────────────────────────
@@ -1077,11 +1197,19 @@ public final class EnnioAgent {
         });
     }
 
-    private static JSONObject insertText(String text) {
+    private static JSONObject insertText(String text, String testID) {
         return runOnUi(() -> {
-            View f = findFirst(v -> v instanceof EditText && v.isFocused());
+            // Target by IDENTITY when a testID is given — never trust "the
+            // focused EditText" alone, which can be a stale field mid focus
+            // hand-off (bsky login custom-server race). Fall back to the
+            // focused field, then any field.
+            View f = null;
+            if (testID != null && !testID.isEmpty())
+                f = findFirst(v -> v instanceof EditText && testID.equals(testIdOf(v)));
+            if (f == null) f = findFirst(v -> v instanceof EditText && v.isFocused());
             if (f == null) f = findFirst(v -> v instanceof EditText);
             if (!(f instanceof EditText)) throw new RuntimeException("no EditText focused");
+            if (!f.isFocused()) f.requestFocus();
             EditText edit = (EditText) f;
             CharSequence cur = edit.getText();
             edit.setText((cur == null ? "" : cur.toString()) + text);

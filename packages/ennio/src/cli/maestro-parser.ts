@@ -251,6 +251,16 @@ export function normalizeSelector(selector: MaestroSelector | string): MaestroSe
 }
 
 /**
+ * A Maestro text selector is a regex (not a literal substring) when it carries
+ * regex metacharacters or explicit `.*` anchors — e.g. "users[,]? or feeds".
+ * Used both to tag the native iOS selector and to flag Android find_* calls so
+ * the in-app agent applies Pattern matching instead of a literal contains.
+ */
+export function isRegexText(text: string): boolean {
+  return text.startsWith('.*') || text.endsWith('.*') || /[[\]{}()|\\^$+?]/.test(text);
+}
+
+/**
  * Convert Maestro selector to Ennio selector format
  */
 export function toEnnioSelector(selector: MaestroSelector): Record<string, unknown> {
@@ -264,11 +274,7 @@ export function toEnnioSelector(selector: MaestroSelector): Record<string, unkno
   // Use TextMatcher shape so client.selectorToJson serializes flat form expected by
   // the native SelectorParser ({ text, textMatchMode }).
   if (selector.text !== undefined) {
-    if (
-      selector.text.startsWith('.*') ||
-      selector.text.endsWith('.*') ||
-      /[\[\]{}()|\\^$+?]/.test(selector.text)
-    ) {
+    if (isRegexText(selector.text)) {
       result.text = { pattern: selector.text, mode: 'regex' };
     } else {
       result.text = { pattern: selector.text, mode: 'contains' };
