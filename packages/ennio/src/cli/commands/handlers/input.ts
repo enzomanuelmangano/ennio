@@ -229,7 +229,9 @@ export function registerInputHandlers(registry: CommandRegistry): void {
           .call('wait_network_idle', { maxMs: 6000, idleMs: 120, graceMs: 1200 })
           .catch(() => undefined);
         if ((netr?.data as { waited?: boolean } | undefined)?.waited) {
-          await ctx.client.call('wait_commit', { maxMs: 800, stableMs: 120 }).catch(() => undefined);
+          await ctx.client
+            .call('wait_commit', { maxMs: 800, stableMs: 120 })
+            .catch(() => undefined);
         }
       }
       if (code != null) await ctx.client.call('hardware_key', { keyCode: code });
