@@ -1,0 +1,33 @@
+diff --git a/android/src/main/java/com/reactnativemenu/MenuView.kt b/android/src/main/java/com/reactnativemenu/MenuView.kt
+index 17ed7c6..b7dab18 100644
+--- a/android/src/main/java/com/reactnativemenu/MenuView.kt
++++ b/android/src/main/java/com/reactnativemenu/MenuView.kt
+@@ -47,8 +47,10 @@ class MenuView(private val mContext: ReactContext) : ReactViewGroup(mContext) {
+     prepareMenu()
+   }
+ 
+-  override fun setHitSlopRect(rect: Rect?) {
+-    super.setHitSlopRect(rect)
++  // RN 0.83's ReactViewGroup.setHitSlopRect is no longer Kotlin-overridable
++  // (same JVM signature, not open). Use a uniquely-named setter so there's
++  // no accidental-override clash; the menu's touch-delegate logic is intact.
++  fun setMenuHitSlop(rect: Rect?) {
+     mHitSlopRect = rect
+     updateTouchDelegate()
+   }
+diff --git a/android/src/main/java/com/reactnativemenu/MenuViewManagerBase.kt b/android/src/main/java/com/reactnativemenu/MenuViewManagerBase.kt
+index 0cd90f4..ec0e9ef 100644
+--- a/android/src/main/java/com/reactnativemenu/MenuViewManagerBase.kt
++++ b/android/src/main/java/com/reactnativemenu/MenuViewManagerBase.kt
+@@ -123,9 +123,9 @@ abstract class MenuViewManagerBase : ReactClippingViewManager<MenuView>() {
+   fun setHitSlop(view: ReactViewGroup, @Nullable hitSlop: ReadableMap?) {
+     if (hitSlop == null) {
+       // We should keep using setters as `Val cannot be reassigned`
+-      view.setHitSlopRect(null)
++      (view as MenuView).setMenuHitSlop(null)
+     } else {
+-      view.setHitSlopRect(
++      (view as MenuView).setMenuHitSlop(
+               Rect(
+                       if (hitSlop.hasKey("left"))
+                               PixelUtil.toPixelFromDIP(hitSlop.getDouble("left")).toInt()
