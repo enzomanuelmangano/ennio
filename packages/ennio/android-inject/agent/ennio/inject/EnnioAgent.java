@@ -1127,6 +1127,14 @@ public final class EnnioAgent {
             float lx = x - loc[0];
             float ly = y - loc[1];
             MotionEvent ev = MotionEvent.obtain(downTime, now, action, lx, ly, 0);
+            // Mark the event as a real finger on the touchscreen. obtain()
+            // leaves source=SOURCE_UNKNOWN, which react-native-gesture-handler's
+            // orchestrator rejects — so RNGH-driven controls (pressto's
+            // PressableScale, RectButton) inside a scroll view never recognized
+            // the tap, while plain RN Pressables (which don't gate on source)
+            // did. setSource makes the synthetic touch indistinguishable from a
+            // dispatched hardware one.
+            ev.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
             try {
                 return root.dispatchTouchEvent(ev);
             } finally {
