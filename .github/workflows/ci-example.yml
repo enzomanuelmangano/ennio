@@ -71,14 +71,16 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -switch /Applications/Xcode_26.0.app
 
-      # Kick the boot NOW and let it proceed while JS deps install and the
-      # CLI/dylib build (~1-2 min) run — the later "Wait for simulator"
-      # step blocks on bootstatus. Fully backgrounded: `simctl boot`
-      # itself blocks for ~60s on these runners, so even it can't sit on
-      # the critical path.
-      - name: Boot simulator (async)
-        run: |
-          nohup bash -c 'xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true' >/dev/null 2>&1 &
+      # Boot the sim NOW (the command blocks ~60s) so it spends the next
+      # ~4-5 min of JS/dylib setup settling — SpringBoard, launchd_sim,
+      # CoreSimulator services. The later "Wait for simulator" step then
+      # confirms in seconds. Do NOT background this: a backgrounded boot
+      # is killed at step end, the Wait step's `bootstatus -b` then boots
+      # the device itself, and the suite starts against a just-booted,
+      # unsettled sim — measured: the first `simctl terminate` blocked
+      # 7.5 minutes.
+      - name: Boot simulator (early)
+        run: xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
