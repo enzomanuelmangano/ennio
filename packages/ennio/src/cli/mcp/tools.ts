@@ -276,6 +276,25 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
       },
     },
     {
+      name: 'ennio_set_animations',
+      description:
+        'Enable or disable in-app animations at runtime. Disable for fast, ' +
+        'deterministic runs (transitions snap to their final frame, so actions ' +
+        'settle sooner); enable to observe animated UI. A coordinating agent can ' +
+        'toggle this per task. Example: { "enabled": false }.',
+      inputSchema: {
+        type: 'object',
+        properties: { enabled: { type: 'boolean', description: 'true = animations on.' } },
+        required: ['enabled'],
+        additionalProperties: false,
+      },
+      readOnly: false,
+      handler: (args) => {
+        if (typeof args.enabled !== 'boolean') return err('invalid', 'enabled must be a boolean');
+        return session.setAnimations(args.enabled);
+      },
+    },
+    {
       name: 'ennio_back',
       description: 'Navigate back (iOS nav pop / Android system back).',
       inputSchema: NO_ARGS,

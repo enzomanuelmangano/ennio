@@ -214,6 +214,25 @@ export class EnnioMcpSession {
     }
   }
 
+  /**
+   * Toggle UIView/CoreAnimation animations in the target app at runtime.
+   * Disabling them snaps transitions to their final frame, so the React
+   * commit lands sooner and post-action settle shrinks — a coordinating
+   * agent can flip this on for a fast, deterministic run and off when it
+   * needs to observe animated UI.
+   */
+  async setAnimations(enabled: boolean): Promise<EnnioResult<{ enabled: boolean }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const r = await a.connection.socket.call('set_no_animations', { enabled: !enabled });
+      if (!r.ok) return err('infra', r.err ?? 'set_no_animations failed');
+      return ok({ enabled });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
   /** Logical screen size in points. */
   async screenSize(): Promise<EnnioResult<{ w: number; h: number }>> {
     const a = this.attachment;

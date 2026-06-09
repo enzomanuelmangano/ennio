@@ -10,6 +10,15 @@ import type { GestureDriver, PreTapSnapshot, SwipeOutcome, TapOptions } from './
 
 const POST_TAP_SETTLE_MS = parseInt(process.env.ENNIO_TAP_SETTLE_MS || '800', 10);
 
+// Post-swipe settle budgets. Defaults are the parity-proven e2e values; a
+// pre-commit pause plus a frame-stability wait so the next assertion reads
+// a settled screen. Fast, high-throughput callers (the MCP loop, a game
+// agent) that read state immediately after every swipe don't need the
+// conservative budget — they can trim it via env. Lower bound is 0.
+const SWIPE_SETTLE_PAUSE_MS = parseInt(process.env.ENNIO_SWIPE_SETTLE_MS ?? '500', 10);
+const SWIPE_SETTLE_MAX_MS = parseInt(process.env.ENNIO_SWIPE_COMMIT_MAX_MS ?? '1000', 10);
+const SWIPE_SETTLE_STABLE_MS = parseInt(process.env.ENNIO_SWIPE_COMMIT_STABLE_MS ?? '150', 10);
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -152,8 +161,11 @@ export class HidDriver implements GestureDriver {
   }
 
   async settleAfterSwipe(client: EnnioSocketClient, _outcome?: SwipeOutcome): Promise<void> {
-    await sleep(500);
-    await bestEffort(client, 'wait_commit', { maxMs: 1000, stableMs: 150 });
+    if (SWIPE_SETTLE_PAUSE_MS > 0) await sleep(SWIPE_SETTLE_PAUSE_MS);
+    await bestEffort(client, 'wait_commit', {
+      maxMs: SWIPE_SETTLE_MAX_MS,
+      stableMs: SWIPE_SETTLE_STABLE_MS,
+    });
   }
 
   async settleScrollStep(client: EnnioSocketClient, _outcome?: SwipeOutcome): Promise<void> {
