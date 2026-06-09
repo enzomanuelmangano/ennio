@@ -154,7 +154,9 @@ function emit(r: Result): Result {
 function deadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     p,
-    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms)),
+    new Promise<T>((_, rej) =>
+      setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms),
+    ),
   ]);
 }
 
@@ -192,7 +194,9 @@ async function runSmoke(bundleId: string, platformName: 'ios' | 'android'): Prom
       detail: e instanceof Error ? e.message.split('\n')[0] : String(e),
     });
     console.log(`\n✗ Could not bring up the in-app agent for ${bundleId}. Most common causes:`);
-    console.log('  - the app is not a Debug/dev build (the dylib refuses Release/App Store builds)');
+    console.log(
+      '  - the app is not a Debug/dev build (the dylib refuses Release/App Store builds)',
+    );
     console.log('  - the bundle id is wrong, or the app is not installed on this simulator');
     console.log('  - an unsupported iOS/RN combination — see the issue tracker');
     return 1;
