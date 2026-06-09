@@ -33,26 +33,19 @@ name: 'Gauntlet — Date picker'
       - assertVisible:
           text: 'Date: 2026-03-15'
 
-# Android: native Material calendar dialog (display="default"). It opens once
-# on mount and does NOT re-open after OK (the picker is mounted but the dialog
-# is a one-shot), so a single confirmed change is the most this control allows.
-# Navigate with the month arrow (content-desc "Next month"), wait for the
-# month-swipe to settle, tap the target day cell (content-desc
-# "15 February 2026"), confirm with OK.
+# Android: native Material calendar dialog (display="default", one-shot — no
+# re-open after OK). The day grid is a canvas-drawn SimpleMonthView exposing
+# days only as VIRTUAL accessibility nodes (no real child View), so a day can't
+# be resolved by text and a positional tap is resolution-dependent (it picked
+# the wrong day on the CI emulator). Drive the YEAR selector instead: tapping
+# the year header opens a list of real year TextViews — resolution-independent,
+# findable by text. Pick 2027 (day/month preserved → 2027-01-15), confirm OK.
 - runFlow:
     when:
       platform: Android
     commands:
-      - tapOn: 'Next month'
-      - waitForAnimationToEnd
-      # The day grid is a single canvas-drawn SimpleMonthView exposing each
-      # day only as a VIRTUAL accessibility node (no real child View), so the
-      # in-app agent — which walks the real View tree — can't resolve a day by
-      # text. Tap by position instead: Feb 2026 starts on a Sunday, so the 15th
-      # is row 3, column 1 of the grid. ("Next month" / "OK" stay text taps —
-      # those are real Buttons.)
-      - tapOn:
-          point: '23%,55%'
+      - tapOn: '2026'
+      - tapOn: '2027'
       - tapOn: 'OK'
       - assertVisible:
-          text: 'Date: 2026-02-15'
+          text: 'Date: 2027-01-15'
