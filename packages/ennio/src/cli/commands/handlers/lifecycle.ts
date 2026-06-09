@@ -9,9 +9,11 @@ import { execFileSync } from 'node:child_process';
 
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
-import { POST_LAUNCH_SETTLE_MS, sleep } from '../../runner/context';
+import { sleep } from '../../runner/context';
 // Relaunch / terminate / soft-reset all route through ctx.platform (the
-// iOS/Android backend abstraction) — no direct lifecycle helper calls here.
+// iOS/Android backend abstraction); the launch-args reuse gate is the
+// one direct lifecycle helper import.
+import { launchArgsSatisfiedByProcess } from '../../runner/lifecycle';
 
 interface LaunchAppCmd {
   launchApp:
@@ -81,17 +83,23 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
       if (opts.clearState) {
         // App reuse (default ON; --disable-reuse-app sets ENNIO_REUSE_APP=0):
         // when the app is ALREADY running (the runner reconnected to the prior
-        // flow's process) and there are no launch arguments (those need a real
-        // relaunch to take effect), soft-reset in place instead of paying the
-        // ~6s relaunch. Routed through ctx.platform.softReset so each backend
+        // flow's process), soft-reset in place instead of paying the ~6s
+        // relaunch. Routed through ctx.platform.softReset so each backend
         // resets the right way — iOS wipes + JS-reloads in place; Android
-        // relaunches (no in-process reload on a release bundle). The previous
-        // direct softResetAndReload call ran the iOS simctl path on Android.
+        // relaunches (no in-process reload on a release bundle). Launch
+        // arguments only force a relaunch when they DIFFER from the ones the
+        // running process was started with: identical args are already live
+        // in its NSUserDefaults arguments domain (process-scoped, survives
+        // the data wipe + JS reload).
         const canReuse =
           process.env.ENNIO_REUSE_APP !== '0' &&
           ctx.client.isConnected() &&
-          launchArgs.length === 0 &&
+          launchArgsSatisfiedByProcess(ctx.udid, ctx.bundleId, launchArgs) &&
           !opts.clearKeychain;
+        // No trailing blind settle: every branch below ends on a
+        // first-paint SIGNAL of its own (softResetAndReload and
+        // clearStateAndRelaunch wait for the post-launch React commit,
+        // relaunchAndReconnect calls waitForFirstPaint).
         if (canReuse) {
           await ctx.platform.softReset(ctx);
         } else {
@@ -102,7 +110,6 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         // Re-launch so the agent reattaches.
         await ctx.platform.relaunchAndReconnect(ctx, launchArgs);
       }
-      await sleep(POST_LAUNCH_SETTLE_MS);
     },
   );
 
@@ -110,7 +117,6 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & ClearStateCmd => has(c, 'clearState'),
     async (_cmd, { ctx }) => {
       await ctx.platform.clearStateAndRelaunch(ctx);
-      await sleep(POST_LAUNCH_SETTLE_MS);
     },
   );
 

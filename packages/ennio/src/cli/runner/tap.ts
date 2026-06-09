@@ -452,34 +452,51 @@ export async function execTapOn(
     };
     if (!(await checkExposed())) {
       confirmedExposed = false;
-      await timedAsync(ctx, 'tap.waitExposed', async () => {
-        // 800 ms cap: RN animations (sheet present/dismiss, modal
-        // slide) are typically 300-500 ms. The retap-self-heal loop
-        // covers any case where the initial tap still misses.
-        const deadline = Date.now() + 800;
-        while (Date.now() < deadline) {
-          await sleep(80);
-          if (await checkExposed()) {
-            confirmedExposed = true;
-            break;
+      // Triage the occlusion BEFORE waiting: when the cover is a
+      // presented modal (composer sheet pending an async publish →
+      // server round-trip), exposure cannot flip until the modal
+      // clears — the 800 ms animation wait and scroll_to below are
+      // guaranteed dead time (measured: every waitExposed in the bsky
+      // composer flow ran to its full cap, then the modal gate
+      // resolved it anyway). The modal gate's own poll breaks early
+      // the moment exposure flips, so the mid-dismissal case loses
+      // nothing by skipping straight there.
+      const earlyBm = await ctx.client.call('behind_modal', exposureSel).catch(() => undefined);
+      const behindModalNow = !!(
+        earlyBm &&
+        earlyBm.ok &&
+        (earlyBm.data as { behind?: boolean } | undefined)?.behind
+      );
+      if (!behindModalNow) {
+        await timedAsync(ctx, 'tap.waitExposed', async () => {
+          // 800 ms cap: RN animations (sheet present/dismiss, modal
+          // slide) are typically 300-500 ms. The retap-self-heal loop
+          // covers any case where the initial tap still misses.
+          const deadline = Date.now() + 800;
+          while (Date.now() < deadline) {
+            await sleep(80);
+            if (await checkExposed()) {
+              confirmedExposed = true;
+              break;
+            }
           }
-        }
-      });
-      // Occlusion self-heal: still covered after the wait AND we have
-      // a testID → the cover is positional (target parked under the
-      // tab bar / nav header), not transitional. scroll_to drives
-      // scrollRectToVisible:, which respects adjusted contentInset on
-      // any layout — UIKit moves the row clear of its own chrome.
-      // This is checked at TAP time (not in scrollUntilVisible) so the
-      // answer can't decay between scroll and tap.
-      if (!confirmedExposed && sel.id) {
-        await timedAsync(ctx, 'tap.scrollToExpose', async () => {
-          await ctx.client.call('scroll_to', { elementTestID: sel.id }).catch(() => undefined);
-          await ctx.client
-            .call('wait_commit', { maxMs: 600, stableMs: 100 })
-            .catch(() => undefined);
-          confirmedExposed = await checkExposed();
         });
+        // Occlusion self-heal: still covered after the wait AND we have
+        // a testID → the cover is positional (target parked under the
+        // tab bar / nav header), not transitional. scroll_to drives
+        // scrollRectToVisible:, which respects adjusted contentInset on
+        // any layout — UIKit moves the row clear of its own chrome.
+        // This is checked at TAP time (not in scrollUntilVisible) so the
+        // answer can't decay between scroll and tap.
+        if (!confirmedExposed && sel.id) {
+          await timedAsync(ctx, 'tap.scrollToExpose', async () => {
+            await ctx.client.call('scroll_to', { elementTestID: sel.id }).catch(() => undefined);
+            await ctx.client
+              .call('wait_commit', { maxMs: 600, stableMs: 100 })
+              .catch(() => undefined);
+            confirmedExposed = await checkExposed();
+          });
+        }
       }
       // Modal-occlusion gate: the target's hosting VC sits BEHIND the
       // topmost presented VC — a modal floats over it, and (pageSheet)
