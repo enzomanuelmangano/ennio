@@ -73,8 +73,19 @@ jobs:
         with:
           node-version: 24
 
+      # Xcode 16.x, NOT 26: the fixture (bsky v1.122) is only proven on the
+      # iOS 18.x runtime. On iOS 26 the suite hits app SIGABRT crashes
+      # (avatar creator, feed render) and the photo picker never presents —
+      # app-runtime incompatibilities, not runner issues.
       - name: Select Xcode
-        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+        run: |
+          set -euo pipefail
+          ls /Applications | grep -E '^Xcode' || true
+          for x in Xcode_16.4.app Xcode_16.3.app Xcode_16.2.app; do
+            if [ -d "/Applications/$x" ]; then sudo xcode-select -switch "/Applications/$x"; break; fi
+          done
+          xcodebuild -version
+          xcrun simctl list runtimes
 
       # Kick the boot FIRST and don't wait — CoreSimulator boots in the
       # background (~90s) while the JS/dylib builds and the mock backend
@@ -82,7 +93,7 @@ jobs:
       # remainder. (Lesson from ci-example perf work: serial boot was a
       # pure 97s tax.)
       - name: Start simulator boot (async)
-        run: xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
+        run: xcrun simctl boot "iPhone 16 Pro" || xcrun simctl boot "iPhone 16" || true
 
       - name: Cache bun
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
