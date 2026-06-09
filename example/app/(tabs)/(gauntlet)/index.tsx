@@ -38,6 +38,7 @@ const PATTERNS: { id: string; label: string; route: string }[] = [
   { id: 'g-segmented', label: 'Native segmented control', route: '/gauntlet/segmented' },
   { id: 'g-datepicker', label: 'Native UIDatePicker spinner', route: '/gauntlet/datepicker' },
   { id: 'g-playground', label: 'Playground sandbox', route: '/gauntlet/playground' },
+  { id: 'g-2048', label: '2048 (swipe-driven game)', route: '/gauntlet/2048' },
 ];
 
 export default function GauntletIndex() {

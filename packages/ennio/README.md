@@ -94,6 +94,68 @@ Native's responder system, and RNGH all see a real touch.
 `setClipboard`, `pasteText`, `runFlow`, `runScript`,
 `extendedWaitUntil`
 
+## MCP server
+
+`ennio mcp` exposes the runner as a [Model Context Protocol](https://modelcontextprotocol.io)
+server over stdio, so an AI agent can drive a device directly: read the
+screen, decide, act — using the same find → settle → actuate pipeline an
+`ennio test` run uses. Taps and swipes go through the HID driver, so ennio
+is always the tap path, never a passthrough.
+
+The interface is tool-agnostic by design. It works identically with any MCP
+client — Claude Code, Cursor, Cline, or a hand-rolled one — with no
+client-specific coupling. Add it to a client's MCP config:
+
+```jsonc
+{
+  "mcpServers": {
+    "ennio": { "command": "ennio", "args": ["mcp"] },
+  },
+}
+```
+
+**Tools** (`ennio_<verb>`, self-describing via JSON Schema):
+
+- Reads (pure): `ennio_status`, `ennio_describe`, `ennio_screenshot`,
+  `ennio_assert_visible`, `ennio_wait_for`
+- Actions (HID): `ennio_launch_app`, `ennio_stop_app`, `ennio_tap`,
+  `ennio_double_tap`, `ennio_long_press`, `ennio_input_text`,
+  `ennio_erase_text`, `ennio_swipe`, `ennio_scroll`, `ennio_back`
+
+**Resources:** `ennio://screen/hierarchy`, `ennio://screen/screenshot`,
+`ennio://session`.
+
+**Contract.** The tool surface is a versioned public API. Guarantees:
+
+1. **Self-describing** — every `ennio_<verb>` tool ships a routable description,
+   a full JSON Schema, and an inline example for any tool that takes arguments.
+   No external docs needed to pick the right tool.
+2. **Structured results, always** — one envelope: `{ ok: true, data }` or
+   `{ ok: false, error: { kind, message } }`, `kind ∈
+not_found | timeout | invalid | infra`. Never raw stdout, never a thrown
+   exception. `not_found` is a normal answer the agent branches on, not a failure.
+3. **One selector + coordinate model** — selectors take exactly one of `testID`,
+   `text`, or a normalized `point`; all coordinates/rects are `[0,1]` screen
+   fractions; times are ms. Same vocabulary across every tool.
+4. **Transparent app view** — `ennio_describe` returns the real element
+   inventory (role / testID / text / value); `ennio_find` resolves any selector
+   to a normalized rect + tap center. No hidden heuristics.
+5. **Capability negotiation** — `ennio_status` reports `protocolVersion`,
+   `contractVersion`, `platform`, `dylibLoaded`, and `capabilities`
+   (`attach`, `actuation`, `crossProcessAx`) so an agent adapts instead of
+   guessing.
+6. **Side-effect-honest** — read tools are flagged `readOnly`; mutating tools
+   are not. No surprising global state between calls.
+7. **Versioned** — `contractVersion` is semver (`1.0.0`); breaking changes bump
+   it. `protocolVersion` reports the MCP revision in use.
+
+These bars are enforced by an executable conformance suite
+(`src/cli/mcp/contract.test.ts`) — that file is the authoritative spec.
+
+The interface is tool-agnostic: Argent is just the first consumer. ennio
+declares how it touches the app (`attach: dyld-inject`, `actuation: hid`) so a
+coordinating agent can sequence other controllers around a single actuator.
+
 ## License
 
 MIT

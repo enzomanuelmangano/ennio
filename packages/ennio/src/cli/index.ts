@@ -21,6 +21,7 @@ import { runVersionCommand } from './commands/version';
 import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
+import { runMcpCommand } from './commands/mcp';
 import { printCrashReport } from './crash-reporter';
 import { currentVersion, printUpdateNotice } from './update-check';
 import { warnVersionDrift } from './version-context';
@@ -30,8 +31,9 @@ async function main() {
 
   // Up front, for every command: recommend an update if one is available
   // (cached, non-blocking, once per process, TTY-only) and flag a global CLI
-  // that differs from the project's pinned ennio. Skipped for JSON output.
-  if (flags.reporter !== 'json') {
+  // that differs from the project's pinned ennio. Skipped for JSON output and
+  // for `mcp` (stdout there is a JSON-RPC stream that must stay clean).
+  if (flags.reporter !== 'json' && command !== 'mcp') {
     printUpdateNotice(currentVersion());
     warnVersionDrift();
   }
@@ -63,6 +65,8 @@ async function main() {
       return runScreenshotCommand(positional, flags);
     case 'doctor':
       return runDoctorCommand(positional, flags);
+    case 'mcp':
+      return runMcpCommand(positional, flags);
     case 'test':
     case 'run':
       return runTestCommand(positional, flags);

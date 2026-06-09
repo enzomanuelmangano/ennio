@@ -38,6 +38,9 @@ export type Flags = {
   android?: boolean;
   /** --ios: force the iOS simulator backend (default). */
   ios?: boolean;
+  /** --smoke: `ennio doctor --smoke <bundleId>` runs an end-to-end self-test
+   *  (inject → socket → read → actuate) against a real app. */
+  smoke?: boolean;
 };
 
 export type ParsedArgs = {
@@ -60,6 +63,7 @@ const BOOL_FLAGS = new Set([
   'disable-reuse-app',
   'android',
   'ios',
+  'smoke',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {
@@ -120,7 +124,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
   // First positional is the subcommand if it doesn't look like a file path
   // or glob. Heuristic: known command name, or no slash + no .yaml/.yml.
-  const KNOWN = new Set(['test', 'run', 'help', 'version', 'hierarchy', 'screenshot', 'doctor']);
+  const KNOWN = new Set([
+    'test',
+    'run',
+    'help',
+    'version',
+    'hierarchy',
+    'screenshot',
+    'doctor',
+    'mcp',
+  ]);
   let command: string | null = null;
   if (positional.length > 0 && KNOWN.has(positional[0])) {
     command = positional.shift()!;
