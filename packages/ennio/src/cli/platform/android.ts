@@ -324,14 +324,20 @@ export class AndroidPlatform implements Platform {
    */
   private async establishReady(serial: string, bundleId: string): Promise<EnnioConnection> {
     let lastErr = '';
-    // More attempts than seems necessary, but each failed inject is now cheap
-    // (the socket-bind check below fails in ~ms-to-1s instead of the old ~14s
-    // readiness timeout), so the extra tries cost little and ride out the
-    // x86 emulator's transient bad patches where ptrace silently no-ops.
-    for (let attempt = 0; attempt < 8; attempt++) {
+    // Each failed inject is cheap (the socket-bind check below fails in
+    // ~ms-to-4s vs the old ~14s readiness timeout), so we can afford many
+    // tries to ride out the x86 emulator's transient bad patches — windows
+    // (~40s seen) where ptrace silently no-ops because the target VM is
+    // momentarily unresponsive under GC / system_server load. Crucially the
+    // inter-attempt backoff ESCALATES: rapid-fire relaunches add load and
+    // prolong the bad patch, so later attempts space out (up to ~6s) to both
+    // span more wall-clock and let the emulator recover. 12 attempts ×
+    // escalating backoff spans ~90s, comfortably outlasting the observed
+    // patches so the flow recovers in-place instead of needing a suite retry.
+    for (let attempt = 0; attempt < 12; attempt++) {
       if (attempt > 0) {
         terminateAndroidApp(serial, bundleId);
-        await sleep(400);
+        await sleep(Math.min(400 + attempt * 600, 6_000));
       }
       launchAndroidApp(serial, bundleId);
       const pid = waitForAppPid(serial, bundleId, 8_000);
