@@ -154,7 +154,10 @@ function simBootStamp(udid: string): string | null {
 export function prepareSimulator(udid: string): void {
   const stamp = simBootStamp(udid);
   const marker = stamp
-    ? join(tmpdir(), `ennio-sim-prep-${udid}-${createHash('sha1').update(stamp).digest('hex').slice(0, 12)}`)
+    ? join(
+        tmpdir(),
+        `ennio-sim-prep-${udid}-${createHash('sha1').update(stamp).digest('hex').slice(0, 12)}`,
+      )
     : null;
   if (marker && existsSync(marker)) {
     if (PHASE_TRACE) console.error('[phase] startup.simPrep skipped (sentinel)');
