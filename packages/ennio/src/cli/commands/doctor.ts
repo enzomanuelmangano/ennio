@@ -140,17 +140,34 @@ async function checkSocket(): Promise<Result> {
  * the HID actuator. If this passes, a real run will work; if it fails, it
  * fails here with an actionable message instead of mid-flow.
  */
+const tag: Record<Severity, string> = { pass: '[PASS]', warn: '[WARN]', fail: '[FAIL]' };
+
+/** Print one result line the instant it's known — streaming, so a hang in
+ *  the next step is visible instead of a silent wait. */
+function emit(r: Result): Result {
+  console.log(`${tag[r.severity]} ${r.name.padEnd(22)} ${r.detail}`);
+  return r;
+}
+
+/** Bound any step so the smoke ALWAYS reaches a verdict — never hangs.
+ *  Rejects with a labelled timeout past `ms`. */
+function deadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
 async function runSmoke(bundleId: string, platformName: 'ios' | 'android'): Promise<number> {
-  const print = (results: Result[]): void => {
-    const tag: Record<Severity, string> = { pass: '[PASS]', warn: '[WARN]', fail: '[FAIL]' };
-    for (const r of results) console.log(`${tag[r.severity]} ${r.name.padEnd(22)} ${r.detail}`);
+  const results: Result[] = [];
+  const rec = (r: Result): void => {
+    results.push(emit(r));
   };
 
-  const results: Result[] = [checkDylib()];
+  rec(checkDylib());
   const udid = getBootedSimulatorId() ?? ensureBootedSim();
-  results.push(checkSim(udid));
+  rec(checkSim(udid));
   if (!udid) {
-    print(results);
     console.log('\n✗ No simulator available — boot one (or set ENNIO_UDID) and retry.');
     return 1;
   }
@@ -158,54 +175,54 @@ async function runSmoke(bundleId: string, platformName: 'ios' | 'android'): Prom
   const platform = selectPlatform(platformName);
   let connection: { socket: EnnioSocketClient; close(): void } | null = null;
   try {
-    const opened = await platform.connect({
-      udid,
-      bundleId,
-      dylibPath: process.env.ENNIO_DYLIB_PATH || null,
-    });
+    // Hard ceiling: injection + socket bootstrap must complete in 30s. A
+    // Release build (dylib refuses) or a wedged launch ends here with a
+    // verdict, never a silent hang.
+    const opened = await deadline(
+      platform.connect({ udid, bundleId, dylibPath: process.env.ENNIO_DYLIB_PATH || null }),
+      30_000,
+      'inject + socket',
+    );
     connection = opened.connection;
-    results.push({
-      name: 'inject + socket',
-      severity: 'pass',
-      detail: 'dylib loaded, bootstrap ready',
-    });
+    rec({ name: 'inject + socket', severity: 'pass', detail: 'dylib loaded, bootstrap ready' });
   } catch (e) {
-    results.push({
+    rec({
       name: 'inject + socket',
       severity: 'fail',
       detail: e instanceof Error ? e.message.split('\n')[0] : String(e),
     });
-    print(results);
-    console.log(`\n✗ Injection failed for ${bundleId}. Most common causes:`);
-    console.log(
-      '  - the app is not a Debug/dev build (the dylib refuses Release/App Store builds)',
-    );
+    console.log(`\n✗ Could not bring up the in-app agent for ${bundleId}. Most common causes:`);
+    console.log('  - the app is not a Debug/dev build (the dylib refuses Release/App Store builds)');
     console.log('  - the bundle id is wrong, or the app is not installed on this simulator');
     console.log('  - an unsupported iOS/RN combination — see the issue tracker');
     return 1;
   }
 
   try {
-    const views = await connection.socket.call('dump_views');
+    const views = await deadline(connection.socket.call('dump_views'), 8_000, 'dump_views').catch(
+      (e: unknown) => ({ ok: false, err: e instanceof Error ? e.message : String(e), data: [] }),
+    );
     const n = Array.isArray(views.data) ? views.data.length : 0;
-    results.push({
+    rec({
       name: 'in-process read',
       severity: views.ok && n > 0 ? 'pass' : 'warn',
       detail: views.ok ? `dump_views returned ${n} elements` : `dump_views failed: ${views.err}`,
     });
 
-    const size = await connection.socket.call('window_size');
-    results.push({
+    const size = await deadline(connection.socket.call('window_size'), 8_000, 'window_size').catch(
+      () => ({ ok: false, data: null }),
+    );
+    rec({
       name: 'screen geometry',
       severity: size.ok ? 'pass' : 'warn',
       detail: size.ok ? JSON.stringify(size.data) : 'window_size failed',
     });
 
     try {
-      await warmActuator(udid);
-      results.push({ name: 'HID actuator', severity: 'pass', detail: 'enniohid responded' });
+      await deadline(warmActuator(udid), 10_000, 'HID actuator');
+      rec({ name: 'HID actuator', severity: 'pass', detail: 'enniohid responded' });
     } catch (e) {
-      results.push({
+      rec({
         name: 'HID actuator',
         severity: 'fail',
         detail: `enniohid did not respond: ${e instanceof Error ? e.message : String(e)}`,
@@ -215,10 +232,8 @@ async function runSmoke(bundleId: string, platformName: 'ios' | 'android'): Prom
     connection.close();
   }
 
-  print(results);
-  const failed = results.filter((r) => r.severity === 'fail');
-  if (failed.length > 0) {
-    console.log(`\n✗ ${failed.length} blocking issue(s) — ennio will not work reliably here yet.`);
+  if (results.some((r) => r.severity === 'fail')) {
+    console.log('\n✗ Blocking issue(s) above — ennio will not work reliably here yet.');
     return 1;
   }
   console.log('\n✓ End-to-end smoke passed — inject, read, and actuate all work on this machine.');
