@@ -125,14 +125,36 @@ client-specific coupling. Add it to a client's MCP config:
 **Resources:** `ennio://screen/hierarchy`, `ennio://screen/screenshot`,
 `ennio://session`.
 
-**Contract.** Every tool returns one structured envelope — `{ ok: true,
-data }` or `{ ok: false, error: { kind, message } }`, where `kind` is one of
-`not_found | timeout | invalid | infra`. A `not_found` is a normal answer,
-not a failure. Selectors take exactly one of `testID`, `text`, or a
-normalized `point`; all coordinates and rects are `[0,1]` fractions of the
-screen. `ennio_status` reports the contract version, platform, and
-capabilities (`attach`, `actuation`, `crossProcessAx`) for capability
-negotiation.
+**Contract.** The tool surface is a versioned public API. Guarantees:
+
+1. **Self-describing** — every `ennio_<verb>` tool ships a routable description,
+   a full JSON Schema, and an inline example for any tool that takes arguments.
+   No external docs needed to pick the right tool.
+2. **Structured results, always** — one envelope: `{ ok: true, data }` or
+   `{ ok: false, error: { kind, message } }`, `kind ∈
+not_found | timeout | invalid | infra`. Never raw stdout, never a thrown
+   exception. `not_found` is a normal answer the agent branches on, not a failure.
+3. **One selector + coordinate model** — selectors take exactly one of `testID`,
+   `text`, or a normalized `point`; all coordinates/rects are `[0,1]` screen
+   fractions; times are ms. Same vocabulary across every tool.
+4. **Transparent app view** — `ennio_describe` returns the real element
+   inventory (role / testID / text / value); `ennio_find` resolves any selector
+   to a normalized rect + tap center. No hidden heuristics.
+5. **Capability negotiation** — `ennio_status` reports `protocolVersion`,
+   `contractVersion`, `platform`, `dylibLoaded`, and `capabilities`
+   (`attach`, `actuation`, `crossProcessAx`) so an agent adapts instead of
+   guessing.
+6. **Side-effect-honest** — read tools are flagged `readOnly`; mutating tools
+   are not. No surprising global state between calls.
+7. **Versioned** — `contractVersion` is semver (`1.0.0`); breaking changes bump
+   it. `protocolVersion` reports the MCP revision in use.
+
+These bars are enforced by an executable conformance suite
+(`src/cli/mcp/contract.test.ts`) — that file is the authoritative spec.
+
+The interface is tool-agnostic: Argent is just the first consumer. ennio
+declares how it touches the app (`attach: dyld-inject`, `actuation: hid`) so a
+coordinating agent can sequence other controllers around a single actuator.
 
 ## License
 

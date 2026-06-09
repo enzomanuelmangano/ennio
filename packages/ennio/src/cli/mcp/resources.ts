@@ -5,7 +5,7 @@
 
 import { readFileSync } from 'node:fs';
 
-import { ENNIO_CONTRACT_VERSION } from './protocol';
+import { ENNIO_CONTRACT_VERSION, PREFERRED_PROTOCOL_VERSION } from './protocol';
 import type { EnnioMcpSession } from './session';
 import type { ResourceDef } from './server';
 
@@ -38,6 +38,7 @@ export function buildResources(session: EnnioMcpSession): ResourceDef[] {
       read: () => ({
         text: JSON.stringify(
           {
+            protocolVersion: PREFERRED_PROTOCOL_VERSION,
             contractVersion: ENNIO_CONTRACT_VERSION,
             platform: session.platformName,
             attached: session.attached,

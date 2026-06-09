@@ -13,7 +13,7 @@
 import type { MaestroCommand, MaestroSelector } from '../maestro-parser';
 import { currentVersion } from '../update-check';
 
-import { ENNIO_CONTRACT_VERSION } from './protocol';
+import { ENNIO_CONTRACT_VERSION, PREFERRED_PROTOCOL_VERSION } from './protocol';
 import { err, ok } from './result';
 import type { EnnioResult } from './result';
 import { SELECTOR_SCHEMA, toMaestroSelector } from './selectors';
@@ -60,10 +60,14 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
       readOnly: true,
       handler: () =>
         ok({
+          // Versioned contract (semver) + the MCP protocol revision in play,
+          // so an agent can negotiate before driving.
+          protocolVersion: PREFERRED_PROTOCOL_VERSION,
           contractVersion: ENNIO_CONTRACT_VERSION,
           ennioVersion: currentVersion(),
           platform: session.platformName,
           attached: session.attached,
+          dylibLoaded: session.attached,
           device: { udid: session.udid, bundleId: session.bundleId },
           capabilities: {
             attach: session.attachMode,
