@@ -3,8 +3,10 @@
 > [!WARNING]
 > **Experimental.** APIs, package names, internals, and behavior may
 > change without notice. iOS is the primary target and further along;
-> **Android is earlier-stage** (opt-in via `--android`). Expect rough
-> edges on both; do not rely on it for production-critical test suites yet.
+> **Android is newer** (opt-in via `--android`) — its full example
+> suite runs green and stable on CI, but it has seen less real-world
+> use than the iOS path. Expect rough edges on both; do not rely on it
+> for production-critical test suites yet.
 
 Maestro-compatible E2E test runner for React Native iOS. The CLI
 injects a prebuilt ObjC dylib into your simulator app via
@@ -16,15 +18,16 @@ through the same path a finger would.
 No XCTest, no CDP, no Metro required, no companion driver.
 
 ```bash
-npx ennio test e2e/01-auth-flow.yaml      # one flow
-npx ennio test e2e/                       # every *.yaml in the directory
+ennio test e2e/01-auth-flow.yaml      # one flow
+ennio test e2e/                       # every *.yaml in the directory
 ```
 
 https://github.com/user-attachments/assets/8734572f-f90c-4658-9cba-98642d0da2d5
 
 ## Getting started
 
-Requires a React Native app (New Architecture, Fabric), iOS 17+
+Requires a React Native app (architecture-agnostic — both Paper and
+Fabric commit signals are supported), iOS 17+
 simulator, Xcode 16+, and Node 18+. No extra toolchain — touches are
 driven by an in-house helper that links Xcode's own CoreSimulator /
 SimulatorKit frameworks. No Homebrew formula, no pip.
@@ -32,13 +35,15 @@ SimulatorKit frameworks. No Homebrew formula, no pip.
 ### Install
 
 ```bash
-bun add -D @reactiive/ennio          # or npm install --save-dev
+npm install -g @reactiive/ennio      # or bun add -g @reactiive/ennio
 ```
 
-No config plugin, no `npx expo prebuild`, no pod install, no rebuild.
-Ennio ships a universal prebuilt dylib in the npm tarball; the CLI
-injects it at simulator launch time. Works across all New Architecture
-RN versions.
+No config plugin, no `npx expo prebuild`, no pod install, no rebuild —
+and nothing to add to your app's dependencies. Ennio is a standalone
+CLI: install it globally, point it at any simulator app. It ships a
+universal prebuilt dylib in the npm tarball and injects it at
+simulator launch time. Works across RN versions and both
+architectures.
 
 **Write a Maestro YAML flow** (`e2e/login.yaml`):
 
@@ -58,16 +63,17 @@ appId: com.your.app
 **Run it:**
 
 ```bash
-npx ennio test e2e/login.yaml
+ennio test e2e/login.yaml
 ```
 
 The CLI:
 
-1. Picks the dylib from `node_modules/@reactiive/ennio/prebuilt/`.
+1. Picks the dylib from the package's `prebuilt/` directory.
 2. Verifies its SHA-256 against `prebuilt/manifest.json` (refuses on
    mismatch — see [Security](#security)).
-3. Sets `DYLD_INSERT_LIBRARIES` and `ENNIO_TARGET_BUNDLE_ID` on the
-   simulator's launchctl env.
+3. Sets `DYLD_INSERT_LIBRARIES` and `ENNIO_TARGET_BUNDLE_ID` as child
+   env on the `simctl launch` (`SIMCTL_CHILD_*` — only your app
+   inherits them, not the whole simulator).
 4. Launches your app via `simctl`.
 5. The shim dylib gates on bundle-id + RN-app presence and dlopens
    the real dylib only inside your targeted app.
@@ -176,6 +182,11 @@ that keeps it safe:
 ennio test <flow.yaml>            # one flow
 ennio test e2e/                   # every *.yaml under the directory
 ennio test --verbose e2e/         # log every step + timing
+ennio hierarchy                   # dump the in-app shadow tree as JSON
+ennio screenshot [path]           # grab the simulator screen
+ennio doctor                      # diagnose Node, Xcode, enniohid, dylib + app socket
+ennio doctor --smoke <bundleId>   # end-to-end self-test: inject, read, actuate
+ennio mcp                         # serve ennio over MCP (stdio) for an AI agent
 ```
 
 ### Flags
@@ -207,6 +218,34 @@ independent: Ennio terminates the app, wipes its data directories,
 then re-launches. The Unix socket reconnects automatically once the
 fresh app process starts.
 
+## MCP server
+
+`ennio mcp` exposes the runner as a
+[Model Context Protocol](https://modelcontextprotocol.io) server over
+stdio, so an AI agent can drive a device directly — read the screen,
+decide, act — using the same find → settle → actuate pipeline an
+`ennio test` run uses. Taps and swipes go through the HID driver, so
+ennio is always the tap path, never a passthrough.
+
+Tool-agnostic by design: works identically with any MCP client
+(Claude Code, Cursor, Cline, or a hand-rolled one). Add it to a
+client's MCP config:
+
+```jsonc
+{
+  "mcpServers": {
+    "ennio": { "command": "ennio", "args": ["mcp"] },
+  },
+}
+```
+
+The tool surface (`ennio_<verb>`) is a versioned public contract —
+structured `{ ok, data | error }` results, one selector model
+(`testID` | `text` | normalized `point`), capability negotiation via
+`ennio_status` — enforced by an executable conformance suite. Full
+tool list and contract details in
+[`packages/ennio/README.md`](packages/ennio/README.md#mcp-server).
+
 ## Maestro flow support
 
 The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
@@ -225,9 +264,11 @@ The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
 ## Limitations
 
 - **iOS** is the primary target — the most coverage so far (still experimental).
-- **Android** is **earlier-stage** — opt-in via `--android` (or
-  `ENNIO_PLATFORM=android`). In-process agent injection (JVMTI attach / ptrace);
-  less exercised than the iOS path.
+- **Android** is **newer** — opt-in via `--android` (or
+  `ENNIO_PLATFORM=android`). In-process agent injection (JVMTI attach /
+  ptrace — works on non-debuggable release builds). The full example
+  suite (40 flows) runs green and stable on CI, but the path has seen
+  less real-world use than iOS.
 
 ## License
 

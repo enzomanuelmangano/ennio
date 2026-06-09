@@ -2,8 +2,10 @@
 
 > [!WARNING]
 > **Experimental.** APIs, package names, internals, and behavior may
-> change without notice. iOS only. Expect rough edges; do not rely on
-> it for production-critical test suites yet.
+> change without notice. iOS is the primary target; **Android is
+> newer** (opt-in via `--android`) — its full example suite runs green
+> and stable on CI, but it has seen less real-world use. Expect rough
+> edges; do not rely on it for production-critical test suites yet.
 
 Maestro-compatible E2E test runner for React Native iOS.
 
@@ -15,15 +17,17 @@ through the same path a finger would. No XCTest, no CDP, no companion
 driver.
 
 ```bash
-bun add -D @reactiive/ennio          # or npm install --save-dev
+npm install -g @reactiive/ennio      # or bun add -g @reactiive/ennio
 
-bunx ennio test e2e/01-auth-flow.yaml      # one flow
-bunx ennio test e2e/                       # every *.yaml in the directory
+ennio test e2e/01-auth-flow.yaml      # one flow
+ennio test e2e/                       # every *.yaml in the directory
 ```
 
-No config plugin, no `expo prebuild`, no pod install. Ennio ships a
-single universal prebuilt dylib in the npm tarball; the CLI injects
-it at simulator launch time.
+No config plugin, no `expo prebuild`, no pod install — and nothing to
+add to your app's dependencies. Ennio is a standalone CLI: install it
+globally, point it at any simulator app. It ships a single universal
+prebuilt dylib in the npm tarball; the CLI injects it at simulator
+launch time.
 
 ## Requirements
 
