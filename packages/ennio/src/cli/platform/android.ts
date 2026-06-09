@@ -44,7 +44,6 @@ import {
   stageAndAttachAgent,
   terminateAndroidApp,
   waitForAppPid,
-  waitForResumedActivity,
 } from '../android/adb';
 
 import type { AxBridge, ConnectOptions, OpenConnection, Platform, SystemBridge } from './types';
@@ -335,17 +334,8 @@ export class AndroidPlatform implements Platform {
         lastErr = 'app process never started';
         continue;
       }
-      // pidof returns the instant the process forks — before Application
-      // .onCreate. A ptrace dlopen into a process that early can wedge the
-      // cold start: the activity never resumes, the agent's `ready` flag
-      // never flips, and the readiness poll burns its whole ~56s budget
-      // (the dominant CI retry flake). Wait for the app to own a RESUMED
-      // activity first, so injection lands on a settled process and start()
-      // finds the foreground activity immediately. Best-effort: if it never
-      // resumes in time we still try to inject rather than fail the attempt.
-      waitForResumedActivity(serial, bundleId, 20_000);
       try {
-        // Inject the agent into the now-resumed process. Both paths stage
+        // Inject the agent into the freshly-started process. Both paths stage
         // the .so into the app's code_cache (wiped by pm clear, so re-staged
         // every launch); the agent's bounded wait covers the brief window
         // before Application.onCreate.
@@ -369,8 +359,19 @@ export class AndroidPlatform implements Platform {
       if ((await conn.open(12_000)) && (await this.isAgentReady(conn, 12_000))) {
         return conn;
       }
+      // Capture the agent's own view of why readiness never flipped — a stuck
+      // ready flag (resumedActivity=true) vs a genuinely un-resumed app
+      // (resumedActivity=false) point at different root causes.
+      let diag = '';
+      try {
+        const p = await conn.socket.call('ping');
+        const d = p?.data as { resumedActivity?: boolean; hasActivityRef?: boolean } | undefined;
+        if (d) diag = ` (resumedActivity=${d.resumedActivity} hasActivityRef=${d.hasActivityRef})`;
+      } catch {
+        diag = ' (socket unreachable)';
+      }
       conn.close();
-      lastErr = 'agent attached but @ennio never became ready';
+      lastErr = `agent attached but @ennio never became ready${diag}`;
     }
     throw new Error(
       `EnnioAgent never came up for ${bundleId}: ${lastErr}. ` +

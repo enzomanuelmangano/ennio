@@ -157,6 +157,36 @@ public final class EnnioAgent {
 
     private static Activity topActivity() { return activityRef.get(); }
 
+    // Readiness ping with LAZY recovery. The agent can be injected AFTER the
+    // first activity already resumed, in which case onActivityResumed never
+    // fires retroactively — `ready` would then stay false forever and the CLI
+    // declares "@ennio never became ready" (the dominant CI retry flake, ~56s).
+    // Re-resolve the resumed activity on every ping so readiness still flips
+    // the instant the app reaches the foreground. Also reports diagnostics so
+    // a stuck flag (resumedActivity=true) is distinguishable from a genuinely
+    // un-resumed app (resumedActivity=false).
+    private static JSONObject ping() {
+        if (!ready) {
+            Activity cur = currentResumedActivity();
+            if (cur != null) {
+                activityRef = new WeakReference<>(cur);
+                ready = true;
+                resumed = true;
+                ensureSocketStarted();
+                mainHandler.post(EnnioAgent::installPreDrawObserver);
+            }
+        }
+        JSONObject r = new JSONObject();
+        try {
+            r.put("pong", true);
+            r.put("bootstrap", ready ? "ready" : "pending");
+            r.put("resumedActivity", currentResumedActivity() != null);
+            r.put("hasActivityRef", topActivity() != null);
+        } catch (Throwable ignored) {
+        }
+        return r;
+    }
+
     private static View decorView() {
         Activity a = topActivity();
         return a == null ? null : a.getWindow().getDecorView();
@@ -310,7 +340,7 @@ public final class EnnioAgent {
     private static Object dispatch(String op, JSONObject a) throws Exception {
         switch (op) {
             case "ping":
-                return new JSONObject().put("pong", true).put("bootstrap", ready ? "ready" : "pending");
+                return ping();
             case "window_size": return windowSize();
             case "find_by_testid": return findByTestId(a.getString("testID"), 0);
             case "find_by_testid_nth": return findByTestId(a.getString("testID"), a.optInt("index", 0));
