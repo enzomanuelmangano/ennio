@@ -440,6 +440,17 @@ public final class EnnioAgent {
                 && v.isShown() && v.getAlpha() > 0.01f;
     }
 
+    // The view (or an ancestor) handles taps — used to prefer an actionable
+    // match (a button) over a same-text label (a dialog title) in find-by-text.
+    private static boolean isTappable(View v) {
+        for (View cur = v; cur != null; ) {
+            if (cur.isClickable()) return true;
+            android.view.ViewParent p = cur.getParent();
+            cur = (p instanceof View) ? (View) p : null;
+        }
+        return false;
+    }
+
     private interface Visitor { void visit(View v); }
 
     private static void walk(View root, Visitor visit) {
@@ -494,21 +505,44 @@ public final class EnnioAgent {
             // where iOS keeps the original "Orders". Flows are authored to
             // the iOS casing, so compare case-insensitively.
             String needle = text.toLowerCase();
+            // Prefer a CLICKABLE match over a non-clickable one. A native
+            // AlertDialog repeats its label in both the (non-clickable) title
+            // TextView and the actionable button — e.g. Alert.alert('Sign Out',
+            // …, [{text:'Sign Out'}]). The title is visited first (top of the
+            // dialog tree), so tapping plain find-first hit the title and the
+            // dialog never dismissed. Tracking a clickable candidate separately
+            // makes tapOn target the button; assertVisible still resolves via
+            // the non-clickable fallback.
             View[] exact = new View[1];
+            View[] exactClickable = new View[1];
             View[] contains = new View[1];
+            View[] containsClickable = new View[1];
             walkAll(v -> {
                 if (!isShown(v)) return;
                 String t = textOf(v);
                 if (t == null) return;
+                boolean clk = isTappable(v);
                 if (pat != null) {
-                    if (pat.matcher(t).find() && contains[0] == null) contains[0] = v;
+                    if (pat.matcher(t).find()) {
+                        if (contains[0] == null) contains[0] = v;
+                        if (clk && containsClickable[0] == null) containsClickable[0] = v;
+                    }
                     return;
                 }
                 String lt = t.toLowerCase();
-                if (lt.equals(needle) && exact[0] == null) exact[0] = v;
-                if (lt.contains(needle) && contains[0] == null) contains[0] = v;
+                if (lt.equals(needle)) {
+                    if (exact[0] == null) exact[0] = v;
+                    if (clk && exactClickable[0] == null) exactClickable[0] = v;
+                }
+                if (lt.contains(needle)) {
+                    if (contains[0] == null) contains[0] = v;
+                    if (clk && containsClickable[0] == null) containsClickable[0] = v;
+                }
             });
-            return exact[0] != null ? exact[0] : contains[0];
+            if (exactClickable[0] != null) return exactClickable[0];
+            if (exact[0] != null) return exact[0];
+            if (containsClickable[0] != null) return containsClickable[0];
+            return contains[0];
         });
     }
 
