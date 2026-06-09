@@ -23,6 +23,19 @@ import type { ToolDef } from './server';
 
 const NO_ARGS = { type: 'object', properties: {}, additionalProperties: false } as const;
 
+// Center-screen segments for a cardinal swipe, normalized [0,1]. A short
+// drag across the middle of the screen — clear of the edges (and any
+// pull-to-refresh zone at the very top) so the gesture reads as a pan.
+const DIRECTION_SEGMENTS: Record<
+  string,
+  { from: { x: number; y: number }; to: { x: number; y: number } }
+> = {
+  UP: { from: { x: 0.5, y: 0.62 }, to: { x: 0.5, y: 0.38 } },
+  DOWN: { from: { x: 0.5, y: 0.38 }, to: { x: 0.5, y: 0.62 } },
+  LEFT: { from: { x: 0.62, y: 0.5 }, to: { x: 0.38, y: 0.5 } },
+  RIGHT: { from: { x: 0.38, y: 0.5 }, to: { x: 0.62, y: 0.5 } },
+};
+
 /** Read + validate the `selector` arg, then dispatch a selector command. */
 async function dispatchSelector(
   session: EnnioMcpSession,
@@ -234,11 +247,11 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
       },
       readOnly: false,
       handler: (args) => {
-        const duration = typeof args.durationMs === 'number' ? args.durationMs : undefined;
+        const duration = typeof args.durationMs === 'number' ? args.durationMs : 120;
         if (typeof args.direction === 'string') {
-          return session.dispatch({
-            swipe: { direction: args.direction, ...(duration && { duration }) },
-          });
+          const seg = DIRECTION_SEGMENTS[args.direction.toUpperCase()];
+          if (!seg) return err('invalid', 'direction must be UP, DOWN, LEFT, or RIGHT');
+          return session.rawSwipe(seg.from, seg.to, duration);
         }
         const from = asPoint(args.from);
         const to = asPoint(args.to);
@@ -248,13 +261,7 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
             'swipe needs either a direction or both from and to points in [0,1]',
           );
         }
-        return session.dispatch({
-          swipe: {
-            start: `${from.x * 100}%,${from.y * 100}%`,
-            end: `${to.x * 100}%,${to.y * 100}%`,
-            ...(duration && { duration }),
-          },
-        });
+        return session.rawSwipe(from, to, duration);
       },
     },
     {

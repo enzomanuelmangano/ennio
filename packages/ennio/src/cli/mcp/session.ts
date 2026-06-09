@@ -158,6 +158,40 @@ export class EnnioMcpSession {
     }
   }
 
+  /**
+   * Fast point-to-point swipe: the raw HID gesture plus a tight in-process
+   * commit-wait, skipping the flow handler's pre-swipe idle gate and
+   * advance-verification. Coordinates are normalized [0,1]. This is the
+   * actuation primitive the MCP exposes — an agent that decides its own
+   * gestures doesn't need the e2e scroll machinery (that lives in
+   * ennio_scroll). Being in-process, the commit-wait returns the instant
+   * the React commit lands rather than polling a black-box screen.
+   */
+  async rawSwipe(
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    durationMs = 120,
+  ): Promise<EnnioResult<{ swiped: true }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const { w, h } = await getScreenSize(a.session.udid);
+      await a.ctx.driver.swipe(
+        a.session.udid,
+        from.x * w,
+        from.y * h,
+        to.x * w,
+        to.y * h,
+        durationMs,
+      );
+      // Cheap in-process confirm: return as soon as the commit settles.
+      await a.connection.socket.call('wait_commit', { maxMs: 250, stableMs: 40 });
+      return ok({ swiped: true });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
   /** On-screen element inventory (role / testID / text / value). */
   async describe(): Promise<EnnioResult<ScreenDescription>> {
     const a = this.attachment;
