@@ -1166,10 +1166,46 @@ public final class EnnioAgent {
     }
 
     // ── activation / focus / text ────────────────────────────────────
+    // RN encodes pointerEvents on its ReactViewGroup (ReactPointerEventsView.
+    // getPointerEvents() → PointerEvents enum). A real touch is hit-tested by
+    // RN's TouchTargetHelper, which skips a subtree gated NONE (self+children)
+    // or, for a descendant, BOX_ONLY (children). performClick bypasses that
+    // hit-test, so it would fire a control a real finger can never reach (the
+    // g-touchables "Blocked" button under a pointerEvents="none" wrapper).
+    // Reflect the enum up the ancestor chain and refuse the activation when a
+    // real tap would have been blocked. Non-RN views lack the method → null →
+    // never blocked.
+    private static String reactPointerEvents(View v) {
+        try {
+            Object pe = v.getClass().getMethod("getPointerEvents").invoke(v);
+            return pe == null ? null : pe.toString();
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    private static boolean pointerEventsBlocked(View target) {
+        View v = target;
+        boolean self = true;
+        while (v != null) {
+            String pe = reactPointerEvents(v);
+            if (pe != null) {
+                if ("NONE".equals(pe)) return true;
+                if (!self && "BOX_ONLY".equals(pe)) return true;
+            }
+            android.view.ViewParent p = v.getParent();
+            v = (p instanceof View) ? (View) p : null;
+            self = false;
+        }
+        return false;
+    }
+
     private static JSONObject activateTestId(String testID) {
         return runOnUi(() -> {
             View v = findFirst(x -> testID.equals(testIdOf(x)));
             if (v == null) throw new RuntimeException("not found: " + testID);
+            if (pointerEventsBlocked(v))
+                return new JSONObject().put("ok", false).put("blocked", true);
             View cursor = v;
             while (cursor != null && !cursor.isClickable())
                 cursor = (cursor.getParent() instanceof View) ? (View) cursor.getParent() : null;
@@ -1182,6 +1218,8 @@ public final class EnnioAgent {
         return runOnUi(() -> {
             View v = findByTextOrNull(text, true);
             if (v == null) throw new RuntimeException("not found: " + text);
+            if (pointerEventsBlocked(v))
+                return new JSONObject().put("ok", false).put("blocked", true);
             View cursor = v;
             while (cursor != null && !cursor.isClickable())
                 cursor = (cursor.getParent() instanceof View) ? (View) cursor.getParent() : null;
