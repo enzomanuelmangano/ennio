@@ -194,19 +194,7 @@ jobs:
           ram-size: 4096M
           heap-size: 576M
           force-avd-creation: true
-          # -gpu off (guest software rendering) instead of swiftshader_indirect.
-          # swiftshader_indirect runs SwiftShader HOST-side through a
-          # gralloc/ColorBuffer bridge; under this suite's heavy surface churn
-          # (40 flows, RN animations) the host frees ColorBuffer handles the
-          # guest still references → "ERROR | Failed to find ColorBuffer: N"
-          # (40 per run). Those stall surface composition, so the app hangs on
-          # splash, its first Activity never resumes inside the readiness
-          # window, and injection reports "agent attached but @ennio never
-          # became ready" — the residual retry flake. -gpu off renders entirely
-          # in the guest (no host bridge, no ColorBuffer handles), trading some
-          # speed for deterministic composition. Vulkan + cameras disabled to
-          # keep the software pipeline simple (see android-emulator-runner #358).
-          emulator-options: -no-window -gpu off -noaudio -no-boot-anim -no-snapshot -camera-back none -camera-front none -feature -Vulkan
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
           disable-animations: true
           script: bash /tmp/run-suite.sh
 
