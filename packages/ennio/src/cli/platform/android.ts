@@ -23,6 +23,7 @@ import { POST_LAUNCH_SETTLE_MS, sleep } from '../runner/context';
 import type { RunContext } from '../runner/context';
 import type { ConnectTarget } from '../socket-client';
 import {
+  abstractSocketBound,
   clearAppData,
   enableRoot,
   getAndroidSerial,
@@ -323,7 +324,11 @@ export class AndroidPlatform implements Platform {
    */
   private async establishReady(serial: string, bundleId: string): Promise<EnnioConnection> {
     let lastErr = '';
-    for (let attempt = 0; attempt < 4; attempt++) {
+    // More attempts than seems necessary, but each failed inject is now cheap
+    // (the socket-bind check below fails in ~ms-to-1s instead of the old ~14s
+    // readiness timeout), so the extra tries cost little and ride out the
+    // x86 emulator's transient bad patches where ptrace silently no-ops.
+    for (let attempt = 0; attempt < 8; attempt++) {
       if (attempt > 0) {
         terminateAndroidApp(serial, bundleId);
         await sleep(400);
@@ -347,6 +352,26 @@ export class AndroidPlatform implements Platform {
         }
       } catch (e) {
         lastErr = `inject failed: ${e instanceof Error ? e.message : String(e)}`;
+        continue;
+      }
+      // dlopen success ≠ a live agent. The agent's constructor (JVM attach +
+      // LocalServerSocket bind) runs AFTER dlopen and silently no-ops on an
+      // unstable cold-start process — the dominant CI flake surfaced as
+      // "open=true pingThrew" (adb's local forward accepts, but no device-side
+      // socket). Confirm the abstract socket actually bound before spending the
+      // readiness budget; if it never binds (~4s), relaunch and re-inject right
+      // away instead of burning ~14s on a doomed readiness poll.
+      let bound = false;
+      const bindDeadline = Date.now() + 4_000;
+      while (Date.now() < bindDeadline) {
+        if (abstractSocketBound(serial, `ennio_${pid}`)) {
+          bound = true;
+          break;
+        }
+        await sleep(200);
+      }
+      if (!bound) {
+        lastErr = 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
         continue;
       }
       const target = this.refreshForward(serial, pid);

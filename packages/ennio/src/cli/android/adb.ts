@@ -232,6 +232,22 @@ export function ptraceInjectAgent(
   }
 }
 
+/** Is the agent's abstract socket actually bound? `ptraceInjectAgent` only
+ *  confirms the dlopen — the agent's constructor (JVM attach + LocalServerSocket
+ *  bind) runs after that and can fail silently on an unstable cold-start
+ *  process, leaving no socket and a ~14s readiness timeout to discover it.
+ *  Abstract sockets appear in /proc/net/unix prefixed with '@', so a quick grep
+ *  confirms the bind in ~ms. */
+export function abstractSocketBound(serial: string, name: string): boolean {
+  try {
+    const out = adb(serial, ['shell', `cat /proc/net/unix | grep @${name}`]);
+    return out.includes(`@${name}`);
+  } catch {
+    // grep exits non-zero (→ throw) when the socket isn't present yet.
+    return false;
+  }
+}
+
 /** Wipe app data (UserDefaults / files / databases). Android's `pm clear`
  *  is the equivalent of the iOS data-container wipe. */
 export function clearAppData(serial: string, pkg: string): void {
