@@ -163,6 +163,11 @@ tags:
 - swipe:
     start: 90%,55%
     end: 10%,55%
+# Let the horizontal carousel's momentum glide settle before tapping —
+# otherwise the small "+" button is still moving when its position is
+# measured and the tap lands on the card image behind it (which pushes
+# the product detail instead of adding to cart).
+- waitForAnimationToEnd
 - tapOn:
     id: 'add-to-cart-featured-3'
 
