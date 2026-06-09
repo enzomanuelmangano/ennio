@@ -49,7 +49,14 @@ import java.util.concurrent.FutureTask;
 
 public final class EnnioAgent {
     private static final String TAG = "Ennio";
-    private static final String SOCKET_NAME = "ennio";
+    // Per-process abstract socket name. The abstract namespace is GLOBAL per
+    // device, so a lingering agent from a prior flow that still holds a fixed
+    // "ennio" name shadows the freshly-injected one: adb forward routes the CLI
+    // to the stale agent, whose ready flag never flips for the new activity
+    // ("@ennio never became ready"). Scoping the name to the pid makes every
+    // agent bind a unique socket — no collision possible — and the CLI forwards
+    // to the matching pid (it already knows it from waitForAppPid).
+    private static final String SOCKET_NAME = "ennio_" + android.os.Process.myPid();
     private static final long FNV_OFFSET = -3750763034362895579L; // 1469598103934665603 (unsigned)
     private static final long FNV_PRIME = 1099511628211L;
 
@@ -303,6 +310,12 @@ public final class EnnioAgent {
     private static Object dispatch(String op, JSONObject a) throws Exception {
         switch (op) {
             case "ping":
+                // Must be INSTANT and non-blocking — the CLI polls this every
+                // 150ms during readiness. An earlier version re-resolved the
+                // resumed activity here (ActivityThread reflection); during the
+                // app's unstable cold-start that reflection could block, so the
+                // ping never responded and readiness was declared failed
+                // ("open=true pingThrew"). Just read the volatile flag.
                 return new JSONObject().put("pong", true).put("bootstrap", ready ? "ready" : "pending");
             case "window_size": return windowSize();
             case "find_by_testid": return findByTestId(a.getString("testID"), 0);
@@ -427,6 +440,17 @@ public final class EnnioAgent {
                 && v.isShown() && v.getAlpha() > 0.01f;
     }
 
+    // The view (or an ancestor) handles taps — used to prefer an actionable
+    // match (a button) over a same-text label (a dialog title) in find-by-text.
+    private static boolean isTappable(View v) {
+        for (View cur = v; cur != null; ) {
+            if (cur.isClickable()) return true;
+            android.view.ViewParent p = cur.getParent();
+            cur = (p instanceof View) ? (View) p : null;
+        }
+        return false;
+    }
+
     private interface Visitor { void visit(View v); }
 
     private static void walk(View root, Visitor visit) {
@@ -481,21 +505,44 @@ public final class EnnioAgent {
             // where iOS keeps the original "Orders". Flows are authored to
             // the iOS casing, so compare case-insensitively.
             String needle = text.toLowerCase();
+            // Prefer a CLICKABLE match over a non-clickable one. A native
+            // AlertDialog repeats its label in both the (non-clickable) title
+            // TextView and the actionable button — e.g. Alert.alert('Sign Out',
+            // …, [{text:'Sign Out'}]). The title is visited first (top of the
+            // dialog tree), so tapping plain find-first hit the title and the
+            // dialog never dismissed. Tracking a clickable candidate separately
+            // makes tapOn target the button; assertVisible still resolves via
+            // the non-clickable fallback.
             View[] exact = new View[1];
+            View[] exactClickable = new View[1];
             View[] contains = new View[1];
+            View[] containsClickable = new View[1];
             walkAll(v -> {
                 if (!isShown(v)) return;
                 String t = textOf(v);
                 if (t == null) return;
+                boolean clk = isTappable(v);
                 if (pat != null) {
-                    if (pat.matcher(t).find() && contains[0] == null) contains[0] = v;
+                    if (pat.matcher(t).find()) {
+                        if (contains[0] == null) contains[0] = v;
+                        if (clk && containsClickable[0] == null) containsClickable[0] = v;
+                    }
                     return;
                 }
                 String lt = t.toLowerCase();
-                if (lt.equals(needle) && exact[0] == null) exact[0] = v;
-                if (lt.contains(needle) && contains[0] == null) contains[0] = v;
+                if (lt.equals(needle)) {
+                    if (exact[0] == null) exact[0] = v;
+                    if (clk && exactClickable[0] == null) exactClickable[0] = v;
+                }
+                if (lt.contains(needle)) {
+                    if (contains[0] == null) contains[0] = v;
+                    if (clk && containsClickable[0] == null) containsClickable[0] = v;
+                }
             });
-            return exact[0] != null ? exact[0] : contains[0];
+            if (exactClickable[0] != null) return exactClickable[0];
+            if (exact[0] != null) return exact[0];
+            if (containsClickable[0] != null) return containsClickable[0];
+            return contains[0];
         });
     }
 
@@ -1127,6 +1174,14 @@ public final class EnnioAgent {
             float lx = x - loc[0];
             float ly = y - loc[1];
             MotionEvent ev = MotionEvent.obtain(downTime, now, action, lx, ly, 0);
+            // Mark the event as a real finger on the touchscreen. obtain()
+            // leaves source=SOURCE_UNKNOWN, which react-native-gesture-handler's
+            // orchestrator rejects — so RNGH-driven controls (pressto's
+            // PressableScale, RectButton) inside a scroll view never recognized
+            // the tap, while plain RN Pressables (which don't gate on source)
+            // did. setSource makes the synthetic touch indistinguishable from a
+            // dispatched hardware one.
+            ev.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
             try {
                 return root.dispatchTouchEvent(ev);
             } finally {
@@ -1166,10 +1221,46 @@ public final class EnnioAgent {
     }
 
     // ── activation / focus / text ────────────────────────────────────
+    // RN encodes pointerEvents on its ReactViewGroup (ReactPointerEventsView.
+    // getPointerEvents() → PointerEvents enum). A real touch is hit-tested by
+    // RN's TouchTargetHelper, which skips a subtree gated NONE (self+children)
+    // or, for a descendant, BOX_ONLY (children). performClick bypasses that
+    // hit-test, so it would fire a control a real finger can never reach (the
+    // g-touchables "Blocked" button under a pointerEvents="none" wrapper).
+    // Reflect the enum up the ancestor chain and refuse the activation when a
+    // real tap would have been blocked. Non-RN views lack the method → null →
+    // never blocked.
+    private static String reactPointerEvents(View v) {
+        try {
+            Object pe = v.getClass().getMethod("getPointerEvents").invoke(v);
+            return pe == null ? null : pe.toString();
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    private static boolean pointerEventsBlocked(View target) {
+        View v = target;
+        boolean self = true;
+        while (v != null) {
+            String pe = reactPointerEvents(v);
+            if (pe != null) {
+                if ("NONE".equals(pe)) return true;
+                if (!self && "BOX_ONLY".equals(pe)) return true;
+            }
+            android.view.ViewParent p = v.getParent();
+            v = (p instanceof View) ? (View) p : null;
+            self = false;
+        }
+        return false;
+    }
+
     private static JSONObject activateTestId(String testID) {
         return runOnUi(() -> {
             View v = findFirst(x -> testID.equals(testIdOf(x)));
             if (v == null) throw new RuntimeException("not found: " + testID);
+            if (pointerEventsBlocked(v))
+                return new JSONObject().put("ok", false).put("blocked", true);
             View cursor = v;
             while (cursor != null && !cursor.isClickable())
                 cursor = (cursor.getParent() instanceof View) ? (View) cursor.getParent() : null;
@@ -1182,6 +1273,8 @@ public final class EnnioAgent {
         return runOnUi(() -> {
             View v = findByTextOrNull(text, true);
             if (v == null) throw new RuntimeException("not found: " + text);
+            if (pointerEventsBlocked(v))
+                return new JSONObject().put("ok", false).put("blocked", true);
             View cursor = v;
             while (cursor != null && !cursor.isClickable())
                 cursor = (cursor.getParent() instanceof View) ? (View) cursor.getParent() : null;

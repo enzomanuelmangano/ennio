@@ -10,10 +10,8 @@ import { execFileSync } from 'node:child_process';
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { POST_LAUNCH_SETTLE_MS, sleep } from '../../runner/context';
-// Relaunch / terminate now route through ctx.platform (the iOS/Android
-// backend abstraction); only the iOS soft-reset optimization is still a
-// direct helper call.
-import { softResetAndReload } from '../../runner/lifecycle';
+// Relaunch / terminate / soft-reset all route through ctx.platform (the
+// iOS/Android backend abstraction) — no direct lifecycle helper calls here.
 
 interface LaunchAppCmd {
   launchApp:
@@ -84,16 +82,18 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         // App reuse (default ON; --disable-reuse-app sets ENNIO_REUSE_APP=0):
         // when the app is ALREADY running (the runner reconnected to the prior
         // flow's process) and there are no launch arguments (those need a real
-        // relaunch to take effect), soft-reset in place — wipe data + reload the
-        // JS bundle — instead of paying the ~6s relaunch. Falls back to relaunch
-        // inside softResetAndReload if the reload symbol is missing.
+        // relaunch to take effect), soft-reset in place instead of paying the
+        // ~6s relaunch. Routed through ctx.platform.softReset so each backend
+        // resets the right way — iOS wipes + JS-reloads in place; Android
+        // relaunches (no in-process reload on a release bundle). The previous
+        // direct softResetAndReload call ran the iOS simctl path on Android.
         const canReuse =
           process.env.ENNIO_REUSE_APP !== '0' &&
           ctx.client.isConnected() &&
           launchArgs.length === 0 &&
           !opts.clearKeychain;
         if (canReuse) {
-          await softResetAndReload(ctx);
+          await ctx.platform.softReset(ctx);
         } else {
           await ctx.platform.clearStateAndRelaunch(ctx, launchArgs);
         }

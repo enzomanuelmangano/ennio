@@ -79,8 +79,11 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
       if (sub.when) {
         let satisfied = true;
         if (sub.when.platform) {
-          // iOS-only runner; iOS branch always runs, others skip.
-          satisfied = String(sub.when.platform).toLowerCase() === 'ios';
+          // Maestro `when: { platform: iOS | Android }` — run the subflow only
+          // on the matching backend. Compare against the RUNTIME platform
+          // (ctx.platform.name), not a hardcoded 'ios' — that made every iOS
+          // branch run on Android and every Android branch get skipped.
+          satisfied = String(sub.when.platform).toLowerCase() === ctx.platform.name;
         }
         if (satisfied && sub.when.visible) {
           satisfied = await isVisible(ctx, normalizeSelector(sub.when.visible as never));

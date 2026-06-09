@@ -136,16 +136,24 @@ tags:
 # TEST: Remove single item
 # ============================================
 
+# Remove the FIRST item, not the last. The cart is a scrollable FlatList
+# of items above a FIXED footer (summary + checkout) whose own height the
+# list can't scroll past — so the LAST item's action row (with its remove
+# button) renders pinned at the list/footer boundary and on the x86 CI
+# emulator parked clipped behind the footer (remove-item-2 → "element not
+# found", and scrolling can't free it). remove-item-1 sits at the top of
+# the list, always fully on-screen, so the remove behaviour is exercised
+# identically without the boundary-occlusion flake.
 - tapOn:
-    id: 'remove-item-2'
+    id: 'remove-item-1'
 
-# Item 2 should be gone
+# Item 1 should be gone
 - assertNotVisible:
-    id: 'cart-item-2'
-
-# Item 1 should still be there
-- assertVisible:
     id: 'cart-item-1'
+
+# Item 2 should still be there
+- assertVisible:
+    id: 'cart-item-2'
 
 # ============================================
 # TEST: Add more items from home featured
@@ -163,6 +171,11 @@ tags:
 - swipe:
     start: 90%,55%
     end: 10%,55%
+# Let the horizontal carousel's momentum glide settle before tapping —
+# otherwise the small "+" button is still moving when its position is
+# measured and the tap lands on the card image behind it (which pushes
+# the product detail instead of adding to cart).
+- waitForAnimationToEnd
 - tapOn:
     id: 'add-to-cart-featured-3'
 

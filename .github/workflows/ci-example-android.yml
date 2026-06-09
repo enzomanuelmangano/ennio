@@ -49,9 +49,11 @@ env:
   # e2e-fixtures release asset — same model as the iOS .app fixture in
   # ci-example.yml. The suite tests the runner, not the app, so the binary is
   # stable; CI never builds it. Refresh: rebuild the example release APK, upload
-  # to e2e-fixtures-v1, update this SHA.
-  EXAMPLE_APK_SHA256: 2b3dbea63888a9670d276911797c969f5aeafeba6ada26ba4eb39e37f5aa152c
-  EXAMPLE_APK_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v1/EnnioExample-android.apk
+  # to a new e2e-fixtures tag, update this SHA + URL. v2 adds the native Android
+  # action sheet (Alert) so g-action-sheet runs on Android; built arm64-v8a +
+  # x86_64 (the CI emulator is x86_64).
+  EXAMPLE_APK_SHA256: 6b9b91b518324d1937af112a0defd189df9d8e6032d980d93256e1d5840681fd
+  EXAMPLE_APK_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/EnnioExample-android.apk
 jobs:
   example-android:
     name: Example suite (Android emulator, ptrace inject)
@@ -149,11 +151,16 @@ jobs:
             case "\$base" in _*|00-*) continue;; esac
             ok=0
             for attempt in 1 2; do
+              adb logcat -c 2>/dev/null || true
               if node packages/ennio/dist/cli.js test "\$f" --verbose \$NO_ANIM \
                   > "/tmp/ennio-logs/\$base.\$attempt.log" 2>&1; then
                 ok=1; break
               fi
               echo "RETRY \$base (attempt \$attempt failed)"
+              # Agent-side truth for an injection/readiness failure: did the
+              # agent inject, bind its socket, or crash?
+              adb logcat -d -s Ennio:V EnnioInject:V AndroidRuntime:E ActivityManager:W \
+                2>/dev/null | tail -150 > "/tmp/ennio-logs/\$base.\$attempt.logcat.txt" || true
             done
             if [ "\$ok" -eq 1 ]; then
               echo "PASS  \$base"; PASS=\$((PASS+1))
@@ -174,8 +181,25 @@ jobs:
           api-level: ${{ env.ANDROID_API }}
           arch: x86_64
           target: default # AOSP image → adb root works (ptrace needs it)
-          force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # Pixel 3a profile (1080x2220). The default emulator device is
+          # shorter, pushing a 2-item cart's second row below the fold so
+          # `assertVisible cart-item-2` failed (03-cart, 04-checkout) — the
+          # iOS fixture and a normal phone show both rows. Pin the geometry.
+          profile: pixel_3a
+          # ram-size 4096: the default device RAM starves system_server under
+          # the app + ptrace agent, ANR-ing it ("Process system isn't
+          # responding") — the ANR dialog steals input focus so taps/finds
+          # silently miss (03 remove-item-2) and launchApp ballooned to 31s+.
+          # The emulator `-memory` flag is overridden by the AVD's config.ini,
+          # so the device RAM must be set via the runner's ram-size input,
+          # which edits hw.ramSize at AVD creation. force-avd-creation: true
+          # guarantees the (re)created AVD picks up the new size. The ubuntu
+          # runner has 16GB, so 4GB device RAM is safe — it makes the CI
+          # emulator behave like the healthy 4GB local AVD (suite: 40/40).
+          ram-size: 4096M
+          heap-size: 576M
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
           disable-animations: true
           script: bash /tmp/run-suite.sh
 

@@ -23,6 +23,7 @@ import { POST_LAUNCH_SETTLE_MS, sleep } from '../runner/context';
 import type { RunContext } from '../runner/context';
 import type { ConnectTarget } from '../socket-client';
 import {
+  abstractSocketBound,
   clearAppData,
   enableRoot,
   getAndroidSerial,
@@ -36,6 +37,7 @@ import {
   ptraceInjectAgent,
   pushAgentToTmp,
   pushInjector,
+  removeForward,
   screenshot,
   setClipboard,
   setSelinuxPermissive,
@@ -96,9 +98,9 @@ export class AndroidPlatform implements Platform {
     hardwareBack: (udid) => pressHardwareBack(udid),
   };
 
-  // adb-forwarded TCP port → the device's `@ennio` abstract socket. Set
-  // up once per device and reused across relaunches (the forward targets
-  // the abstract name, which each new app process re-binds).
+  // adb-forwarded TCP port → the device's `@ennio_<pid>` abstract socket.
+  // The agent's socket name is pid-scoped, so the forward must be re-pointed
+  // at the new pid on every (re)launch — see refreshForward.
   private forwardPort = new Map<string, number>();
 
   // The agent .so, pushed to the device's /data/local/tmp once per serial
@@ -225,12 +227,18 @@ export class AndroidPlatform implements Platform {
     return serial;
   }
 
-  private target(serial: string): ConnectTarget {
-    let port = this.forwardPort.get(serial);
-    if (port == null) {
-      port = setupForward(serial);
-      this.forwardPort.set(serial, port);
-    }
+  /**
+   * (Re)point the adb forward at the given pid's `@ennio_<pid>` socket and
+   * cache the new host port. The agent's socket name is pid-scoped to avoid a
+   * stale agent shadowing the new one, so this runs after every (re)launch
+   * once the new pid is known. Tears down the prior forward to avoid leaking
+   * host ports across relaunches.
+   */
+  private refreshForward(serial: string, pid: string): ConnectTarget {
+    const prev = this.forwardPort.get(serial);
+    if (prev != null) removeForward(serial, prev);
+    const port = setupForward(serial, `ennio_${pid}`);
+    this.forwardPort.set(serial, port);
     return { kind: 'tcp', port };
   }
 
@@ -243,11 +251,20 @@ export class AndroidPlatform implements Platform {
     this.prepareInjection(serial, opts.bundleId);
 
     // Already running with a live agent? Use it. Otherwise establish one.
-    const existing = new EnnioConnection({ udid: serial, target: this.target(serial) });
-    if ((await existing.open(2_000)) && (await this.isAgentReady(existing, 3_000))) {
-      return { session, connection: existing };
+    // The agent's socket is pid-scoped, so we need the running pid before we
+    // can forward to it — a quick pidof; if the app isn't up there's nothing
+    // to reuse and we fall straight through to establishReady.
+    const runningPid = waitForAppPid(serial, opts.bundleId, 500);
+    if (runningPid) {
+      const existing = new EnnioConnection({
+        udid: serial,
+        target: this.refreshForward(serial, runningPid),
+      });
+      if ((await existing.open(2_000)) && (await this.isAgentReady(existing, 3_000))) {
+        return { session, connection: existing };
+      }
+      existing.close();
     }
-    existing.close();
     grantAllPermissions(serial, opts.bundleId);
     const connection = await this.establishReady(serial, opts.bundleId);
     return { session, connection };
@@ -262,6 +279,13 @@ export class AndroidPlatform implements Platform {
     // apps that need them are granted once in connect().)
     clearAppData(serial, ctx.bundleId);
     await this.relaunchInto(ctx, serial);
+  }
+
+  // No in-process JS reload on a release bundle, so the reuse-app fast path
+  // can't soft-reset — a full clear+relaunch IS the reset. (iOS soft-resets
+  // via simctl; routing through the platform keeps that off the emulator.)
+  softReset(ctx: RunContext): Promise<void> {
+    return this.clearStateAndRelaunch(ctx);
   }
 
   async relaunchAndReconnect(ctx: RunContext, _launchArgs: string[] = []): Promise<void> {
@@ -300,10 +324,20 @@ export class AndroidPlatform implements Platform {
    */
   private async establishReady(serial: string, bundleId: string): Promise<EnnioConnection> {
     let lastErr = '';
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Each failed inject is cheap (the socket-bind check below fails in
+    // ~ms-to-4s vs the old ~14s readiness timeout), so we can afford many
+    // tries to ride out the x86 emulator's transient bad patches — windows
+    // (~40s seen) where ptrace silently no-ops because the target VM is
+    // momentarily unresponsive under GC / system_server load. Crucially the
+    // inter-attempt backoff ESCALATES: rapid-fire relaunches add load and
+    // prolong the bad patch, so later attempts space out (up to ~6s) to both
+    // span more wall-clock and let the emulator recover. 12 attempts ×
+    // escalating backoff spans ~90s, comfortably outlasting the observed
+    // patches so the flow recovers in-place instead of needing a suite retry.
+    for (let attempt = 0; attempt < 12; attempt++) {
       if (attempt > 0) {
         terminateAndroidApp(serial, bundleId);
-        await sleep(400);
+        await sleep(Math.min(400 + attempt * 600, 6_000));
       }
       launchAndroidApp(serial, bundleId);
       const pid = waitForAppPid(serial, bundleId, 8_000);
@@ -326,12 +360,54 @@ export class AndroidPlatform implements Platform {
         lastErr = `inject failed: ${e instanceof Error ? e.message : String(e)}`;
         continue;
       }
-      const conn = new EnnioConnection({ udid: serial, target: this.target(serial) });
-      if ((await conn.open(8_000)) && (await this.isAgentReady(conn, 6_000))) {
+      // dlopen success ≠ a live agent. The agent's constructor (JVM attach +
+      // LocalServerSocket bind) runs AFTER dlopen and silently no-ops on an
+      // unstable cold-start process — the dominant CI flake surfaced as
+      // "open=true pingThrew" (adb's local forward accepts, but no device-side
+      // socket). Confirm the abstract socket actually bound before spending the
+      // readiness budget; if it never binds (~4s), relaunch and re-inject right
+      // away instead of burning ~14s on a doomed readiness poll.
+      let bound = false;
+      const bindDeadline = Date.now() + 4_000;
+      while (Date.now() < bindDeadline) {
+        if (abstractSocketBound(serial, `ennio_${pid}`)) {
+          bound = true;
+          break;
+        }
+        await sleep(200);
+      }
+      if (!bound) {
+        lastErr = 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
+        continue;
+      }
+      const target = this.refreshForward(serial, pid);
+      const port = target.kind === 'tcp' ? target.port : -1;
+      const conn = new EnnioConnection({ udid: serial, target });
+      // Generous on the readiness wait: a KVM emulator on a loaded CI runner
+      // can take >6 s from process-start to the first resumed Activity (when
+      // the agent flips `ready`). The socket binds quickly (open succeeds),
+      // but a tight ready-poll declared "@ennio never became ready" and forced
+      // a relaunch — sometimes burning all attempts. Wider windows + an extra
+      // attempt make a hot-path relaunch reliable under CI load.
+      const openOk = await conn.open(12_000);
+      if (openOk && (await this.isAgentReady(conn, 12_000))) {
         return conn;
       }
+      // Diagnostics. The CLI forwards to localabstract:ennio_<pid>; the agent
+      // logs the pid it actually bound (@ennio_<myPid>). pid + port + open let
+      // us tell a forward/pid mismatch (open=false → nothing listening on that
+      // name) from a bound-but-not-ready agent (open=true). The ping fields
+      // distinguish a stuck ready flag from an un-resumed app.
+      let diag = '';
+      try {
+        const p = await conn.socket.call('ping');
+        const d = p?.data as { bootstrap?: string } | undefined;
+        diag = ` bootstrap=${d?.bootstrap ?? '?'}`;
+      } catch {
+        diag = ' pingThrew';
+      }
       conn.close();
-      lastErr = 'agent attached but @ennio never became ready';
+      lastErr = `agent attached but @ennio never became ready (pid=${pid} port=${port} open=${openOk}${diag})`;
     }
     throw new Error(
       `EnnioAgent never came up for ${bundleId}: ${lastErr}. ` +

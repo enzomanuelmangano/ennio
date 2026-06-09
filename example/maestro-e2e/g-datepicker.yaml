@@ -15,16 +15,37 @@ name: 'Gauntlet — Date picker'
 - assertVisible:
     text: 'Date: 2026-01-15'
 
-# UIDatePicker spinner mode is a multi-component UIPickerView
-# (month + day + year). Each visible row label is unique
-# (e.g. "February", "16", "2027") so selectPickerValueByLabel
-# can target a single component at a time. v1 selectPickerValueByLabel
-# walks every component — for this gauntlet we pick a month change
-# whose name is unambiguous.
-- tapOn: 'February'
-- assertVisible:
-    text: 'Date: 2026-02-15'
+# The same date change (Jan→Feb→Mar, keeping day 15) is driven through
+# whichever native control each platform renders — display is
+# Platform-branched in the component (iOS spinner vs Android calendar).
+#
+# iOS: inline UIDatePicker spinner mode is a multi-component UIPickerView
+# (month + day + year). Each visible row label is unique (e.g. "February",
+# "16", "2027") so a tapOn-by-text targets a single component at a time.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: 'February'
+      - assertVisible:
+          text: 'Date: 2026-02-15'
+      - tapOn: 'March'
+      - assertVisible:
+          text: 'Date: 2026-03-15'
 
-- tapOn: 'March'
-- assertVisible:
-    text: 'Date: 2026-03-15'
+# Android: native Material calendar dialog (display="default", one-shot — no
+# re-open after OK). The day grid is a canvas-drawn SimpleMonthView exposing
+# days only as VIRTUAL accessibility nodes (no real child View), so a day can't
+# be resolved by text and a positional tap is resolution-dependent (it picked
+# the wrong day on the CI emulator). Drive the YEAR selector instead: tapping
+# the year header opens a list of real year TextViews — resolution-independent,
+# findable by text. Pick 2027 (day/month preserved → 2027-01-15), confirm OK.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn: '2026'
+      - tapOn: '2027'
+      - tapOn: 'OK'
+      - assertVisible:
+          text: 'Date: 2027-01-15'

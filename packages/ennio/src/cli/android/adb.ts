@@ -4,11 +4,12 @@
 // terminate) via `adb shell`.
 //
 // Transport model: the agent binds a LocalServerSocket in the abstract
-// namespace named "ennio". `adb forward tcp:0 localabstract:ennio`
+// namespace named "ennio_<pid>" (per-process — a global fixed name lets a
+// stale agent shadow the new one). `adb forward tcp:0 localabstract:ennio_<pid>`
 // allocates a host TCP port that routes to it; the CLI's socket client
-// connects to 127.0.0.1:<port>. The forward survives app restarts (it
-// targets the abstract name, which the new process re-binds), so we set
-// it up once per session and reconnect the TCP client after each launch.
+// connects to 127.0.0.1:<port>. Because the name is pid-scoped, the forward
+// must be re-pointed at the new pid on every (re)launch — see refreshForward
+// in android.ts.
 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -47,8 +48,8 @@ export function getAndroidSerial(): string | null {
  * TCP port. Idempotent-ish: a fresh `forward tcp:0` allocates a new port
  * each call, so callers should set it up once and cache the port.
  */
-export function setupForward(serial: string): number {
-  const out = adb(serial, ['forward', 'tcp:0', `localabstract:${ABSTRACT_SOCKET_NAME}`]).trim();
+export function setupForward(serial: string, socketName: string = ABSTRACT_SOCKET_NAME): number {
+  const out = adb(serial, ['forward', 'tcp:0', `localabstract:${socketName}`]).trim();
   const port = parseInt(out, 10);
   if (!Number.isFinite(port) || port <= 0) {
     throw new Error(`adb forward returned unexpected output: "${out}"`);
@@ -228,6 +229,22 @@ export function ptraceInjectAgent(
   const out = adb(serial, ['shell', `${injectorPath} ${pid} ${cc}`]);
   if (!/OK dlopen/.test(out)) {
     throw new Error(`ptrace inject failed: ${out.trim().split('\n').slice(-2).join(' ')}`);
+  }
+}
+
+/** Is the agent's abstract socket actually bound? `ptraceInjectAgent` only
+ *  confirms the dlopen — the agent's constructor (JVM attach + LocalServerSocket
+ *  bind) runs after that and can fail silently on an unstable cold-start
+ *  process, leaving no socket and a ~14s readiness timeout to discover it.
+ *  Abstract sockets appear in /proc/net/unix prefixed with '@', so a quick grep
+ *  confirms the bind in ~ms. */
+export function abstractSocketBound(serial: string, name: string): boolean {
+  try {
+    const out = adb(serial, ['shell', `cat /proc/net/unix | grep @${name}`]);
+    return out.includes(`@${name}`);
+  } catch {
+    // grep exits non-zero (→ throw) when the socket isn't present yet.
+    return false;
   }
 }
 

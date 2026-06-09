@@ -1,26 +1,37 @@
-// Action sheet — ActionSheetIOS is system-rendered (out-of-process on
-// iOS 18+). Tests Ennio's cross-process AX fallback for non-Fabric UI.
+// Action sheet — each platform's system-rendered chooser. iOS uses
+// ActionSheetIOS (out-of-process on iOS 18+, exercising Ennio's cross-process
+// AX fallback). ActionSheetIOS is a no-op on Android, so there it falls back
+// to Alert.alert — a native AlertDialog with the same options as real buttons.
+// Both are system UI; the same flow ("Open", tap "Save") drives either.
 
 import { useState } from 'react';
-import { View, Text, ActionSheetIOS, StyleSheet } from 'react-native';
+import { View, Text, ActionSheetIOS, Alert, Platform, StyleSheet } from 'react-native';
 import { PressableScale } from 'pressto';
 
 export default function ActionSheetScreen() {
   const [picked, setPicked] = useState<string | null>(null);
   const open = () => {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options: ['Cancel', 'Save', 'Delete'],
-        cancelButtonIndex: 0,
-        destructiveButtonIndex: 2,
-        title: 'Choose action',
-      },
-      (idx) => {
-        if (idx === 1) setPicked('Save');
-        else if (idx === 2) setPicked('Delete');
-        else setPicked('Cancel');
-      },
-    );
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Save', 'Delete'],
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: 2,
+          title: 'Choose action',
+        },
+        (idx) => {
+          if (idx === 1) setPicked('Save');
+          else if (idx === 2) setPicked('Delete');
+          else setPicked('Cancel');
+        },
+      );
+    } else {
+      Alert.alert('Choose action', undefined, [
+        { text: 'Cancel', style: 'cancel', onPress: () => setPicked('Cancel') },
+        { text: 'Save', onPress: () => setPicked('Save') },
+        { text: 'Delete', style: 'destructive', onPress: () => setPicked('Delete') },
+      ]);
+    }
   };
 
   return (
