@@ -32,6 +32,10 @@ name: ci-bsky
 
 on:
   workflow_dispatch:
+  # Temporary while iterating: new workflow files aren't dispatchable via
+  # the API until they exist on the default branch. Remove before merge.
+  push:
+    branches: [ci/bsky-e2e-suite]
 
 permissions:
   contents: read
@@ -75,6 +79,14 @@ jobs:
 
       - name: Select Xcode
         run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      # Kick the boot FIRST and don't wait — CoreSimulator boots in the
+      # background (~90s) while the JS/dylib builds and the mock backend
+      # come up. The later "Wait for simulator" step pays only the
+      # remainder. (Lesson from ci-example perf work: serial boot was a
+      # pure 97s tax.)
+      - name: Start simulator boot (async)
+        run: xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
 
       - name: Cache bun
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -153,11 +165,10 @@ jobs:
           unzip -q /tmp/bsky-app.zip -d /tmp/bskyapp
           test -d /tmp/bskyapp/App.app
 
-      - name: Boot simulator
+      - name: Wait for simulator
         id: sim
         run: |
           set -euo pipefail
-          xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
           xcrun simctl bootstatus booted -b
           UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
           test -n "$UDID" || { echo "No sim booted"; exit 1; }
