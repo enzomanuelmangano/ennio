@@ -67,6 +67,10 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
       const NUDGE_DISTANCE = Math.round(winH / 6);
       // Bottom 20% of screen overlaps with the tab bar.
       const TAB_BAR_THRESHOLD = (winH * 4) / 5;
+      // Top ~14% overlaps a sticky screen header / status bar. An element
+      // whose centre lands here after a found scroll is clipped behind the
+      // header and not reliably tappable — nudge it down (see below).
+      const TOP_THRESHOLD = winH / 7;
       const isFastDriver = ctx.driver.name === 'fast';
       // True only after a swipe that ran in-process (instant, no
       // momentum). Deliberately false before the first swipe: the
@@ -115,6 +119,23 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
                 250,
               );
             }
+            await ctx.driver.settleAfterNudge(ctx.client, nudgeOutcome);
+          } else if (rect && rect.y + rect.h / 2 < TOP_THRESHOLD) {
+            // Symmetric to the tab-bar nudge: scrolling UP often parks the
+            // FIRST list item clipped behind a sticky top header (e.g. the
+            // "Profile" title), so the element is reported visible but its
+            // centre sits in the header band — a tap there lands on the
+            // header and the control's onPress never fires (08 menu-orders
+            // navigated only intermittently). Nudge the content DOWN to drop
+            // the element fully below the header into the tappable area.
+            const nudgeOutcome = await ctx.driver.swipe(
+              ctx.udid,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y - NUDGE_DISTANCE / 2,
+              SWIPE_CENTER_X,
+              SWIPE_CENTER_Y + NUDGE_DISTANCE / 2,
+              250,
+            );
             await ctx.driver.settleAfterNudge(ctx.client, nudgeOutcome);
           }
           return;
