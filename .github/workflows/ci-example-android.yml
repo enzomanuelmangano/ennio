@@ -182,7 +182,13 @@ jobs:
           # iOS fixture and a normal phone show both rows. Pin the geometry.
           profile: pixel_3a
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # -memory 4096: the default device RAM starves system_server under
+          # the app + ptrace agent, ANR-ing it ("Process system isn't
+          # responding") — the ANR dialog steals input focus so taps/finds
+          # silently miss (03 remove-item-2; launchApp ballooned to 31s).
+          # The ubuntu runner has 16GB, so 4GB device RAM is safe and makes
+          # the emulator behave like a healthy 4GB AVD (local suite: 40/40).
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096
           disable-animations: true
           script: bash /tmp/run-suite.sh
 
