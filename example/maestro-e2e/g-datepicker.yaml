@@ -15,16 +15,44 @@ name: 'Gauntlet — Date picker'
 - assertVisible:
     text: 'Date: 2026-01-15'
 
-# UIDatePicker spinner mode is a multi-component UIPickerView
-# (month + day + year). Each visible row label is unique
-# (e.g. "February", "16", "2027") so selectPickerValueByLabel
-# can target a single component at a time. v1 selectPickerValueByLabel
-# walks every component — for this gauntlet we pick a month change
-# whose name is unambiguous.
-- tapOn: 'February'
-- assertVisible:
-    text: 'Date: 2026-02-15'
+# The same date change (Jan→Feb→Mar, keeping day 15) is driven through
+# whichever native control each platform renders — display is
+# Platform-branched in the component (iOS spinner vs Android calendar).
+#
+# iOS: inline UIDatePicker spinner mode is a multi-component UIPickerView
+# (month + day + year). Each visible row label is unique (e.g. "February",
+# "16", "2027") so a tapOn-by-text targets a single component at a time.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: 'February'
+      - assertVisible:
+          text: 'Date: 2026-02-15'
+      - tapOn: 'March'
+      - assertVisible:
+          text: 'Date: 2026-03-15'
 
-- tapOn: 'March'
-- assertVisible:
-    text: 'Date: 2026-03-15'
+# Android: native Material calendar dialog (display="default"). It opens once
+# on mount and does NOT re-open after OK (the picker is mounted but the dialog
+# is a one-shot), so a single confirmed change is the most this control allows.
+# Navigate with the month arrow (content-desc "Next month"), wait for the
+# month-swipe to settle, tap the target day cell (content-desc
+# "15 February 2026"), confirm with OK.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn: 'Next month'
+      - waitForAnimationToEnd
+      # The day grid is a single canvas-drawn SimpleMonthView exposing each
+      # day only as a VIRTUAL accessibility node (no real child View), so the
+      # in-app agent — which walks the real View tree — can't resolve a day by
+      # text. Tap by position instead: Feb 2026 starts on a Sunday, so the 15th
+      # is row 3, column 1 of the grid. ("Next month" / "OK" stay text taps —
+      # those are real Buttons.)
+      - tapOn:
+          point: '23%,55%'
+      - tapOn: 'OK'
+      - assertVisible:
+          text: 'Date: 2026-02-15'

@@ -17,22 +17,49 @@ name: 'Gauntlet — Picker'
 - assertVisible:
     id: 'picker-control'
 
-# UIPickerView wheel selection via Ennio's selectPickerValueByLabel
-# fast-path: tapOn-by-text auto-routes to the native picker delegate
-# when a UIPickerView is visible (HID-swipe-on-wheel is flaky on
-# iOS 26 simulator). selectRow + didSelectRow fires onValueChange
-# deterministically.
-- tapOn:
-    text: 'Banana'
-- assertVisible:
-    text: 'Selected: banana'
+# iOS: inline UIPickerView wheel. tapOn-by-text auto-routes to the native
+# picker delegate (selectRow + didSelectRow) — the wheel rows are always
+# visible, so each value is a direct tap.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          text: 'Banana'
+      - assertVisible:
+          text: 'Selected: banana'
+      - tapOn:
+          text: 'Cherry'
+      - assertVisible:
+          text: 'Selected: cherry'
+      - tapOn:
+          text: 'Apple'
+      - assertVisible:
+          text: 'Selected: apple'
 
-- tapOn:
-    text: 'Cherry'
-- assertVisible:
-    text: 'Selected: cherry'
-
-- tapOn:
-    text: 'Apple'
-- assertVisible:
-    text: 'Selected: apple'
+# Android: @react-native-picker/picker renders a native Spinner. Options
+# aren't on screen until the Spinner is tapped to open its dropdown; the
+# dropdown rows are real TextViews, so each select is "open control, tap
+# value". (No virtual-node problem here — unlike the calendar day grid.)
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          id: 'picker-control'
+      - tapOn:
+          text: 'Banana'
+      - assertVisible:
+          text: 'Selected: banana'
+      - tapOn:
+          id: 'picker-control'
+      - tapOn:
+          text: 'Cherry'
+      - assertVisible:
+          text: 'Selected: cherry'
+      - tapOn:
+          id: 'picker-control'
+      - tapOn:
+          text: 'Apple'
+      - assertVisible:
+          text: 'Selected: apple'
