@@ -22,6 +22,8 @@ vi.mock('./ennio-hid', () => ({
     tap = actTap;
     doubleTap = actDoubleTap;
     swipe = actSwipe;
+    typeText = vi.fn(async () => {});
+    warm = vi.fn(async () => {});
   },
 }));
 

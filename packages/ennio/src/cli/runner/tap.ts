@@ -131,7 +131,7 @@ export async function execTapOn(
   // alert_tap op, which targets the UIAlertAction directly.
   if (sel.text) {
     try {
-      const a = await ctx.client.call('alert_present');
+      const a = await timedAsync(ctx, 'tap.alertProbe', () => ctx.client.call('alert_present'));
       if (a.ok && a.data && (a.data as { present: boolean }).present) {
         const t = await ctx.client.call('alert_tap', { buttonText: sel.text });
         if (t.ok && t.data && (t.data as { tapped: boolean }).tapped) return;
@@ -145,7 +145,8 @@ export async function execTapOn(
     // change, which would otherwise trip the phantom detector into a
     // pointless HID redo); baseline keeps the probe in the retap loop
     // only.
-    if (await ctx.driver.tryTabTap(ctx.client, sel.text)) return;
+    if (await timedAsync(ctx, 'tap.tabProbe', () => ctx.driver.tryTabTap(ctx.client, sel.text!)))
+      return;
     // (Skipped when childOf is set — the cross-process AX can't scope by
     // parent, and a bare testID/label match would pick the wrong sibling.)
     // Text tap onto a testID'd interactive container the in-app finder
@@ -157,7 +158,11 @@ export async function execTapOn(
     // it and verify the frame moved. High-confidence (testID-backed) and
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
-    const axEl = sel.childOf ? null : await ctx.platform.ax.resolve(ctx.udid, { text: sel.text });
+    const axEl = sel.childOf
+      ? null
+      : await timedAsync(ctx, 'tap.axFastResolve', () =>
+          ctx.platform.ax.resolve(ctx.udid, { text: sel.text }),
+        );
     if (axEl) {
       // Doomed-tap gate for the AX fast path: a VC transition in flight
       // at dispatch time swallows the touch AND means the AX snapshot
@@ -167,9 +172,9 @@ export async function execTapOn(
       // the hash check below, masking the lost tap. If we had to wait,
       // the coords are stale — skip the fast path and fall through to
       // the standard find, which re-resolves on the settled hierarchy.
-      const pi = await ctx.client
-        .call('wait_presentation_idle', { maxMs: 2500 })
-        .catch(() => undefined);
+      const pi = await timedAsync(ctx, 'tap.axPresIdle', () =>
+        ctx.client.call('wait_presentation_idle', { maxMs: 2500 }).catch(() => undefined),
+      );
       const axWaitedMs = Number((pi?.data as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
       if (axWaitedMs <= 50) {
         const { w, h } = await getScreenSize(ctx.udid);
@@ -234,13 +239,15 @@ export async function execTapOn(
   // Skip the AX override entirely for ambiguous testIDs.
   let ambiguousId = false;
   if (sel.id && !sel.childOf) {
-    const nth = await ctx.client
-      .call('find_by_testid_nth', { testID: sel.id, index: 1 })
-      .catch(() => undefined);
+    const nth = await timedAsync(ctx, 'tap.ambiguityProbe', () =>
+      ctx.client.call('find_by_testid_nth', { testID: sel.id, index: 1 }).catch(() => undefined),
+    );
     ambiguousId = !!(nth && nth.ok && nth.data);
   }
   if ((sel.id || sel.text) && !sel.childOf && !ambiguousId) {
-    const axEl = await ctx.platform.ax.resolve(ctx.udid, { id: sel.id, text: sel.text });
+    const axEl = await timedAsync(ctx, 'tap.axCrossResolve', () =>
+      ctx.platform.ax.resolve(ctx.udid, { id: sel.id, text: sel.text }),
+    );
     // Only correct SMALL interactive elements (buttons, tabs, menu rows
     // — height < ~12% of the screen). For a large container (a feed item,
     // a card) the AX "center" can sit on an inner sub-link (the avatar →

@@ -28,7 +28,7 @@ export function getDylibClient(udid: string): EnnioSocketClient {
 // earlier in-process IOHIDEvent injector — the dylib's hid_* ops — is
 // dead: the simulator never dispatches in-process HID; see the trail
 // in native-hid/helper/enniohid.swift's header.)
-const ennioHidCache = new Map<string, EnnioHidClient>();
+const ennioHidCache = new Map<string, HidBackend>();
 
 interface HidBackend {
   tap(x: number, y: number, holdSec?: number): Promise<void>;
@@ -38,10 +38,35 @@ interface HidBackend {
   warm(): Promise<void>;
 }
 
+// Monotonic count of delivered gestures. Consumers that cache a
+// snapshot of the SCREEN (the cross-process AX dump) key it on this:
+// any gesture may have mutated the UI, so a snapshot taken before one
+// must not be served after it. warm() is the one non-mutating method.
+let actuationCount = 0;
+export function actuationGen(): number {
+  return actuationCount;
+}
+export function bumpActuationGen(): void {
+  actuationCount++;
+}
+
 export function getActuator(udid: string): HidBackend {
   let c = ennioHidCache.get(udid);
   if (!c) {
-    c = new EnnioHidClient(udid);
+    const client = new EnnioHidClient(udid);
+    const bump =
+      <A extends unknown[], R>(fn: (...args: A) => Promise<R>) =>
+      (...args: A): Promise<R> => {
+        actuationCount++;
+        return fn(...args);
+      };
+    c = {
+      tap: bump(client.tap.bind(client)),
+      doubleTap: bump(client.doubleTap.bind(client)),
+      swipe: bump(client.swipe.bind(client)),
+      typeText: bump(client.typeText.bind(client)),
+      warm: client.warm.bind(client),
+    };
     ennioHidCache.set(udid, c);
   }
   return c;

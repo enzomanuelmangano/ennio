@@ -15,7 +15,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { getActuator, getScreenSize, trace } from './hid';
+import { actuationGen, getActuator, getScreenSize, trace } from './hid';
 
 export interface AxElement {
   role: string;
@@ -159,11 +159,26 @@ function warnBlindOnce(reason: string): void {
   );
 }
 
-export async function axTree(udid: string): Promise<AxTree | null> {
+// One dump is ~200-450ms (the helper re-walks the whole Simulator AX
+// tree). A single tap consults the tree up to twice within ~250ms with
+// no UI mutation in between — the text fast-path probe, then the
+// coordinate cross-check on the same untouched screen — so let the
+// second consult reuse the first dump. Two guards make reuse safe:
+// the entry is dropped when ANY gesture has been delivered since the
+// dump (actuationGen), and when it's older than maxAgeMs. Callers opt
+// in via maxAgeMs; the default stays 0 (always fresh), so poll loops
+// (permission-dialog scan, exposure wait) are unaffected.
+const dumpCache = new Map<string, { at: number; gen: number; tree: AxTree | null }>();
+
+export async function axTree(udid: string, maxAgeMs = 0): Promise<AxTree | null> {
   // ennioax is the macOS Simulator accessibility helper — iOS-only. On Android
   // the in-app agent already walks every window (dialogs included), so there is
   // no cross-process tree and the "open Simulator.app" warning would be wrong.
   if (process.env.ENNIO_PLATFORM === 'android') return null;
+  if (maxAgeMs > 0) {
+    const hit = dumpCache.get(udid);
+    if (hit && hit.gen === actuationGen() && Date.now() - hit.at <= maxAgeMs) return hit.tree;
+  }
   const helper = findHelper();
   if (!helper) {
     warnBlindOnce('ennioax helper binary not found');
@@ -175,6 +190,9 @@ export async function axTree(udid: string): Promise<AxTree | null> {
     axHelpers.set(udid, h);
   }
   try {
+    // Generation sampled BEFORE the dump: a gesture landing mid-dump
+    // yields a tree of unknowable vintage — the mismatch drops it.
+    const genAtDump = actuationGen();
     const out = await h.dump();
     if (!out) return null;
     const data = JSON.parse(out) as AxTree & { error?: string };
@@ -185,8 +203,10 @@ export async function axTree(udid: string): Promise<AxTree | null> {
     }
     if (!data.elements?.length) {
       warnBlindOnce('Simulator window not visible or Accessibility trust missing');
+      dumpCache.set(udid, { at: Date.now(), gen: genAtDump, tree: data });
       return data;
     }
+    dumpCache.set(udid, { at: Date.now(), gen: genAtDump, tree: data });
     return data;
   } catch (e) {
     trace(`ax: ${(e as Error).message}`);
@@ -257,12 +277,20 @@ export async function axHasText(udid: string, text: string): Promise<boolean> {
   );
 }
 
-/** Resolve a Maestro selector against the cross-process tree. */
+/**
+ * Resolve a Maestro selector against the cross-process tree. Tolerates a
+ * dump up to 250ms old: both resolve sites inside one tap (fast-path
+ * probe + coordinate cross-check) run back-to-back with only read-RPCs
+ * between them, so the screen cannot have changed — and 250ms is shorter
+ * than a dump itself, so repeated polling always re-dumps.
+ */
+const AX_RESOLVE_MAX_AGE_MS = 250;
+
 export async function axResolve(
   udid: string,
   sel: { id?: string; text?: string },
 ): Promise<AxElement | null> {
-  const tree = await axTree(udid);
+  const tree = await axTree(udid, AX_RESOLVE_MAX_AGE_MS);
   if (!tree) return null;
   if (sel.id) {
     const byId = tree.elements.find((e) => e.id === sel.id);
