@@ -1,0 +1,38 @@
+diff --git a/__e2e__/setupApp.yml b/__e2e__/setupApp.yml
+index dc784e6..c393fec 100644
+--- a/__e2e__/setupApp.yml
++++ b/__e2e__/setupApp.yml
+@@ -1,3 +1,5 @@
++# Release: bundled build, no Expo dev client/Metro. Drop the dev-client
++# openLink; only the appview proxy header is needed at runtime.
+ appId: xyz.blueskyweb.app
+ ---
+ - launchApp:
+@@ -5,27 +7,6 @@ appId: xyz.blueskyweb.app
+     clearState: true
+     arguments:
+       "-EXDevMenuIsOnboardingFinished": true
+-- runFlow:
+-    when:
+-      platform: iOS
+-    commands:
+-      - openLink: "exp+bluesky://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"
+-      - runFlow:
+-          when:
+-            visible: 'Open in "Bluesky"'
+-          commands:
+-            - tapOn: Open
+-- runFlow:
+-    when:
+-      platform: Android
+-    commands:
+-      - tapOn: 'http://localhost:8081'
+-      - runFlow:
+-          label: "Dismiss Expo dev menu"
+-          when:
+-            visible: "Continue"
+-          commands:
+-            - back
+ - tapOn:
+     id: e2eProxyHeaderInput
+ - inputText: ${output.result}

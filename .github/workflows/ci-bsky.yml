@@ -1,0 +1,211 @@
+# Bluesky e2e — the full upstream 17-flow suite driven by ennio against a
+# prebuilt Release fixture, on a free GitHub-hosted macOS runner.
+#
+# The suite tests the RUNNER against a real-world app, so the app binary is
+# a stable fixture published as a GitHub release asset (e2e-fixtures-v2,
+# bsky e2e Release build: EXPO_PUBLIC_ENV=e2e RN_SRC_EXT=e2e.ts,e2e.tsx,
+# jsbundle embedded, no dev client) — never rebuilt in CI.
+#
+# The bluesky repo is cloned at a pinned commit and patched:
+#   - setup-app-release.patch    drop the Expo dev-client openLink block
+#                                (Metro-only; the fixture is a Release build)
+#   - dev-env-double-buffer.patch L4 proxy on :3000 + standby TestNetwork
+#                                pre-warm (mock ?users 3.4s -> ~0.5s)
+#
+# The mock backend (@atproto/dev-env) needs postgres + redis. Upstream wraps
+# them in docker, which GitHub macOS runners don't have — but the wrapper
+# only exports DB_POSTGRES_URL/REDIS_HOST, so brew services + two env vars
+# replace it entirely.
+#
+# Cost: $0 — public repo, standard GitHub-hosted runner.
+#
+# Security posture (mirrors ci-wikipedia/ci-example):
+#   - permissions: contents: read
+#   - actions pinned to full commit SHAs
+#   - checkout with persist-credentials: false
+#   - fixture download SHA-256-verified before unzip/install
+#   - bluesky cloned at a pinned commit SHA
+#   - no secrets consumed
+#
+# Trigger: manual for now — gh workflow run ci-bsky.yml
+name: ci-bsky
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bsky-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # SHA-256 of Bluesky-ios-e2e-Release.app.zip from the e2e-fixtures-v2
+  # release. Built from bluesky@c02f2a1e (v1.122.0) — refresh procedure in
+  # the release notes.
+  BSKY_APP_ZIP_SHA256: 4884d33510a3a3f46b137fac73d1753c5bb4a9a98f719252d35ff1655600090e
+  BSKY_APP_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/Bluesky-ios-e2e-Release.app.zip
+  # bluesky commit the fixture was built from — flows + dev-env must match.
+  BSKY_SHA: c02f2a1eda66246ed76e91a6d12f440bc1c581c3
+  BSKY_BUNDLE_ID: xyz.blueskyweb.app
+
+jobs:
+  bsky:
+    name: Bluesky suite (iOS sim, prebuilt fixture)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+        with:
+          version: 10
+
+      # mock-server.ts runs as native-TS node (type stripping) — needs >=23.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      - name: Cache bun
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      - name: Build dylib + HID helper
+        working-directory: packages/ennio
+        run: |
+          set -euo pipefail
+          bash scripts/build-dylib-local.sh
+          bash scripts/build-hid-helper.sh
+
+      - name: Start postgres + redis (brew, no docker)
+        run: |
+          set -euo pipefail
+          # The dev-env docker wrapper only exports these connection details —
+          # brew services provide the same contract.
+          brew install postgresql@16 redis >/dev/null || true
+          brew services start postgresql@16
+          brew services start redis
+          PGBIN="$(brew --prefix postgresql@16)/bin"
+          for i in $(seq 1 30); do "$PGBIN/pg_isready" -q && break; sleep 1; done
+          "$PGBIN/pg_isready"
+          "$PGBIN/psql" -d postgres -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='pg') THEN CREATE ROLE pg LOGIN SUPERUSER PASSWORD 'password'; END IF; END \$\$;"
+          redis-cli ping
+
+      - name: Clone + patch bluesky (pinned)
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/bluesky-social/social-app.git /tmp/bluesky
+          git -C /tmp/bluesky checkout "$BSKY_SHA"
+          git -C /tmp/bluesky apply --verbose \
+            "$GITHUB_WORKSPACE/e2e/bsky/patches/setup-app-release.patch" \
+            "$GITHUB_WORKSPACE/e2e/bsky/patches/dev-env-double-buffer.patch"
+
+      - name: Install dev-env deps + start mock server
+        working-directory: /tmp/bluesky/dev-env
+        env:
+          DB_POSTGRES_URL: postgresql://pg:password@127.0.0.1:5432/postgres
+          REDIS_HOST: 127.0.0.1:6379
+        run: |
+          set -euo pipefail
+          pnpm install
+          NODE_ENV=development nohup node ./mock-server.ts > /tmp/mock-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null http://localhost:1986/; then break; fi
+            sleep 1
+          done
+          # Smoke: create users once; proves PDS spin-up + DBs end-to-end.
+          curl -fsS -X POST 'http://localhost:1986/?users' --max-time 120 | grep -q pdsUrl
+          echo "mock server healthy"
+
+      - name: Cache bsky app fixture
+        id: app-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/bskyapp
+          key: bsky-app-${{ env.BSKY_APP_ZIP_SHA256 }}
+
+      - name: Download bsky app fixture (cache miss)
+        if: steps.app-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/bsky-app.zip "$BSKY_APP_URL"
+          echo "${BSKY_APP_ZIP_SHA256}  /tmp/bsky-app.zip" | shasum -a 256 -c -
+          unzip -q /tmp/bsky-app.zip -d /tmp/bskyapp
+          test -d /tmp/bskyapp/App.app
+
+      - name: Boot simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
+          xcrun simctl bootstatus booted -b
+          UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
+          test -n "$UDID" || { echo "No sim booted"; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Install bsky app + pre-grant permissions
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set -euo pipefail
+          xcrun simctl install "$UDID" /tmp/bskyapp/App.app
+          # Headless runner: no Simulator.app window, so ennioax cannot
+          # dismiss permission sheets. Pre-grant everything. simctl grants
+          # photos as "limited" (auth_value=3) which still shows a picker
+          # prompt — override to full access (auth_value=2) in the sim's
+          # TCC database, then kickstart tccd so it re-reads the rows.
+          # (Same rows ennio's clearState reinstall path writes.)
+          xcrun simctl privacy "$UDID" grant all "$BSKY_BUNDLE_ID" || true
+          TCC_DB="$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Library/TCC/TCC.db"
+          for svc in kTCCServicePhotoLibrary kTCCServicePhotos kTCCServicePhotosAdd kTCCServiceCamera kTCCServiceMicrophone; do
+            sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$svc', '$BSKY_BUNDLE_ID', 0, 2, 2, 2, 16);"
+          done
+          xcrun simctl spawn "$UDID" launchctl kickstart -k system/com.apple.tccd || true
+
+      - name: Run bsky suite
+        env:
+          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+          ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
+          ENNIO_CLI: ${{ github.workspace }}/packages/ennio/dist/cli.js
+          BLUESKY_DIR: /tmp/bluesky
+          SUITE_LOG_DIR: /tmp/bsky-suite-logs
+          # GitHub macOS runners are ~1.5-2x slower than a dev Mac for
+          # simulator workloads; give visibility waits more headroom.
+          ENNIO_DEFAULT_WAIT_MS: '25000'
+        run: bash e2e/bsky/run-suite.sh
+
+      - name: Mock server log (always)
+        if: always()
+        run: tail -50 /tmp/mock-server.log || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bsky-suite-logs
+          path: |
+            /tmp/bsky-suite-logs/
+            /tmp/ennio-shots/
+            /tmp/mock-server.log
+          retention-days: 7
+          if-no-files-found: warn
