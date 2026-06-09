@@ -176,6 +176,15 @@ export class EnnioMcpSession {
     if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
     try {
       const { w, h } = await getScreenSize(a.session.udid);
+      // Commit-aware confirm: note the React commit timestamp before the
+      // gesture, then wait for the NEXT commit after it. This returns the
+      // instant React commits the new state — ignoring any CALayer
+      // animation still playing out — which a black-box driver can't do
+      // (it has to wait for the screen to visually settle). Falls back to
+      // frame-stability when no React observer is attached.
+      const pre = await a.connection.socket.call('react_commit_ts').catch(() => null);
+      const sinceMs = Number((pre?.data as { ts?: number | string })?.ts) || 0;
+      const attach = (pre?.data as { attach?: string })?.attach;
       await a.ctx.driver.swipe(
         a.session.udid,
         from.x * w,
@@ -184,8 +193,11 @@ export class EnnioMcpSession {
         to.y * h,
         durationMs,
       );
-      // Cheap in-process confirm: return as soon as the commit settles.
-      await a.connection.socket.call('wait_commit', { maxMs: 250, stableMs: 40 });
+      if (attach && attach !== 'none') {
+        await a.connection.socket.call('wait_react_commit', { sinceMs, maxMs: 300 });
+      } else {
+        await a.connection.socket.call('wait_commit', { maxMs: 250, stableMs: 40 });
+      }
       return ok({ swiped: true });
     } catch (e) {
       return classifyError(e);
