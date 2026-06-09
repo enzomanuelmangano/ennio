@@ -40,6 +40,7 @@ import {
   screenshot,
   setClipboard,
   setSelinuxPermissive,
+  resumedActivityLine,
   setupForward,
   stageAndAttachAgent,
   terminateAndroidApp,
@@ -321,6 +322,20 @@ export class AndroidPlatform implements Platform {
    * socket. The retry loop only covers ordinary launch hiccups (the process
    * failing to appear, or a rare attach error), not a probabilistic inject.
    */
+  /** Poll (paced) until `bundleId` owns the resumed/foreground activity, so
+   *  injection lands on a fully-attached process rather than mid-bindApplication.
+   *  Returns true once resumed; false on timeout (caller injects anyway —
+   *  best-effort settle, never a hard gate). */
+  private async waitForResumed(serial: string, bundleId: string, maxMs: number): Promise<boolean> {
+    const deadline = Date.now() + maxMs;
+    const needle = `${bundleId}/`;
+    while (Date.now() < deadline) {
+      if (resumedActivityLine(serial).includes(needle)) return true;
+      await sleep(250);
+    }
+    return false;
+  }
+
   private async establishReady(serial: string, bundleId: string): Promise<EnnioConnection> {
     let lastErr = '';
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -334,8 +349,17 @@ export class AndroidPlatform implements Platform {
         lastErr = 'app process never started';
         continue;
       }
+      // Inject only AFTER the app has reached a RESUMED activity. pidof returns
+      // the instant the process forks — a ptrace dlopen during bindApplication
+      // (Application.onCreate) corrupts the app↔ActivityManager attach
+      // handshake: the process logs "socket bound" then dies ("unknown pid"),
+      // never attaches, never resumes, and the agent socket goes unreachable —
+      // the dominant CI injection flake. Waiting for the resumed activity means
+      // we inject into a fully-attached, running process. Paced at 250ms: a
+      // tight dumpsys loop floods system_server and itself wedges cold-start.
+      await this.waitForResumed(serial, bundleId, 12_000);
       try {
-        // Inject the agent into the freshly-started process. Both paths stage
+        // Inject the agent into the now-resumed process. Both paths stage
         // the .so into the app's code_cache (wiped by pm clear, so re-staged
         // every launch); the agent's bounded wait covers the brief window
         // before Application.onCreate.
