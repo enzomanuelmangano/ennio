@@ -136,6 +136,16 @@ tags:
 # TEST: Remove single item
 # ============================================
 
+# The cart is a scrollable FlatList of items above a FIXED footer
+# (summary + checkout) — so cart-total is always visible and is NOT a
+# scrolled-to-bottom signal. The last item's action row (with its
+# remove button) sits at the list/footer boundary and can render clipped
+# behind the footer (x86 CI layout parked remove-item-2 under it →
+# "element not found"). Scroll it fully into the list viewport first.
+- scrollUntilVisible:
+    element:
+      id: 'remove-item-2'
+    direction: DOWN
 - tapOn:
     id: 'remove-item-2'
 
