@@ -176,6 +176,11 @@ jobs:
           api-level: ${{ env.ANDROID_API }}
           arch: x86_64
           target: default # AOSP image → adb root works (ptrace needs it)
+          # Pixel 3a profile (1080x2220). The default emulator device is
+          # shorter, pushing a 2-item cart's second row below the fold so
+          # `assertVisible cart-item-2` failed (03-cart, 04-checkout) — the
+          # iOS fixture and a normal phone show both rows. Pin the geometry.
+          profile: pixel_3a
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
