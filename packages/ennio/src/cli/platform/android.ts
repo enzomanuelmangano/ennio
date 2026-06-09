@@ -370,8 +370,8 @@ export class AndroidPlatform implements Platform {
       let diag = '';
       try {
         const p = await conn.socket.call('ping');
-        const d = p?.data as { resumedActivity?: boolean; hasActivityRef?: boolean } | undefined;
-        if (d) diag = ` resumedActivity=${d.resumedActivity} hasActivityRef=${d.hasActivityRef}`;
+        const d = p?.data as { bootstrap?: string } | undefined;
+        diag = ` bootstrap=${d?.bootstrap ?? '?'}`;
       } catch {
         diag = ' pingThrew';
       }
