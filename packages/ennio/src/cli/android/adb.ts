@@ -103,6 +103,28 @@ export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string
   return null;
 }
 
+/** Poll until `pkg` owns the RESUMED (foreground) activity. pidof returns the
+ *  instant the process forks — long before Application.onCreate — and a ptrace
+ *  dlopen into a process still in early cold-start can wedge it (the activity
+ *  then never resumes and the agent's `ready` flag never flips, burning the
+ *  whole injection-readiness budget). Gating injection on a resumed activity
+ *  injects into a settled process, so start() finds the foreground activity
+ *  immediately. Returns true once resumed, false if it never resumed in time
+ *  (caller still proceeds — a best-effort settle, not a hard gate). */
+export function waitForResumedActivity(serial: string, pkg: string, maxMs = 20000): boolean {
+  const deadline = Date.now() + maxMs;
+  const needle = `${pkg}/`;
+  while (Date.now() < deadline) {
+    try {
+      const out = adb(serial, ['shell', 'dumpsys activity activities | grep ResumedActivity']);
+      if (out.includes(needle)) return true;
+    } catch {
+      /* not up yet */
+    }
+  }
+  return false;
+}
+
 /** The device's primary ABI (e.g. arm64-v8a, x86_64) — selects the matching
  *  prebuilt agent .so. */
 export function getDeviceAbi(serial: string): string {
