@@ -3,8 +3,6 @@
 // dispatch — no transport here (see serve.ts), so the whole protocol is
 // testable by feeding messages to `handle()` and asserting the response.
 
-import { isErrorResult } from './result';
-import type { EnnioResult } from './result';
 import {
   failure,
   isNotification,
@@ -14,6 +12,33 @@ import {
   SUPPORTED_PROTOCOL_VERSIONS,
 } from './protocol';
 import type { JsonRpcRequest, JsonRpcResponse } from './protocol';
+import { err, isErrorResult } from './result';
+import type { EnnioResult } from './result';
+
+// Hard ceiling on any single tool call. A dead socket, a missing element
+// on the wrong screen, or a stuck animation must never hang the agent —
+// past this the call returns a structured `timeout` and the agent adapts.
+const TOOL_TIMEOUT_MS = Number(process.env.ENNIO_MCP_TOOL_TIMEOUT_MS) || 30_000;
+
+function withDeadline(p: Promise<EnnioResult> | EnnioResult, name: string): Promise<EnnioResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (r: EnnioResult) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(r);
+      }
+    };
+    const timer = setTimeout(
+      () => done(err('timeout', `tool ${name} exceeded ${TOOL_TIMEOUT_MS}ms`)),
+      TOOL_TIMEOUT_MS,
+    );
+    Promise.resolve(p).then(done, (e: unknown) =>
+      done(err('infra', e instanceof Error ? e.message : String(e))),
+    );
+  });
+}
 
 export interface ToolDef {
   name: string;
@@ -121,7 +146,9 @@ export class McpServer {
     if (!name) throw new Error('invalid params: tools/call requires a tool name');
     const tool = this.opts.tools.find((t) => t.name === name);
     if (!tool) throw new Error(`unknown tool: ${name}`);
-    const result = await tool.handler(args ?? {});
+    // Every tool is bounded: a handler that hangs becomes a structured
+    // timeout, never a stuck agent.
+    const result = await withDeadline(tool.handler(args ?? {}), name);
     // The envelope is the source of truth. We mirror it as text (so plain
     // MCP clients without structuredContent support still see everything)
     // and as structuredContent (for clients that parse it directly).

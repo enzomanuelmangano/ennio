@@ -20,8 +20,10 @@
 import { execFileSync } from 'child_process';
 
 import type { Flags } from '../cli/args';
+import { warmActuator } from '../hid';
+import { selectPlatform } from '../platform';
 import { EnnioSocketClient } from '../socket-client';
-import { getTargetUdid as getBootedSimulatorId, findDylib } from '../sim';
+import { getTargetUdid as getBootedSimulatorId, findDylib, ensureBootedSim } from '../sim';
 
 type Severity = 'pass' | 'warn' | 'fail';
 type Result = { name: string; severity: Severity; detail: string };
@@ -130,7 +132,112 @@ async function checkSocket(): Promise<Result> {
   }
 }
 
-export async function runDoctorCommand(_positional: string[], _flags: Flags): Promise<number> {
+/**
+ * `ennio doctor --smoke <bundleId>` — the end-to-end self-test. Where the
+ * static checks confirm the *pieces* are present, this proves the whole
+ * chain actually works on this machine + this app: inject the dylib, bring
+ * the socket up to bootstrap-ready, read the in-process view tree, and warm
+ * the HID actuator. If this passes, a real run will work; if it fails, it
+ * fails here with an actionable message instead of mid-flow.
+ */
+async function runSmoke(bundleId: string, platformName: 'ios' | 'android'): Promise<number> {
+  const print = (results: Result[]): void => {
+    const tag: Record<Severity, string> = { pass: '[PASS]', warn: '[WARN]', fail: '[FAIL]' };
+    for (const r of results) console.log(`${tag[r.severity]} ${r.name.padEnd(22)} ${r.detail}`);
+  };
+
+  const results: Result[] = [checkDylib()];
+  const udid = getBootedSimulatorId() ?? ensureBootedSim();
+  results.push(checkSim(udid));
+  if (!udid) {
+    print(results);
+    console.log('\n✗ No simulator available — boot one (or set ENNIO_UDID) and retry.');
+    return 1;
+  }
+
+  const platform = selectPlatform(platformName);
+  let connection: { socket: EnnioSocketClient; close(): void } | null = null;
+  try {
+    const opened = await platform.connect({
+      udid,
+      bundleId,
+      dylibPath: process.env.ENNIO_DYLIB_PATH || null,
+    });
+    connection = opened.connection;
+    results.push({
+      name: 'inject + socket',
+      severity: 'pass',
+      detail: 'dylib loaded, bootstrap ready',
+    });
+  } catch (e) {
+    results.push({
+      name: 'inject + socket',
+      severity: 'fail',
+      detail: e instanceof Error ? e.message.split('\n')[0] : String(e),
+    });
+    print(results);
+    console.log(`\n✗ Injection failed for ${bundleId}. Most common causes:`);
+    console.log(
+      '  - the app is not a Debug/dev build (the dylib refuses Release/App Store builds)',
+    );
+    console.log('  - the bundle id is wrong, or the app is not installed on this simulator');
+    console.log('  - an unsupported iOS/RN combination — see the issue tracker');
+    return 1;
+  }
+
+  try {
+    const views = await connection.socket.call('dump_views');
+    const n = Array.isArray(views.data) ? views.data.length : 0;
+    results.push({
+      name: 'in-process read',
+      severity: views.ok && n > 0 ? 'pass' : 'warn',
+      detail: views.ok ? `dump_views returned ${n} elements` : `dump_views failed: ${views.err}`,
+    });
+
+    const size = await connection.socket.call('window_size');
+    results.push({
+      name: 'screen geometry',
+      severity: size.ok ? 'pass' : 'warn',
+      detail: size.ok ? JSON.stringify(size.data) : 'window_size failed',
+    });
+
+    try {
+      await warmActuator(udid);
+      results.push({ name: 'HID actuator', severity: 'pass', detail: 'enniohid responded' });
+    } catch (e) {
+      results.push({
+        name: 'HID actuator',
+        severity: 'fail',
+        detail: `enniohid did not respond: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  } finally {
+    connection.close();
+  }
+
+  print(results);
+  const failed = results.filter((r) => r.severity === 'fail');
+  if (failed.length > 0) {
+    console.log(`\n✗ ${failed.length} blocking issue(s) — ennio will not work reliably here yet.`);
+    return 1;
+  }
+  console.log('\n✓ End-to-end smoke passed — inject, read, and actuate all work on this machine.');
+  return 0;
+}
+
+export async function runDoctorCommand(positional: string[], flags: Flags): Promise<number> {
+  if (flags.smoke) {
+    const bundleId = positional[0] || process.env.ENNIO_BUNDLE_ID;
+    if (!bundleId) {
+      console.error('Usage: ennio doctor --smoke <bundleId>');
+      console.error('  Runs an end-to-end self-test (inject → read → actuate) against the app.');
+      return 1;
+    }
+    const platformName =
+      flags.android || process.env.ENNIO_PLATFORM === 'android' ? 'android' : 'ios';
+    return runSmoke(bundleId, platformName);
+  }
+
   const udid = getBootedSimulatorId();
 
   const results: Result[] = [
