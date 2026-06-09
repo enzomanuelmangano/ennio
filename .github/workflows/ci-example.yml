@@ -68,12 +68,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      # Kick the boot NOW and let it proceed while JS deps install and the
+      # CLI/dylib build (~1-2 min) — `simctl boot` returns without waiting
+      # for the boot to finish; the later "Wait for simulator" step blocks
+      # on bootstatus. Saves the ~90s the boot used to spend serial.
+      - name: Boot simulator (async)
+        run: xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.2.19
-
-      - name: Select Xcode
-        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
 
       - name: Cache bun
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -112,15 +119,20 @@ jobs:
           unzip -q /tmp/EnnioExample-app.zip -d /tmp/exampleapp
           test -d /tmp/exampleapp/EnnioExample.app
 
-      - name: Boot simulator
+      - name: Wait for simulator
         id: sim
         run: |
           set -euo pipefail
-          xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
           xcrun simctl bootstatus booted -b
           UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
           test -n "$UDID" || { echo "No sim booted"; exit 1; }
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          # Pre-warm CoreSimulator's spawn/cfprefsd path in the background:
+          # the FIRST `simctl spawn` after boot pays a ~60-90s service
+          # warm-up on these runners (measured via ENNIO_PHASE_TRACE —
+          # enableAccessibility 77s). Poking it now, overlapped with the
+          # app install below, moves that cost off the first flow.
+          (xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility >/dev/null 2>&1 || true) &
 
       - name: Install example app
         run: xcrun simctl install "${{ steps.sim.outputs.udid }}" /tmp/exampleapp/EnnioExample.app
