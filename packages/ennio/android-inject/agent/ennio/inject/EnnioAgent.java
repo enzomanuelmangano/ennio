@@ -49,7 +49,14 @@ import java.util.concurrent.FutureTask;
 
 public final class EnnioAgent {
     private static final String TAG = "Ennio";
-    private static final String SOCKET_NAME = "ennio";
+    // Per-process abstract socket name. The abstract namespace is GLOBAL per
+    // device, so a lingering agent from a prior flow that still holds a fixed
+    // "ennio" name shadows the freshly-injected one: adb forward routes the CLI
+    // to the stale agent, whose ready flag never flips for the new activity
+    // ("@ennio never became ready"). Scoping the name to the pid makes every
+    // agent bind a unique socket — no collision possible — and the CLI forwards
+    // to the matching pid (it already knows it from waitForAppPid).
+    private static final String SOCKET_NAME = "ennio_" + android.os.Process.myPid();
     private static final long FNV_OFFSET = -3750763034362895579L; // 1469598103934665603 (unsigned)
     private static final long FNV_PRIME = 1099511628211L;
 

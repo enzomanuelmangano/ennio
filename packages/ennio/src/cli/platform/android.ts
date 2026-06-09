@@ -36,6 +36,7 @@ import {
   ptraceInjectAgent,
   pushAgentToTmp,
   pushInjector,
+  removeForward,
   screenshot,
   setClipboard,
   setSelinuxPermissive,
@@ -96,9 +97,9 @@ export class AndroidPlatform implements Platform {
     hardwareBack: (udid) => pressHardwareBack(udid),
   };
 
-  // adb-forwarded TCP port → the device's `@ennio` abstract socket. Set
-  // up once per device and reused across relaunches (the forward targets
-  // the abstract name, which each new app process re-binds).
+  // adb-forwarded TCP port → the device's `@ennio_<pid>` abstract socket.
+  // The agent's socket name is pid-scoped, so the forward must be re-pointed
+  // at the new pid on every (re)launch — see refreshForward.
   private forwardPort = new Map<string, number>();
 
   // The agent .so, pushed to the device's /data/local/tmp once per serial
@@ -225,12 +226,18 @@ export class AndroidPlatform implements Platform {
     return serial;
   }
 
-  private target(serial: string): ConnectTarget {
-    let port = this.forwardPort.get(serial);
-    if (port == null) {
-      port = setupForward(serial);
-      this.forwardPort.set(serial, port);
-    }
+  /**
+   * (Re)point the adb forward at the given pid's `@ennio_<pid>` socket and
+   * cache the new host port. The agent's socket name is pid-scoped to avoid a
+   * stale agent shadowing the new one, so this runs after every (re)launch
+   * once the new pid is known. Tears down the prior forward to avoid leaking
+   * host ports across relaunches.
+   */
+  private refreshForward(serial: string, pid: string): ConnectTarget {
+    const prev = this.forwardPort.get(serial);
+    if (prev != null) removeForward(serial, prev);
+    const port = setupForward(serial, `ennio_${pid}`);
+    this.forwardPort.set(serial, port);
     return { kind: 'tcp', port };
   }
 
@@ -243,11 +250,20 @@ export class AndroidPlatform implements Platform {
     this.prepareInjection(serial, opts.bundleId);
 
     // Already running with a live agent? Use it. Otherwise establish one.
-    const existing = new EnnioConnection({ udid: serial, target: this.target(serial) });
-    if ((await existing.open(2_000)) && (await this.isAgentReady(existing, 3_000))) {
-      return { session, connection: existing };
+    // The agent's socket is pid-scoped, so we need the running pid before we
+    // can forward to it — a quick pidof; if the app isn't up there's nothing
+    // to reuse and we fall straight through to establishReady.
+    const runningPid = waitForAppPid(serial, opts.bundleId, 500);
+    if (runningPid) {
+      const existing = new EnnioConnection({
+        udid: serial,
+        target: this.refreshForward(serial, runningPid),
+      });
+      if ((await existing.open(2_000)) && (await this.isAgentReady(existing, 3_000))) {
+        return { session, connection: existing };
+      }
+      existing.close();
     }
-    existing.close();
     grantAllPermissions(serial, opts.bundleId);
     const connection = await this.establishReady(serial, opts.bundleId);
     return { session, connection };
@@ -333,7 +349,7 @@ export class AndroidPlatform implements Platform {
         lastErr = `inject failed: ${e instanceof Error ? e.message : String(e)}`;
         continue;
       }
-      const conn = new EnnioConnection({ udid: serial, target: this.target(serial) });
+      const conn = new EnnioConnection({ udid: serial, target: this.refreshForward(serial, pid) });
       // Generous on the readiness wait: a KVM emulator on a loaded CI runner
       // can take >6 s from process-start to the first resumed Activity (when
       // the agent flips `ready`). The socket binds quickly (open succeeds),
