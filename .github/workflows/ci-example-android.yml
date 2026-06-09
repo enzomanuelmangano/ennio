@@ -181,14 +181,20 @@ jobs:
           # `assertVisible cart-item-2` failed (03-cart, 04-checkout) — the
           # iOS fixture and a normal phone show both rows. Pin the geometry.
           profile: pixel_3a
-          force-avd-creation: false
-          # -memory 4096: the default device RAM starves system_server under
+          # ram-size 4096: the default device RAM starves system_server under
           # the app + ptrace agent, ANR-ing it ("Process system isn't
           # responding") — the ANR dialog steals input focus so taps/finds
-          # silently miss (03 remove-item-2; launchApp ballooned to 31s).
-          # The ubuntu runner has 16GB, so 4GB device RAM is safe and makes
-          # the emulator behave like a healthy 4GB AVD (local suite: 40/40).
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096
+          # silently miss (03 remove-item-2) and launchApp ballooned to 31s+.
+          # The emulator `-memory` flag is overridden by the AVD's config.ini,
+          # so the device RAM must be set via the runner's ram-size input,
+          # which edits hw.ramSize at AVD creation. force-avd-creation: true
+          # guarantees the (re)created AVD picks up the new size. The ubuntu
+          # runner has 16GB, so 4GB device RAM is safe — it makes the CI
+          # emulator behave like the healthy 4GB local AVD (suite: 40/40).
+          ram-size: 4096M
+          heap-size: 576M
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bash /tmp/run-suite.sh
 
