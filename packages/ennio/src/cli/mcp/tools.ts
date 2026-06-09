@@ -175,7 +175,15 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
         required: ['selector'],
       },
       readOnly: false,
-      handler: (args) => dispatchSelector(session, args, (sel) => ({ tapOn: sel })),
+      handler: (args) => {
+        const sel = toMaestroSelector(args.selector as McpSelector | undefined);
+        if (!sel.ok) return sel;
+        // A point tap needs no find/settle — take the fast HID path. testID
+        // and text taps go through the full find pipeline (correct targeting).
+        const p = (args.selector as McpSelector)?.point;
+        if (p) return session.rawTap(p);
+        return session.dispatch({ tapOn: sel.data });
+      },
     },
     {
       name: 'ennio_double_tap',

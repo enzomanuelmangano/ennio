@@ -204,6 +204,25 @@ export class EnnioMcpSession {
     }
   }
 
+  /**
+   * Fast tap at a normalized [0,1] point: the raw HID tap plus a tight
+   * in-process commit-wait, skipping the flow handler's find + settle. The
+   * point counterpart to rawSwipe — for an agent that already knows where to
+   * tap (or is poking coordinates), with no e2e overhead.
+   */
+  async rawTap(point: { x: number; y: number }): Promise<EnnioResult<{ tapped: true }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const { w, h } = await getScreenSize(a.session.udid);
+      await a.ctx.driver.tap(a.session.udid, point.x * w, point.y * h);
+      await a.connection.socket.call('wait_commit', { maxMs: 250, stableMs: 40 });
+      return ok({ tapped: true });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
   /** On-screen element inventory (role / testID / text / value). */
   async describe(): Promise<EnnioResult<ScreenDescription>> {
     const a = this.attachment;
