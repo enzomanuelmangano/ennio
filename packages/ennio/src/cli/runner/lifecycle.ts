@@ -33,6 +33,37 @@ export async function dismissPermissionDialogs(udid: string): Promise<boolean> {
   return dismissSystemSheet(udid).catch(() => false);
 }
 
+/**
+ * simctl launch arguments the CURRENT app process was started with,
+ * per device+bundle. Written by the two real-relaunch paths below; read
+ * by the launchApp handler's app-reuse gate. A running process already
+ * carries its launch args in the NSUserDefaults arguments domain
+ * (process-scoped — survives a data wipe + in-place JS reload), so a
+ * launchApp with byte-identical args can take the soft-reset fast path;
+ * only DIFFERENT args force a real relaunch. In-memory: valid for the
+ * lifetime of this CLI process, which is exactly the window in which a
+ * suite reconnects to the same app process between flows.
+ */
+const lastLaunchArgsByApp = new Map<string, string[]>();
+
+function launchArgsKey(udid: string, bundleId: string): string {
+  return `${udid}:${bundleId}`;
+}
+
+export function recordLaunchArgs(udid: string, bundleId: string, args: string[]): void {
+  lastLaunchArgsByApp.set(launchArgsKey(udid, bundleId), [...args]);
+}
+
+export function launchArgsSatisfiedByProcess(
+  udid: string,
+  bundleId: string,
+  args: string[],
+): boolean {
+  if (args.length === 0) return true;
+  const last = lastLaunchArgsByApp.get(launchArgsKey(udid, bundleId));
+  return last !== undefined && last.length === args.length && last.every((a, i) => a === args[i]);
+}
+
 export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void> {
   // The app is "painted" when React first commits content (post-splash).
   // That commit IS the signal — wait for the EVENT, not a stable window.
@@ -148,6 +179,7 @@ export async function relaunchAndReconnect(
     );
   }
   ctx.client = reopen;
+  recordLaunchArgs(ctx.udid, ctx.bundleId, launchArgs);
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     try {
@@ -357,9 +389,15 @@ export async function clearStateAndRelaunch(
     );
   }
   ctx.client = reopen;
+  recordLaunchArgs(ctx.udid, ctx.bundleId, launchArgs);
   getAppContainer(ctx.udid, ctx.bundleId);
   // Pre-spawn the HID helper in the background — it arms while the app
   // finishes booting, so the first real gesture doesn't pay the ~700ms
   // spawn (observed as a slow first nav tap).
   void warmActuator(ctx.udid);
+  // Settle on the SIGNAL (first React commit + layout tail), not a fixed
+  // pause — callers previously stacked a blind POST_LAUNCH_SETTLE_MS on
+  // top of this return, which both under-waits a slow boot and
+  // over-waits a fast one.
+  await waitForFirstPaint(reopen);
 }

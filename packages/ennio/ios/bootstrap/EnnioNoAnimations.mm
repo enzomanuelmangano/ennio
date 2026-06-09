@@ -19,8 +19,22 @@ static void (*g_origAddAnimation)(id, SEL, CAAnimation *, NSString *) = NULL;
 
 static void ennio_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString *key) {
     if (g_enabled) {
-        // Drop the animation entirely. The layer's model value was already
-        // set by the caller; without the animation it's displayed at once.
+        // Time-compress instead of dropping. Dropping the add silently
+        // loses the animation's delegate callbacks — and UIKit's modal
+        // present/dismiss state machine blocks on animationDidStop:
+        // (observed: bsky's avatar pageSheet stuck open after "Done",
+        // UIMenu intermittently failing to present). Playing the
+        // animation at 1000x keeps every delegate/completion firing
+        // through the normal machinery while finishing within ~a frame.
+        if (anim.repeatCount == HUGE_VALF || anim.repeatDuration == INFINITY) {
+            // Infinite loops (activity spinners) never complete by
+            // design — no delegate to preserve. Drop them so the
+            // animations_active settle signal doesn't see a perpetual
+            // 1000x loop as in-flight animation.
+            return;
+        }
+        anim.speed = 1000.0f;
+        if (g_origAddAnimation) g_origAddAnimation(self, _cmd, anim, key);
         return;
     }
     if (g_origAddAnimation) g_origAddAnimation(self, _cmd, anim, key);
