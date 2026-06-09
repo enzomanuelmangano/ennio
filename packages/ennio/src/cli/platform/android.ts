@@ -40,7 +40,6 @@ import {
   screenshot,
   setClipboard,
   setSelinuxPermissive,
-  resumedActivityLine,
   setupForward,
   stageAndAttachAgent,
   terminateAndroidApp,
@@ -322,20 +321,6 @@ export class AndroidPlatform implements Platform {
    * socket. The retry loop only covers ordinary launch hiccups (the process
    * failing to appear, or a rare attach error), not a probabilistic inject.
    */
-  /** Poll (paced) until `bundleId` owns the resumed/foreground activity, so
-   *  injection lands on a fully-attached process rather than mid-bindApplication.
-   *  Returns true once resumed; false on timeout (caller injects anyway —
-   *  best-effort settle, never a hard gate). */
-  private async waitForResumed(serial: string, bundleId: string, maxMs: number): Promise<boolean> {
-    const deadline = Date.now() + maxMs;
-    const needle = `${bundleId}/`;
-    while (Date.now() < deadline) {
-      if (resumedActivityLine(serial).includes(needle)) return true;
-      await sleep(250);
-    }
-    return false;
-  }
-
   private async establishReady(serial: string, bundleId: string): Promise<EnnioConnection> {
     let lastErr = '';
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -349,17 +334,8 @@ export class AndroidPlatform implements Platform {
         lastErr = 'app process never started';
         continue;
       }
-      // Inject only AFTER the app has reached a RESUMED activity. pidof returns
-      // the instant the process forks — a ptrace dlopen during bindApplication
-      // (Application.onCreate) corrupts the app↔ActivityManager attach
-      // handshake: the process logs "socket bound" then dies ("unknown pid"),
-      // never attaches, never resumes, and the agent socket goes unreachable —
-      // the dominant CI injection flake. Waiting for the resumed activity means
-      // we inject into a fully-attached, running process. Paced at 250ms: a
-      // tight dumpsys loop floods system_server and itself wedges cold-start.
-      await this.waitForResumed(serial, bundleId, 12_000);
       try {
-        // Inject the agent into the now-resumed process. Both paths stage
+        // Inject the agent into the freshly-started process. Both paths stage
         // the .so into the app's code_cache (wiped by pm clear, so re-staged
         // every launch); the agent's bounded wait covers the brief window
         // before Application.onCreate.
@@ -373,29 +349,34 @@ export class AndroidPlatform implements Platform {
         lastErr = `inject failed: ${e instanceof Error ? e.message : String(e)}`;
         continue;
       }
-      const conn = new EnnioConnection({ udid: serial, target: this.refreshForward(serial, pid) });
+      const target = this.refreshForward(serial, pid);
+      const port = target.kind === 'tcp' ? target.port : -1;
+      const conn = new EnnioConnection({ udid: serial, target });
       // Generous on the readiness wait: a KVM emulator on a loaded CI runner
       // can take >6 s from process-start to the first resumed Activity (when
       // the agent flips `ready`). The socket binds quickly (open succeeds),
       // but a tight ready-poll declared "@ennio never became ready" and forced
       // a relaunch — sometimes burning all attempts. Wider windows + an extra
       // attempt make a hot-path relaunch reliable under CI load.
-      if ((await conn.open(12_000)) && (await this.isAgentReady(conn, 12_000))) {
+      const openOk = await conn.open(12_000);
+      if (openOk && (await this.isAgentReady(conn, 12_000))) {
         return conn;
       }
-      // Capture the agent's own view of why readiness never flipped — a stuck
-      // ready flag (resumedActivity=true) vs a genuinely un-resumed app
-      // (resumedActivity=false) point at different root causes.
+      // Diagnostics. The CLI forwards to localabstract:ennio_<pid>; the agent
+      // logs the pid it actually bound (@ennio_<myPid>). pid + port + open let
+      // us tell a forward/pid mismatch (open=false → nothing listening on that
+      // name) from a bound-but-not-ready agent (open=true). The ping fields
+      // distinguish a stuck ready flag from an un-resumed app.
       let diag = '';
       try {
         const p = await conn.socket.call('ping');
         const d = p?.data as { resumedActivity?: boolean; hasActivityRef?: boolean } | undefined;
-        if (d) diag = ` (resumedActivity=${d.resumedActivity} hasActivityRef=${d.hasActivityRef})`;
+        if (d) diag = ` resumedActivity=${d.resumedActivity} hasActivityRef=${d.hasActivityRef}`;
       } catch {
-        diag = ' (socket unreachable)';
+        diag = ' pingThrew';
       }
       conn.close();
-      lastErr = `agent attached but @ennio never became ready${diag}`;
+      lastErr = `agent attached but @ennio never became ready (pid=${pid} port=${port} open=${openOk}${diag})`;
     }
     throw new Error(
       `EnnioAgent never came up for ${bundleId}: ${lastErr}. ` +

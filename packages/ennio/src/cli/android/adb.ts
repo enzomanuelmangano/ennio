@@ -103,17 +103,6 @@ export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string
   return null;
 }
 
-/** Single dumpsys probe: returns the "ResumedActivity" line(s), or '' on error.
- *  Caller paces the polling — do NOT tight-loop this; dumpsys activity is a
- *  heavy system_server call and flooding it itself wedges cold-start. */
-export function resumedActivityLine(serial: string): string {
-  try {
-    return adb(serial, ['shell', 'dumpsys activity activities | grep ResumedActivity']);
-  } catch {
-    return '';
-  }
-}
-
 /** The device's primary ABI (e.g. arm64-v8a, x86_64) — selects the matching
  *  prebuilt agent .so. */
 export function getDeviceAbi(serial: string): string {
