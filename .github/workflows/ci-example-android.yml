@@ -49,9 +49,11 @@ env:
   # e2e-fixtures release asset — same model as the iOS .app fixture in
   # ci-example.yml. The suite tests the runner, not the app, so the binary is
   # stable; CI never builds it. Refresh: rebuild the example release APK, upload
-  # to e2e-fixtures-v1, update this SHA.
-  EXAMPLE_APK_SHA256: 2b3dbea63888a9670d276911797c969f5aeafeba6ada26ba4eb39e37f5aa152c
-  EXAMPLE_APK_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v1/EnnioExample-android.apk
+  # to a new e2e-fixtures tag, update this SHA + URL. v2 adds the native Android
+  # action sheet (Alert) so g-action-sheet runs on Android; built arm64-v8a +
+  # x86_64 (the CI emulator is x86_64).
+  EXAMPLE_APK_SHA256: 6b9b91b518324d1937af112a0defd189df9d8e6032d980d93256e1d5840681fd
+  EXAMPLE_APK_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/EnnioExample-android.apk
 jobs:
   example-android:
     name: Example suite (Android emulator, ptrace inject)
