@@ -68,10 +68,6 @@ jobs:
         with:
           bun-version: 1.2.19
 
-      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
-        with:
-          version: 10
-
       # mock-server.ts runs as native-TS node (type stripping) — needs >=23.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -139,6 +135,9 @@ jobs:
           REDIS_HOST: 127.0.0.1:6379
         run: |
           set -euo pipefail
+          # pnpm via npm, not pnpm/action-setup: the action refuses to run
+          # because ennio's root package.json pins packageManager to bun.
+          npm install -g pnpm@10
           pnpm install
           NODE_ENV=development nohup node ./mock-server.ts > /tmp/mock-server.log 2>&1 &
           for i in $(seq 1 60); do
