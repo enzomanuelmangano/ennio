@@ -136,6 +136,9 @@ jobs:
           # for simulator workloads. Give assertVisible / waitFor more headroom
           # so slow dark-mode re-renders and logout navigations don't timeout.
           ENNIO_DEFAULT_WAIT_MS: '25000'
+          # Per-phase timing ([phase] lines in the per-flow logs) — costs
+          # nothing, makes runner slowness diagnosable from artifacts.
+          ENNIO_PHASE_TRACE: '1'
         run: |
           set -uo pipefail
           mkdir -p /tmp/ennio-logs

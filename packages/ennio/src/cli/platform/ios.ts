@@ -23,7 +23,7 @@ import {
   relaunchAndReconnect as iosRelaunchAndReconnect,
   softResetAndReload,
 } from '../runner/lifecycle';
-import { enableAccessibility, disableAutocorrect } from '../sim';
+import { prepareSimulator, tracePhase, tracePhaseAsync } from '../sim';
 import { POST_LAUNCH_SETTLE_MS, sleep } from '../runner/context';
 import type { RunContext } from '../runner/context';
 
@@ -70,21 +70,17 @@ export class IosPlatform implements Platform {
       safeMode: opts.safeMode,
     });
 
-    // SwiftUI / native screens only build their a11y tree when an a11y
-    // client is active — flip it on so find_ax_by_text can read them.
-    enableAccessibility(session.udid);
-
-    // Make typing deterministic: a non-English keyboard's autocorrect
-    // intermittently rewrites typed text (e.g. "Reply 1" → "Replay 1").
-    disableAutocorrect(session.udid);
+    // SwiftUI a11y tree + deterministic keyboard — device-level prefs,
+    // applied once per sim boot (sentinel-skipped on later invocations).
+    prepareSimulator(session.udid);
 
     const connection = new EnnioConnection({ udid: session.udid });
-    if (!(await connection.open(2_000))) {
+    if (!(await tracePhaseAsync('socketOpenFast', () => connection.open(2_000)))) {
       // App isn't running with the dylib loaded — launch + retry.
-      session.terminate();
+      tracePhase('terminate', () => session.terminate());
       const launchedAt = Date.now();
-      session.launch();
-      if (!(await connection.open(15_000))) {
+      tracePhase('launch', () => session.launch());
+      if (!(await tracePhaseAsync('socketOpenLaunched', () => connection.open(15_000)))) {
         const diagnosis = diagnoseSocketFailure(session.udid, session.bundleId, launchedAt);
         throw new Error(
           'Auto-launched the app with DYLD injection but libennio socket never came up.' +
@@ -93,7 +89,7 @@ export class IosPlatform implements Platform {
               : ' Check the app is a Debug build and the dylib path is correct.'),
         );
       }
-      await this.waitBootstrapReady(connection);
+      await tracePhaseAsync('bootstrapReady', () => this.waitBootstrapReady(connection));
     }
     return { session, connection };
   }
