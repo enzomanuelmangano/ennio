@@ -307,7 +307,7 @@ export class AndroidPlatform implements Platform {
    */
   private async establishReady(serial: string, bundleId: string): Promise<EnnioConnection> {
     let lastErr = '';
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       if (attempt > 0) {
         terminateAndroidApp(serial, bundleId);
         await sleep(400);
@@ -334,7 +334,13 @@ export class AndroidPlatform implements Platform {
         continue;
       }
       const conn = new EnnioConnection({ udid: serial, target: this.target(serial) });
-      if ((await conn.open(8_000)) && (await this.isAgentReady(conn, 6_000))) {
+      // Generous on the readiness wait: a KVM emulator on a loaded CI runner
+      // can take >6 s from process-start to the first resumed Activity (when
+      // the agent flips `ready`). The socket binds quickly (open succeeds),
+      // but a tight ready-poll declared "@ennio never became ready" and forced
+      // a relaunch — sometimes burning all attempts. Wider windows + an extra
+      // attempt make a hot-path relaunch reliable under CI load.
+      if ((await conn.open(12_000)) && (await this.isAgentReady(conn, 12_000))) {
         return conn;
       }
       conn.close();
