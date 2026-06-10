@@ -58,7 +58,7 @@ jobs:
   bsky:
     name: Bluesky suite (iOS sim, prebuilt fixture)
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -93,7 +93,19 @@ jobs:
       # remainder. (Lesson from ci-example perf work: serial boot was a
       # pure 97s tax.)
       - name: Start simulator boot (async)
-        run: xcrun simctl boot "iPhone 16 Pro" || xcrun simctl boot "iPhone 16" || true
+        id: boot
+        run: |
+          set -euo pipefail
+          # Create a dedicated device pinned to the iOS 18 runtime —
+          # `simctl boot <name>` resolves an ambiguous name to an arbitrary
+          # device, which on this image is the iOS 26 one (where bsky
+          # v1.122 crashes). Explicit runtime, explicit UDID.
+          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-18-[0-9]+' | tail -1)
+          test -n "$RUNTIME" || { echo "No iOS 18 runtime on image"; xcrun simctl list runtimes; exit 1; }
+          UDID=$(xcrun simctl create "bsky-e2e" "iPhone 16 Pro" "$RUNTIME")
+          echo "created $UDID on $RUNTIME"
+          xcrun simctl boot "$UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
 
       - name: Cache bun
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -179,9 +191,9 @@ jobs:
         id: sim
         run: |
           set -euo pipefail
-          xcrun simctl bootstatus booted -b
-          UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
-          test -n "$UDID" || { echo "No sim booted"; exit 1; }
+          UDID="${{ steps.boot.outputs.udid }}"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl list devices booted
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
 
       - name: Install bsky app + pre-grant permissions
