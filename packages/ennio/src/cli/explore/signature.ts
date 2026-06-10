@@ -46,9 +46,7 @@ export function screenSignature(elements: DescribedElement[]): string {
   }
   // Presence matters, multiplicity collapses: any repeat count hashes as
   // 'n' so list LENGTH (a data property) never splits a node.
-  const entries = [...counts.entries()]
-    .map(([entry, n]) => `${entry}${n > 1 ? '|n' : ''}`)
-    .sort();
+  const entries = [...counts.entries()].map(([entry, n]) => `${entry}${n > 1 ? '|n' : ''}`).sort();
   return createHash('sha1').update(entries.join('\n')).digest('hex').slice(0, 12);
 }
 

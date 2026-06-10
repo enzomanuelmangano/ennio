@@ -69,7 +69,7 @@ export class LiveExploreDriver implements ExploreDriver {
   }
 
   async describe(): Promise<
-    Array<{ role: string; testID?: string; text?: string; value?: string; enabled: boolean }>
+    { role: string; testID?: string; text?: string; value?: string; enabled: boolean }[]
   > {
     const r = await this.session.describe();
     if (!r.ok) throw new Error(`describe failed: ${r.error.message}`);

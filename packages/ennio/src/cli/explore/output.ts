@@ -12,17 +12,17 @@ import type { ExploreResult } from './types';
 export interface AppMap {
   appId: string;
   root: string;
-  nodes: Array<{
+  nodes: {
     sig: string;
     title?: string;
     depth: number;
     screenshot?: string;
     actions: string[];
     untried: string[];
-    elements: Array<{ role: string; testID?: string; text?: string }>;
-  }>;
-  edges: Array<{ from: string; action: string; to: string; kind: string; detail?: string }>;
-  warnings: Array<{ kind: string; detail: string }>;
+    elements: { role: string; testID?: string; text?: string }[];
+  }[];
+  edges: { from: string; action: string; to: string; kind: string; detail?: string }[];
+  warnings: { kind: string; detail: string }[];
   stats: { screens: number; edges: number; steps: number };
 }
 
@@ -45,9 +45,11 @@ export function buildAppMap(appId: string, result: ExploreResult): AppMap {
   const edges = [...result.edges]
     .map((e) => ({ ...e }))
     .sort(
-    (a, b) =>
-      a.from.localeCompare(b.from) || a.action.localeCompare(b.action) || a.to.localeCompare(b.to),
-  );
+      (a, b) =>
+        a.from.localeCompare(b.from) ||
+        a.action.localeCompare(b.action) ||
+        a.to.localeCompare(b.to),
+    );
   return {
     appId,
     root: result.root,

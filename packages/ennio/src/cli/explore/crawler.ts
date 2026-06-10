@@ -213,7 +213,13 @@ export async function crawl(
       //   3. clearState replay of the parent path — the ground truth.
       const parentPath = path.slice(0, -1);
       const expected =
-        parentPath.length === 0 ? root : edgeTarget(edges, root, parentPath.map((a) => a.key));
+        parentPath.length === 0
+          ? root
+          : edgeTarget(
+              edges,
+              root,
+              parentPath.map((a) => a.key),
+            );
       const tb = Date.now();
       await driver.back();
       let sig = await snapshot(parentPath);

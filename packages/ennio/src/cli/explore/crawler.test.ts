@@ -155,8 +155,8 @@ describe('crawl', () => {
   it('honors maxSteps as a hard global cap', async () => {
     const result = await crawl(app(), { ...LIMITS, maxSteps: 2 });
     expect(result.steps).toBe(2);
-    expect(
-      result.warnings.some((w) => w.kind === 'cap-hit' && w.detail.includes('maxSteps')),
-    ).toBe(true);
+    expect(result.warnings.some((w) => w.kind === 'cap-hit' && w.detail.includes('maxSteps'))).toBe(
+      true,
+    );
   });
 });
