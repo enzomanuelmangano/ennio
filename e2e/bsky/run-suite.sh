@@ -24,6 +24,11 @@ for f in __e2e__/flows/*.yml; do
   # Optional prefix filter (FLOW_FILTER=composer) — iterate on a single
   # failing flow without paying for the whole suite.
   if [ -n "${FLOW_FILTER:-}" ]; then case "$b" in ${FLOW_FILTER}*) ;; *) continue;; esac; fi
+  # Space-separated exact flow names to skip (SKIP_FLOWS="composer ..."),
+  # each printed loudly so an exclusion can never hide.
+  skip=0
+  for s in ${SKIP_FLOWS:-}; do [ "$b" = "$s" ] && skip=1; done
+  if [ "$skip" = "1" ]; then echo "SKIP  $b (SKIP_FLOWS)"; continue; fi
   # onboarding picks a photo via a blind point-tap (50%,22%) whose target
   # position depends on the animated picker-sheet timeline — animations
   # must stay on for that flow.
