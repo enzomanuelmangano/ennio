@@ -16,7 +16,7 @@
 #     anything is unzipped or installed
 #   - no secrets consumed
 #
-# Trigger: manual only for now —
+# Triggers: pull_request (paths-filtered) + manual dispatch —
 #   gh workflow run ci-example.yml
 name: ci-example
 
@@ -35,15 +35,18 @@ on:
         description: 'Run with --disable-reuse-app (full relaunch; reuse is on by default)'
         type: boolean
         default: false
-  # pull_request:
-  #   branches: [main]
-  #   paths:
-  #     - 'packages/ennio/src/**'
-  #     - 'packages/ennio/ios/**'
-  #     - 'packages/ennio/cpp/**'
-  #     - 'packages/ennio/native-hid/**'
-  #     - 'example/maestro-e2e/**'
-  #     - '.github/workflows/ci-example.yml'
+  # Every PR that can affect the iOS runner or the example suite.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - 'packages/ennio/ios/**'
+      - 'packages/ennio/cpp/**'
+      - 'packages/ennio/native-hid/**'
+      - 'packages/ennio/native-ax/**'
+      - 'packages/ennio/native-shim/**'
+      - 'example/maestro-e2e/**'
+      - '.github/workflows/ci-example.yml'
 
 permissions:
   contents: read

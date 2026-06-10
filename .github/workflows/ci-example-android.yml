@@ -18,19 +18,28 @@
 # Security posture mirrors ci-example: contents: read, actions pinned to SHAs,
 # checkout with persist-credentials: false, no secrets.
 #
-# Trigger: manual —  gh workflow run ci-example-android.yml
+# Triggers: pull_request (paths-filtered) + manual dispatch.
 name: ci-example-android
 
 on:
-  # Manual-only — same policy as ci-example / ci-wikipedia / ci-fast-build.
-  # Re-enable a push/pull_request trigger once the Android flake rate is low
-  # enough to gate merges on it.
   workflow_dispatch:
     inputs:
       no_animations:
         description: 'Run with --disable-animations (suppress app animations for speed)'
         type: boolean
         default: false
+  # Every PR that can affect the Android runner or the example suite.
+  # Flake rate cleared the bar for gating merges: 3 consecutive zero-retry
+  # 40/40 dispatch runs on the escalating-backoff injection fix.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - 'packages/ennio/android/**'
+      - 'packages/ennio/android-inject/**'
+      - 'packages/ennio/cpp/**'
+      - 'example/maestro-e2e/**'
+      - '.github/workflows/ci-example-android.yml'
 
 permissions:
   contents: read
