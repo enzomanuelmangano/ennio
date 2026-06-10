@@ -115,7 +115,8 @@ export async function execTapOn(
     // 1500ms cap expires mid-load, and the blind point-tap lands on a
     // not-yet-hittable cell (observed: bsky onboarding's 50%,22% photo
     // pick dismissing the sheet pick-less).
-    const pointSettleMaxMs = parseInt(process.env.ENNIO_POINT_TAP_SETTLE_MAX_MS ?? '1500', 10);
+    const pointSettleMaxMs =
+      parseInt(process.env.ENNIO_POINT_TAP_SETTLE_MAX_MS ?? '1500', 10) || 1500;
     await ctx.client
       .call('wait_commit', { maxMs: pointSettleMaxMs, stableMs: 250 })
       .catch(() => undefined);
@@ -127,7 +128,10 @@ export async function execTapOn(
     // a slow CI VM). Wait out in-flight animations + presentation
     // transitions too — one cheap RPC when nothing is animating.
     {
-      const animDeadline = Date.now() + 3000;
+      // Animation budget rides the same env knob as the commit settle —
+      // a host slow enough to need a longer commit budget is slow at
+      // animations too.
+      const animDeadline = Date.now() + Math.max(3000, pointSettleMaxMs);
       while (Date.now() < animDeadline) {
         const a = await ctx.client.call('animations_active').catch(() => undefined);
         if (!(a?.ok && (a.data as { active?: boolean } | undefined)?.active)) break;
@@ -911,7 +915,7 @@ export async function execTapOn(
     // Wait on the SIGNAL — the pre-tap VC chain changing (dismissal
     // start) — then let presentation-idle absorb the transition. Bails
     // the moment the chain changes; fast hosts pay ~1 poll.
-    const submitDismissMaxMs = parseInt(process.env.ENNIO_SUBMIT_DISMISS_MAX_MS ?? '0', 10);
+    const submitDismissMaxMs = parseInt(process.env.ENNIO_SUBMIT_DISMISS_MAX_MS ?? '0', 10) || 0;
     if (submitDismissMaxMs > 0 && sel.id && /publish|submit|send/i.test(sel.id)) {
       await timedAsync(ctx, 'tap.waitSubmitDismiss', async () => {
         const before = chain.join('>');

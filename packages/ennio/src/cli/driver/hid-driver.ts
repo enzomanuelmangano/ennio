@@ -18,7 +18,7 @@ const POST_TAP_SETTLE_MS = parseInt(process.env.ENNIO_TAP_SETTLE_MS || '800', 10
 // Opt-in post-tap presentation-begin grace window (see settleAfterTap).
 // 0 (default) = disabled; CI sets ~800ms to absorb VM scheduling lag
 // between a dismiss and the chained present.
-const PRESENT_GRACE_MS = parseInt(process.env.ENNIO_PRESENT_GRACE_MS ?? '0', 10);
+const PRESENT_GRACE_MS = parseInt(process.env.ENNIO_PRESENT_GRACE_MS ?? '0', 10) || 0;
 
 const SWIPE_SETTLE_PAUSE_MS = parseInt(process.env.ENNIO_SWIPE_SETTLE_MS ?? '500', 10);
 const SWIPE_SETTLE_MAX_MS = parseInt(process.env.ENNIO_SWIPE_COMMIT_MAX_MS ?? '1000', 10);
@@ -181,9 +181,11 @@ export class HidDriver implements GestureDriver {
             if (waited > 30) {
               // A transition started (and may still be running) — wait it
               // out fully, then treat it like the normal post-transition
-              // case below.
+              // case below. Force past the >50 gate: the observed probe
+              // wait can legitimately be 31-50ms while the transition is
+              // real (we caught its tail end).
               await bestEffort(client, 'wait_presentation_idle', { maxMs: 1500 });
-              transitionWaitMs = waited;
+              transitionWaitMs = Math.max(waited, 51);
               return;
             }
             await sleep(60);
