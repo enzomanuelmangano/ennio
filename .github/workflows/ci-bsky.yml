@@ -267,11 +267,17 @@ jobs:
           # fresh library is still initializing on the slow VM — retry.
           # Duplicate imports across attempts are harmless (every seed is
           # the same small JPEG).
+          # 12 copies: the onboarding flow picks a photo with a BLIND
+          # point-tap at 50%,22% of the picker sheet — a sparse grid (one
+          # 3-photo row) leaves that point on empty space, the sheet
+          # dismisses pick-less, and the cropper's "Done" never exists.
+          # A full grid keeps every plausible layout covered.
+          SEED_DIR=$(mktemp -d)
+          for i in $(seq 1 12); do
+            cp "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg "$SEED_DIR/seed-$i.jpg"
+          done
           for attempt in 1 2 3 4 5; do
-            if xcrun simctl addmedia "$UDID" \
-              "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg \
-              "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-2.jpg \
-              "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-3.jpg; then
+            if xcrun simctl addmedia "$UDID" "$SEED_DIR"/seed-*.jpg; then
               echo "addmedia OK on attempt $attempt"; break
             fi
             [ "$attempt" = "5" ] && { echo "addmedia failed after 5 attempts"; exit 1; }
