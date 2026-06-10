@@ -61,12 +61,15 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
 
 /**
  * Tappable candidates, document order, deduped:
- *   * every testID'd element (authored interactivity), and
+ *   * every testID'd element (authored interactivity),
+ *   * elements carrying the button/link accessibility trait (how apps
+ *     without testIDs mark their tappables — accessibilityRole="button"
+ *     sets it), and
  *   * Button-role elements identified only by text (RNGestureHandler
- *     buttons, UIKit buttons — interactive by class, no testID given).
- * Generic text views are NOT actions: `dump_views` carries no
- * interactivity signal, so a bare RCTView card without a testID is
- * invisible to the crawler — give it a testID to make it explorable.
+ *     buttons, UIKit buttons — interactive by class, no trait dumped on
+ *     older dylibs).
+ * Untraited bare text views are NOT actions: give an element a testID or
+ * an accessibility role to make it explorable.
  */
 export function enumerateActions(
   elements: DescribedElement[],
@@ -86,7 +89,7 @@ export function enumerateActions(
       all.push({ key: el.testID, id: el.testID, ...(el.text && { text: el.text }) });
       continue;
     }
-    if (el.text && /Button/.test(el.role)) {
+    if (el.text && (el.button || /Button/.test(el.role))) {
       const key = `tx:${el.text}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -297,10 +300,19 @@ export async function crawl(
       }
       warnings.push({ kind: 'back-failed', detail: `back from ${current} landed ${sig}` });
       current = await replayTo(parentPath, expected);
-      // On a mismatch, anchor on the screen the replay actually reached —
-      // pretending we are on `expected` would mis-attribute every edge
-      // tried from here.
-      path = current === expected ? parentPath : (nodes.get(current)?.path ?? parentPath);
+      if (current === expected) {
+        path = parentPath;
+        continue;
+      }
+      // The parent can't be reached by replay anymore — the app's state
+      // moved on under the path (login flipped mid-crawl, data gone).
+      // Freeze it (its untried work stays visible in the map) and re-root
+      // on a fresh relaunch: adopting the landing screen's stale path
+      // here loops back into the same failing backtrack forever.
+      unreachable.add(expected);
+      await driver.relaunch();
+      current = await snapshot([]);
+      path = [];
       continue;
     }
 
