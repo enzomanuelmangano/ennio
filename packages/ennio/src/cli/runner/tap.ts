@@ -110,7 +110,15 @@ export async function execTapOn(
   // a settle, the tap can land on a still-moving frame or behind a
   // transitioning overlay.
   if (sel.point !== undefined) {
-    await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined);
+    // Settle budget is env-tunable: on slow hosts (CI VMs) a picker
+    // sheet's image grid keeps committing while thumbnails decode, the
+    // 1500ms cap expires mid-load, and the blind point-tap lands on a
+    // not-yet-hittable cell (observed: bsky onboarding's 50%,22% photo
+    // pick dismissing the sheet pick-less).
+    const pointSettleMaxMs = parseInt(process.env.ENNIO_POINT_TAP_SETTLE_MAX_MS ?? '1500', 10);
+    await ctx.client
+      .call('wait_commit', { maxMs: pointSettleMaxMs, stableMs: 250 })
+      .catch(() => undefined);
     let winW = DEFAULT_WIN_W;
     let winH = DEFAULT_WIN_H;
     const ws = await ctx.client.call('window_size').catch(() => undefined);
@@ -896,9 +904,7 @@ export async function execTapOn(
           const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
           const cur = (((r?.data as { chain?: string[] })?.chain ?? []) as string[]).join('>');
           if (cur && cur !== before) {
-            await ctx.client
-              .call('wait_presentation_idle', { maxMs: 2000 })
-              .catch(() => undefined);
+            await ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined);
             return;
           }
           await sleep(150);

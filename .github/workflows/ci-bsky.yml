@@ -330,6 +330,9 @@ jobs:
           # the VM and the next step otherwise cancels them mid-flight
           # (composer wedged in "Uploading images..."). See runner/tap.ts.
           ENNIO_SUBMIT_DISMISS_MAX_MS: '20000'
+          # Blind point-taps (onboarding's 50%,22% photo pick) need the
+          # picker grid to finish committing thumbnails before firing.
+          ENNIO_POINT_TAP_SETTLE_MAX_MS: '6000'
           FLOW_FILTER: ${{ inputs.flow_filter || '' }}
           # The two composer flows are excluded ON CI ONLY (green locally):
           # their image posts stall inside the app's RN upload stack on
