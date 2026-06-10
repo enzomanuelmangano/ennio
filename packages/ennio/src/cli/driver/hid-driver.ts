@@ -15,6 +15,11 @@ const POST_TAP_SETTLE_MS = parseInt(process.env.ENNIO_TAP_SETTLE_MS || '800', 10
 // a settled screen. Fast, high-throughput callers (the MCP loop, a game
 // agent) that read state immediately after every swipe don't need the
 // conservative budget — they can trim it via env. Lower bound is 0.
+// Opt-in post-tap presentation-begin grace window (see settleAfterTap).
+// 0 (default) = disabled; CI sets ~800ms to absorb VM scheduling lag
+// between a dismiss and the chained present.
+const PRESENT_GRACE_MS = parseInt(process.env.ENNIO_PRESENT_GRACE_MS ?? '0', 10);
+
 const SWIPE_SETTLE_PAUSE_MS = parseInt(process.env.ENNIO_SWIPE_SETTLE_MS ?? '500', 10);
 const SWIPE_SETTLE_MAX_MS = parseInt(process.env.ENNIO_SWIPE_COMMIT_MAX_MS ?? '1000', 10);
 const SWIPE_SETTLE_STABLE_MS = parseInt(process.env.ENNIO_SWIPE_COMMIT_STABLE_MS ?? '150', 10);
@@ -158,7 +163,33 @@ export class HidDriver implements GestureDriver {
       const pi = await tracedLeg('settle.presentationIdle', () =>
         bestEffort(client, 'wait_presentation_idle', { maxMs: 1500 }),
       );
-      const transitionWaitMs = Number((pi as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
+      let transitionWaitMs = Number((pi as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
+      // Presentation-begin grace (opt-in, ENNIO_PRESENT_GRACE_MS): on a
+      // slow host (CI VM) a tap that chains DISMISS -> PRESENT (menu item
+      // opening a composer) can be probed in the dead gap between the two
+      // — presentation looks idle, the settle exits, and the next step
+      // types into a screen whose new VC hasn't mounted yet. When no
+      // transition was observed, poll briefly for one to START; the
+      // moment it does, hand back to the normal presentation-idle +
+      // react-commit chain.
+      if (transitionWaitMs <= 50 && PRESENT_GRACE_MS > 0) {
+        await tracedLeg('settle.presentGrace', async () => {
+          const deadline = Date.now() + PRESENT_GRACE_MS;
+          while (Date.now() < deadline) {
+            const probe = await bestEffort(client, 'wait_presentation_idle', { maxMs: 60 });
+            const waited = Number((probe as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
+            if (waited > 30) {
+              // A transition started (and may still be running) — wait it
+              // out fully, then treat it like the normal post-transition
+              // case below.
+              await bestEffort(client, 'wait_presentation_idle', { maxMs: 1500 });
+              transitionWaitMs = waited;
+              return;
+            }
+            await sleep(60);
+          }
+        });
+      }
       if (transitionWaitMs > 50) {
         await tracedLeg('settle.postTransitionReactCommit', () =>
           bestEffort(client, 'wait_react_commit', { sinceMs: reactSinceMs, maxMs: 2500 }),

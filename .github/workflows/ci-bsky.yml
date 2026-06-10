@@ -273,6 +273,9 @@ jobs:
           # GitHub macOS runners are ~1.5-2x slower than a dev Mac for
           # simulator workloads; give visibility waits more headroom.
           ENNIO_DEFAULT_WAIT_MS: '35000'
+          # Absorb VM scheduling lag in dismiss->present tap chains (menu
+          # item opening a composer) — see hid-driver settleAfterTap.
+          ENNIO_PRESENT_GRACE_MS: '800'
         run: bash e2e/bsky/run-suite.sh
 
       - name: Mock server log + DCIM state (always)
