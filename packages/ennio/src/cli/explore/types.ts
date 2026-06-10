@@ -71,10 +71,9 @@ export interface ExploreLimits {
   maxNodes: number;
   /** Max actions attempted per screen (default 25). */
   maxActionsPerScreen: number;
-  /** Global cap on attempted actions (default 400). */
-  maxSteps: number;
   /** Wall-clock budget for the whole crawl in ms (default 30s). The cut
-   *  is recorded as a cap-hit warning — the partial map stays valid. */
+   *  is recorded as a cap-hit warning — the partial map stays valid.
+   *  This is the global stop: there is deliberately no step-count cap. */
   maxMs: number;
   /** Case-insensitive regex; matching testIDs are never tapped. */
   deny: RegExp;

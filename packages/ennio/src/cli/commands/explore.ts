@@ -36,21 +36,12 @@ export async function runExploreCommand(positional: string[], flags: Flags): Pro
     console.error('Usage: ennio explore <bundleId> [--max-depth N] [--out DIR]');
     return 1;
   }
-  const extra = flags as Flags & {
-    maxDepth?: string;
-    maxNodes?: string;
-    maxActions?: string;
-    maxSteps?: string;
-    maxMs?: string;
-    deny?: string;
-  };
   const limits = {
-    maxDepth: intFlag(extra.maxDepth, DEFAULT_LIMITS.maxDepth),
-    maxNodes: intFlag(extra.maxNodes, DEFAULT_LIMITS.maxNodes),
-    maxActionsPerScreen: intFlag(extra.maxActions, DEFAULT_LIMITS.maxActionsPerScreen),
-    maxSteps: intFlag(extra.maxSteps, DEFAULT_LIMITS.maxSteps),
-    maxMs: intFlag(extra.maxMs, DEFAULT_LIMITS.maxMs),
-    deny: extra.deny ? new RegExp(extra.deny, 'i') : DEFAULT_DENY,
+    maxDepth: intFlag(flags.maxDepth, DEFAULT_LIMITS.maxDepth),
+    maxNodes: intFlag(flags.maxNodes, DEFAULT_LIMITS.maxNodes),
+    maxActionsPerScreen: intFlag(flags.maxActions, DEFAULT_LIMITS.maxActionsPerScreen),
+    maxMs: intFlag(flags.duration, DEFAULT_LIMITS.maxMs / 1000) * 1000,
+    deny: flags.deny ? new RegExp(flags.deny, 'i') : DEFAULT_DENY,
   };
   const outDir = resolve(flags.output ?? join('.ennio', 'explore', bundleId));
 

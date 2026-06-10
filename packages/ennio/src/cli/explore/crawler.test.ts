@@ -152,10 +152,12 @@ describe('crawl', () => {
     expect(result.nodes.length).toBeLessThanOrEqual(3);
   });
 
-  it('honors maxSteps as a hard global cap', async () => {
-    const result = await crawl(app(), { ...LIMITS, maxSteps: 2 });
-    expect(result.steps).toBe(2);
-    expect(result.warnings.some((w) => w.kind === 'cap-hit' && w.detail.includes('maxSteps'))).toBe(
+  it('honors the wall-clock budget as the global stop', async () => {
+    // Zero budget: the deadline is already past when the loop starts, so
+    // no action fires and the cut is surfaced as a warning.
+    const result = await crawl(app(), { ...LIMITS, maxMs: 0 });
+    expect(result.steps).toBe(0);
+    expect(result.warnings.some((w) => w.kind === 'cap-hit' && w.detail.includes('maxMs'))).toBe(
       true,
     );
   });

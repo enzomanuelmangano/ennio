@@ -45,9 +45,9 @@ export type Flags = {
   maxDepth?: string;
   maxNodes?: string;
   maxActions?: string;
-  maxSteps?: string;
-  /** --max-ms: wall-clock budget for the whole crawl (default 30000). */
-  maxMs?: string;
+  /** --duration: wall-clock budget for the whole crawl in SECONDS
+   *  (default 30). */
+  duration?: string;
   /** --deny: case-insensitive regex of testIDs `ennio explore` never taps. */
   deny?: string;
   /** --keep-animations: `ennio explore` leaves app animations running
@@ -68,8 +68,7 @@ const STRING_FLAGS = new Set([
   'max-depth',
   'max-nodes',
   'max-actions',
-  'max-steps',
-  'max-ms',
+  'duration',
   'deny',
 ]);
 const BOOL_FLAGS = new Set([
@@ -94,8 +93,6 @@ const FLAG_KEY_ALIASES: Record<string, string> = {
   'max-depth': 'maxDepth',
   'max-nodes': 'maxNodes',
   'max-actions': 'maxActions',
-  'max-steps': 'maxSteps',
-  'max-ms': 'maxMs',
   'keep-animations': 'keepAnimations',
   'in-process-tap': 'inProcessTap',
   'disable-animations': 'noAnimations',
@@ -144,7 +141,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (STRING_FLAGS.has(name)) {
       const v = val ?? argv[++i];
       if (name === 'port') flags.port = parseInt(v, 10);
-      else (flags as Record<string, unknown>)[name] = v;
+      // Kebab-case names must map through the same alias table as bool
+      // flags — writing the raw 'max-depth' key leaves flags.maxDepth
+      // undefined and the flag silently dead.
+      else (flags as Record<string, unknown>)[FLAG_KEY_ALIASES[name] ?? name] = v;
     } else {
       // Unknown flag: surface as positional so help can warn — silently
       // dropping makes typos invisible.

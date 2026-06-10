@@ -71,8 +71,7 @@ Options:
   --max-depth N      path-length cap from the root (default 5)
   --max-nodes N      distinct-screen cap (default 50)
   --max-actions N    actions attempted per screen (default 25)
-  --max-steps N      global action cap (default 400)
-  --max-ms N         wall-clock budget for the crawl (default 30000)
+  --duration N       wall-clock budget for the crawl in seconds (default 30)
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)
   --keep-animations  leave app animations running (explore snaps them
@@ -103,8 +102,7 @@ Options:
   --max-depth N      path-length cap from the root (default 5)
   --max-nodes N      distinct-screen cap (default 50)
   --max-actions N    actions attempted per screen (default 25)
-  --max-steps N      global action cap (default 400)
-  --max-ms N         wall-clock budget for the crawl (default 30000)
+  --duration N       wall-clock budget for the crawl in seconds (default 30)
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)
   --keep-animations  leave app animations running

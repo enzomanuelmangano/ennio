@@ -89,8 +89,7 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     maxDepth: intFlag(flags.maxDepth, DEFAULT_LIMITS.maxDepth),
     maxNodes: intFlag(flags.maxNodes, DEFAULT_LIMITS.maxNodes),
     maxActionsPerScreen: intFlag(flags.maxActions, DEFAULT_LIMITS.maxActionsPerScreen),
-    maxSteps: intFlag(flags.maxSteps, DEFAULT_LIMITS.maxSteps),
-    maxMs: intFlag(flags.maxMs, DEFAULT_LIMITS.maxMs),
+    maxMs: intFlag(flags.duration, DEFAULT_LIMITS.maxMs / 1000) * 1000,
     deny: flags.deny ? new RegExp(flags.deny, 'i') : DEFAULT_DENY,
   };
   if (!flags.keepAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';

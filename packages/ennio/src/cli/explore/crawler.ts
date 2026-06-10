@@ -32,7 +32,6 @@ export const DEFAULT_LIMITS: ExploreLimits = {
   maxDepth: 5,
   maxNodes: 50,
   maxActionsPerScreen: 25,
-  maxSteps: 400,
   maxMs: 30_000,
   deny: DEFAULT_DENY,
 };
@@ -167,7 +166,10 @@ export async function crawl(
   let path: ExploreAction[] = [];
   let current = root;
 
-  while (steps < limits.maxSteps) {
+  // No step-count cap by design: the wall-clock budget is the global
+  // stop, and the frontier draining (no node with untried actions) is
+  // the natural end.
+  for (;;) {
     if (Date.now() >= deadline) {
       warnings.push({ kind: 'cap-hit', detail: `maxMs=${limits.maxMs} budget exhausted` });
       break;
@@ -294,10 +296,6 @@ export async function crawl(
       path = [...path, next];
     }
     current = after;
-  }
-
-  if (steps >= limits.maxSteps) {
-    warnings.push({ kind: 'cap-hit', detail: `maxSteps=${limits.maxSteps} reached` });
   }
 
   return { root, nodes: [...nodes.values()], edges, warnings, steps };
