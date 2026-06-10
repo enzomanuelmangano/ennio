@@ -277,6 +277,23 @@ jobs:
             [ "$attempt" = "5" ] && { echo "addmedia failed after 5 attempts"; exit 1; }
             sleep 8
           done
+          # In-sandbox upload source: the app's uploadBlob streams the
+          # PICKED FILE PATH directly (small seeds skip compressIfNeeded —
+          # and the compress path can't be used as an alternative, its
+          # expo-image-manipulator hangs on the GPU-less VM at any image
+          # size). A DCIM (out-of-sandbox) source path stalls RN's file
+          # read on this runner: CFNetwork opens the connection but the
+          # request never reaches the PDS (pino-verified). Replace the
+          # DCIM JPEGs with symlinks to a copy inside the app's own data
+          # container — listing/size checks are unchanged, but the upload
+          # read resolves to an in-sandbox target. The copy lives at the
+          # container ROOT, which ennio's per-flow clearState (wiping
+          # Documents/Library/tmp contents) leaves untouched.
+          APP_DATA=$(xcrun simctl get_app_container "$UDID" "$BSKY_BUNDLE_ID" data)
+          cp "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg "$APP_DATA/e2e-seed.jpg"
+          for f in "$SIM_DATA/Media/DCIM/100APPLE"/*.JPG; do
+            ln -sf "$APP_DATA/e2e-seed.jpg" "$f"
+          done
           ls -la "$SIM_DATA/Media/DCIM/100APPLE/"
 
       - name: Start app log capture
