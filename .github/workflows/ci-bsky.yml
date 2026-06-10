@@ -235,6 +235,12 @@ jobs:
             "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-3.jpg
           SEED_SIZE=$(stat -f%z "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg)
           find "$SIM_DATA/Media/DCIM/100APPLE" -type f ! -size "${SEED_SIZE}c" -print -delete
+          # photod can resurrect stock originals it still has DB rows for —
+          # iteration 9 attached a 2-3MB stock park photo again. Plant a
+          # filesystem-only copy that sorts FIRST (IMG_0000) so the mock's
+          # files[0] is always a small seed no matter what photod restores.
+          cp "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg \
+             "$SIM_DATA/Media/DCIM/100APPLE/IMG_0000.JPG"
           ls -la "$SIM_DATA/Media/DCIM/100APPLE/"
 
       - name: Start app log capture
@@ -257,9 +263,14 @@ jobs:
           ENNIO_DEFAULT_WAIT_MS: '35000'
         run: bash e2e/bsky/run-suite.sh
 
-      - name: Mock server log (always)
+      - name: Mock server log + DCIM state (always)
         if: always()
-        run: tail -50 /tmp/mock-server.log || true
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          tail -50 /tmp/mock-server.log || true
+          echo "--- DCIM after suite (did photod resurrect stock files?) ---"
+          ls -la "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Media/DCIM/100APPLE/" || true
 
       - name: Upload logs
         if: always()
