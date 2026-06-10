@@ -4,7 +4,7 @@
 // falls back to a real HID touch. Settle budgets are the trimmed,
 // event-driven variants.
 
-import { getDylibClient, trace } from '../hid';
+import { bumpActuationGen, getDylibClient, trace } from '../hid';
 import type { EnnioSocketClient } from '../socket-client';
 
 import type { HidDriver } from './hid-driver';
@@ -65,6 +65,9 @@ export class FastDriver implements GestureDriver {
     const preR = await bestEffort(dy, 'frame_hash');
     const preHash = typeof preR?.hash === 'string' ? (preR.hash as string) : '';
     let activated = false;
+    // In-process activation mutates the UI without touching the HID
+    // funnel — invalidate screen-snapshot caches the same way.
+    bumpActuationGen();
     try {
       const r = await dy.call('activate_at_point', { x: Math.round(x), y: Math.round(y) });
       activated = !!(r.ok && r.data && (r.data as { ok?: boolean }).ok === true);
@@ -116,6 +119,7 @@ export class FastDriver implements GestureDriver {
   ): Promise<SwipeOutcome> {
     const dy = getDylibClient(udid);
     try {
+      bumpActuationGen();
       const r = await dy.call('swipe_points', {
         x1,
         y1,
@@ -197,6 +201,7 @@ export class FastDriver implements GestureDriver {
         // back after the pop). Decline; the real HID tap on the tab
         // button drives the framework's own handler.
         if (d.selected) return false;
+        bumpActuationGen();
         const t = await client.call('tap_tab', { name: text });
         if (t.ok && t.data && (t.data as { tapped: boolean }).tapped) {
           this.hits++;

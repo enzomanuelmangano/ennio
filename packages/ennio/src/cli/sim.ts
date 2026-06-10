@@ -12,8 +12,33 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
+
+const PHASE_TRACE = process.env.ENNIO_PHASE_TRACE === '1';
+
+/** Time a startup phase and emit `[phase] startup.<name> Xms` when tracing. */
+export function tracePhase<T>(name: string, fn: () => T): T {
+  if (!PHASE_TRACE) return fn();
+  const t0 = Date.now();
+  try {
+    return fn();
+  } finally {
+    console.error(`[phase] startup.${name} ${Date.now() - t0}ms`);
+  }
+}
+
+/** Async variant of tracePhase. */
+export async function tracePhaseAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  if (!PHASE_TRACE) return fn();
+  const t0 = Date.now();
+  try {
+    return await fn();
+  } finally {
+    console.error(`[phase] startup.${name} ${Date.now() - t0}ms`);
+  }
+}
 
 /**
  * Turn on the simulator's accessibility automation server. SwiftUI (and
@@ -89,6 +114,67 @@ export function disableAutocorrect(udid: string): void {
   setBool('KeyboardShowPredictionBar', 'NO');
   setBool('KeyboardAutocapitalization', 'NO');
   setBool('KeyboardCheckSpelling', 'NO');
+}
+
+/**
+ * Identity of the sim's current boot: the start time of its launchd_sim
+ * process. Survives across CLI invocations, changes on every (re)boot —
+ * so device-level prefs written once per boot are never re-written.
+ * Read from the host process table (~10ms), NOT via `simctl spawn`
+ * (which is the expensive call this stamp exists to avoid).
+ */
+function simBootStamp(udid: string): string | null {
+  try {
+    const pid = execFileSync('pgrep', ['-f', `launchd_sim.*${udid}`], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+      .trim()
+      .split('\n')[0];
+    if (!pid) return null;
+    const lstart = execFileSync('ps', ['-p', pid, '-o', 'lstart='], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return lstart ? `${pid}:${lstart}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One-time-per-boot simulator prep: accessibility automation server on,
+ * keyboard autocorrect/prediction off. Both are device-level prefs that
+ * survive until the sim reboots, but each costs ~9 `simctl spawn` calls —
+ * ~1-10s per CLI invocation on a loaded CI runner. A sentinel file keyed
+ * by (udid, boot identity) skips the whole batch on every invocation
+ * after the first. No boot identity (pgrep miss) → prep every time, the
+ * pre-sentinel behavior.
+ */
+export function prepareSimulator(udid: string): void {
+  // Escape hatch: prefs were changed on a booted sim (manually or by
+  // another tool) and ennio must re-force them without a reboot.
+  const force = process.env.ENNIO_FORCE_SIM_PREP === '1';
+  const stamp = simBootStamp(udid);
+  const marker = stamp
+    ? join(
+        tmpdir(),
+        `ennio-sim-prep-${udid}-${createHash('sha1').update(stamp).digest('hex').slice(0, 12)}`,
+      )
+    : null;
+  if (!force && marker && existsSync(marker)) {
+    if (PHASE_TRACE) console.error('[phase] startup.simPrep skipped (sentinel)');
+    return;
+  }
+  tracePhase('simPrep.enableAccessibility', () => enableAccessibility(udid));
+  tracePhase('simPrep.disableAutocorrect', () => disableAutocorrect(udid));
+  if (marker) {
+    try {
+      writeFileSync(marker, '');
+    } catch {
+      /* best effort — worst case we prep again next run */
+    }
+  }
 }
 
 export function getTargetUdid(): string | null {

@@ -19,7 +19,7 @@
 //         gesture chain never armed)
 
 import type { TapIntent } from '../driver/types';
-import { getScreenSize } from '../hid';
+import { bumpActuationGen, getScreenSize } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
@@ -131,8 +131,9 @@ export async function execTapOn(
   // alert_tap op, which targets the UIAlertAction directly.
   if (sel.text) {
     try {
-      const a = await ctx.client.call('alert_present');
+      const a = await timedAsync(ctx, 'tap.alertProbe', () => ctx.client.call('alert_present'));
       if (a.ok && a.data && (a.data as { present: boolean }).present) {
+        bumpActuationGen();
         const t = await ctx.client.call('alert_tap', { buttonText: sel.text });
         if (t.ok && t.data && (t.data as { tapped: boolean }).tapped) return;
       }
@@ -145,7 +146,8 @@ export async function execTapOn(
     // change, which would otherwise trip the phantom detector into a
     // pointless HID redo); baseline keeps the probe in the retap loop
     // only.
-    if (await ctx.driver.tryTabTap(ctx.client, sel.text)) return;
+    if (await timedAsync(ctx, 'tap.tabProbe', () => ctx.driver.tryTabTap(ctx.client, sel.text!)))
+      return;
     // (Skipped when childOf is set — the cross-process AX can't scope by
     // parent, and a bare testID/label match would pick the wrong sibling.)
     // Text tap onto a testID'd interactive container the in-app finder
@@ -157,7 +159,11 @@ export async function execTapOn(
     // it and verify the frame moved. High-confidence (testID-backed) and
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
-    const axEl = sel.childOf ? null : await ctx.platform.ax.resolve(ctx.udid, { text: sel.text });
+    const axEl = sel.childOf
+      ? null
+      : await timedAsync(ctx, 'tap.axFastResolve', () =>
+          ctx.platform.ax.resolve(ctx.udid, { text: sel.text }),
+        );
     if (axEl) {
       // Doomed-tap gate for the AX fast path: a VC transition in flight
       // at dispatch time swallows the touch AND means the AX snapshot
@@ -167,9 +173,9 @@ export async function execTapOn(
       // the hash check below, masking the lost tap. If we had to wait,
       // the coords are stale — skip the fast path and fall through to
       // the standard find, which re-resolves on the settled hierarchy.
-      const pi = await ctx.client
-        .call('wait_presentation_idle', { maxMs: 2500 })
-        .catch(() => undefined);
+      const pi = await timedAsync(ctx, 'tap.axPresIdle', () =>
+        ctx.client.call('wait_presentation_idle', { maxMs: 2500 }).catch(() => undefined),
+      );
       const axWaitedMs = Number((pi?.data as { elapsedMs?: number } | undefined)?.elapsedMs ?? 0);
       if (axWaitedMs <= 50) {
         const { w, h } = await getScreenSize(ctx.udid);
@@ -234,13 +240,15 @@ export async function execTapOn(
   // Skip the AX override entirely for ambiguous testIDs.
   let ambiguousId = false;
   if (sel.id && !sel.childOf) {
-    const nth = await ctx.client
-      .call('find_by_testid_nth', { testID: sel.id, index: 1 })
-      .catch(() => undefined);
+    const nth = await timedAsync(ctx, 'tap.ambiguityProbe', () =>
+      ctx.client.call('find_by_testid_nth', { testID: sel.id, index: 1 }).catch(() => undefined),
+    );
     ambiguousId = !!(nth && nth.ok && nth.data);
   }
   if ((sel.id || sel.text) && !sel.childOf && !ambiguousId) {
-    const axEl = await ctx.platform.ax.resolve(ctx.udid, { id: sel.id, text: sel.text });
+    const axEl = await timedAsync(ctx, 'tap.axCrossResolve', () =>
+      ctx.platform.ax.resolve(ctx.udid, { id: sel.id, text: sel.text }),
+    );
     // Only correct SMALL interactive elements (buttons, tabs, menu rows
     // — height < ~12% of the screen). For a large container (a feed item,
     // a card) the AX "center" can sit on an inner sub-link (the avatar →
@@ -288,6 +296,7 @@ export async function execTapOn(
           `[ennio] off-viewport id="${sel.id}" rect=(${rect.x.toFixed(0)},${rect.y.toFixed(0)},${rect.w.toFixed(0)},${rect.h.toFixed(0)}) center=(${cx.toFixed(0)},${cy.toFixed(0)}) win=(${winW.toFixed(0)},${winH.toFixed(0)}) → scroll_to\n`,
         );
       }
+      bumpActuationGen();
       const scrollResp = await ctx.client
         .call('scroll_to', { elementTestID: sel.id })
         .catch(() => undefined);
@@ -321,6 +330,7 @@ export async function execTapOn(
       // Pressable in most archs; returns false on Fabric Release
       // where Pressability's handler isn't reachable via the public
       // accessibility chain — fall through to HID tap in that case.
+      bumpActuationGen();
       const r = await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
       const ok = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
       if (process.env.ENNIO_PHASE_TRACE) {
@@ -490,6 +500,7 @@ export async function execTapOn(
         // answer can't decay between scroll and tap.
         if (!confirmedExposed && sel.id) {
           await timedAsync(ctx, 'tap.scrollToExpose', async () => {
+            bumpActuationGen();
             await ctx.client.call('scroll_to', { elementTestID: sel.id }).catch(() => undefined);
             await ctx.client
               .call('wait_commit', { maxMs: 600, stableMs: 100 })
@@ -800,6 +811,7 @@ export async function execTapOn(
       // already get the unconditional tap_tab fallback below.
       if (!finalChanged) {
         if (sel.id) {
+          bumpActuationGen();
           await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
         } else if (sel.text) {
           // Text-only tap whose retap loop never moved the hash —
@@ -840,6 +852,7 @@ export async function execTapOn(
     // and if it DOES resolve UIKit's setSelectedIndex is idempotent
     // (no-op when the target tab is already selected).
     if (sel.text && !sel.id) {
+      bumpActuationGen();
       await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
     }
     // Async-payload dismissal settle: this tap fired INTO a cropper /
