@@ -217,30 +217,28 @@ jobs:
             sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$svc', '$BSKY_BUNDLE_ID', 0, 2, 2, 2, 16);"
           done
           xcrun simctl spawn "$UDID" launchctl kickstart -k system/com.apple.tccd || true
-          # Photo library: bsky's e2e picker mock reads the FIRST JPG out of
-          # Media/DCIM/100APPLE and runs it through resize/crop. The
-          # runtime's stock photos sort first (IMG_0001..) and are large
+          # Photo library: bsky's e2e picker mock grabs an arbitrary JPG out
+          # of Media/DCIM/100APPLE (readdir order) and runs it through
+          # resize/crop + upload. The runtime's stock photos are large
           # 4288x2848 JPEGs whose decode/resize dies on the virtualized
-          # runner (no real GPU) — composer attach and the avatar cropper
-          # hang. Seed small (<1MB) fixtures, then delete the stock
-          # ORIGINALS from DCIM (size-keyed; photod's db must stay intact —
-          # deleting PhotoData mid-flight broke addmedia with PHPhotos 3301).
-          # The mock then picks a seed, and compressIfNeeded short-circuits
-          # on size so no heavy image op runs. The real picker (onboarding)
-          # sorts newest-first, so its blind point-tap also lands on a seed.
+          # runner (no real GPU) — and photod re-materializes their
+          # originals even after they're deleted from DCIM, because its
+          # PhotoData db still references them. So rebuild the WHOLE photo
+          # library from scratch with only small (<1MB) seeds: wipe DCIM +
+          # PhotoData, restart the photo daemons (deleting PhotoData under
+          # a live assetsd broke addmedia with PHPhotos 3301), re-seed.
+          # compressIfNeeded then short-circuits on size and no heavy image
+          # op ever runs. Sequence validated end-to-end on a local iOS 18.5
+          # device (both composer flows green).
           SIM_DATA="$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data"
+          rm -rf "$SIM_DATA/Media/DCIM" "$SIM_DATA/Media/PhotoData"
+          xcrun simctl spawn "$UDID" launchctl kill TERM system/com.apple.assetsd || true
+          xcrun simctl spawn "$UDID" launchctl kill TERM system/com.apple.photoanalysisd || true
+          sleep 2
           xcrun simctl addmedia "$UDID" \
             "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg \
             "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-2.jpg \
             "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-3.jpg
-          SEED_SIZE=$(stat -f%z "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg)
-          find "$SIM_DATA/Media/DCIM/100APPLE" -type f ! -size "${SEED_SIZE}c" -print -delete
-          # photod can resurrect stock originals it still has DB rows for —
-          # iteration 9 attached a 2-3MB stock park photo again. Plant a
-          # filesystem-only copy that sorts FIRST (IMG_0000) so the mock's
-          # files[0] is always a small seed no matter what photod restores.
-          cp "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg \
-             "$SIM_DATA/Media/DCIM/100APPLE/IMG_0000.JPG"
           ls -la "$SIM_DATA/Media/DCIM/100APPLE/"
 
       - name: Start app log capture
