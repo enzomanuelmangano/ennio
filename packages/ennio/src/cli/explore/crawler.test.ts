@@ -68,7 +68,7 @@ const LIMITS: ExploreLimits = { ...DEFAULT_LIMITS };
 
 describe('enumerateActions', () => {
   it('keeps document order, dedupes, applies the denylist', () => {
-    const { actions } = enumerateActions(
+    const actions = enumerateActions(
       [el('b'), el('a'), el('b'), el('logout-btn'), txt('Title')],
       LIMITS,
     );

@@ -88,7 +88,6 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
   const limits = {
     maxDepth: intFlag(flags.maxDepth, DEFAULT_LIMITS.maxDepth),
     maxNodes: intFlag(flags.maxNodes, DEFAULT_LIMITS.maxNodes),
-    maxActionsPerScreen: intFlag(flags.maxActions, DEFAULT_LIMITS.maxActionsPerScreen),
     maxMs: intFlag(flags.duration, DEFAULT_LIMITS.maxMs / 1000) * 1000,
     deny: flags.deny ? new RegExp(flags.deny, 'i') : DEFAULT_DENY,
   };
@@ -171,6 +170,9 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
     return 0;
   } finally {
+    // Leave the app as we found it: the crawl disabled animations for
+    // speed, the user keeps interacting with the app afterwards.
+    if (!flags.keepAnimations) await session.setAnimations(true).catch(() => undefined);
     session.close();
   }
 }

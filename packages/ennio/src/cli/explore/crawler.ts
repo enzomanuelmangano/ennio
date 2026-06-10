@@ -31,7 +31,6 @@ export const DEFAULT_DENY = /log.?out|sign.?out|delete|remove|destroy|pay|purcha
 export const DEFAULT_LIMITS: ExploreLimits = {
   maxDepth: 5,
   maxNodes: 50,
-  maxActionsPerScreen: 25,
   maxMs: 60_000,
   deny: DEFAULT_DENY,
 };
@@ -48,7 +47,7 @@ export const DEFAULT_LIMITS: ExploreLimits = {
 export function enumerateActions(
   elements: DescribedElement[],
   limits: ExploreLimits,
-): { actions: ExploreAction[]; capped: boolean } {
+): ExploreAction[] {
   const seen = new Set<string>();
   const all: ExploreAction[] = [];
   for (const el of elements) {
@@ -71,10 +70,10 @@ export function enumerateActions(
       all.push({ key, text: el.text });
     }
   }
-  return {
-    actions: all.slice(0, limits.maxActionsPerScreen),
-    capped: all.length > limits.maxActionsPerScreen,
-  };
+  // Every candidate is kept — there is deliberately no per-screen action
+  // cap: the wall-clock budget is the only thing that cuts work short,
+  // and an arbitrary slice would hide whole regions behind busy screens.
+  return all;
 }
 
 export interface CrawlerHooks {
@@ -118,7 +117,7 @@ export async function crawl(
       }
     }
     if (!nodes.has(sig)) {
-      const { actions, capped } = enumerateActions(elements, limits);
+      const actions = enumerateActions(elements, limits);
       const node: ExploreNode = {
         sig,
         title: screenTitle(elements),
@@ -130,11 +129,6 @@ export async function crawl(
       };
       if (nodes.size >= limits.maxNodes) {
         warnings.push({ kind: 'cap-hit', detail: `maxNodes=${limits.maxNodes}: ${sig} frozen` });
-      } else if (capped) {
-        warnings.push({
-          kind: 'cap-hit',
-          detail: `maxActionsPerScreen=${limits.maxActionsPerScreen} on ${sig}`,
-        });
       }
       nodes.set(sig, node);
       log(`screen ${sig}${node.title ? ` "${node.title}"` : ''} — ${node.actions.length} actions`);
@@ -165,6 +159,11 @@ export async function crawl(
   // The action path from root to the screen the device currently shows.
   let path: ExploreAction[] = [];
   let current = root;
+  // Nodes whose discovery path no longer reproduces them (state-dependent
+  // screens: a clearState replay wiped the session/data they depended
+  // on). Sweeping to one again would replay-mismatch forever — frozen
+  // after the first failure; their untried actions stay in the map.
+  const unreachable = new Set<string>();
 
   // No step-count cap by design: the wall-clock budget is the global
   // stop, and the frontier draining (no node with untried actions) is
@@ -196,12 +195,22 @@ export async function crawl(
             // Depth-frozen nodes can never try their actions — sweeping
             // to them would loop forever; their untried list stays
             // visible in the map instead.
-            n.path.length <= limits.maxDepth,
+            n.path.length <= limits.maxDepth &&
+            !unreachable.has(n.sig),
         );
         if (!pending) break;
         log(`sweep → ${pending.sig} (${pending.path.map((a) => a.key).join(' → ')})`);
         current = await replayTo(pending.path, pending.sig);
-        path = pending.path;
+        if (current === pending.sig) {
+          path = pending.path;
+        } else {
+          // Landed elsewhere: the target depends on state the relaunch
+          // wiped. Freeze it and anchor on where we actually are — the
+          // replay's taps ARE the recipe for the landing screen, and
+          // snapshot() registered it under exactly that path if new.
+          unreachable.add(pending.sig);
+          path = nodes.get(current)?.path ?? pending.path;
+        }
         continue;
       }
       // Backtrack — cheap to expensive, every hop signature-verified:
@@ -255,7 +264,10 @@ export async function crawl(
       }
       warnings.push({ kind: 'back-failed', detail: `back from ${current} landed ${sig}` });
       current = await replayTo(parentPath, expected);
-      path = parentPath;
+      // On a mismatch, anchor on the screen the replay actually reached —
+      // pretending we are on `expected` would mis-attribute every edge
+      // tried from here.
+      path = current === expected ? parentPath : (nodes.get(current)?.path ?? parentPath);
       continue;
     }
 

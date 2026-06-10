@@ -69,8 +69,6 @@ export interface ExploreLimits {
   maxDepth: number;
   /** Max distinct screens to register (default 50). */
   maxNodes: number;
-  /** Max actions attempted per screen (default 25). */
-  maxActionsPerScreen: number;
   /** Wall-clock budget for the whole crawl in ms (default 60s). The cut
    *  is recorded as a cap-hit warning — the partial map stays valid.
    *  This is the global stop: there is deliberately no step-count cap. */

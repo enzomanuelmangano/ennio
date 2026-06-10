@@ -70,7 +70,6 @@ Writes to .ennio/explore/<bundleId>/ (override with --output):
 Options:
   --max-depth N      path-length cap from the root (default 5)
   --max-nodes N      distinct-screen cap (default 50)
-  --max-actions N    actions attempted per screen (default 25)
   --duration N       wall-clock budget for the crawl in seconds (default 60)
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)
@@ -101,7 +100,6 @@ Options:
   --verbose          stream per-action progress while crawling
   --max-depth N      path-length cap from the root (default 5)
   --max-nodes N      distinct-screen cap (default 50)
-  --max-actions N    actions attempted per screen (default 25)
   --duration N       wall-clock budget for the crawl in seconds (default 60)
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)

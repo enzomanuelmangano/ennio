@@ -44,7 +44,6 @@ export type Flags = {
   /** `ennio explore` caps — see commands/explore.ts. */
   maxDepth?: string;
   maxNodes?: string;
-  maxActions?: string;
   /** --duration: wall-clock budget for the whole crawl in SECONDS
    *  (default 60). */
   duration?: string;
@@ -67,7 +66,6 @@ const STRING_FLAGS = new Set([
   'reporter',
   'max-depth',
   'max-nodes',
-  'max-actions',
   'duration',
   'deny',
 ]);
@@ -92,7 +90,6 @@ const FLAG_KEY_ALIASES: Record<string, string> = {
   'safe-mode': 'safeMode',
   'max-depth': 'maxDepth',
   'max-nodes': 'maxNodes',
-  'max-actions': 'maxActions',
   'keep-animations': 'keepAnimations',
   'in-process-tap': 'inProcessTap',
   'disable-animations': 'noAnimations',
