@@ -46,7 +46,7 @@ export type Flags = {
   maxNodes?: string;
   maxActions?: string;
   /** --duration: wall-clock budget for the whole crawl in SECONDS
-   *  (default 30). */
+   *  (default 60). */
   duration?: string;
   /** --deny: case-insensitive regex of testIDs `ennio explore` never taps. */
   deny?: string;

@@ -32,7 +32,7 @@ export const DEFAULT_LIMITS: ExploreLimits = {
   maxDepth: 5,
   maxNodes: 50,
   maxActionsPerScreen: 25,
-  maxMs: 30_000,
+  maxMs: 60_000,
   deny: DEFAULT_DENY,
 };
 
