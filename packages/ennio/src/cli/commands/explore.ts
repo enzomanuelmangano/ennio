@@ -41,6 +41,9 @@ export async function runExploreCommand(positional: string[], flags: Flags): Pro
     maxNodes: intFlag(flags.maxNodes, DEFAULT_LIMITS.maxNodes),
     maxMs: intFlag(flags.duration, DEFAULT_LIMITS.maxMs / 1000) * 1000,
     deny: flags.deny ? new RegExp(flags.deny, 'i') : DEFAULT_DENY,
+    // Explore's product is a DIFFABLE map: document order unless the
+    // user explicitly opts into a seeded shuffle.
+    ...(flags.seed !== undefined && { seed: Number(flags.seed) >>> 0 }),
   };
   const outDir = resolve(flags.output ?? join('.ennio', 'explore', bundleId));
 

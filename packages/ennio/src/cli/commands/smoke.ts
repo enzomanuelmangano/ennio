@@ -7,6 +7,14 @@
  * does the app survive autonomous exploration? — printing a one-screen
  * summary and writing NOTHING unless --output is given.
  *
+ * Two deliberate departures from explore's determinism defaults:
+ *   * WARM START — no relaunch, no clearState, ever: the crawl roots at
+ *     whatever screen the app shows right now, with the user's session
+ *     and data intact.
+ *   * RANDOM SEED — per-screen action order is shuffled so repeated CI
+ *     runs probe different paths; the seed is printed in the summary so
+ *     any run replays exactly with --seed.
+ *
  *   exit 0  crawl completed (caps/budget cuts are fine)
  *   exit 1  the app crashed mid-crawl (diagnosis printed, with the last
  *           action attributed), attach failed, or no screen was readable
@@ -38,6 +46,11 @@ import { getTargetUdid } from '../sim';
 function intFlag(value: string | undefined, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+/** Fresh random seed per run, small enough to read off a CI log. */
+function randomSeed(): number {
+  return Math.floor(Math.random() * 1_000_000);
 }
 
 /**
@@ -85,11 +98,16 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     }
   }
 
+  // Smoke is a monkey at heart: vary the walk run-to-run so CI keeps
+  // probing different paths — but ALWAYS from a printed seed, so any
+  // failure replays exactly with --seed.
+  const seed = flags.seed !== undefined ? Number(flags.seed) >>> 0 : randomSeed();
   const limits = {
     maxDepth: intFlag(flags.maxDepth, DEFAULT_LIMITS.maxDepth),
     maxNodes: intFlag(flags.maxNodes, DEFAULT_LIMITS.maxNodes),
     maxMs: intFlag(flags.duration, DEFAULT_LIMITS.maxMs / 1000) * 1000,
     deny: flags.deny ? new RegExp(flags.deny, 'i') : DEFAULT_DENY,
+    seed,
   };
   if (!flags.keepAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
 
@@ -112,10 +130,15 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
 
     const outDir = flags.output ? resolve(flags.output) : null;
     if (outDir) mkdirSync(join(outDir, 'screens'), { recursive: true });
-    const driver = new LiveExploreDriver(session, bundleId);
+    // Warm start, never clearState: smoke tests the app from EXACTLY the
+    // state it's in — logged-in session, filled carts and all. --relaunch
+    // restarts the process first (data still kept); recovery relaunches
+    // behave the same way.
+    const driver = new LiveExploreDriver(session, bundleId, false);
     let result;
     try {
       result = await crawl(driver, limits, {
+        warmStart: !flags.relaunch,
         log: (msg) => {
           if (flags.verbose) console.error(`[smoke] ${msg}`);
           const m = msg.match(/[→·✗] (.+?) (?:tap=\d|\d+ms)/);
@@ -143,7 +166,10 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
         bundleId,
         startedAt,
       );
-      console.error(`\nSMOKE FAIL ${bundleId} — crawl aborted after ${lastAction}`);
+      console.error(
+        `\nSMOKE FAIL ${bundleId} (seed ${seed}) — crawl aborted after ${lastAction}`,
+      );
+      console.error(`  replay exactly: ennio smoke ${bundleId} --seed ${seed}`);
       console.error(`  ${msg}`);
       if (diagnosis) console.error(diagnosis.replace(/^/gm, '  '));
       return 1;
@@ -164,8 +190,9 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     }
 
     console.log(
-      `SMOKE PASS ${bundleId} — ${map.stats.screens} screens, ${result.steps} actions ` +
-        `(${kinds.nav} nav, ${kinds.state} state, ${kinds.error} failed) in ${wallS}s`,
+      `SMOKE PASS ${bundleId} (seed ${seed}) — ${map.stats.screens} screens, ` +
+        `${result.steps} actions (${kinds.nav} nav, ${kinds.state} state, ` +
+        `${kinds.error} failed) in ${wallS}s`,
     );
     for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
     return 0;

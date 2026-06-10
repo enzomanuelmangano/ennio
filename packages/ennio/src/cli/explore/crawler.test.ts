@@ -152,6 +152,20 @@ describe('crawl', () => {
     expect(result.nodes.length).toBeLessThanOrEqual(3);
   });
 
+  it('seeded shuffle: same seed reproduces the crawl, seeds vary the order', async () => {
+    const a = await crawl(app(), { ...LIMITS, seed: 7 });
+    const b = await crawl(app(), { ...LIMITS, seed: 7 });
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    // A different seed walks the same graph (node/edge SETS match)…
+    const c = await crawl(app(), { ...LIMITS, seed: 1234 });
+    expect(c.nodes.map((n) => n.sig).sort()).toEqual(a.nodes.map((n) => n.sig).sort());
+    // …but in a different action order somewhere (seeds 7 vs 1234 differ
+    // on this fixture; a collision would mean the PRNG ignored the seed).
+    expect(JSON.stringify(c.nodes.map((n) => n.actions))).not.toBe(
+      JSON.stringify(a.nodes.map((n) => n.actions)),
+    );
+  });
+
   it('honors the wall-clock budget as the global stop', async () => {
     // Zero budget: the deadline is already past when the loop starts, so
     // no action fires and the cut is surfaced as a warning.

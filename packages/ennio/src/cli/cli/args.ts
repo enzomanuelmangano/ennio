@@ -45,13 +45,20 @@ export type Flags = {
   maxDepth?: string;
   maxNodes?: string;
   /** --duration: wall-clock budget for the whole crawl in SECONDS
-   *  (default 60). */
+   *  (default 30). */
   duration?: string;
+  /** --seed: shuffle per-screen action order with this PRNG seed.
+   *  `ennio smoke` defaults to a random seed (printed for replay);
+   *  `ennio explore` defaults to deterministic document order. */
+  seed?: string;
   /** --deny: case-insensitive regex of testIDs `ennio explore` never taps. */
   deny?: string;
   /** --keep-animations: `ennio explore` leaves app animations running
    *  (explore disables them by default for speed — it maps structure). */
   keepAnimations?: boolean;
+  /** --relaunch: `ennio smoke` restarts the app before crawling (state
+   *  kept). Default off — the crawl roots at the current screen. */
+  relaunch?: boolean;
 };
 
 export type ParsedArgs = {
@@ -67,6 +74,7 @@ const STRING_FLAGS = new Set([
   'max-depth',
   'max-nodes',
   'duration',
+  'seed',
   'deny',
 ]);
 const BOOL_FLAGS = new Set([
@@ -84,6 +92,7 @@ const BOOL_FLAGS = new Set([
   'ios',
   'smoke',
   'keep-animations',
+  'relaunch',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {

@@ -1,9 +1,12 @@
 // The exploration engine — deterministic DFS over the app's screen graph.
 //
 // Invariants that make two runs produce the same map:
-//   * Actions are enumerated in document order and attempted in that order.
+//   * Actions are enumerated in document order and attempted in that
+//     order — unless limits.seed is set, in which case each screen's
+//     order is shuffled by a PRNG seeded with that value. Same seed +
+//     same build = same crawl: randomized, still reproducible.
 //   * Every decision is a pure function of the graph state + limits — no
-//     wall-clock, no randomness, no retries-with-jitter.
+//     wall-clock, no unseeded randomness, no retries-with-jitter.
 //   * Returning to a screen is verified by signature; when `back` lands
 //     somewhere unexpected the crawler REPLAYS the action path from a
 //     clearState relaunch — and verifies again. A second mismatch is
@@ -31,9 +34,30 @@ export const DEFAULT_DENY = /log.?out|sign.?out|delete|remove|destroy|pay|purcha
 export const DEFAULT_LIMITS: ExploreLimits = {
   maxDepth: 5,
   maxNodes: 50,
-  maxMs: 60_000,
+  maxMs: 30_000,
   deny: DEFAULT_DENY,
 };
+
+/** mulberry32 — tiny seeded PRNG; good enough to vary a walk, fully
+ *  reproducible from its 32-bit seed. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** In-place Fisher-Yates with the crawl's seeded PRNG. */
+function shuffle<T>(items: T[], rng: () => number): T[] {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
 
 /**
  * Tappable candidates, document order, deduped:
@@ -81,6 +105,11 @@ export interface CrawlerHooks {
   onNode?: (node: ExploreNode) => Promise<void>;
   /** Progress line for the human watching. */
   log?: (msg: string) => void;
+  /** Skip the initial relaunch: the crawl's root is whatever screen the
+   *  app is showing right now (smoke's warm start). Recovery replays
+   *  still call driver.relaunch() — what THAT does to app state is the
+   *  driver's policy. */
+  warmStart?: boolean;
 }
 
 export async function crawl(
@@ -92,6 +121,9 @@ export async function crawl(
   const edges: ExploreEdge[] = [];
   const warnings: ExploreWarning[] = [];
   const log = hooks.log ?? (() => undefined);
+  // One PRNG stream for the whole crawl: each new screen draws its
+  // shuffle from it in discovery order, so the seed pins the entire walk.
+  const rng = limits.seed !== undefined ? mulberry32(limits.seed) : null;
   let steps = 0;
 
   /** Describe the current screen; register the node if it's new. */
@@ -118,6 +150,7 @@ export async function crawl(
     }
     if (!nodes.has(sig)) {
       const actions = enumerateActions(elements, limits);
+      if (rng) shuffle(actions, rng);
       const node: ExploreNode = {
         sig,
         title: screenTitle(elements),
@@ -151,7 +184,7 @@ export async function crawl(
     return sig;
   };
 
-  await driver.relaunch();
+  if (!hooks.warmStart) await driver.relaunch();
   // The budget clock starts AFTER the initial relaunch settle: launch cost
   // varies by machine, exploration work is what the budget meters.
   const deadline = Date.now() + limits.maxMs;

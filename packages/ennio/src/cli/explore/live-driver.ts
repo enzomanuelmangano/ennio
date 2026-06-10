@@ -11,10 +11,14 @@ export class LiveExploreDriver implements ExploreDriver {
   constructor(
     private readonly session: EnnioMcpSession,
     private readonly bundleId: string,
+    /** Whether relaunches wipe app data. Explore wants the known-zero
+     *  state (deterministic, diffable maps); smoke keeps the user's
+     *  state — the test starts from the app exactly as it stands. */
+    private readonly clearState = true,
   ) {}
 
   async relaunch(): Promise<void> {
-    const r = await this.session.dispatch({ launchApp: { clearState: true } });
+    const r = await this.session.dispatch({ launchApp: { clearState: this.clearState } });
     if (!r.ok) throw new Error(`relaunch failed: ${r.error.message}`);
     // clearState soft-resets (data wipe + JS reload): the launch settle
     // covers the React commit, but the first dump_views can still race

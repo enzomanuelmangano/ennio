@@ -70,7 +70,10 @@ Writes to .ennio/explore/<bundleId>/ (override with --output):
 Options:
   --max-depth N      path-length cap from the root (default 5)
   --max-nodes N      distinct-screen cap (default 50)
-  --duration N       wall-clock budget for the crawl in seconds (default 60)
+  --duration N       wall-clock budget for the crawl in seconds (default 30)
+  --seed N           shuffle per-screen action order (PRNG seed; same
+                     seed + same build = same crawl). Default: document
+                     order, for diffable maps
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)
   --keep-animations  leave app animations running (explore snaps them
@@ -83,6 +86,10 @@ Crawl-based smoke test — same engine as \`ennio explore\`, but the
 product is the exit code, for CI: does the app survive autonomous
 exploration? Walks the app for the wall-clock budget, prints a one-line
 summary (plus any warnings) and writes NO files unless --output is set.
+
+Starts WARM: no relaunch, no state reset — the crawl roots at whatever
+screen the app is showing, with session and data intact. Action order
+is shuffled from a printed seed so repeated runs probe different paths.
 
   exit 0   crawl completed (caps and budget cuts are fine)
   exit 1   app crashed mid-crawl (diagnosis printed, last action
@@ -100,7 +107,12 @@ Options:
   --verbose          stream per-action progress while crawling
   --max-depth N      path-length cap from the root (default 5)
   --max-nodes N      distinct-screen cap (default 50)
-  --duration N       wall-clock budget for the crawl in seconds (default 60)
+  --duration N       wall-clock budget for the crawl in seconds (default 30)
+  --seed N           pin the action-order shuffle for an exact replay.
+                     Default: a fresh random seed each run (printed in
+                     the summary) so CI keeps probing different paths
+  --relaunch         restart the app before crawling (app data is kept;
+                     default off — the crawl starts on the current screen)
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)
   --keep-animations  leave app animations running

@@ -69,12 +69,16 @@ export interface ExploreLimits {
   maxDepth: number;
   /** Max distinct screens to register (default 50). */
   maxNodes: number;
-  /** Wall-clock budget for the whole crawl in ms (default 60s). The cut
+  /** Wall-clock budget for the whole crawl in ms (default 30s). The cut
    *  is recorded as a cap-hit warning — the partial map stays valid.
    *  This is the global stop: there is deliberately no step-count cap. */
   maxMs: number;
   /** Case-insensitive regex; matching testIDs are never tapped. */
   deny: RegExp;
+  /** When set, per-screen action order is shuffled by a PRNG seeded with
+   *  this value — randomized walks that are still reproducible: same
+   *  seed + same build = same crawl. Unset = document order. */
+  seed?: number;
 }
 
 export interface ExploreResult {
