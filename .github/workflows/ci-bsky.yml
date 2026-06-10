@@ -100,7 +100,10 @@ jobs:
           # `simctl boot <name>` resolves an ambiguous name to an arbitrary
           # device, which on this image is the iOS 26 one (where bsky
           # v1.122 crashes). Explicit runtime, explicit UDID.
-          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-18-[0-9]+' | tail -1)
+          # head -1 = OLDEST iOS 18 runtime on the image (18.5). On 18.6 the
+          # e2e picker mock's DCIM read silently fails (image flows hang);
+          # 18.5 matches the locally-verified behavior.
+          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-18-[0-9]+' | head -1)
           test -n "$RUNTIME" || { echo "No iOS 18 runtime on image"; xcrun simctl list runtimes; exit 1; }
           UDID=$(xcrun simctl create "bsky-e2e" "iPhone 16 Pro" "$RUNTIME")
           echo "created $UDID on $RUNTIME"
@@ -224,6 +227,14 @@ jobs:
             "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-3.jpg
           ls "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Media/DCIM/100APPLE/" || true
 
+      - name: Start app log capture
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          nohup xcrun simctl spawn "$UDID" log stream \
+            --predicate 'processImagePath CONTAINS "Bluesky"' \
+            --style compact > /tmp/bsky-app.log 2>&1 &
+
       - name: Run bsky suite
         env:
           ENNIO_UDID: ${{ steps.sim.outputs.udid }}
@@ -249,5 +260,6 @@ jobs:
             /tmp/bsky-suite-logs/
             /tmp/ennio-shots/
             /tmp/mock-server.log
+            /tmp/bsky-app.log
           retention-days: 7
           if-no-files-found: warn
