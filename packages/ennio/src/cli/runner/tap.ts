@@ -876,5 +876,34 @@ export async function execTapOn(
           .catch(() => undefined);
       });
     }
+    // Submit-dismissal settle (opt-in, ENNIO_SUBMIT_DISMISS_MAX_MS): a
+    // publish/submit/send button inside a presented sheet dismisses it
+    // only AFTER an async server round-trip (bsky composer "Post"
+    // uploads blobs first). The flow's next step can reach FLOATING
+    // overlay controls straight through the still-open sheet and reset
+    // app state mid-flight — observed on a slow CI VM: e2eRefreshHome
+    // fired during the upload, the app cancelled the in-flight
+    // uploadBlob task, and the composer wedged in "Uploading images...".
+    // Wait on the SIGNAL — the pre-tap VC chain changing (dismissal
+    // start) — then let presentation-idle absorb the transition. Bails
+    // the moment the chain changes; fast hosts pay ~1 poll.
+    const submitDismissMaxMs = parseInt(process.env.ENNIO_SUBMIT_DISMISS_MAX_MS ?? '0', 10);
+    if (submitDismissMaxMs > 0 && sel.id && /publish|submit|send/i.test(sel.id)) {
+      await timedAsync(ctx, 'tap.waitSubmitDismiss', async () => {
+        const before = chain.join('>');
+        const deadline = Date.now() + submitDismissMaxMs;
+        while (Date.now() < deadline) {
+          const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
+          const cur = (((r?.data as { chain?: string[] })?.chain ?? []) as string[]).join('>');
+          if (cur && cur !== before) {
+            await ctx.client
+              .call('wait_presentation_idle', { maxMs: 2000 })
+              .catch(() => undefined);
+            return;
+          }
+          await sleep(150);
+        }
+      });
+    }
   }
 }

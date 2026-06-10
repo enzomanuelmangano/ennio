@@ -276,6 +276,11 @@ jobs:
           # Absorb VM scheduling lag in dismiss->present tap chains (menu
           # item opening a composer) — see hid-driver settleAfterTap.
           ENNIO_PRESENT_GRACE_MS: '800'
+          # Hold the flow after publish/submit/send taps until the
+          # presenting sheet actually dismisses — uploads take seconds on
+          # the VM and the next step otherwise cancels them mid-flight
+          # (composer wedged in "Uploading images..."). See runner/tap.ts.
+          ENNIO_SUBMIT_DISMISS_MAX_MS: '20000'
         run: bash e2e/bsky/run-suite.sh
 
       - name: Mock server log + DCIM state (always)
