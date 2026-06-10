@@ -27,13 +27,13 @@ describe('parseDumpViewLine', () => {
   });
 
   it('prefers the accessibility label over KVC text', () => {
-    expect(parseDumpViewLine('RCTTextView | aL=Greeting | aV= | t=Hello world | id= | tr=')).toEqual(
-      {
-        role: 'RCTTextView',
-        text: 'Greeting',
-        enabled: true,
-      },
-    );
+    expect(
+      parseDumpViewLine('RCTTextView | aL=Greeting | aV= | t=Hello world | id= | tr='),
+    ).toEqual({
+      role: 'RCTTextView',
+      text: 'Greeting',
+      enabled: true,
+    });
   });
 
   it('parses legacy three-field lines (older dylibs): t= is text, never a testID', () => {

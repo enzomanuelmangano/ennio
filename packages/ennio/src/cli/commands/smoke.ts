@@ -7,13 +7,17 @@
  * does the app survive autonomous exploration? — printing a one-screen
  * summary and writing NOTHING unless --output is given.
  *
- * Two deliberate departures from explore's determinism defaults:
+ * Three deliberate departures from explore's determinism-and-speed
+ * defaults — smoke exercises the app the way a user would:
  *   * WARM START — no relaunch, no clearState, ever: the crawl roots at
  *     whatever screen the app shows right now, with the user's session
  *     and data intact.
  *   * RANDOM SEED — per-screen action order is shuffled so repeated CI
  *     runs probe different paths; the seed is printed in the summary so
  *     any run replays exactly with --seed.
+ *   * REAL INPUT — every tap is a HID touch through the simulator's
+ *     event pipeline (no in-process shortcuts), and animations run
+ *     untouched.
  *
  *   exit 0  crawl completed (caps/budget cuts are fine)
  *   exit 1  the app crashed mid-crawl (diagnosis printed, with the last
@@ -109,11 +113,13 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     deny: flags.deny ? new RegExp(flags.deny, 'i') : DEFAULT_DENY,
     seed,
   };
-  if (!flags.keepAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
 
+  // As real as it gets: animations run untouched and every tap is a HID
+  // touch through the simulator's event pipeline — smoke exists to
+  // exercise the app the way a user would, not to map it fast.
   const session = new EnnioMcpSession({
     platform: selectPlatform(flags.android ? 'android' : 'ios'),
-    inProcessTap: flags.inProcessTap,
+    inProcessTap: false,
     safeMode: flags.safeMode,
   });
   const startedAt = Date.now();
@@ -126,15 +132,30 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
       console.error(`attach failed: ${attached.error.message}`);
       return 1;
     }
-    if (!flags.keepAnimations) await session.setAnimations(false);
-
     const outDir = flags.output ? resolve(flags.output) : null;
     if (outDir) mkdirSync(join(outDir, 'screens'), { recursive: true });
     // Warm start, never clearState: smoke tests the app from EXACTLY the
     // state it's in — logged-in session, filled carts and all. --relaunch
     // restarts the process first (data still kept); recovery relaunches
     // behave the same way.
-    const driver = new LiveExploreDriver(session, bundleId, false);
+    //
+    // Root readiness: if attach itself (re)launched the app, the JS tree
+    // may still be mounting — a static splash passes the crawler's quick
+    // settle and roots the crawl on a dead screen. Wait until two dumps
+    // 250ms apart agree on a non-empty inventory (up to 10s) before
+    // crawling; a genuinely empty app falls through after the deadline.
+    {
+      const ready = Date.now() + 10_000;
+      let prev = '';
+      while (Date.now() < ready) {
+        const d = await session.describe();
+        const now = d.ok ? JSON.stringify(d.data.elements) : '';
+        if (now && now !== '[]' && now === prev) break;
+        prev = now;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    const driver = new LiveExploreDriver(session, bundleId, { clearState: false, realInput: true });
     let result;
     try {
       result = await crawl(driver, limits, {
@@ -166,9 +187,7 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
         bundleId,
         startedAt,
       );
-      console.error(
-        `\nSMOKE FAIL ${bundleId} (seed ${seed}) — crawl aborted after ${lastAction}`,
-      );
+      console.error(`\nSMOKE FAIL ${bundleId} (seed ${seed}) — crawl aborted after ${lastAction}`);
       console.error(`  replay exactly: ennio smoke ${bundleId} --seed ${seed}`);
       console.error(`  ${msg}`);
       if (diagnosis) console.error(diagnosis.replace(/^/gm, '  '));
@@ -197,9 +216,6 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
     return 0;
   } finally {
-    // Leave the app as we found it: the crawl disabled animations for
-    // speed, the user keeps interacting with the app afterwards.
-    if (!flags.keepAnimations) await session.setAnimations(true).catch(() => undefined);
     session.close();
   }
 }

@@ -7,15 +7,30 @@ import type { EnnioMcpSession } from '../mcp/session';
 
 import type { ExploreAction, ExploreDriver } from './types';
 
+export interface LiveDriverOptions {
+  /** Whether relaunches wipe app data. Explore wants the known-zero
+   *  state (deterministic, diffable maps); smoke keeps the user's
+   *  state — the test starts from the app exactly as it stands. */
+  clearState?: boolean;
+  /** Real input only: every tap is a HID touch through the simulator's
+   *  event pipeline — no in-process shortcuts (tap_tab drives UIKit
+   *  selection directly). Smoke sets this: it exists to exercise the
+   *  app the way a finger would. */
+  realInput?: boolean;
+}
+
 export class LiveExploreDriver implements ExploreDriver {
+  private readonly clearState: boolean;
+  private readonly realInput: boolean;
+
   constructor(
     private readonly session: EnnioMcpSession,
     private readonly bundleId: string,
-    /** Whether relaunches wipe app data. Explore wants the known-zero
-     *  state (deterministic, diffable maps); smoke keeps the user's
-     *  state — the test starts from the app exactly as it stands. */
-    private readonly clearState = true,
-  ) {}
+    opts: LiveDriverOptions = {},
+  ) {
+    this.clearState = opts.clearState ?? true;
+    this.realInput = opts.realInput ?? false;
+  }
 
   async relaunch(): Promise<void> {
     const r = await this.session.dispatch({ launchApp: { clearState: this.clearState } });
@@ -54,9 +69,12 @@ export class LiveExploreDriver implements ExploreDriver {
     if (action.text) {
       // UIKit-native case first (tab-bar labels — identifier in the dump,
       // invisible to the RN testID index): the dylib's tap_tab op is
-      // deterministic UIKit selection, ~20ms, no-op for non-tabs.
-      const tab = await this.session.tapTab(action.text);
-      if (tab.ok && tab.data.tapped) return { ok: true };
+      // deterministic UIKit selection, ~20ms, no-op for non-tabs. Skipped
+      // under realInput — driving UIKit directly is not a real touch.
+      if (!this.realInput) {
+        const tab = await this.session.tapTab(action.text);
+        if (tab.ok && tab.data.tapped) return { ok: true };
+      }
       const found = await this.session.find({ text: action.text });
       if (found.ok) {
         const r = await this.session.rawTap(found.data.center);

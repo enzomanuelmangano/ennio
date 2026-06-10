@@ -90,6 +90,9 @@ summary (plus any warnings) and writes NO files unless --output is set.
 Starts WARM: no relaunch, no state reset — the crawl roots at whatever
 screen the app is showing, with session and data intact. Action order
 is shuffled from a printed seed so repeated runs probe different paths.
+Input is REAL: every tap is a HID touch through the simulator's event
+pipeline, and animations run untouched — the app is exercised the way
+a user would.
 
   exit 0   crawl completed (caps and budget cuts are fine)
   exit 1   app crashed mid-crawl (diagnosis printed, last action
@@ -115,7 +118,6 @@ Options:
                      default off — the crawl starts on the current screen)
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)
-  --keep-animations  leave app animations running
 Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
   doctor: `ennio doctor [--smoke <bundleId>]
 
