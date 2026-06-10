@@ -77,8 +77,44 @@ export function runningApps(udid: string): string[] {
   }
 }
 
+/** All booted simulator UDIDs, list order (= simctl's runtime order). */
+function bootedSims(): string[] {
+  try {
+    const json = execFileSync('xcrun', ['simctl', 'list', 'devices', 'booted', '-j'], {
+      encoding: 'utf-8',
+    });
+    const data = JSON.parse(json) as {
+      devices?: Record<string, { udid: string; state: string }[]>;
+    };
+    const out: string[] = [];
+    for (const bucket of Object.values(data.devices ?? {})) {
+      for (const d of bucket) if (d.state === 'Booted') out.push(d.udid);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export async function runSmokeCommand(positional: string[], flags: Flags): Promise<number> {
   let bundleId = positional[0];
+  // Device pick, warm-start flavored: with several sims booted and no
+  // ENNIO_UDID pin, "first booted" can land the run on a sim that merely
+  // has the app INSTALLED — launching a cold copy there while the user
+  // watches their live one. Prefer the sim where the target app is
+  // actually RUNNING.
+  if (bundleId && !process.env.ENNIO_UDID) {
+    const where = bootedSims().filter((u) => runningApps(u).includes(bundleId));
+    if (where.length > 0) {
+      process.env.ENNIO_UDID = where[0];
+      console.error(`[smoke] device: ${where[0]} (${bundleId} is running there)`);
+      if (where.length > 1) {
+        console.error(
+          `[smoke] note: ${bundleId} runs on ${where.length} booted sims — pin one with ENNIO_UDID`,
+        );
+      }
+    }
+  }
   if (!bundleId) {
     const udid = getTargetUdid();
     if (!udid) {
