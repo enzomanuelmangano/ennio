@@ -234,11 +234,21 @@ jobs:
           rm -rf "$SIM_DATA/Media/DCIM" "$SIM_DATA/Media/PhotoData"
           xcrun simctl spawn "$UDID" launchctl kill TERM system/com.apple.assetsd || true
           xcrun simctl spawn "$UDID" launchctl kill TERM system/com.apple.photoanalysisd || true
-          sleep 2
-          xcrun simctl addmedia "$UDID" \
-            "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg \
-            "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-2.jpg \
-            "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-3.jpg
+          sleep 8
+          # assetsd respawns lazily and can throw PHPhotos 3301 while its
+          # fresh library is still initializing on the slow VM — retry.
+          # Duplicate imports across attempts are harmless (every seed is
+          # the same small JPEG).
+          for attempt in 1 2 3 4 5; do
+            if xcrun simctl addmedia "$UDID" \
+              "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg \
+              "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-2.jpg \
+              "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-3.jpg; then
+              echo "addmedia OK on attempt $attempt"; break
+            fi
+            [ "$attempt" = "5" ] && { echo "addmedia failed after 5 attempts"; exit 1; }
+            sleep 8
+          done
           ls -la "$SIM_DATA/Media/DCIM/100APPLE/"
 
       - name: Start app log capture
