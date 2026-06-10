@@ -217,15 +217,22 @@ jobs:
             sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$svc', '$BSKY_BUNDLE_ID', 0, 2, 2, 2, 16);"
           done
           xcrun simctl spawn "$UDID" launchctl kickstart -k system/com.apple.tccd || true
-          # Seed the photo library: bsky's e2e picker mock reads the first
-          # JPG straight out of Media/DCIM/100APPLE — a freshly created
-          # device has an EMPTY DCIM, so image flows (composer attach,
-          # avatar crop) hang forever without this.
+          # Photo library: bsky's e2e picker mock reads the FIRST JPG out of
+          # Media/DCIM/100APPLE and runs it through resize/crop. The
+          # runtime's stock photos sort first (IMG_0001..) and are large
+          # 4288x2848 JPEGs whose decode/resize dies on the virtualized
+          # runner (no real GPU) — composer attach and the avatar cropper
+          # hang. Wipe the stock media BEFORE photod ever ingests it, then
+          # seed small (<1MB) fixtures: they become IMG_0001.., and
+          # compressIfNeeded short-circuits on size so no heavy image op
+          # runs at all.
+          SIM_DATA="$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data"
+          rm -rf "$SIM_DATA/Media/DCIM" "$SIM_DATA/Media/PhotoData" || true
           xcrun simctl addmedia "$UDID" \
             "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg \
             "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-2.jpg \
             "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-3.jpg
-          ls "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Media/DCIM/100APPLE/" || true
+          ls "$SIM_DATA/Media/DCIM/100APPLE/"
 
       - name: Start app log capture
         env:
@@ -244,7 +251,7 @@ jobs:
           SUITE_LOG_DIR: /tmp/bsky-suite-logs
           # GitHub macOS runners are ~1.5-2x slower than a dev Mac for
           # simulator workloads; give visibility waits more headroom.
-          ENNIO_DEFAULT_WAIT_MS: '25000'
+          ENNIO_DEFAULT_WAIT_MS: '35000'
         run: bash e2e/bsky/run-suite.sh
 
       - name: Mock server log (always)
