@@ -32,6 +32,11 @@ name: ci-bsky
 
 on:
   workflow_dispatch:
+    inputs:
+      flow_filter:
+        description: 'Run only flows whose name starts with this prefix (empty = all)'
+        type: string
+        default: ''
   # Temporary while iterating: new workflow files aren't dispatchable via
   # the API until they exist on the default branch. Remove before merge.
   push:
@@ -163,6 +168,10 @@ jobs:
         env:
           DB_POSTGRES_URL: postgresql://pg:password@127.0.0.1:5432/postgres
           REDIS_HOST: 127.0.0.1:6379
+          # Surface @atproto service (PDS/appview) pino logs in
+          # mock-server.log — uploadBlob stalls are otherwise invisible.
+          LOG_ENABLED: 'true'
+          LOG_LEVEL: 'info'
         run: |
           set -euo pipefail
           # pnpm via npm, not pnpm/action-setup: the action refuses to run
@@ -175,8 +184,23 @@ jobs:
             sleep 1
           done
           # Smoke: create users once; proves PDS spin-up + DBs end-to-end.
-          curl -fsS -X POST 'http://localhost:1986/?users' --max-time 120 | grep -q pdsUrl
+          RESP=$(curl -fsS -X POST 'http://localhost:1986/?users' --max-time 120)
+          echo "$RESP" | grep -q pdsUrl
           echo "mock server healthy"
+          # uploadBlob benchmark: the suite's composer flows stall on this
+          # exact call ~50% of attempts (app aborts after ~7-20s with no
+          # response). Reproduce server-side with curl: auth as alice,
+          # upload a small JPEG 5x, print timings.
+          PDS=http://localhost:3000
+          TOKEN=$(curl -fsS -X POST "$PDS/xrpc/com.atproto.server.createSession" \
+            -H 'Content-Type: application/json' \
+            -d '{"identifier":"alice.test","password":"hunter2"}' | /usr/bin/python3 -c 'import sys,json;print(json.load(sys.stdin)["accessJwt"])')
+          for i in 1 2 3 4 5; do
+            /usr/bin/time -p curl -fsS -o /dev/null -X POST "$PDS/xrpc/com.atproto.repo.uploadBlob" \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: image/jpeg' \
+              --data-binary @"$GITHUB_WORKSPACE/e2e/bsky/fixtures/seed-photo-1.jpg" \
+              --max-time 30 2>&1 | grep -E "real|curl" || echo "uploadBlob attempt $i FAILED"
+          done
 
       - name: Cache bsky app fixture
         id: app-cache
@@ -281,6 +305,10 @@ jobs:
           # the VM and the next step otherwise cancels them mid-flight
           # (composer wedged in "Uploading images..."). See runner/tap.ts.
           ENNIO_SUBMIT_DISMISS_MAX_MS: '20000'
+          # Iteration aid: composer-only on push while the composer flows
+          # are the last red ones; full suite via workflow_dispatch (or
+          # clear this default before merge).
+          FLOW_FILTER: ${{ inputs.flow_filter || 'composer' }}
         run: bash e2e/bsky/run-suite.sh
 
       - name: Mock server log + DCIM state (always)

@@ -21,6 +21,9 @@ echo "=== bsky suite (fast profile, retry-once) $(date +%T) ==="
 SUITE_T0=$(date +%s)
 for f in __e2e__/flows/*.yml; do
   b=$(basename "$f" .yml); case "$b" in _*) continue;; esac
+  # Optional prefix filter (FLOW_FILTER=composer) — iterate on a single
+  # failing flow without paying for the whole suite.
+  if [ -n "${FLOW_FILTER:-}" ]; then case "$b" in ${FLOW_FILTER}*) ;; *) continue;; esac; fi
   # onboarding picks a photo via a blind point-tap (50%,22%) whose target
   # position depends on the animated picker-sheet timeline — animations
   # must stay on for that flow.
