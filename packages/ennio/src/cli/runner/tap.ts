@@ -119,6 +119,22 @@ export async function execTapOn(
     await ctx.client
       .call('wait_commit', { maxMs: pointSettleMaxMs, stableMs: 250 })
       .catch(() => undefined);
+    // wait_commit tracks REACT commits — a sheet rising via a pure CA /
+    // presentation animation is invisible to it, and a point tap fired
+    // mid-rise lands where the YAML's coordinate WILL be, not where it
+    // is (observed: bsky onboarding's 50%,22% photo pick hitting the
+    // backdrop above the still-rising sheet, dismissing it pick-less on
+    // a slow CI VM). Wait out in-flight animations + presentation
+    // transitions too — one cheap RPC when nothing is animating.
+    {
+      const animDeadline = Date.now() + 3000;
+      while (Date.now() < animDeadline) {
+        const a = await ctx.client.call('animations_active').catch(() => undefined);
+        if (!(a?.ok && (a.data as { active?: boolean } | undefined)?.active)) break;
+        await sleep(60);
+      }
+      await ctx.client.call('wait_presentation_idle', { maxMs: 1500 }).catch(() => undefined);
+    }
     let winW = DEFAULT_WIN_W;
     let winH = DEFAULT_WIN_H;
     const ws = await ctx.client.call('window_size').catch(() => undefined);
