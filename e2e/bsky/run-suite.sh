@@ -30,10 +30,15 @@ for f in __e2e__/flows/*.yml; do
     echo "PASS  $b  $(grep -o 'total .*' "$LOGD/$b.log" | head -1)"
     PASS=$((PASS+1))
   else
+    # Screen state at first-attempt failure — element-not-found failures
+    # don't produce an in-app screenshot, and the screen is the fastest
+    # way to tell "app wedged" from "wrong element" on a slow runner.
+    xcrun simctl io "$ENNIO_UDID" screenshot "$LOGD/$b.fail1.png" || true
     if ENNIO_PHASE_TRACE=1 node "$ENNIO_CLI" test "$f" --verbose $ANIM_FLAG \
          > "$LOGD/$b.retry.log" 2>&1; then
       echo "PASS  $b (retry)"; PASS=$((PASS+1)); RETRIED="$RETRIED $b"
     else
+      xcrun simctl io "$ENNIO_UDID" screenshot "$LOGD/$b.fail2.png" || true
       echo "FAIL  $b"; FAIL=$((FAIL+1)); FAILED="$FAILED $b"
     fi
   fi
