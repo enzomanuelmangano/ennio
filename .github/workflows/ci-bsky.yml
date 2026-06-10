@@ -214,6 +214,15 @@ jobs:
             sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags) VALUES ('$svc', '$BSKY_BUNDLE_ID', 0, 2, 2, 2, 16);"
           done
           xcrun simctl spawn "$UDID" launchctl kickstart -k system/com.apple.tccd || true
+          # Seed the photo library: bsky's e2e picker mock reads the first
+          # JPG straight out of Media/DCIM/100APPLE — a freshly created
+          # device has an EMPTY DCIM, so image flows (composer attach,
+          # avatar crop) hang forever without this.
+          xcrun simctl addmedia "$UDID" \
+            "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-1.jpg \
+            "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-2.jpg \
+            "$GITHUB_WORKSPACE"/e2e/bsky/fixtures/seed-photo-3.jpg
+          ls "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Media/DCIM/100APPLE/" || true
 
       - name: Run bsky suite
         env:
