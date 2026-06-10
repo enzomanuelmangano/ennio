@@ -333,6 +333,15 @@ jobs:
           # sibling-copy lands.
           chmod -R a+rwx "$SIM_DATA/Media" || true
           ls -la "$SIM_DATA/Media/DCIM/100APPLE/"
+          # Pre-warm photod's thumbnail store: PHPicker (onboarding's
+          # photo pick) renders its grid in a remote process from photod
+          # thumbnails — on a cold store the blind 50%,22% tap lands on
+          # an unpopulated grid and picks nothing (run-correlated flake;
+          # the sheet itself presents and settles fine). Opening Photos
+          # once forces thumbnail generation for the seeds.
+          xcrun simctl launch "$UDID" com.apple.mobileslideshow || true
+          sleep 10
+          xcrun simctl terminate "$UDID" com.apple.mobileslideshow || true
 
       - name: Start app log capture
         env:
