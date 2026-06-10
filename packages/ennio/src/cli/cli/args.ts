@@ -41,6 +41,18 @@ export type Flags = {
   /** --smoke: `ennio doctor --smoke <bundleId>` runs an end-to-end self-test
    *  (inject → socket → read → actuate) against a real app. */
   smoke?: boolean;
+  /** `ennio explore` caps — see commands/explore.ts. */
+  maxDepth?: string;
+  maxNodes?: string;
+  maxActions?: string;
+  maxSteps?: string;
+  /** --max-ms: wall-clock budget for the whole crawl (default 30000). */
+  maxMs?: string;
+  /** --deny: case-insensitive regex of testIDs `ennio explore` never taps. */
+  deny?: string;
+  /** --keep-animations: `ennio explore` leaves app animations running
+   *  (explore disables them by default for speed — it maps structure). */
+  keepAnimations?: boolean;
 };
 
 export type ParsedArgs = {
@@ -49,7 +61,17 @@ export type ParsedArgs = {
   flags: Flags;
 };
 
-const STRING_FLAGS = new Set(['port', 'output', 'reporter']);
+const STRING_FLAGS = new Set([
+  'port',
+  'output',
+  'reporter',
+  'max-depth',
+  'max-nodes',
+  'max-actions',
+  'max-steps',
+  'max-ms',
+  'deny',
+]);
 const BOOL_FLAGS = new Set([
   'verbose',
   'trace',
@@ -64,10 +86,17 @@ const BOOL_FLAGS = new Set([
   'android',
   'ios',
   'smoke',
+  'keep-animations',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {
   'safe-mode': 'safeMode',
+  'max-depth': 'maxDepth',
+  'max-nodes': 'maxNodes',
+  'max-actions': 'maxActions',
+  'max-steps': 'maxSteps',
+  'max-ms': 'maxMs',
+  'keep-animations': 'keepAnimations',
   'in-process-tap': 'inProcessTap',
   'disable-animations': 'noAnimations',
   'disable-reuse-app': 'disableReuseApp',
@@ -133,6 +162,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     'screenshot',
     'doctor',
     'mcp',
+    'explore',
   ]);
   let command: string | null = null;
   if (positional.length > 0 && KNOWN.has(positional[0])) {

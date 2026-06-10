@@ -21,6 +21,7 @@ import { runVersionCommand } from './commands/version';
 import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
+import { runExploreCommand } from './commands/explore';
 import { runMcpCommand } from './commands/mcp';
 import { printCrashReport } from './crash-reporter';
 import { currentVersion, printUpdateNotice } from './update-check';
@@ -67,6 +68,8 @@ async function main() {
       return runDoctorCommand(positional, flags);
     case 'mcp':
       return runMcpCommand(positional, flags);
+    case 'explore':
+      return runExploreCommand(positional, flags);
     case 'test':
     case 'run':
       return runTestCommand(positional, flags);

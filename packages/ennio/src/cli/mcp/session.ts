@@ -223,6 +223,27 @@ export class EnnioMcpSession {
     }
   }
 
+  /**
+   * Direct in-process tab tap: the dylib's `tap_tab` op resolves a
+   * UITabBarItem by name and drives UIKit's own selection — deterministic
+   * and idempotent, no gesture machinery. Returns tapped=false when the
+   * name doesn't resolve to a tab (callers fall back to a normal tap).
+   */
+  async tapTab(name: string): Promise<EnnioResult<{ tapped: boolean }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const r = await a.connection.socket.call('tap_tab', { name });
+      const tapped = !!(r.ok && r.data && (r.data as { tapped?: boolean }).tapped);
+      if (tapped) {
+        await a.connection.socket.call('wait_commit', { maxMs: 400, stableMs: 60 });
+      }
+      return ok({ tapped });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
   /** On-screen element inventory (role / testID / text / value). */
   async describe(): Promise<EnnioResult<ScreenDescription>> {
     const a = this.attachment;

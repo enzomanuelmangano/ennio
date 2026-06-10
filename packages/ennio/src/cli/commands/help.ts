@@ -11,6 +11,7 @@ Usage:
   ennio screenshot [path]       grab the simulator screen
   ennio doctor                  diagnose Node, Xcode, enniohid, dylib + app socket
   ennio mcp                     serve ennio over MCP (stdio) for an AI agent
+  ennio explore <bundleId>      deterministic DFS app crawl -> app-map.json
   ennio version                 print version
   ennio help [command]          this message, or per-command help
 
@@ -50,6 +51,32 @@ ennio_input_text. Taps and swipes go through the HID driver — ennio is the
 tap path. stdout carries only JSON-RPC; diagnostics go to stderr.
 
 Options: --android (target an emulator), --in-process-tap
+Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
+  explore: `ennio explore <bundleId>
+
+Deterministic app crawler: walks the app depth-first, tapping testID'd
+elements in document order. Screens are identified by a structural
+signature (testIDs + roles, volatile text/numbers normalized), so two
+runs over the same build produce the same map. Backtracking is verified:
+back first, clearState + path replay on mismatch — nondeterminism is
+recorded as a warning, never absorbed.
+
+Writes to .ennio/explore/<bundleId>/ (override with --output):
+  app-map.json    sorted, diffable graph: nodes, edges, warnings
+  map.mmd         mermaid rendering of the nav edges
+  screens/*.png   one screenshot per discovered screen
+
+Options:
+  --max-depth N      path-length cap from the root (default 5)
+  --max-nodes N      distinct-screen cap (default 50)
+  --max-actions N    actions attempted per screen (default 25)
+  --max-steps N      global action cap (default 400)
+  --max-ms N         wall-clock budget for the crawl (default 30000)
+  --deny REGEX       testIDs never tapped (default blocks logout/delete/
+                     purchase-looking ids)
+  --keep-animations  leave app animations running (explore snaps them
+                     to the final frame by default, for speed)
+  --reporter json    also print the map to stdout
 Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
   doctor: `ennio doctor [--smoke <bundleId>]
 
