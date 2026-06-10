@@ -152,6 +152,9 @@ function simBootStamp(udid: string): string | null {
  * pre-sentinel behavior.
  */
 export function prepareSimulator(udid: string): void {
+  // Escape hatch: prefs were changed on a booted sim (manually or by
+  // another tool) and ennio must re-force them without a reboot.
+  const force = process.env.ENNIO_FORCE_SIM_PREP === '1';
   const stamp = simBootStamp(udid);
   const marker = stamp
     ? join(
@@ -159,7 +162,7 @@ export function prepareSimulator(udid: string): void {
         `ennio-sim-prep-${udid}-${createHash('sha1').update(stamp).digest('hex').slice(0, 12)}`,
       )
     : null;
-  if (marker && existsSync(marker)) {
+  if (!force && marker && existsSync(marker)) {
     if (PHASE_TRACE) console.error('[phase] startup.simPrep skipped (sentinel)');
     return;
   }

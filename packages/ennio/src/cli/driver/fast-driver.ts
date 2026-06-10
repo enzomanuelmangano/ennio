@@ -119,6 +119,7 @@ export class FastDriver implements GestureDriver {
   ): Promise<SwipeOutcome> {
     const dy = getDylibClient(udid);
     try {
+      bumpActuationGen();
       const r = await dy.call('swipe_points', {
         x1,
         y1,
@@ -200,6 +201,7 @@ export class FastDriver implements GestureDriver {
         // back after the pop). Decline; the real HID tap on the tab
         // button drives the framework's own handler.
         if (d.selected) return false;
+        bumpActuationGen();
         const t = await client.call('tap_tab', { name: text });
         if (t.ok && t.data && (t.data as { tapped: boolean }).tapped) {
           this.hits++;

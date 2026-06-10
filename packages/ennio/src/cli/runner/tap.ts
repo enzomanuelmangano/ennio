@@ -19,7 +19,7 @@
 //         gesture chain never armed)
 
 import type { TapIntent } from '../driver/types';
-import { getScreenSize } from '../hid';
+import { bumpActuationGen, getScreenSize } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
@@ -133,6 +133,7 @@ export async function execTapOn(
     try {
       const a = await timedAsync(ctx, 'tap.alertProbe', () => ctx.client.call('alert_present'));
       if (a.ok && a.data && (a.data as { present: boolean }).present) {
+        bumpActuationGen();
         const t = await ctx.client.call('alert_tap', { buttonText: sel.text });
         if (t.ok && t.data && (t.data as { tapped: boolean }).tapped) return;
       }
@@ -295,6 +296,7 @@ export async function execTapOn(
           `[ennio] off-viewport id="${sel.id}" rect=(${rect.x.toFixed(0)},${rect.y.toFixed(0)},${rect.w.toFixed(0)},${rect.h.toFixed(0)}) center=(${cx.toFixed(0)},${cy.toFixed(0)}) win=(${winW.toFixed(0)},${winH.toFixed(0)}) → scroll_to\n`,
         );
       }
+      bumpActuationGen();
       const scrollResp = await ctx.client
         .call('scroll_to', { elementTestID: sel.id })
         .catch(() => undefined);
@@ -328,6 +330,7 @@ export async function execTapOn(
       // Pressable in most archs; returns false on Fabric Release
       // where Pressability's handler isn't reachable via the public
       // accessibility chain — fall through to HID tap in that case.
+      bumpActuationGen();
       const r = await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
       const ok = !!(r && r.ok && r.data && (r.data as { ok?: boolean }).ok);
       if (process.env.ENNIO_PHASE_TRACE) {
@@ -497,6 +500,7 @@ export async function execTapOn(
         // answer can't decay between scroll and tap.
         if (!confirmedExposed && sel.id) {
           await timedAsync(ctx, 'tap.scrollToExpose', async () => {
+            bumpActuationGen();
             await ctx.client.call('scroll_to', { elementTestID: sel.id }).catch(() => undefined);
             await ctx.client
               .call('wait_commit', { maxMs: 600, stableMs: 100 })
@@ -807,6 +811,7 @@ export async function execTapOn(
       // already get the unconditional tap_tab fallback below.
       if (!finalChanged) {
         if (sel.id) {
+          bumpActuationGen();
           await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
         } else if (sel.text) {
           // Text-only tap whose retap loop never moved the hash —
@@ -847,6 +852,7 @@ export async function execTapOn(
     // and if it DOES resolve UIKit's setSelectedIndex is idempotent
     // (no-op when the target tab is already selected).
     if (sel.text && !sel.id) {
+      bumpActuationGen();
       await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
     }
     // Async-payload dismissal settle: this tap fired INTO a cropper /
