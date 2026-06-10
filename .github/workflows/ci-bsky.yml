@@ -150,9 +150,13 @@ jobs:
           set -euo pipefail
           git clone --filter=blob:none https://github.com/bluesky-social/social-app.git /tmp/bluesky
           git -C /tmp/bluesky checkout "$BSKY_SHA"
+          # NOTE: the dev-env double-buffer patch is temporarily NOT applied —
+          # isolating whether its :3000 L4 proxy is what wedges the composer
+          # publish pipeline on CI ("Uploading images..." never clears while
+          # the uploadBlob HTTP transaction completes in <100ms). Stock
+          # serial mock costs ~3s/flow extra. Re-evaluate after a green run.
           git -C /tmp/bluesky apply --verbose \
-            "$GITHUB_WORKSPACE/e2e/bsky/patches/setup-app-release.patch" \
-            "$GITHUB_WORKSPACE/e2e/bsky/patches/dev-env-double-buffer.patch"
+            "$GITHUB_WORKSPACE/e2e/bsky/patches/setup-app-release.patch"
 
       - name: Install dev-env deps + start mock server
         working-directory: /tmp/bluesky/dev-env
