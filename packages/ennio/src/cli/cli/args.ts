@@ -163,6 +163,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     'doctor',
     'mcp',
     'explore',
+    'smoke',
   ]);
   let command: string | null = null;
   if (positional.length > 0 && KNOWN.has(positional[0])) {
