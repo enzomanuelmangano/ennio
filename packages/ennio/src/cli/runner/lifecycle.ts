@@ -11,7 +11,7 @@ import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { diagnoseSocketFailure } from '../crash-detector';
+import { diagnoseSocketFailure, throttledAliveProbe } from '../crash-detector';
 import { dismissSystemSheet } from '../ennio-ax';
 import { warmActuator } from '../hid';
 import { findDylib, getAppContainer, setSimLaunchEnv, terminateApp } from '../sim';
@@ -172,6 +172,7 @@ export async function relaunchAndReconnect(
     },
   );
   const reopen = new EnnioSocketClient(ctx.udid);
+  reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
   if (!(await reopen.connectWithRetry(15_000))) {
     const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
     throw new Error(
@@ -382,6 +383,7 @@ export async function clearStateAndRelaunch(
     },
   );
   const reopen = new EnnioSocketClient(ctx.udid);
+  reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
   if (!(await reopen.connectWithRetry(15_000))) {
     const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
     throw new Error(

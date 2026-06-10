@@ -72,6 +72,25 @@ export class EnnioSocketClient {
   private target: ConnectTarget;
 
   /**
+   * Optional process-liveness probe, installed by the owner that knows
+   * the target app (EnnioConnection wires a throttled isAppRunning).
+   * When it reports the process gone, every retry ladder short-circuits
+   * immediately: a crashed app cannot come back on its own, and waiting
+   * out reconnect budgets turns one crash into minutes of hang per op
+   * (measured: a crash-on-boot app cost 3-11min per flow, 112min over a
+   * 21-flow suite).
+   */
+  aliveProbe: (() => boolean) | null = null;
+
+  private appDead(): boolean {
+    try {
+      return this.aliveProbe ? !this.aliveProbe() : false;
+    } catch {
+      return false; // probe failure must never fabricate a crash
+    }
+  }
+
+  /**
    * Accepts either a UDID (iOS legacy — resolves to the per-target Unix
    * path) or an explicit ConnectTarget (Android passes a TCP port). The
    * UDID overload keeps the many `new EnnioSocketClient(ctx.udid)` call
@@ -129,6 +148,8 @@ export class EnnioSocketClient {
     const deadline = Date.now() + maxWaitMs;
     while (Date.now() < deadline) {
       if (await this.connect()) return true;
+      // Dead process → the listener is never coming up; stop waiting.
+      if (this.appDead()) return false;
       await new Promise((r) => setTimeout(r, 150));
     }
     return false;
@@ -197,6 +218,11 @@ export class EnnioSocketClient {
         const msg = e instanceof Error ? e.message : String(e);
         if (!/socket closed|socket request timeout|ennio socket not connected/.test(msg)) {
           throw e;
+        }
+        // A dead process can't reconnect — fail the op NOW so the caller
+        // can diagnose the crash, instead of grinding the retry ladder.
+        if (this.appDead()) {
+          throw new Error('ennio socket not connected (app process is gone)');
         }
         this.close();
         await new Promise((r) => setTimeout(r, 150));

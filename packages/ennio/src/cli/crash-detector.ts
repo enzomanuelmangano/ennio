@@ -33,6 +33,9 @@ export interface CrashReport {
   faultingFrames: string[];
   /** Whether libennio.dylib was loaded in the crashed process. */
   ennioLoaded: boolean;
+  /** The crash is React Native's fatal-JS-exception abort
+   *  (RCTExceptionsManager reportFatal) — an app bug, not injection. */
+  jsFatal: boolean;
   crashedAtMs: number;
 }
 
@@ -49,6 +52,7 @@ interface IpsBody {
   faultingThread?: number;
   threads?: { frames?: IpsFrame[] }[];
   usedImages?: { name?: string; path?: string }[];
+  lastExceptionBacktrace?: IpsFrame[];
 }
 
 const REPORTS_DIR = join(homedir(), 'Library/Logs/DiagnosticReports');
@@ -139,6 +143,12 @@ export function findCrashReport(
     const ennioLoaded = (body.usedImages ?? []).some(
       (img) => img.name === 'libennio.dylib' || (img.path ?? '').includes('libennio'),
     );
+    // RN routes fatal JS exceptions through RCTExceptionsManager before
+    // aborting — its presence in the exception backtrace marks the crash
+    // as the app's own JavaScript, not an injection problem.
+    const jsFatal = (body.lastExceptionBacktrace ?? []).some((f) =>
+      /RCTExceptionsManager|RCTFatal/.test(f.symbol ?? ''),
+    );
     return {
       path: c.p,
       procName: proc,
@@ -146,6 +156,7 @@ export function findCrashReport(
       exception,
       faultingFrames: framesOf(body),
       ennioLoaded,
+      jsFatal,
       crashedAtMs: c.mtime,
     };
   }
@@ -188,16 +199,25 @@ export function diagnoseSocketFailure(udid: string, bundleId: string, sinceMs: n
       lines.push('faulting thread:');
       for (const f of report.faultingFrames) lines.push(`    ${f}`);
     }
-    if (report.ennioLoaded) {
+    if (report.jsFatal) {
       lines.push(
-        'libennio.dylib was loaded — likely an injection conflict. ' +
-          'Retry with --safe-mode to disable in-app hooks.',
+        "the app's JavaScript threw a fatal exception (RCTFatalException) — " +
+          'an app bug, not an ennio issue. Check the JS bundle the app is loading.',
+      );
+      lines.push(`crash report: ${report.path}`);
+    } else {
+      if (report.ennioLoaded) {
+        lines.push(
+          'libennio.dylib was loaded — likely an injection conflict. ' +
+            'Retry with --safe-mode to disable in-app hooks.',
+        );
+      }
+      lines.push(`crash report: ${report.path}`);
+      lines.push(
+        'this is likely an ennio bug — please open an issue attaching the ' +
+          `report: ${ISSUES_URL}`,
       );
     }
-    lines.push(`crash report: ${report.path}`);
-    lines.push(
-      'this is likely an ennio bug — please open an issue attaching the ' + `report: ${ISSUES_URL}`,
-    );
   } else {
     lines.push(
       'the app process is no longer running (no crash report found yet — ' +
@@ -206,4 +226,25 @@ export function diagnoseSocketFailure(udid: string, bundleId: string, sinceMs: n
     );
   }
   return lines.join('\n');
+}
+
+/**
+ * Throttled liveness probe for EnnioSocketClient.aliveProbe. Shells out
+ * to launchctl at most every 1.5s (the probe runs inside 150ms retry
+ * loops); between checks it returns the cached verdict. A dead process
+ * short-circuits every socket retry ladder — one crash then costs
+ * seconds, not the 3-11 minutes of reconnect grinding measured on a
+ * crash-on-boot app.
+ */
+export function throttledAliveProbe(udid: string, bundleId: string): () => boolean {
+  let checkedAt = 0;
+  let alive = true;
+  return () => {
+    const now = Date.now();
+    if (now - checkedAt > 1_500) {
+      checkedAt = now;
+      alive = isAppRunning(udid, bundleId);
+    }
+    return alive;
+  };
 }
