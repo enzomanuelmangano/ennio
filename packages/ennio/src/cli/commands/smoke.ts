@@ -264,7 +264,17 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
         `${result.steps} actions (${kinds.nav} nav, ${kinds.state} state, ` +
         `${kinds.error} failed) in ${wallS}s`,
     );
-    for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
+    // Quiet by default: warnings are routine crawl bookkeeping (caps hit,
+    // nondeterministic backtracks), and a healthy run can produce a dozen.
+    // One summary line; --verbose lists them all.
+    if (flags.verbose) {
+      for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
+    } else if (map.warnings.length > 0) {
+      const byKind = new Map<string, number>();
+      for (const w of map.warnings) byKind.set(w.kind, (byKind.get(w.kind) ?? 0) + 1);
+      const parts = [...byKind.entries()].map(([k, n]) => `${n} ${k}`).join(', ');
+      console.log(`  ${map.warnings.length} warnings (${parts}) — --verbose to list`);
+    }
     // Coverage floor: a warm start can root on a stale/dead screen, drain
     // instantly, and "pass" having tested nothing. Still exit 0 (the app
     // didn't crash — the contract holds) but say it loudly so a CI log

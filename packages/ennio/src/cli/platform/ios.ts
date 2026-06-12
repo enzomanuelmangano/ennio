@@ -43,7 +43,9 @@ export class IosPlatform implements Platform {
 
   readonly system: SystemBridge = {
     screenshot: (udid, path) => {
-      execFileSync('xcrun', ['simctl', 'io', udid, 'screenshot', path]);
+      // stdio piped: simctl chats ("Detected file type 'PNG'... Wrote
+      // screenshot to:") on stderr and it leaks into every quiet run.
+      execFileSync('xcrun', ['simctl', 'io', udid, 'screenshot', path], { stdio: 'pipe' });
     },
     clearKeychain: (udid) => {
       execFileSync('xcrun', ['simctl', 'keychain', udid, 'reset'], { stdio: 'pipe' });
