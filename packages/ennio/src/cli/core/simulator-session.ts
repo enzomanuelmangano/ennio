@@ -88,8 +88,7 @@ export class SimulatorSession {
     // Same sticky-env hygiene for ENNIO_NO_ANIMATIONS (--no-animations)
     // and ENNIO_SHOW_TOUCHES (--show-touches).
     for (const name of ['ENNIO_NO_ANIMATIONS', 'ENNIO_SHOW_TOUCHES']) {
-      const envArgs =
-        process.env[name] === '1' ? ['setenv', name, '1'] : ['unsetenv', name];
+      const envArgs = process.env[name] === '1' ? ['setenv', name, '1'] : ['unsetenv', name];
       try {
         execFileSync('xcrun', ['simctl', 'spawn', this.udid, 'launchctl', ...envArgs], {
           stdio: 'pipe',

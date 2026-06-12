@@ -66,7 +66,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('  --disable-reuse-app   Force a full relaunch on clearState. App reuse');
     console.error('                        (soft-reset: data wipe + JS reload) is ON by default.');
     console.error('  --show-touches        Draw every tap/swipe on screen (iOS: in-app ripple');
-    console.error("                        overlay; Android: the OS setting, restored on exit).");
+    console.error('                        overlay; Android: the OS setting, restored on exit).');
     console.error('');
     console.error('Auto-detection:');
     console.error('  - booted iOS simulator (or auto-boots one)');
