@@ -38,6 +38,81 @@ export const DEFAULT_LIMITS: ExploreLimits = {
   deny: DEFAULT_DENY,
 };
 
+/** Primary actions may run this many levels past maxDepth — enough to
+ *  finish a wizard/checkout instead of abandoning it one step short. */
+export const FLOW_DEPTH_BONUS = 5;
+
+/** Scroll-mining passes per node. The first pass that reveals nothing
+ *  new ends mining early, so non-scrollable screens pay for one swipe. */
+export const MAX_SCROLLS_PER_NODE = 3;
+
+/**
+ * Does this action look like a flow-advancing CTA? Matched against the
+ * testID and the visible label. Deliberately conservative: a false
+ * positive only reorders the walk; a false negative just means the flow
+ * gets completed later (or cut at maxDepth like before).
+ */
+const PRIMARY_RE =
+  /(^|[-_ ])(next|continue|submit|done|confirm|save|apply|checkout|proceed|sign[-_ ]?in|log[-_ ]?in|sign[-_ ]?up|register|get[-_ ]?started|start|finish|send|search|add[-_ ]?to[-_ ]?cart|place[-_ ]?order)([-_ ]|$)/i;
+
+export function isPrimaryAction(action: { id?: string; text?: string }): boolean {
+  return PRIMARY_RE.test(action.id ?? '') || PRIMARY_RE.test(action.text ?? '');
+}
+
+/**
+ * Sliders are dragged, not tapped. Detected by the adjustable
+ * accessibility trait (UISlider, accessibilityRole="adjustable") with a
+ * naming heuristic as backstop for custom gesture-handler sliders that
+ * never set the trait.
+ */
+export function isSliderElement(el: DescribedElement): boolean {
+  return el.adjustable === true || /slider/i.test(el.testID ?? '') || /Slider/.test(el.role);
+}
+
+/** Editable text inputs (RN TextInput / UIKit text fields), by class.
+ *  The Label guard matters: a UITextField's placeholder renders as a
+ *  `UITextFieldLabel` — same screen position, not editable — and typing
+ *  "into" it double-fills the real field. */
+const INPUT_ROLE_RE = /TextField|TextInput|TextView|SecureField/i;
+const INPUT_ROLE_EXCLUDE_RE = /Label/i;
+
+export function enumerateInputs(elements: DescribedElement[]): ExploreAction[] {
+  const out: ExploreAction[] = [];
+  const seen = new Set<string>();
+  for (const el of elements) {
+    if (!INPUT_ROLE_RE.test(el.role) || INPUT_ROLE_EXCLUDE_RE.test(el.role)) continue;
+    const key = el.testID ? el.testID : el.text ? `tx:${el.text}` : null;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, ...(el.testID ? { id: el.testID } : { text: el.text }) });
+  }
+  return out;
+}
+
+/**
+ * A plausible value for a text input, keyed off its name so forms with
+ * format validation (email, phone, zip) actually advance. `n` is drawn
+ * from the crawl's seeded PRNG — varied run-to-run, replayable by seed.
+ */
+export function inputValueFor(key: string, n: number): string {
+  const k = key.toLowerCase();
+  if (/e.?mail/.test(k)) return `ennio${n}@example.com`;
+  if (/phone|tel|mobile/.test(k)) return `555${String(1000000 + (n % 9000000))}`;
+  if (/zip|postal/.test(k)) return '10001';
+  if (/pass/.test(k)) return `Passw0rd!${n}`;
+  // Name checks must precede card: "cardholder" is a NAME field.
+  if (/holder|(first|last|full)?.?name/.test(k)) return 'Ennio Tester';
+  if (/expir|mm.?yy/.test(k)) return '12/30';
+  if (/cvc|cvv|security.?code/.test(k)) return '123';
+  if (/card|cc.?num/.test(k)) return '4242424242424242';
+  if (/state|province/.test(k)) return 'NY';
+  if (/country/.test(k)) return 'Italy';
+  if (/city/.test(k)) return 'Milano';
+  if (/address|street/.test(k)) return `Via Roma ${1 + (n % 99)}`;
+  if (/search|query|filter/.test(k)) return 'a';
+  return `ennio ${n}`;
+}
+
 /** mulberry32 — tiny seeded PRNG; good enough to vary a walk, fully
  *  reproducible from its 32-bit seed. */
 function mulberry32(seed: number): () => number {
@@ -82,19 +157,28 @@ export function enumerateActions(
       if (seen.has(el.testID)) continue;
       seen.add(el.testID);
       if (limits.deny.test(el.testID)) continue;
+      // Text inputs are fill targets (enumerateInputs), not tap actions —
+      // tapping one just opens the keyboard and reads as a state edge.
+      if (INPUT_ROLE_RE.test(el.role)) continue;
       // Carry the element's text as the tap fallback: UIKit-native views
       // (tab-bar labels) surface an accessibilityIdentifier in the dump
       // that the RN testID index can't resolve — the text path routes
       // through the deterministic tab/alert handling instead.
-      all.push({ key: el.testID, id: el.testID, ...(el.text && { text: el.text }) });
+      const a: ExploreAction = { key: el.testID, id: el.testID, ...(el.text && { text: el.text }) };
+      if (isPrimaryAction(a)) a.primary = true;
+      if (isSliderElement(el)) a.slide = true;
+      all.push(a);
       continue;
     }
-    if (el.text && (el.button || /Button/.test(el.role))) {
+    if (el.text && (el.button || el.adjustable || /Button/.test(el.role))) {
       const key = `tx:${el.text}`;
       if (seen.has(key)) continue;
       seen.add(key);
       if (limits.deny.test(el.text)) continue;
-      all.push({ key, text: el.text });
+      const a: ExploreAction = { key, text: el.text };
+      if (isPrimaryAction(a)) a.primary = true;
+      if (isSliderElement(el)) a.slide = true;
+      all.push(a);
     }
   }
   // Every candidate is kept — there is deliberately no per-screen action
@@ -154,6 +238,11 @@ export async function crawl(
     if (!nodes.has(sig)) {
       const actions = enumerateActions(elements, limits);
       if (rng) shuffle(actions, rng);
+      // Primary CTAs first (stable sort): the crawler works a screen the
+      // way a user would — fill the form, hit the main button, map the
+      // secondary chrome later. Within each group the (shuffled) order
+      // is preserved, so the seed still pins the walk.
+      actions.sort((a, b) => Number(b.primary ?? false) - Number(a.primary ?? false));
       const node: ExploreNode = {
         sig,
         title: screenTitle(elements),
@@ -162,6 +251,7 @@ export async function crawl(
         tried: [],
         depth: pathNow.length,
         path: [...pathNow],
+        inputs: enumerateInputs(elements),
       };
       if (nodes.size >= limits.maxNodes) {
         warnings.push({ kind: 'cap-hit', detail: `maxNodes=${limits.maxNodes}: ${sig} frozen` });
@@ -211,10 +301,53 @@ export async function crawl(
     }
     const node = nodes.get(current);
     if (!node) break; // unreachable; defensive
-    const next = node.actions.find((a) => !node.tried.includes(a.key));
+    const depthLimit = limits.maxDepth + 1;
+    const untried = node.actions.filter((a) => !node.tried.includes(a.key));
+    // Action pick. Below maxDepth anything goes (primaries already sit
+    // first). In the FLOW ZONE — past maxDepth but within the bonus —
+    // only primary CTAs may run: deep enough to finish a checkout or
+    // wizard, without letting ordinary branching explode the walk.
+    let next: ExploreAction | undefined;
+    if (path.length < depthLimit) {
+      next = untried[0];
+    } else if (path.length < depthLimit + FLOW_DEPTH_BONUS) {
+      next = untried.find((a) => a.primary === true);
+    }
 
-    if (!next || path.length >= limits.maxDepth + 1) {
-      if (next && path.length >= limits.maxDepth + 1) {
+    // Scroll mining: the visible frontier drained, but RN virtualization
+    // means below-the-fold actions don't even exist in the dump. Swipe
+    // forward and re-enumerate; the first barren swipe ends mining so a
+    // non-scrollable screen pays for exactly one.
+    if (
+      !next &&
+      untried.length === 0 &&
+      path.length < depthLimit &&
+      (node.scrolls ?? 0) < MAX_SCROLLS_PER_NODE
+    ) {
+      await driver.scrollForward();
+      const after = await driver.describe();
+      const mined = enumerateActions(after, limits).filter(
+        (a) => !node.actions.some((e) => e.key === a.key),
+      );
+      const minedInputs = enumerateInputs(after).filter(
+        (i) => !node.inputs.some((e) => e.key === i.key),
+      );
+      node.inputs.push(...minedInputs);
+      if (mined.length > 0) {
+        if (rng) shuffle(mined, rng);
+        mined.sort((a, b) => Number(b.primary ?? false) - Number(a.primary ?? false));
+        node.actions.push(...mined);
+        node.scrolls = (node.scrolls ?? 0) + 1;
+        log(`  ⤓ scroll: +${mined.length} actions on ${current}`);
+      } else {
+        node.scrolls = MAX_SCROLLS_PER_NODE; // barren — stop mining here
+        log(`  ⤓ scroll: nothing new on ${current}`);
+      }
+      continue;
+    }
+
+    if (!next) {
+      if (untried.length > 0 && path.length >= depthLimit) {
         warnings.push({ kind: 'cap-hit', detail: `maxDepth=${limits.maxDepth} at ${current}` });
         // Freeze the node's remaining actions at this depth — they stay
         // visible in the map as untried.
@@ -314,6 +447,19 @@ export async function crawl(
       current = await snapshot([]);
       path = [];
       continue;
+    }
+
+    // Complete the flow like a user: before pressing a screen's primary
+    // CTA for the first time, fill its text inputs with plausible values
+    // (email-shaped for email fields, etc.) so format validation doesn't
+    // bounce the whole subtree.
+    if (next.primary === true && node.inputs.length > 0 && node.filled !== true) {
+      node.filled = true;
+      for (const input of node.inputs) {
+        const value = inputValueFor(input.key, rng ? 1 + Math.floor(rng() * 9999) : 1);
+        const filled = await driver.typeInto(input, value);
+        log(`  ✎ ${input.key}${filled ? ` = "${value}"` : ' — fill failed'}`);
+      }
     }
 
     node.tried.push(next.key);

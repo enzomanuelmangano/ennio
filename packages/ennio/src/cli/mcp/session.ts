@@ -311,6 +311,50 @@ export class EnnioMcpSession {
     }
   }
 
+  /** Scroll until a testID'd element is in view (in-process scroller).
+   *  Best-effort: false when there's nothing to scroll or no such id. */
+  async scrollTo(testID: string): Promise<boolean> {
+    const a = this.attachment;
+    if (!a) return false;
+    try {
+      const r = await a.connection.socket.call('scroll_to', { elementTestID: testID });
+      return !!(r.ok && r.data && (r.data as { scrolled?: boolean }).scrolled);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Focus a text input and type into it. Focus path: in-process
+   * focus_testid when an id is available (deterministic, works for
+   * fields below the keyboard), else a tap on the element's center.
+   * Typing always goes through insert_text — the same op flows use.
+   */
+  async typeText(sel: { id?: string; text?: string }, value: string): Promise<boolean> {
+    const a = this.attachment;
+    if (!a) return false;
+    try {
+      let focused = false;
+      if (sel.id) {
+        const f = await a.connection.socket.call('focus_testid', { testID: sel.id });
+        focused = !!(f.ok && f.data && (f.data as { ok?: boolean }).ok);
+      }
+      if (!focused) {
+        const found = await this.find(sel.id ? { id: sel.id } : { text: sel.text ?? '' });
+        if (!found.ok) return false;
+        await this.rawTap(found.data.center);
+      }
+      // Give the responder a beat to become first responder before typing.
+      await a.connection.socket
+        .call('first_responder_ready', { maxMs: 1000 })
+        .catch(() => undefined);
+      const r = await a.connection.socket.call('insert_text', { text: value });
+      return !!r.ok;
+    } catch {
+      return false;
+    }
+  }
+
   /** On-screen element inventory (role / testID / text / value). */
   async describe(): Promise<EnnioResult<ScreenDescription>> {
     const a = this.attachment;

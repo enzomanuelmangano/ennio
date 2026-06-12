@@ -265,6 +265,16 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
         `${kinds.error} failed) in ${wallS}s`,
     );
     for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
+    // Coverage floor: a warm start can root on a stale/dead screen, drain
+    // instantly, and "pass" having tested nothing. Still exit 0 (the app
+    // didn't crash — the contract holds) but say it loudly so a CI log
+    // reader doesn't mistake an empty walk for a healthy one.
+    if (map.stats.screens < 2 || kinds.nav === 0) {
+      console.log(
+        `  warning: low-coverage — ${map.stats.screens} screen(s), ${kinds.nav} nav edges: ` +
+          'the crawl barely moved. The root screen may be stale or stuck; try --relaunch.',
+      );
+    }
     return 0;
   } finally {
     if (recording) {

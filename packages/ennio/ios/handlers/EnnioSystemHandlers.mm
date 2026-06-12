@@ -143,6 +143,14 @@ void RegisterEnnioSystemHandlers(void) {
                 BOOL tappable =
                     (v.accessibilityTraits &
                      (UIAccessibilityTraitButton | UIAccessibilityTraitLink)) != 0;
+                // 'a' = adjustable (UISlider, RN accessibilityRole=
+                // "adjustable"): consumers drag these instead of tapping.
+                BOOL adjustable =
+                    (v.accessibilityTraits & UIAccessibilityTraitAdjustable) != 0 ||
+                    [v isKindOfClass:UISlider.class];
+                NSString *traits = [NSString stringWithFormat:@"%@%@",
+                                                              tappable ? @"b" : @"",
+                                                              adjustable ? @"a" : @""];
                 NSString *t = @"";
                 @try {
                     id raw = [v valueForKey:@"text"];
@@ -154,8 +162,7 @@ void RegisterEnnioSystemHandlers(void) {
                 if (al.length || av.length || t.length || ident.length) {
                     [out addObject:[NSString
                                        stringWithFormat:@"%@ | aL=%@ | aV=%@ | t=%@ | id=%@ | tr=%@",
-                                                        cls, al, av, t, ident,
-                                                        tappable ? @"b" : @""]];
+                                                        cls, al, av, t, ident, traits]];
                 }
                 for (UIView *sub in v.subviews.reverseObjectEnumerator) [stack addObject:sub];
             }

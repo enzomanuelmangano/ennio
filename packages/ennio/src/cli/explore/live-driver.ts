@@ -58,6 +58,24 @@ export class LiveExploreDriver implements ExploreDriver {
       const al = await this.session.alertTap(action.text);
       if (al.ok && al.data.tapped) return { ok: true };
     }
+    // Sliders: a center tap does nothing on a UISlider track — drag
+    // across the element instead. Start near the left edge (a fresh
+    // slider's thumb usually sits at its minimum) and pull to ~80%;
+    // pan-based RN sliders accept the gesture anywhere on the track.
+    if (action.slide === true) {
+      const found = await this.session.find(
+        action.id ? { id: action.id } : { text: action.text ?? '' },
+      );
+      if (!found.ok) return { ok: false, detail: `not visible: ${action.key}` };
+      const r = found.data.rect;
+      const y = r.y + r.h / 2;
+      const drag = await this.session.rawSwipe(
+        { x: r.x + r.w * 0.1, y },
+        { x: r.x + r.w * 0.8, y },
+        300,
+      );
+      return drag.ok ? { ok: true } : { ok: false, detail: drag.error.message };
+    }
     // Fast path ONLY: the crawler just dumped this screen, so the element
     // is known-present and settled — resolve its rect in one RPC and fire
     // a raw HID tap (commit-aware ~250ms wait). The full execTapOn
@@ -69,7 +87,16 @@ export class LiveExploreDriver implements ExploreDriver {
     // element left the viewport or unmounted since the dump — record it
     // as a cheap error edge and spend the budget elsewhere.
     if (action.id) {
-      const found = await this.session.find({ id: action.id });
+      let found = await this.session.find({ id: action.id });
+      if (!found.ok) {
+        // The element was enumerated on this screen but left the viewport
+        // (earlier taps mutated/scrolled the content). One in-process
+        // scroll_to + re-find turns what used to be a dead "error edge"
+        // into a real tap for ~one RPC.
+        if (await this.session.scrollTo(action.id)) {
+          found = await this.session.find({ id: action.id });
+        }
+      }
       if (found.ok) {
         const r = await this.session.rawTap(found.data.center);
         return r.ok ? { ok: true } : { ok: false, detail: r.error.message };
@@ -93,6 +120,16 @@ export class LiveExploreDriver implements ExploreDriver {
     }
     if (action.id) return { ok: false, detail: `not visible: ${action.id}` };
     return { ok: false, detail: 'empty selector' };
+  }
+
+  async scrollForward(): Promise<void> {
+    // One real swipe (content moves up) — the crawler mines whatever the
+    // scroll revealed from the next dump.
+    await this.session.rawSwipe({ x: 0.5, y: 0.72 }, { x: 0.5, y: 0.28 }).catch(() => undefined);
+  }
+
+  async typeInto(target: { id?: string; text?: string }, value: string): Promise<boolean> {
+    return this.session.typeText(target, value);
   }
 
   async back(): Promise<void> {

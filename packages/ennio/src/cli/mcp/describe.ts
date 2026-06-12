@@ -21,6 +21,9 @@ export interface DescribedElement {
    *  accessibilityRole="button"/"link" (how apps without testIDs mark
    *  their tappables). */
   button?: boolean;
+  /** Adjustable trait (UISlider, accessibilityRole="adjustable"):
+   *  interact by dragging, not tapping. */
+  adjustable?: boolean;
   enabled: boolean;
 }
 
@@ -46,11 +49,15 @@ export function parseDumpViewLine(line: string): DescribedElement | null {
   let rawText: string | undefined;
   let value: string | undefined;
   let button = false;
+  let adjustable = false;
   for (const part of parts.slice(1)) {
     if (part.startsWith('aL=')) label = part.slice(3) || undefined;
     else if (part.startsWith('aV=')) value = part.slice(3) || undefined;
-    else if (part.startsWith('tr=')) button = part.slice(3).includes('b');
-    else if (part.startsWith('t=')) rawText = part.slice(2) || undefined;
+    else if (part.startsWith('tr=')) {
+      const tr = part.slice(3);
+      button = tr.includes('b');
+      adjustable = tr.includes('a');
+    } else if (part.startsWith('t=')) rawText = part.slice(2) || undefined;
     else if (part.startsWith('id=')) testID = part.slice(3) || undefined;
   }
   // The accessibility label is the authored description; KVC text is the
@@ -63,6 +70,7 @@ export function parseDumpViewLine(line: string): DescribedElement | null {
     ...(text && { text }),
     ...(value && { value }),
     ...(button && { button }),
+    ...(adjustable && { adjustable }),
     enabled: true,
   };
 }
