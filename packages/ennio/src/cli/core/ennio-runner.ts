@@ -145,12 +145,9 @@ export class EnnioRunner {
       // it off when the flow ends, so the overlay never outlives ennio and
       // keeps drawing the user's own taps (iOS only; Android is an OS
       // setting restored on CLI exit).
-      const showTouches =
-        process.env.ENNIO_SHOW_TOUCHES === '1' && this.platform.name === 'ios';
+      const showTouches = process.env.ENNIO_SHOW_TOUCHES === '1' && this.platform.name === 'ios';
       if (showTouches) {
-        await connection.socket
-          .call('set_show_touches', { enabled: true })
-          .catch(() => undefined);
+        await connection.socket.call('set_show_touches', { enabled: true }).catch(() => undefined);
       }
       // ennio: { animations: true } restores animations for this flow
       // when --no-animations is the global default. Useful for flows

@@ -360,9 +360,7 @@ export class EnnioMcpSession {
   async disableShowTouches(): Promise<void> {
     const a = this.attachment;
     if (!a || process.env.ENNIO_SHOW_TOUCHES !== '1' || this.platform.name !== 'ios') return;
-    await a.connection.socket
-      .call('set_show_touches', { enabled: false })
-      .catch(() => undefined);
+    await a.connection.socket.call('set_show_touches', { enabled: false }).catch(() => undefined);
     setSimLaunchEnv(a.session.udid, 'ENNIO_SHOW_TOUCHES', false);
   }
 
