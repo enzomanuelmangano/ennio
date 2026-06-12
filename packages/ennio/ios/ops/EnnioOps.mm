@@ -48,11 +48,30 @@ static UIViewController *rootVC(void) {
     return win.rootViewController;
 }
 
+// Set on a UIAlertController once one of its actions has been
+// triggered. RN alerts (RCTAlertManager) share a SINGLE JS callback
+// across every button — invoking a second handler on the same alert
+// calls that callback twice, which TurboModule treats as fatal
+// (glog CHECK → SIGABRT, observed crashing the host app when a caller
+// re-tapped during the dismissal animation).
+static const void *kEnnioAlertActioned = &kEnnioAlertActioned;
+
 static UIAlertController *_Nullable findAlert(void) {
     for (UIWindow *w in allWindows()) {
         UIViewController *vc = w.rootViewController;
         while (vc) {
-            if ([vc isKindOfClass:UIAlertController.class]) return (UIAlertController *)vc;
+            if ([vc isKindOfClass:UIAlertController.class]) {
+                UIAlertController *a = (UIAlertController *)vc;
+                // An alert on its way out is not actionable: its handler
+                // (if any) already fired, and reporting it present makes
+                // callers re-tap it. Skip dismissing and already-actioned
+                // alerts so alert_present flips false the moment a button
+                // is pressed.
+                BOOL spent = a.isBeingDismissed ||
+                             objc_getAssociatedObject(a, kEnnioAlertActioned) != nil;
+                if (!spent) return a;
+                break; // nothing actionable below a presented alert
+            }
             UIViewController *presented = vc.presentedViewController;
             if (!presented) break;
             vc = presented;
@@ -156,6 +175,11 @@ static UIScrollView *_Nullable findEnclosingScrollView(UIView *view) {
         } @catch (...) {
             // KVC fails -> no handler; treat as success (dismiss only).
         }
+        // Mark BEFORE dismissing: findAlert skips actioned alerts, so a
+        // second tap during the (async) dismissal can't reach this alert
+        // and double-invoke the shared RN callback.
+        objc_setAssociatedObject(a, kEnnioAlertActioned, @YES,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         // Dismiss first so the alert is gone by the time the handler
         // fires — matches what UIKit does on user tap.
         UIViewController *presenter = a.presentingViewController ?: rootVC();
@@ -170,6 +194,8 @@ static UIScrollView *_Nullable findEnclosingScrollView(UIView *view) {
 + (BOOL)dismissAlert {
     UIAlertController *a = findAlert();
     if (!a) return NO;
+    objc_setAssociatedObject(a, kEnnioAlertActioned, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     UIViewController *presenter = a.presentingViewController ?: rootVC();
     [presenter dismissViewControllerAnimated:NO completion:nil];
     return YES;

@@ -1,4 +1,5 @@
-// `ennio explore` — deterministic app crawler. Shared types.
+// The crawl engine behind `ennio smoke` — deterministic app crawler.
+// Shared types.
 //
 // The crawler walks the app as a graph: a NODE is a screen (identified by
 // a structural signature of its element inventory), an EDGE is one action
@@ -18,6 +19,13 @@ export interface ExploreAction {
   key: string;
   id?: string;
   text?: string;
+  /** Looks like a flow-advancing CTA (next/submit/checkout/...): hoisted
+   *  to the front of the screen's action order and allowed to run past
+   *  maxDepth so wizards/checkouts get completed, not abandoned. */
+  primary?: boolean;
+  /** Adjustable element (slider): the driver drags across it instead of
+   *  tapping its center (which does nothing on a UISlider track). */
+  slide?: boolean;
 }
 
 /** One screen, keyed by its structural signature. */
@@ -38,6 +46,12 @@ export interface ExploreNode {
   depth: number;
   /** Action path root → this node at first discovery (replay recipe). */
   path: ExploreAction[];
+  /** Text inputs on the screen (filled once before the first primary tap). */
+  inputs: ExploreAction[];
+  /** Whether the screen's inputs have been filled this visit cycle. */
+  filled?: boolean;
+  /** Scroll-mining passes performed on this node (capped). */
+  scrolls?: number;
 }
 
 export type EdgeKind =
@@ -60,7 +74,7 @@ export interface ExploreEdge {
 
 /** Non-fatal events worth surfacing (nondeterminism, caps hit). */
 export interface ExploreWarning {
-  kind: 'replay-mismatch' | 'cap-hit' | 'back-failed';
+  kind: 'replay-mismatch' | 'cap-hit' | 'back-failed' | 'low-coverage';
   detail: string;
 }
 
@@ -102,6 +116,11 @@ export interface ExploreDriver {
   back(): Promise<void>;
   /** Current on-screen element inventory (settled). */
   describe(): Promise<DescribedElement[]>;
+  /** One forward scroll (content moves up) — used to mine actions below
+   *  the fold once a screen's visible frontier drains. Best-effort. */
+  scrollForward(): Promise<void>;
+  /** Focus a text input and type into it. Best-effort: false = couldn't. */
+  typeInto(target: { id?: string; text?: string }, value: string): Promise<boolean>;
   /** Capture a screenshot to an absolute path. No-op allowed. */
   screenshot(absPath: string): Promise<void>;
 }

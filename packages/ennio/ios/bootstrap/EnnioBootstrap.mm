@@ -33,6 +33,7 @@
 #import "EnnioNoAnimations.h"
 #import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
+#import "EnnioShowTouches.h"
 #import "EnnioTestIDIndex.h"
 
 #import <objc/runtime.h>
@@ -232,6 +233,10 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
     // Opt-in animation suppressor (ENNIO_NO_ANIMATIONS) — collapses CA
     // transitions so the runner doesn't wait out 300-500ms slides/fades.
     [EnnioNoAnimations installIfEnabled];
+
+    // Opt-in touch visualizer (ENNIO_SHOW_TOUCHES) — ripples on a
+    // passthrough overlay, Android's "show touches" for the simulator.
+    [EnnioShowTouches installIfEnabled];
 
     g_ennioReady = YES;
     NSLog(@"[Ennio] Bootstrap ready — socket dispatching commands (RN observer: %@)",

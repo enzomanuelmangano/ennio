@@ -11,7 +11,6 @@ Usage:
   ennio screenshot [path]       grab the simulator screen
   ennio doctor                  diagnose Node, Xcode, enniohid, dylib + app socket
   ennio mcp                     serve ennio over MCP (stdio) for an AI agent
-  ennio explore <bundleId>      deterministic DFS app crawl -> app-map.json
   ennio smoke [bundleId]        crawl-based smoke test: exit 0/1, no artifacts
   ennio version                 print version
   ennio help [command]          this message, or per-command help
@@ -53,38 +52,10 @@ tap path. stdout carries only JSON-RPC; diagnostics go to stderr.
 
 Options: --android (target an emulator), --in-process-tap
 Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
-  explore: `ennio explore <bundleId>
-
-Deterministic app crawler: walks the app depth-first, tapping testID'd
-elements in document order. Screens are identified by a structural
-signature (testIDs + roles, volatile text/numbers normalized), so two
-runs over the same build produce the same map. Backtracking is verified:
-back first, clearState + path replay on mismatch — nondeterminism is
-recorded as a warning, never absorbed.
-
-Writes to .ennio/explore/<bundleId>/ (override with --output):
-  app-map.json    sorted, diffable graph: nodes, edges, warnings
-  map.mmd         mermaid rendering of the nav edges
-  screens/*.png   one screenshot per discovered screen
-
-Options:
-  --max-depth N      path-length cap from the root (default 5)
-  --max-nodes N      distinct-screen cap (default 50)
-  --duration N       wall-clock budget for the crawl in seconds (default 30)
-  --seed N           shuffle per-screen action order (PRNG seed; same
-                     seed + same build = same crawl). Default: document
-                     order, for diffable maps
-  --deny REGEX       testIDs never tapped (default blocks logout/delete/
-                     purchase-looking ids)
-  --keep-animations  leave app animations running (explore snaps them
-                     to the final frame by default, for speed)
-  --reporter json    also print the map to stdout
-Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
   smoke: `ennio smoke [bundleId]
 
-Crawl-based smoke test — same engine as \`ennio explore\`, but the
-product is the exit code, for CI: does the app survive autonomous
-exploration? Walks the app for the wall-clock budget, prints a one-line
+Crawl-based smoke test — the product is the exit code, for CI: does
+the app survive autonomous exploration? Walks the app for the wall-clock budget, prints a one-line
 summary (plus any warnings) and writes NO files unless --output is set.
 
 Starts WARM: no relaunch, no state reset — the crawl roots at whatever
@@ -105,7 +76,7 @@ Not \`ennio doctor --smoke\`, which self-tests ennio's own plumbing —
 \`ennio smoke\` tests YOUR app.
 
 Options:
-  --output DIR       also write explore artifacts (app-map.json, map.mmd,
+  --output DIR       also write crawl artifacts (app-map.json, map.mmd,
                      screenshots) to DIR
   --verbose          stream per-action progress while crawling
   --max-depth N      path-length cap from the root (default 5)

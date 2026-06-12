@@ -1,14 +1,12 @@
 /**
  * `ennio smoke [bundleId]` — crawl-based app smoke test for CI.
  *
- * Same engine as `ennio explore`, different product: explore's output is
- * the artifact folder (the map); smoke's output is the EXIT CODE. It
- * walks the app for the wall-clock budget and answers one question —
+ * The product is the EXIT CODE. It walks the app (the crawl engine in
+ * src/cli/explore/) for the wall-clock budget and answers one question —
  * does the app survive autonomous exploration? — printing a one-screen
  * summary and writing NOTHING unless --output is given.
  *
- * Three deliberate departures from explore's determinism-and-speed
- * defaults — smoke exercises the app the way a user would:
+ * Smoke exercises the app the way a user would:
  *   * WARM START — no relaunch, no clearState, ever: the crawl roots at
  *     whatever screen the app shows right now, with the user's session
  *     and data intact.
@@ -45,6 +43,8 @@ import { LiveExploreDriver } from '../explore/live-driver';
 import { buildAppMap, writeArtifacts } from '../explore/output';
 import { EnnioMcpSession } from '../mcp/session';
 import { selectPlatform } from '../platform';
+import type { ScreenRecording } from '../recorder';
+import { startScreenRecording } from '../recorder';
 import { getTargetUdid } from '../sim';
 
 function intFlag(value: string | undefined, fallback: number): number {
@@ -150,6 +150,11 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     seed,
   };
 
+  // Touch visualization is ON by default (session.attach arms it even on
+  // a warm start, and turns it off at close). --disable-touches opts out
+  // for pixel-exact artifacts.
+  process.env.ENNIO_SHOW_TOUCHES = flags.disableTouches ? '0' : '1';
+
   // As real as it gets: animations run untouched and every tap is a HID
   // touch through the simulator's event pipeline — smoke exists to
   // exercise the app the way a user would, not to map it fast.
@@ -162,6 +167,7 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
   // The crawler logs every action; remember the last one so a crash can
   // be attributed ("died after tapping X") instead of just diagnosed.
   let lastAction = '(launch)';
+  let recording: ScreenRecording | null = null;
   try {
     const attached = await session.attach(bundleId);
     if (!attached.ok) {
@@ -170,6 +176,13 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     }
     const outDir = flags.output ? resolve(flags.output) : null;
     if (outDir) mkdirSync(join(outDir, 'screens'), { recursive: true });
+    if (flags.record && session.udid) {
+      recording = startScreenRecording(
+        session.platformName,
+        session.udid,
+        outDir ? join(outDir, 'recording.mp4') : resolve(`ennio-smoke-${seed}.mp4`),
+      );
+    }
     // Warm start, never clearState: smoke tests the app from EXACTLY the
     // state it's in — logged-in session, filled carts and all. --relaunch
     // restarts the process first (data still kept); recovery relaunches
@@ -249,9 +262,34 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
         `${result.steps} actions (${kinds.nav} nav, ${kinds.state} state, ` +
         `${kinds.error} failed) in ${wallS}s`,
     );
-    for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
+    // Quiet by default: warnings are routine crawl bookkeeping (caps hit,
+    // nondeterministic backtracks), and a healthy run can produce a dozen.
+    // One summary line; --verbose lists them all.
+    if (flags.verbose) {
+      for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
+    } else if (map.warnings.length > 0) {
+      const byKind = new Map<string, number>();
+      for (const w of map.warnings) byKind.set(w.kind, (byKind.get(w.kind) ?? 0) + 1);
+      const parts = [...byKind.entries()].map(([k, n]) => `${n} ${k}`).join(', ');
+      console.log(`  ${map.warnings.length} warnings (${parts}) — --verbose to list`);
+    }
+    // Coverage floor: a warm start can root on a stale/dead screen, drain
+    // instantly, and "pass" having tested nothing. Still exit 0 (the app
+    // didn't crash — the contract holds) but say it loudly so a CI log
+    // reader doesn't mistake an empty walk for a healthy one.
+    if (map.stats.screens < 2 || kinds.nav === 0) {
+      console.log(
+        `  warning: low-coverage — ${map.stats.screens} screen(s), ${kinds.nav} nav edges: ` +
+          'the crawl barely moved. The root screen may be stale or stuck; try --relaunch.',
+      );
+    }
     return 0;
   } finally {
+    if (recording) {
+      const saved = await recording.stop();
+      if (saved) console.error(`[smoke] recording → ${saved}`);
+    }
+    await session.disableShowTouches();
     session.close();
   }
 }

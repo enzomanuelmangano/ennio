@@ -21,7 +21,6 @@ import { runVersionCommand } from './commands/version';
 import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
-import { runExploreCommand } from './commands/explore';
 import { runSmokeCommand } from './commands/smoke';
 import { runMcpCommand } from './commands/mcp';
 import { printCrashReport } from './crash-reporter';
@@ -79,8 +78,6 @@ async function main() {
       return runDoctorCommand(positional, flags);
     case 'mcp':
       return runMcpCommand(positional, flags);
-    case 'explore':
-      return runExploreCommand(positional, flags);
     case 'smoke':
       return runSmokeCommand(positional, flags);
     case 'test':

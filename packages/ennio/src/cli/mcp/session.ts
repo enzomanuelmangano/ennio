@@ -19,6 +19,7 @@ import type { Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { DeviceSession } from '../platform/types';
 import type { RunContext } from '../runner/context';
+import { setSimLaunchEnv } from '../sim';
 
 import { describeViews } from './describe';
 import type { ScreenDescription } from './describe';
@@ -131,6 +132,12 @@ export class EnnioMcpSession {
         flowEnv: {},
       };
       this.attachment = { bundleId, session, connection, ctx };
+      // --show-touches: enable explicitly — the env-at-launch gate misses
+      // a warm attach to an already-running process (smoke's default).
+      // Counterpart of disableShowTouches(); best-effort on old dylibs.
+      if (process.env.ENNIO_SHOW_TOUCHES === '1' && this.platform.name === 'ios') {
+        await connection.socket.call('set_show_touches', { enabled: true }).catch(() => undefined);
+      }
       return ok({ bundleId, udid: session.udid });
     } catch (e) {
       return classifyError(e);
@@ -244,6 +251,110 @@ export class EnnioMcpSession {
     }
   }
 
+  /**
+   * Native alert state. A UIAlertController lives in its own window
+   * outside the RN view tree — dump_views and the finder never see it,
+   * so callers that enumerate or tap from describe() output are blind
+   * to it (and the alert swallows every touch they fire underneath).
+   */
+  async alertInfo(): Promise<EnnioResult<{ present: boolean; text: string; buttons: string[] }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const p = await a.connection.socket.call('alert_present');
+      const present = !!(p.ok && p.data && (p.data as { present?: boolean }).present);
+      if (!present) return ok({ present: false, text: '', buttons: [] });
+      const [t, b] = await Promise.all([
+        a.connection.socket.call('alert_text'),
+        a.connection.socket.call('alert_buttons'),
+      ]);
+      return ok({
+        present: true,
+        text: (t.ok && (t.data as { text?: string })?.text) || '',
+        buttons: (b.ok && (b.data as { buttons?: string[] })?.buttons) || [],
+      });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /** Tap an alert button by its label — routes through UIAlertAction
+   *  directly, the only reliable way to press a native alert button. */
+  async alertTap(buttonText: string): Promise<EnnioResult<{ tapped: boolean }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const r = await a.connection.socket.call('alert_tap', { buttonText });
+      const tapped = !!(r.ok && r.data && (r.data as { tapped?: boolean }).tapped);
+      if (tapped) {
+        await a.connection.socket.call('wait_commit', { maxMs: 400, stableMs: 60 });
+      }
+      return ok({ tapped });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /** Dismiss a present alert (cancel-equivalent action). */
+  async alertDismiss(): Promise<EnnioResult<{ dismissed: boolean }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const r = await a.connection.socket.call('alert_dismiss');
+      const dismissed = !!(r.ok && r.data && (r.data as { dismissed?: boolean }).dismissed);
+      if (dismissed) {
+        await a.connection.socket.call('wait_commit', { maxMs: 400, stableMs: 60 });
+      }
+      return ok({ dismissed });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /** Scroll until a testID'd element is in view (in-process scroller).
+   *  Best-effort: false when there's nothing to scroll or no such id. */
+  async scrollTo(testID: string): Promise<boolean> {
+    const a = this.attachment;
+    if (!a) return false;
+    try {
+      const r = await a.connection.socket.call('scroll_to', { elementTestID: testID });
+      return !!(r.ok && r.data && (r.data as { scrolled?: boolean }).scrolled);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Focus a text input and type into it. Focus path: in-process
+   * focus_testid when an id is available (deterministic, works for
+   * fields below the keyboard), else a tap on the element's center.
+   * Typing always goes through insert_text — the same op flows use.
+   */
+  async typeText(sel: { id?: string; text?: string }, value: string): Promise<boolean> {
+    const a = this.attachment;
+    if (!a) return false;
+    try {
+      let focused = false;
+      if (sel.id) {
+        const f = await a.connection.socket.call('focus_testid', { testID: sel.id });
+        focused = !!(f.ok && f.data && (f.data as { ok?: boolean }).ok);
+      }
+      if (!focused) {
+        const found = await this.find(sel.id ? { id: sel.id } : { text: sel.text ?? '' });
+        if (!found.ok) return false;
+        await this.rawTap(found.data.center);
+      }
+      // Give the responder a beat to become first responder before typing.
+      await a.connection.socket
+        .call('first_responder_ready', { maxMs: 1000 })
+        .catch(() => undefined);
+      const r = await a.connection.socket.call('insert_text', { text: value });
+      return !!r.ok;
+    } catch {
+      return false;
+    }
+  }
+
   /** On-screen element inventory (role / testID / text / value). */
   async describe(): Promise<EnnioResult<ScreenDescription>> {
     const a = this.attachment;
@@ -347,6 +458,20 @@ export class EnnioMcpSession {
       this.attachment.connection.close();
       this.attachment = null;
     }
+  }
+
+  /**
+   * Touch-visualization cleanup (smoke/mcp): the overlay must not outlive
+   * the session and keep drawing the user's own taps. Turns it off in
+   * the still-running app (awaited, so a process.exit right after can't
+   * cut the RPC short) and clears the sticky launchctl env so a manual
+   * relaunch doesn't re-arm it. Call before close(); no-op otherwise.
+   */
+  async disableShowTouches(): Promise<void> {
+    const a = this.attachment;
+    if (!a || process.env.ENNIO_SHOW_TOUCHES !== '1' || this.platform.name !== 'ios') return;
+    await a.connection.socket.call('set_show_touches', { enabled: false }).catch(() => undefined);
+    setSimLaunchEnv(a.session.udid, 'ENNIO_SHOW_TOUCHES', false);
   }
 
   close(): void {

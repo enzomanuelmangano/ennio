@@ -19,6 +19,8 @@ const txt = (text: string): DescribedElement => ({ role: 'RCTText', text, enable
 interface FakeScreen {
   elements: DescribedElement[];
   tap: Record<string, string | 'stay' | 'fail'>;
+  /** Extra elements revealed by one scrollForward (scroll mining). */
+  scrolledElements?: DescribedElement[];
 }
 
 class FakeApp implements ExploreDriver {
@@ -55,8 +57,23 @@ class FakeApp implements ExploreDriver {
     if (this.stack.length > 1) this.stack.pop();
   }
 
+  private scrolled = new Set<string>();
+
   async describe(): Promise<DescribedElement[]> {
-    return this.screens[this.currentName].elements;
+    const s = this.screens[this.currentName];
+    return this.scrolled.has(this.currentName) && s.scrolledElements
+      ? [...s.elements, ...s.scrolledElements]
+      : s.elements;
+  }
+
+  async scrollForward(): Promise<void> {
+    this.calls.push(`scroll:${this.currentName}`);
+    this.scrolled.add(this.currentName);
+  }
+
+  async typeInto(target: { id?: string; text?: string }, value: string): Promise<boolean> {
+    this.calls.push(`type:${target.id ?? target.text}=${value}`);
+    return true;
   }
 
   async screenshot(): Promise<void> {
@@ -139,11 +156,14 @@ describe('crawl', () => {
   });
 
   it('honors maxDepth and surfaces the cut as a warning', async () => {
+    // 'hop-*' deliberately does NOT look like a primary CTA — ordinary
+    // actions still stop at maxDepth (primaries get the flow bonus,
+    // covered in the smart-walk suite below).
     const chain = new FakeApp({
-      home: { elements: [el('next-0')], tap: { 'next-0': 's1' } },
-      s1: { elements: [txt('S1'), el('next-1')], tap: { 'next-1': 's2' } },
-      s2: { elements: [txt('S2'), el('next-2')], tap: { 'next-2': 's3' } },
-      s3: { elements: [txt('S3'), el('next-3')], tap: { 'next-3': 'home' } },
+      home: { elements: [el('hop-0')], tap: { 'hop-0': 's1' } },
+      s1: { elements: [txt('S1'), el('hop-1')], tap: { 'hop-1': 's2' } },
+      s2: { elements: [txt('S2'), el('hop-2')], tap: { 'hop-2': 's3' } },
+      s3: { elements: [txt('S3'), el('hop-3')], tap: { 'hop-3': 'home' } },
     });
     const result = await crawl(chain, { ...LIMITS, maxDepth: 1 });
     expect(result.warnings.some((w) => w.kind === 'cap-hit' && w.detail.includes('maxDepth'))).toBe(
@@ -159,11 +179,18 @@ describe('crawl', () => {
     // A different seed walks the same graph (node/edge SETS match)…
     const c = await crawl(app(), { ...LIMITS, seed: 1234 });
     expect(c.nodes.map((n) => n.sig).sort()).toEqual(a.nodes.map((n) => n.sig).sort());
-    // …but in a different action order somewhere (seeds 7 vs 1234 differ
-    // on this fixture; a collision would mean the PRNG ignored the seed).
-    expect(JSON.stringify(c.nodes.map((n) => n.actions))).not.toBe(
-      JSON.stringify(a.nodes.map((n) => n.actions)),
-    );
+    // …and SOME seed produces a different action order (the primary
+    // hoist shrinks the permutation space on this tiny fixture, so any
+    // single seed pair may collide — scan a few; all-equal would mean
+    // the PRNG ignored the seed).
+    let differs = false;
+    for (let s = 1; s <= 20 && !differs; s++) {
+      const d = await crawl(app(), { ...LIMITS, seed: s });
+      differs =
+        JSON.stringify(d.nodes.map((n) => n.actions)) !==
+        JSON.stringify(a.nodes.map((n) => n.actions));
+    }
+    expect(differs).toBe(true);
   });
 
   it('honors the wall-clock budget as the global stop', async () => {
@@ -174,5 +201,84 @@ describe('crawl', () => {
     expect(result.warnings.some((w) => w.kind === 'cap-hit' && w.detail.includes('maxMs'))).toBe(
       true,
     );
+  });
+});
+
+const input = (testID: string): DescribedElement => ({
+  role: 'RCTUITextField',
+  testID,
+  enabled: true,
+});
+
+describe('smart walk', () => {
+  it('hoists primary CTAs to the front of a screen order', async () => {
+    const fake = new FakeApp({
+      home: {
+        elements: [el('about-link'), el('submit-btn')],
+        tap: { 'about-link': 'stay', 'submit-btn': 'stay' },
+      },
+    });
+    await crawl(fake, LIMITS);
+    expect(fake.calls.indexOf('tap:submit-btn')).toBeLessThan(fake.calls.indexOf('tap:about-link'));
+  });
+
+  it('follows primary CTAs past maxDepth and completes the flow', async () => {
+    const wizard = new FakeApp({
+      home: { elements: [el('next-0')], tap: { 'next-0': 's1' } },
+      s1: { elements: [txt('S1'), el('next-1')], tap: { 'next-1': 's2' } },
+      s2: { elements: [txt('S2'), el('next-2')], tap: { 'next-2': 's3' } },
+      s3: { elements: [txt('S3'), el('done-3')], tap: { 'done-3': 'stay' } },
+    });
+    const result = await crawl(wizard, { ...LIMITS, maxDepth: 1 });
+    // maxDepth=1 used to abandon the wizard at s1; the flow bonus lets
+    // the primary chain run to the end.
+    expect(result.nodes.length).toBe(4);
+    expect(wizard.calls).toContain('tap:done-3');
+  });
+
+  it('fills text inputs before tapping the primary CTA', async () => {
+    const form = new FakeApp({
+      home: {
+        elements: [input('email-input'), el('submit-btn')],
+        tap: { 'submit-btn': 'done' },
+      },
+      done: { elements: [txt('Done')], tap: {} },
+    });
+    await crawl(form, LIMITS);
+    const fill = form.calls.findIndex((c) => c.startsWith('type:email-input='));
+    expect(fill).toBeGreaterThanOrEqual(0);
+    expect(form.calls[fill]).toContain('@example.com'); // email-shaped value
+    expect(fill).toBeLessThan(form.calls.indexOf('tap:submit-btn'));
+  });
+
+  it('does not enumerate text inputs as tap actions', () => {
+    const actions = enumerateActions([input('email-input'), el('go-btn')], LIMITS);
+    expect(actions.map((a) => a.key)).toEqual(['go-btn']);
+  });
+
+  it('scroll-mines actions below the fold when the frontier drains', async () => {
+    const fake = new FakeApp({
+      home: {
+        elements: [el('top-btn')],
+        scrolledElements: [el('below-btn')],
+        tap: { 'top-btn': 'stay', 'below-btn': 'detail' },
+      },
+      detail: { elements: [txt('Detail')], tap: {} },
+    });
+    const result = await crawl(fake, LIMITS);
+    expect(fake.calls).toContain('scroll:home');
+    expect(fake.calls).toContain('tap:below-btn');
+    // detail was reached via mining (the scrolled home re-signs as its
+    // own node on revisit — different visible content IS a different
+    // signature — so we assert reachability, not node count)
+    expect(result.nodes.some((n) => n.title === 'Detail')).toBe(true);
+  });
+
+  it('stops mining after one barren scroll', async () => {
+    const fake = new FakeApp({
+      home: { elements: [el('only-btn')], tap: { 'only-btn': 'stay' } },
+    });
+    await crawl(fake, LIMITS);
+    expect(fake.calls.filter((c) => c === 'scroll:home').length).toBe(1);
   });
 });

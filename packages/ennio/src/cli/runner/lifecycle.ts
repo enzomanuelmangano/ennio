@@ -162,6 +162,7 @@ export async function relaunchAndReconnect(
   // Propagate --no-animations (sticky launchctl env; set OR clear so a
   // prior run can't leak it). Source of truth: the CLI's process env.
   setSimLaunchEnv(ctx.udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
+  setSimLaunchEnv(ctx.udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
   const launchedAt = Date.now();
   execFileSync(
     'xcrun',
@@ -373,6 +374,7 @@ export async function clearStateAndRelaunch(
   // Propagate --no-animations (sticky launchctl env; set OR clear so a
   // prior run can't leak it). Source of truth: the CLI's process env.
   setSimLaunchEnv(ctx.udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
+  setSimLaunchEnv(ctx.udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
   const launchedAt = Date.now();
   execFileSync(
     'xcrun',

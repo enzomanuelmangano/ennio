@@ -65,6 +65,10 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('                        final frame) — faster, but alters animated UI');
     console.error('  --disable-reuse-app   Force a full relaunch on clearState. App reuse');
     console.error('                        (soft-reset: data wipe + JS reload) is ON by default.');
+    console.error('  --disable-touches     Turn OFF the default touch visualization (every');
+    console.error('                        tap/swipe is drawn on screen; restored on exit).');
+    console.error('                        Use for pixel-exact screenshot comparisons.');
+    console.error('  --record              Record the whole run to an .mp4 (iOS simulator).');
     console.error('');
     console.error('Auto-detection:');
     console.error('  - booted iOS simulator (or auto-boots one)');
@@ -83,6 +87,11 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   // launch site (set there from this process env). Set it here so all
   // three launch paths see a single source of truth.
   if (flags.noAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
+  // Touch visualization is ON by default — every gesture ennio performs
+  // is visible on the device (and in --record footage), and the runner
+  // turns it off the moment the run ends. --disable-touches opts out for
+  // pixel-exact screenshot/visual-regression runs.
+  process.env.ENNIO_SHOW_TOUCHES = flags.disableTouches ? '0' : '1';
   // App reuse is ON by default: clearState soft-resets (data wipe + JS reload)
   // instead of relaunching when the app is already running (read in the
   // launchApp handler via this env). --disable-reuse-app forces full relaunch.
@@ -106,6 +115,13 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     safeMode: flags.safeMode ?? false,
     inProcessTap: flags.inProcessTap ?? false,
     platform: selectPlatform(platformName),
+    // --record: one video for the whole suite, --output dir or cwd.
+    recordPath: flags.record
+      ? resolve(
+          flags.output ?? '.',
+          `ennio-run-${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`,
+        )
+      : undefined,
   });
 
   try {
