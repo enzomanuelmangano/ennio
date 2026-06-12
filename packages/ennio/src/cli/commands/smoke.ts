@@ -257,6 +257,7 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
     return 0;
   } finally {
+    await session.disableShowTouches();
     session.close();
   }
 }

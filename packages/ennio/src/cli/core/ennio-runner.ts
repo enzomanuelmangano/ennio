@@ -25,6 +25,8 @@ import { selectPlatform } from '../platform';
 import { pickReporter } from '../reporters';
 import type { Reporter, SuiteResult, FlowResult } from '../reporters';
 
+import { setSimLaunchEnv } from '../sim';
+
 import { FlowExecutor } from './flow-executor';
 
 export interface EnnioRunnerOptions {
@@ -55,6 +57,9 @@ export class EnnioRunner {
   private safeMode: boolean;
   private platform: Platform;
   private driver: GestureDriver;
+  /** UDID of the device the last flow actually ran on — needed for
+   *  suite-end cleanup when no explicit udid was configured. */
+  private lastUdid?: string;
 
   constructor(opts: EnnioRunnerOptions = {}) {
     this.udid = opts.udid;
@@ -98,6 +103,14 @@ export class EnnioRunner {
       flows: results,
     };
     this.reporter.suiteEnd(suiteResult);
+
+    // --show-touches cleanup: clear the sticky launchctl env so an app
+    // the user launches manually after this run doesn't come up with the
+    // overlay armed. (The running app already got set_show_touches off in
+    // runFlow's finally; Android restores the OS setting on process exit.)
+    if (process.env.ENNIO_SHOW_TOUCHES === '1' && this.platform.name === 'ios' && this.lastUdid) {
+      setSimLaunchEnv(this.lastUdid, 'ENNIO_SHOW_TOUCHES', false);
+    }
     return suiteResult;
   }
 
@@ -116,6 +129,7 @@ export class EnnioRunner {
       dylibPath: this.dylibPath ?? null,
       safeMode: this.safeMode,
     });
+    this.lastUdid = session.udid;
     try {
       const executor = new FlowExecutor({
         session,
@@ -126,6 +140,18 @@ export class EnnioRunner {
         lenient: this.lenient,
         driver: this.driver,
       });
+      // --show-touches: enable explicitly at flow start — the env-at-launch
+      // gate misses a process reused from a previous run — and ALWAYS turn
+      // it off when the flow ends, so the overlay never outlives ennio and
+      // keeps drawing the user's own taps (iOS only; Android is an OS
+      // setting restored on CLI exit).
+      const showTouches =
+        process.env.ENNIO_SHOW_TOUCHES === '1' && this.platform.name === 'ios';
+      if (showTouches) {
+        await connection.socket
+          .call('set_show_touches', { enabled: true })
+          .catch(() => undefined);
+      }
       // ennio: { animations: true } restores animations for this flow
       // when --no-animations is the global default. Useful for flows
       // that test animation behaviour or assert mid-animation state.
@@ -142,6 +168,11 @@ export class EnnioRunner {
         if (restoreAnimations) {
           await connection.socket
             .call('set_no_animations', { enabled: true })
+            .catch(() => undefined);
+        }
+        if (showTouches) {
+          await connection.socket
+            .call('set_show_touches', { enabled: false })
             .catch(() => undefined);
         }
       }

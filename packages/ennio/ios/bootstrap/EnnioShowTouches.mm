@@ -220,23 +220,41 @@ static void ennio_sendEvent(id self, SEL _cmd, UIEvent *event) {
 + (void)installIfEnabled {
     const char *v = getenv("ENNIO_SHOW_TOUCHES");
     BOOL want = v != NULL && v[0] != '\0' && strcmp(v, "0") != 0;
-    if (!want) return;
+    if (want) [self setEnabled:YES];
+}
 
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        g_indicators = [NSMapTable weakToStrongObjectsMapTable];
-        g_lastTrailPoint = [NSMapTable weakToStrongObjectsMapTable];
-        g_animator = [EnnioTouchAnimator new];
++ (void)setEnabled:(BOOL)enabled {
+    if (enabled) {
+        // Swizzle -[UIApplication sendEvent:] once; afterwards g_enabled
+        // gates the behaviour so the toggle never re-swizzles.
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            g_indicators = [NSMapTable weakToStrongObjectsMapTable];
+            g_lastTrailPoint = [NSMapTable weakToStrongObjectsMapTable];
+            g_animator = [EnnioTouchAnimator new];
 
-        Class cls = [UIApplication class];
-        SEL sel = @selector(sendEvent:);
-        Method m = class_getInstanceMethod(cls, sel);
-        if (!m) return;
-        g_origSendEvent = (void (*)(id, SEL, UIEvent *))method_getImplementation(m);
-        method_setImplementation(m, (IMP)ennio_sendEvent);
-        g_enabled = YES;
-        NSLog(@"[Ennio] show-touches ON — touches drawn on a passthrough overlay");
-    });
+            Class cls = [UIApplication class];
+            SEL sel = @selector(sendEvent:);
+            Method m = class_getInstanceMethod(cls, sel);
+            if (!m) return;
+            g_origSendEvent = (void (*)(id, SEL, UIEvent *))method_getImplementation(m);
+            method_setImplementation(m, (IMP)ennio_sendEvent);
+        });
+    }
+    if (g_enabled == enabled) return;
+    g_enabled = enabled;
+    if (!enabled) {
+        // Leave no trace: drop tracked touches and clear every indicator
+        // (including mid-fade ones the animator still owns) right away.
+        [g_indicators removeAllObjects];
+        [g_lastTrailPoint removeAllObjects];
+        for (EnnioFadeEntry *e in g_animator.entries) [e.view removeFromSuperview];
+        [g_animator.entries removeAllObjects];
+        g_animator.link.paused = YES;
+        for (UIView *v in [g_overlay.subviews copy]) [v removeFromSuperview];
+    }
+    NSLog(@"[Ennio] show-touches %@", enabled ? @"ON — touches drawn on a passthrough overlay"
+                                              : @"OFF");
 }
 
 @end

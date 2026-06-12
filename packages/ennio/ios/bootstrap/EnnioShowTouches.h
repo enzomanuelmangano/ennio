@@ -31,6 +31,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// set (any value but "0"). Call once UIKit is up.
 + (void)installIfEnabled;
 
+/// Runtime toggle (set_show_touches socket op). Enabling installs the
+/// hook on first use; disabling clears every live indicator immediately
+/// so the overlay leaves no trace once a run ends.
++ (void)setEnabled:(BOOL)enabled;
+
 @end
 
 NS_ASSUME_NONNULL_END

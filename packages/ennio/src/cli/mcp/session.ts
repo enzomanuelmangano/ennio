@@ -19,6 +19,7 @@ import type { Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { DeviceSession } from '../platform/types';
 import type { RunContext } from '../runner/context';
+import { setSimLaunchEnv } from '../sim';
 
 import { describeViews } from './describe';
 import type { ScreenDescription } from './describe';
@@ -347,6 +348,22 @@ export class EnnioMcpSession {
       this.attachment.connection.close();
       this.attachment = null;
     }
+  }
+
+  /**
+   * --show-touches cleanup (explore/smoke): the overlay must not outlive
+   * the session and keep drawing the user's own taps. Turns it off in
+   * the still-running app (awaited, so a process.exit right after can't
+   * cut the RPC short) and clears the sticky launchctl env so a manual
+   * relaunch doesn't re-arm it. Call before close(); no-op otherwise.
+   */
+  async disableShowTouches(): Promise<void> {
+    const a = this.attachment;
+    if (!a || process.env.ENNIO_SHOW_TOUCHES !== '1' || this.platform.name !== 'ios') return;
+    await a.connection.socket
+      .call('set_show_touches', { enabled: false })
+      .catch(() => undefined);
+    setSimLaunchEnv(a.session.udid, 'ENNIO_SHOW_TOUCHES', false);
   }
 
   close(): void {

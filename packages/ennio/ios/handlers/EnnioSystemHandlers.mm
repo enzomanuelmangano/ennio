@@ -9,6 +9,7 @@
 
 #import "EnnioBootstrap.h"
 #import "../bootstrap/EnnioNoAnimations.h"
+#import "../bootstrap/EnnioShowTouches.h"
 #import "EnnioFinder.h"
 #import "EnnioFinderManager.h"
 #import "EnnioOps.h"
@@ -376,6 +377,18 @@ void RegisterEnnioSystemHandlers(void) {
         NSDictionary *a = EnnioParseArgs(args);
         BOOL enabled = a[@"enabled"] ? [a[@"enabled"] boolValue] : YES;
         EnnioOnMainVoid([&]() { [EnnioNoAnimations setEnabled:enabled]; });
+        return std::string("{\"ok\":true,\"enabled\":") + (enabled ? "true" : "false") + "}";
+    });
+
+    // set_show_touches {enabled}: flip the touch visualizer at runtime.
+    // The CLI turns it on at flow start (the env-at-launch gate misses a
+    // process reused across runs) and OFF when the run ends — without
+    // this, the overlay would keep drawing the user's own taps after
+    // ennio exits.
+    EnnioControlSocket::registerHandler("set_show_touches", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        BOOL enabled = a[@"enabled"] ? [a[@"enabled"] boolValue] : YES;
+        EnnioOnMainVoid([&]() { [EnnioShowTouches setEnabled:enabled]; });
         return std::string("{\"ok\":true,\"enabled\":") + (enabled ? "true" : "false") + "}";
     });
 

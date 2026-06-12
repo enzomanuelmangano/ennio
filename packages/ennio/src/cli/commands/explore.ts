@@ -105,6 +105,7 @@ export async function runExploreCommand(positional: string[], flags: Flags): Pro
     // Leave the app as we found it: the crawl disabled animations for
     // speed, the user keeps interacting with the app afterwards.
     if (!flags.keepAnimations) await session.setAnimations(true).catch(() => undefined);
+    await session.disableShowTouches();
     session.close();
   }
 }

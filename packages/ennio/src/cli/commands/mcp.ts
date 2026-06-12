@@ -52,6 +52,7 @@ export async function runMcpCommand(_positional: string[], flags: Flags): Promis
   try {
     await serveStdio(server, process.stdin, process.stdout);
   } finally {
+    await session.disableShowTouches();
     session.close();
   }
   return 0;
