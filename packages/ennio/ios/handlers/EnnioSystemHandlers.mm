@@ -133,6 +133,15 @@ void RegisterEnnioSystemHandlers(void) {
                 NSString *cls = NSStringFromClass([v class]);
                 NSString *al = v.accessibilityLabel ?: @"";
                 NSString *av = v.accessibilityValue ?: @"";
+                NSString *ident = v.accessibilityIdentifier ?: @"";
+                // Button/link traits are the only interactivity signal a
+                // flat dump can carry — consumers (the explore crawler)
+                // use them to tell tappable views from plain text when
+                // the app ships no testIDs (accessibilityRole="button"
+                // sets the trait; e.g. Bluesky).
+                BOOL tappable =
+                    (v.accessibilityTraits &
+                     (UIAccessibilityTraitButton | UIAccessibilityTraitLink)) != 0;
                 NSString *t = @"";
                 @try {
                     id raw = [v valueForKey:@"text"];
@@ -141,9 +150,11 @@ void RegisterEnnioSystemHandlers(void) {
                         t = [(NSAttributedString *)raw string];
                 } @catch (...) {
                 }
-                if (al.length || av.length || t.length) {
-                    [out addObject:[NSString stringWithFormat:@"%@ | aL=%@ | aV=%@ | t=%@",
-                                                              cls, al, av, t]];
+                if (al.length || av.length || t.length || ident.length) {
+                    [out addObject:[NSString
+                                       stringWithFormat:@"%@ | aL=%@ | aV=%@ | t=%@ | id=%@ | tr=%@",
+                                                        cls, al, av, t, ident,
+                                                        tappable ? @"b" : @""]];
                 }
                 for (UIView *sub in v.subviews.reverseObjectEnumerator) [stack addObject:sub];
             }

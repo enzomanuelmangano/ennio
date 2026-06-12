@@ -33,8 +33,21 @@ static void ennio_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString *k
             // 1000x loop as in-flight animation.
             return;
         }
-        anim.speed = 1000.0f;
-        if (g_origAddAnimation) g_origAddAnimation(self, _cmd, anim, key);
+        // CAAnimation freezes once attached to a layer, and RN/UIKit reuse
+        // instances across layers — setting speed on a frozen animation
+        // throws NSInternalInconsistencyException (observed: SIGABRT mid-
+        // crawl under RCTMountingManager). -copy yields a mutable twin, and
+        // addAnimation: copies its argument anyway, so semantics are
+        // unchanged. @try is the backstop for exotic CAAnimation subclasses
+        // whose copies stay frozen: play those at normal speed rather than
+        // crash the host app.
+        CAAnimation *fast = [anim copy];
+        @try {
+            fast.speed = 1000.0f;
+        } @catch (NSException *e) {
+            fast = anim;
+        }
+        if (g_origAddAnimation) g_origAddAnimation(self, _cmd, fast, key);
         return;
     }
     if (g_origAddAnimation) g_origAddAnimation(self, _cmd, anim, key);

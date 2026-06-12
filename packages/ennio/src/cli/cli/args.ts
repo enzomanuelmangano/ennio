@@ -41,6 +41,24 @@ export type Flags = {
   /** --smoke: `ennio doctor --smoke <bundleId>` runs an end-to-end self-test
    *  (inject → socket → read → actuate) against a real app. */
   smoke?: boolean;
+  /** `ennio explore` caps — see commands/explore.ts. */
+  maxDepth?: string;
+  maxNodes?: string;
+  /** --duration: wall-clock budget for the whole crawl in SECONDS
+   *  (default 30). */
+  duration?: string;
+  /** --seed: shuffle per-screen action order with this PRNG seed.
+   *  `ennio smoke` defaults to a random seed (printed for replay);
+   *  `ennio explore` defaults to deterministic document order. */
+  seed?: string;
+  /** --deny: case-insensitive regex of testIDs `ennio explore` never taps. */
+  deny?: string;
+  /** --keep-animations: `ennio explore` leaves app animations running
+   *  (explore disables them by default for speed — it maps structure). */
+  keepAnimations?: boolean;
+  /** --relaunch: `ennio smoke` restarts the app before crawling (state
+   *  kept). Default off — the crawl roots at the current screen. */
+  relaunch?: boolean;
 };
 
 export type ParsedArgs = {
@@ -49,7 +67,16 @@ export type ParsedArgs = {
   flags: Flags;
 };
 
-const STRING_FLAGS = new Set(['port', 'output', 'reporter']);
+const STRING_FLAGS = new Set([
+  'port',
+  'output',
+  'reporter',
+  'max-depth',
+  'max-nodes',
+  'duration',
+  'seed',
+  'deny',
+]);
 const BOOL_FLAGS = new Set([
   'verbose',
   'trace',
@@ -64,10 +91,15 @@ const BOOL_FLAGS = new Set([
   'android',
   'ios',
   'smoke',
+  'keep-animations',
+  'relaunch',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {
   'safe-mode': 'safeMode',
+  'max-depth': 'maxDepth',
+  'max-nodes': 'maxNodes',
+  'keep-animations': 'keepAnimations',
   'in-process-tap': 'inProcessTap',
   'disable-animations': 'noAnimations',
   'disable-reuse-app': 'disableReuseApp',
@@ -115,7 +147,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (STRING_FLAGS.has(name)) {
       const v = val ?? argv[++i];
       if (name === 'port') flags.port = parseInt(v, 10);
-      else (flags as Record<string, unknown>)[name] = v;
+      // Kebab-case names must map through the same alias table as bool
+      // flags — writing the raw 'max-depth' key leaves flags.maxDepth
+      // undefined and the flag silently dead.
+      else (flags as Record<string, unknown>)[FLAG_KEY_ALIASES[name] ?? name] = v;
     } else {
       // Unknown flag: surface as positional so help can warn — silently
       // dropping makes typos invisible.
@@ -133,6 +168,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     'screenshot',
     'doctor',
     'mcp',
+    'explore',
+    'smoke',
   ]);
   let command: string | null = null;
   if (positional.length > 0 && KNOWN.has(positional[0])) {

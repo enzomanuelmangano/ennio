@@ -21,6 +21,8 @@ import { runVersionCommand } from './commands/version';
 import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
+import { runExploreCommand } from './commands/explore';
+import { runSmokeCommand } from './commands/smoke';
 import { runMcpCommand } from './commands/mcp';
 import { printCrashReport } from './crash-reporter';
 import { currentVersion, printUpdateNotice } from './update-check';
@@ -28,6 +30,16 @@ import { warnVersionDrift } from './version-context';
 
 async function main() {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
+
+  // Unknown flags surface from the parser as positionals. Never let one
+  // fall through into a command (a typo'd `--maxMs=60000` must not become
+  // a bundleId) — fail fast and point at per-command help.
+  const unknownFlags = positional.filter((p) => p.startsWith('--'));
+  if (unknownFlags.length > 0) {
+    console.error(`Unknown flag${unknownFlags.length > 1 ? 's' : ''}: ${unknownFlags.join(', ')}`);
+    console.error(`See \`ennio help${command ? ` ${command}` : ''}\` for available options.`);
+    return 1;
+  }
 
   // Up front, for every command: recommend an update if one is available
   // (cached, non-blocking, once per process, TTY-only) and flag a global CLI
@@ -67,6 +79,10 @@ async function main() {
       return runDoctorCommand(positional, flags);
     case 'mcp':
       return runMcpCommand(positional, flags);
+    case 'explore':
+      return runExploreCommand(positional, flags);
+    case 'smoke':
+      return runSmokeCommand(positional, flags);
     case 'test':
     case 'run':
       return runTestCommand(positional, flags);

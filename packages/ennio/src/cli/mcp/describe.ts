@@ -5,16 +5,22 @@
 // a screenshot, then targets an element by testID or text.
 //
 // `dump_views` reports identity, not geometry (one element per line:
-// "<class> | aL=<label> | aV=<value> | t=<testID>"). Precise coordinates
-// for a specific element come from ennio_find, which resolves one selector
-// to a normalized rect in a single roundtrip — so describe stays a fast,
-// single-roundtrip read.
+// "<class> | aL=<label> | aV=<value> | t=<text> | id=<identifier> | tr=<traits>").
+// Precise coordinates for a specific element come from ennio_find, which
+// resolves one selector to a normalized rect in a single roundtrip — so
+// describe stays a fast, single-roundtrip read.
 
 export interface DescribedElement {
   role: string;
+  /** accessibilityIdentifier — RN's testID. */
   testID?: string;
   text?: string;
   value?: string;
+  /** Carries the button/link accessibility trait — the dump's only
+   *  interactivity signal. Set for UIButtons and anything with
+   *  accessibilityRole="button"/"link" (how apps without testIDs mark
+   *  their tappables). */
+  button?: boolean;
   enabled: boolean;
 }
 
@@ -26,7 +32,9 @@ export interface ScreenDescription {
 /**
  * Parse one `dump_views` line. Fields are ` | `-separated: the leading
  * token is the view class, followed by `aL=` (accessibility label), `aV=`
- * (value), and `t=` (testID). Empty fields are dropped. A line with no
+ * (value), `t=` (KVC text), `id=` (accessibilityIdentifier = testID) and
+ * `tr=` (traits, 'b' = button/link). Older dylibs emit only the first
+ * three — id/tr parse as absent. Empty fields are dropped. A line with no
  * identity (neither testID nor text) is structural — returns null.
  */
 export function parseDumpViewLine(line: string): DescribedElement | null {
@@ -34,19 +42,27 @@ export function parseDumpViewLine(line: string): DescribedElement | null {
   const role = parts[0]?.trim();
   if (!role) return null;
   let testID: string | undefined;
-  let text: string | undefined;
+  let label: string | undefined;
+  let rawText: string | undefined;
   let value: string | undefined;
+  let button = false;
   for (const part of parts.slice(1)) {
-    if (part.startsWith('aL=')) text = part.slice(3) || undefined;
+    if (part.startsWith('aL=')) label = part.slice(3) || undefined;
     else if (part.startsWith('aV=')) value = part.slice(3) || undefined;
-    else if (part.startsWith('t=')) testID = part.slice(2) || undefined;
+    else if (part.startsWith('tr=')) button = part.slice(3).includes('b');
+    else if (part.startsWith('t=')) rawText = part.slice(2) || undefined;
+    else if (part.startsWith('id=')) testID = part.slice(3) || undefined;
   }
+  // The accessibility label is the authored description; KVC text is the
+  // fallback for plain labels/fields that never set one.
+  const text = label ?? rawText;
   if (!testID && !text) return null;
   return {
     role,
     ...(testID && { testID }),
     ...(text && { text }),
     ...(value && { value }),
+    ...(button && { button }),
     enabled: true,
   };
 }

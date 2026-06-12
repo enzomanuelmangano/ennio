@@ -9,6 +9,7 @@
 // class populates on open() and drains on close(). hid.ts itself
 // holds zero mutable state.
 
+import { throttledAliveProbe } from '../crash-detector';
 import { EnnioSocketClient } from '../socket-client';
 import type { ConnectTarget } from '../socket-client';
 
@@ -20,6 +21,10 @@ export interface EnnioConnectionOptions {
    *  Android platform passes a TCP target (adb-forwarded abstract
    *  socket). */
   target?: ConnectTarget;
+  /** Target app. When given (iOS sims), the socket gets a liveness
+   *  probe so retry ladders fail in seconds — not minutes — when the
+   *  app process crashes. */
+  bundleId?: string;
 }
 
 export class EnnioConnection {
@@ -31,6 +36,11 @@ export class EnnioConnection {
   constructor(opts: EnnioConnectionOptions) {
     this.udid = opts.udid;
     this.socket = new EnnioSocketClient(opts.target ?? opts.udid);
+    // launchctl-based probe is simulator-only; Android (TCP target)
+    // keeps the plain ladders.
+    if (opts.bundleId && (!opts.target || opts.target.kind === 'unix')) {
+      this.socket.aliveProbe = throttledAliveProbe(this.udid, opts.bundleId);
+    }
   }
 
   /**

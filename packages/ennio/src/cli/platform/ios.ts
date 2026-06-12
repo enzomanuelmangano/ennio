@@ -74,7 +74,7 @@ export class IosPlatform implements Platform {
     // applied once per sim boot (sentinel-skipped on later invocations).
     prepareSimulator(session.udid);
 
-    const connection = new EnnioConnection({ udid: session.udid });
+    const connection = new EnnioConnection({ udid: session.udid, bundleId: session.bundleId });
     if (!(await tracePhaseAsync('socketOpenFast', () => connection.open(2_000)))) {
       // App isn't running with the dylib loaded — launch + retry.
       tracePhase('terminate', () => session.terminate());
