@@ -24,7 +24,6 @@
  *   exit 1  the app crashed mid-crawl (diagnosis printed, with the last
  *           action attributed), attach failed, or no screen was readable
  *
-
  * The default bundleId is the app already open on the booted simulator:
  * launchctl lists running app processes as "UIKitApplication:<id>", and
  * a simulator rarely has more than one non-system app alive. Ambiguity
@@ -237,7 +236,9 @@ export async function runImproviseCommand(positional: string[], flags: Flags): P
         startedAt,
         'improvise',
       );
-      console.error(`\nIMPROVISE FAIL ${bundleId} (seed ${seed}) — crawl aborted after ${lastAction}`);
+      console.error(
+        `\nIMPROVISE FAIL ${bundleId} (seed ${seed}) — crawl aborted after ${lastAction}`,
+      );
       console.error(`  replay exactly: ennio improvise ${bundleId} --seed ${seed}`);
       console.error(`  ${msg}`);
       if (diagnosis) console.error(diagnosis.replace(/^/gm, '  '));
