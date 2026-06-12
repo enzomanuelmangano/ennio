@@ -132,6 +132,12 @@ export class EnnioMcpSession {
         flowEnv: {},
       };
       this.attachment = { bundleId, session, connection, ctx };
+      // --show-touches: enable explicitly — the env-at-launch gate misses
+      // a warm attach to an already-running process (smoke's default).
+      // Counterpart of disableShowTouches(); best-effort on old dylibs.
+      if (process.env.ENNIO_SHOW_TOUCHES === '1' && this.platform.name === 'ios') {
+        await connection.socket.call('set_show_touches', { enabled: true }).catch(() => undefined);
+      }
       return ok({ bundleId, udid: session.udid });
     } catch (e) {
       return classifyError(e);
