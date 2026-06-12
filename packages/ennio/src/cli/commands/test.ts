@@ -65,6 +65,8 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('                        final frame) — faster, but alters animated UI');
     console.error('  --disable-reuse-app   Force a full relaunch on clearState. App reuse');
     console.error('                        (soft-reset: data wipe + JS reload) is ON by default.');
+    console.error('  --show-touches        Draw every tap/swipe on screen (iOS: in-app ripple');
+    console.error("                        overlay; Android: the OS setting, restored on exit).");
     console.error('');
     console.error('Auto-detection:');
     console.error('  - booted iOS simulator (or auto-boots one)');
@@ -83,6 +85,9 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   // launch site (set there from this process env). Set it here so all
   // three launch paths see a single source of truth.
   if (flags.noAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
+  // --show-touches rides the same channel (iOS: in-app overlay reads the
+  // env at launch; Android: the platform flips the OS setting on connect).
+  if (flags.showTouches) process.env.ENNIO_SHOW_TOUCHES = '1';
   // App reuse is ON by default: clearState soft-resets (data wipe + JS reload)
   // instead of relaunching when the app is already running (read in the
   // launchApp handler via this env). --disable-reuse-app forces full relaunch.

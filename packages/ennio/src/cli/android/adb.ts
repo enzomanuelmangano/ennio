@@ -65,6 +65,45 @@ export function removeForward(serial: string, port: number): void {
   }
 }
 
+// Serials whose show_touches we flipped, with the value to put back.
+const showTouchesRestore = new Map<string, string>();
+
+/**
+ * Turn on Android's OS-level "show touches" pointer indicator (the
+ * --show-touches flag). ennio's gestures are injected MotionEvents, so
+ * the OS renders them exactly like real fingers — no in-app overlay
+ * needed. The user's prior setting is restored on process exit; only
+ * the first call per serial snapshots it (later calls would snapshot
+ * our own '1').
+ */
+export function enableShowTouches(serial: string): void {
+  if (showTouchesRestore.has(serial)) return;
+  let prev = '0';
+  try {
+    const v = adb(serial, ['shell', 'settings', 'get', 'system', 'show_touches']).trim();
+    if (v && v !== 'null') prev = v;
+  } catch {
+    /* unreadable — assume default off */
+  }
+  try {
+    adb(serial, ['shell', 'settings', 'put', 'system', 'show_touches', '1']);
+  } catch {
+    return; // device gone — nothing to restore either
+  }
+  showTouchesRestore.set(serial, prev);
+  if (showTouchesRestore.size === 1) {
+    process.on('exit', () => {
+      for (const [s, value] of showTouchesRestore) {
+        try {
+          adb(s, ['shell', 'settings', 'put', 'system', 'show_touches', value]);
+        } catch {
+          /* device gone */
+        }
+      }
+    });
+  }
+}
+
 /** Launch the app's default launcher activity. monkey is the most robust
  *  cross-app way to start the LAUNCHER intent without knowing the
  *  activity class name. */

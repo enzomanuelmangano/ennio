@@ -150,6 +150,11 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     seed,
   };
 
+  // --show-touches: on iOS the in-app overlay reads the env at app
+  // launch, so a warm-start smoke (no relaunch) only shows ripples if
+  // the app was already launched with it; immediate on Android.
+  if (flags.showTouches) process.env.ENNIO_SHOW_TOUCHES = '1';
+
   // As real as it gets: animations run untouched and every tap is a HID
   // touch through the simulator's event pipeline — smoke exists to
   // exercise the app the way a user would, not to map it fast.

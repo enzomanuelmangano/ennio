@@ -52,6 +52,9 @@ export async function runExploreCommand(positional: string[], flags: Flags): Pro
   // toggle below covers the already-running attach); --keep-animations
   // opts back into real timing.
   if (!flags.keepAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
+  // --show-touches: applies from the next (re)launch on iOS (the in-app
+  // overlay reads the env at startup); immediate on Android.
+  if (flags.showTouches) process.env.ENNIO_SHOW_TOUCHES = '1';
 
   const session = new EnnioMcpSession({
     platform: selectPlatform(flags.android ? 'android' : 'ios'),

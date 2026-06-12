@@ -39,6 +39,12 @@ describe('parseArgs boolean flags', () => {
     expect(r.flags.noAnimations).toBe(true);
   });
 
+  it('parses --show-touches as a boolean flag', () => {
+    const r = parseArgs(['test', 'e2e/', '--show-touches']);
+    expect(r.flags.showTouches).toBe(true);
+    expect(r.positional).toEqual(['e2e/']);
+  });
+
   it('drops removed legacy flags (--fast) to positionals', () => {
     const r = parseArgs(['test', 'e2e/', '--fast']);
     expect(r.flags.inProcessTap).toBeUndefined();

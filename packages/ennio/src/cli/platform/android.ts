@@ -26,6 +26,7 @@ import {
   abstractSocketBound,
   clearAppData,
   enableRoot,
+  enableShowTouches,
   getAndroidSerial,
   getClipboard,
   getDeviceAbi,
@@ -245,6 +246,10 @@ export class AndroidPlatform implements Platform {
   async connect(opts: ConnectOptions): Promise<OpenConnection> {
     const serial = this.resolveSerial(opts.udid);
     const session = { udid: serial, bundleId: opts.bundleId, dylibPath: null };
+
+    // --show-touches: the OS pointer indicator renders our injected
+    // MotionEvents like real fingers. Prior setting restored on exit.
+    if (process.env.ENNIO_SHOW_TOUCHES === '1') enableShowTouches(serial);
 
     // Decide attach-agent vs ptrace and (for ptrace) enable root BEFORE any adb
     // forward is set up — `adb root` restarts adbd and would drop forwards.

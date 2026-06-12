@@ -59,6 +59,10 @@ export type Flags = {
   /** --relaunch: `ennio smoke` restarts the app before crawling (state
    *  kept). Default off — the crawl roots at the current screen. */
   relaunch?: boolean;
+  /** --show-touches: draw every tap/swipe on screen. iOS: in-app ripple
+   *  overlay (ENNIO_SHOW_TOUCHES); Android: the OS show_touches setting,
+   *  restored on exit. */
+  showTouches?: boolean;
 };
 
 export type ParsedArgs = {
@@ -93,6 +97,7 @@ const BOOL_FLAGS = new Set([
   'smoke',
   'keep-animations',
   'relaunch',
+  'show-touches',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {
@@ -103,6 +108,7 @@ const FLAG_KEY_ALIASES: Record<string, string> = {
   'in-process-tap': 'inProcessTap',
   'disable-animations': 'noAnimations',
   'disable-reuse-app': 'disableReuseApp',
+  'show-touches': 'showTouches',
 };
 
 export function parseArgs(argv: string[]): ParsedArgs {
