@@ -106,7 +106,6 @@ Native's responder system, and RNGH all see a real touch.
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ennio test <flow.yaml \| dir \| glob>` | Run Maestro YAML flows (`run` is an alias; a bare path works too)                                                                                                  |
 | `ennio smoke [bundleId]`                | Crawl-based smoke test: walks the app autonomously for a wall-clock budget; the exit code is the product. Defaults to the app already open on the booted simulator |
-| `ennio explore <bundleId>`              | Deterministic app crawler: produces a diffable `app-map.json`, a mermaid graph, and one screenshot per screen                                                      |
 | `ennio screenshot [path]`               | Capture the simulator screen                                                                                                                                       |
 | `ennio hierarchy`                       | Dump the app's view hierarchy                                                                                                                                      |
 | `ennio doctor [--smoke <bundleId>]`     | Diagnose the setup; `--smoke` runs an inject → socket → actuate self-test                                                                                          |
@@ -134,18 +133,17 @@ Native's responder system, and RNGH all see a real touch.
 | `--disable-animations` | off      | Suppress app animations (1000x time-compression — transitions snap to their final frame). Faster, but alters animated UI   |
 | `--disable-reuse-app`  | reuse on | Force a full relaunch on `clearState` instead of the default soft-reset (data wipe + JS reload)                            |
 
-### Flags — `ennio smoke` / `ennio explore`
+### Flags — `ennio smoke`
 
-| Flag                | Default                                           | Effect                                                                                                                            |
-| ------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `--duration <s>`    | 30                                                | Wall-clock budget for the whole crawl — the only global stop                                                                      |
-| `--seed <n>`        | random (smoke) / document order (explore)         | Shuffle per-screen action order with this PRNG seed. smoke prints its seed on every run so any walk replays exactly with `--seed` |
-| `--deny <regex>`    | `logout\|delete\|pay\|purchase\|…`                | Case-insensitive regex of testIDs/labels never tapped                                                                             |
-| `--max-depth <n>`   | 5                                                 | Max action-path length from the root. Primary CTAs (next/submit/checkout/…) may run a few levels deeper so flows get completed    |
-| `--max-nodes <n>`   | 50                                                | Max distinct screens to register                                                                                                  |
-| `--output <dir>`    | explore: `.ennio/explore/<bundleId>`; smoke: none | Artifact directory (app map, per-screen screenshots, recording)                                                                   |
-| `--relaunch`        | off (smoke)                                       | Restart the app before crawling (state kept). Default is a warm start rooted at the current screen                                |
-| `--keep-animations` | off (explore)                                     | Leave app animations running (explore suppresses them by default — it maps structure, not motion)                                 |
+| Flag              | Default                            | Effect                                                                                                                         |
+| ----------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `--duration <s>`  | 30                                 | Wall-clock budget for the whole crawl — the only global stop                                                                   |
+| `--seed <n>`      | random                             | Shuffle per-screen action order with this PRNG seed; printed on every run so any walk replays exactly with `--seed`            |
+| `--deny <regex>`  | `logout\|delete\|pay\|purchase\|…` | Case-insensitive regex of testIDs/labels never tapped                                                                          |
+| `--max-depth <n>` | 5                                  | Max action-path length from the root. Primary CTAs (next/submit/checkout/…) may run a few levels deeper so flows get completed |
+| `--max-nodes <n>` | 50                                 | Max distinct screens to register                                                                                               |
+| `--output <dir>`  | none                               | Artifact directory (app map, per-screen screenshots, recording)                                                                |
+| `--relaunch`      | off (smoke)                        | Restart the app before crawling (state kept). Default is a warm start rooted at the current screen                             |
 
 Exit codes (`smoke`): `0` — the app survived the crawl (caps/budget cuts
 are fine; a barely-moved walk prints a `low-coverage` warning); `1` —

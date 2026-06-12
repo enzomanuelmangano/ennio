@@ -1,14 +1,12 @@
 /**
  * `ennio smoke [bundleId]` — crawl-based app smoke test for CI.
  *
- * Same engine as `ennio explore`, different product: explore's output is
- * the artifact folder (the map); smoke's output is the EXIT CODE. It
- * walks the app for the wall-clock budget and answers one question —
+ * The product is the EXIT CODE. It walks the app (the crawl engine in
+ * src/cli/explore/) for the wall-clock budget and answers one question —
  * does the app survive autonomous exploration? — printing a one-screen
  * summary and writing NOTHING unless --output is given.
  *
- * Three deliberate departures from explore's determinism-and-speed
- * defaults — smoke exercises the app the way a user would:
+ * Smoke exercises the app the way a user would:
  *   * WARM START — no relaunch, no clearState, ever: the crawl roots at
  *     whatever screen the app shows right now, with the user's session
  *     and data intact.

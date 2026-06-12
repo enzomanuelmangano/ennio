@@ -1,4 +1,5 @@
-// `ennio explore` — deterministic app crawler. Shared types.
+// The crawl engine behind `ennio smoke` — deterministic app crawler.
+// Shared types.
 //
 // The crawler walks the app as a graph: a NODE is a screen (identified by
 // a structural signature of its element inventory), an EDGE is one action

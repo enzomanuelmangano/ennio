@@ -461,7 +461,7 @@ export class EnnioMcpSession {
   }
 
   /**
-   * --show-touches cleanup (explore/smoke): the overlay must not outlive
+   * Touch-visualization cleanup (smoke/mcp): the overlay must not outlive
    * the session and keep drawing the user's own taps. Turns it off in
    * the still-running app (awaited, so a process.exit right after can't
    * cut the RPC short) and clears the sticky launchctl env so a manual
