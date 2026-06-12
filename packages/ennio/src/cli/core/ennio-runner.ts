@@ -22,6 +22,8 @@ import type { MaestroFlow } from '../maestro-parser';
 import { parseMaestroFile } from '../maestro-parser';
 import type { Platform } from '../platform';
 import { selectPlatform } from '../platform';
+import type { ScreenRecording } from '../recorder';
+import { startScreenRecording } from '../recorder';
 import { pickReporter } from '../reporters';
 import type { Reporter, SuiteResult, FlowResult } from '../reporters';
 
@@ -46,6 +48,8 @@ export interface EnnioRunnerOptions {
   reporterKind?: 'pretty' | 'json';
   /** Device backend. Default: iOS simulator. */
   platform?: Platform;
+  /** --record: capture a video of the whole suite to this path. */
+  recordPath?: string;
 }
 
 export class EnnioRunner {
@@ -60,6 +64,8 @@ export class EnnioRunner {
   /** UDID of the device the last flow actually ran on — needed for
    *  suite-end cleanup when no explicit udid was configured. */
   private lastUdid?: string;
+  private recordPath?: string;
+  private recording: ScreenRecording | null = null;
 
   constructor(opts: EnnioRunnerOptions = {}) {
     this.udid = opts.udid;
@@ -68,6 +74,7 @@ export class EnnioRunner {
     this.lenient = opts.lenient ?? false;
     this.safeMode = opts.safeMode ?? false;
     this.platform = opts.platform ?? selectPlatform('ios');
+    this.recordPath = opts.recordPath;
     this.driver = this.platform.createDriver(opts.inProcessTap ?? false);
     this.reporter =
       opts.reporter ?? pickReporter({ kind: opts.reporterKind ?? 'pretty', verbose: this.verbose });
@@ -104,6 +111,11 @@ export class EnnioRunner {
     };
     this.reporter.suiteEnd(suiteResult);
 
+    if (this.recording) {
+      const saved = await this.recording.stop();
+      this.recording = null;
+      if (saved) console.error(`[record] saved → ${saved}`);
+    }
     // --show-touches cleanup: clear the sticky launchctl env so an app
     // the user launches manually after this run doesn't come up with the
     // overlay armed. (The running app already got set_show_touches off in
@@ -130,6 +142,11 @@ export class EnnioRunner {
       safeMode: this.safeMode,
     });
     this.lastUdid = session.udid;
+    // --record: the udid is only known once the first flow connects;
+    // one recording spans the whole suite.
+    if (this.recordPath && !this.recording) {
+      this.recording = startScreenRecording(this.platform.name, session.udid, this.recordPath);
+    }
     try {
       const executor = new FlowExecutor({
         session,

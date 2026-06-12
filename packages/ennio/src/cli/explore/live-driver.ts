@@ -117,7 +117,12 @@ export class LiveExploreDriver implements ExploreDriver {
     if (alert.ok && alert.data.present) {
       return [
         { role: 'Alert', text: alert.data.text || 'alert', enabled: true },
-        ...alert.data.buttons.map((b) => ({ role: 'Button', text: b, button: true, enabled: true })),
+        ...alert.data.buttons.map((b) => ({
+          role: 'Button',
+          text: b,
+          button: true,
+          enabled: true,
+        })),
       ];
     }
     const r = await this.session.describe();

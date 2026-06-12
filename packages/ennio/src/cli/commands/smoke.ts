@@ -45,6 +45,8 @@ import { LiveExploreDriver } from '../explore/live-driver';
 import { buildAppMap, writeArtifacts } from '../explore/output';
 import { EnnioMcpSession } from '../mcp/session';
 import { selectPlatform } from '../platform';
+import type { ScreenRecording } from '../recorder';
+import { startScreenRecording } from '../recorder';
 import { getTargetUdid } from '../sim';
 
 function intFlag(value: string | undefined, fallback: number): number {
@@ -167,6 +169,7 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
   // The crawler logs every action; remember the last one so a crash can
   // be attributed ("died after tapping X") instead of just diagnosed.
   let lastAction = '(launch)';
+  let recording: ScreenRecording | null = null;
   try {
     const attached = await session.attach(bundleId);
     if (!attached.ok) {
@@ -175,6 +178,13 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     }
     const outDir = flags.output ? resolve(flags.output) : null;
     if (outDir) mkdirSync(join(outDir, 'screens'), { recursive: true });
+    if (flags.record && session.udid) {
+      recording = startScreenRecording(
+        session.platformName,
+        session.udid,
+        outDir ? join(outDir, 'recording.mp4') : resolve(`ennio-smoke-${seed}.mp4`),
+      );
+    }
     // Warm start, never clearState: smoke tests the app from EXACTLY the
     // state it's in — logged-in session, filled carts and all. --relaunch
     // restarts the process first (data still kept); recovery relaunches
@@ -257,6 +267,10 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     for (const w of map.warnings) console.log(`  warning: ${w.kind} — ${w.detail}`);
     return 0;
   } finally {
+    if (recording) {
+      const saved = await recording.stop();
+      if (saved) console.error(`[smoke] recording → ${saved}`);
+    }
     await session.disableShowTouches();
     session.close();
   }

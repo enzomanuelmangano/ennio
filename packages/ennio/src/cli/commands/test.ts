@@ -67,6 +67,8 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('                        (soft-reset: data wipe + JS reload) is ON by default.');
     console.error('  --show-touches        Draw every tap/swipe on screen (iOS: in-app ripple');
     console.error('                        overlay; Android: the OS setting, restored on exit).');
+    console.error('  --record              Record the whole run to an .mp4 (iOS simulator).');
+    console.error('                        Pair with --show-touches to see every tap in it.');
     console.error('');
     console.error('Auto-detection:');
     console.error('  - booted iOS simulator (or auto-boots one)');
@@ -111,6 +113,10 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     safeMode: flags.safeMode ?? false,
     inProcessTap: flags.inProcessTap ?? false,
     platform: selectPlatform(platformName),
+    // --record: one video for the whole suite, --output dir or cwd.
+    recordPath: flags.record
+      ? resolve(flags.output ?? '.', `ennio-run-${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`)
+      : undefined,
   });
 
   try {

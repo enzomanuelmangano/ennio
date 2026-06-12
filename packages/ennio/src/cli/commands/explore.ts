@@ -24,6 +24,8 @@ import { LiveExploreDriver } from '../explore/live-driver';
 import { buildAppMap, writeArtifacts } from '../explore/output';
 import { EnnioMcpSession } from '../mcp/session';
 import { selectPlatform } from '../platform';
+import type { ScreenRecording } from '../recorder';
+import { startScreenRecording } from '../recorder';
 
 function intFlag(value: string | undefined, fallback: number): number {
   const n = Number(value);
@@ -61,6 +63,7 @@ export async function runExploreCommand(positional: string[], flags: Flags): Pro
     inProcessTap: flags.inProcessTap,
     safeMode: flags.safeMode,
   });
+  let recording: ScreenRecording | null = null;
   try {
     const attached = await session.attach(bundleId);
     if (!attached.ok) {
@@ -74,6 +77,13 @@ export async function runExploreCommand(positional: string[], flags: Flags): Pro
 
     const startedAt = Date.now();
     mkdirSync(join(outDir, 'screens'), { recursive: true });
+    if (flags.record && session.udid) {
+      recording = startScreenRecording(
+        session.platformName,
+        session.udid,
+        join(outDir, 'recording.mp4'),
+      );
+    }
     const driver = new LiveExploreDriver(session, bundleId);
     const result = await crawl(driver, limits, {
       log: (msg) => console.error(`[explore] ${msg}`),
@@ -102,6 +112,10 @@ export async function runExploreCommand(positional: string[], flags: Flags): Pro
     if (flags.reporter === 'json') console.log(JSON.stringify(map, null, 2));
     return 0;
   } finally {
+    if (recording) {
+      const saved = await recording.stop();
+      if (saved) console.error(`[explore] recording → ${saved}`);
+    }
     // Leave the app as we found it: the crawl disabled animations for
     // speed, the user keeps interacting with the app afterwards.
     if (!flags.keepAnimations) await session.setAnimations(true).catch(() => undefined);

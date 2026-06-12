@@ -63,6 +63,10 @@ export type Flags = {
    *  overlay (ENNIO_SHOW_TOUCHES); Android: the OS show_touches setting,
    *  restored on exit. */
   showTouches?: boolean;
+  /** --record: capture a video of the whole run (simctl recordVideo).
+   *  Saved next to the run's artifacts (--output) or the cwd. Pairs with
+   *  --show-touches to make every tap visible in the footage. */
+  record?: boolean;
 };
 
 export type ParsedArgs = {
@@ -98,6 +102,7 @@ const BOOL_FLAGS = new Set([
   'keep-animations',
   'relaunch',
   'show-touches',
+  'record',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {
