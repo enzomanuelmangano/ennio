@@ -26,6 +26,11 @@ export async function runMcpCommand(_positional: string[], flags: Flags): Promis
   const platformName =
     flags.android || process.env.ENNIO_PLATFORM === 'android' ? 'android' : 'ios';
 
+  // Touch visualization is ON by default — an agent driving the device
+  // through MCP is exactly the case where a human wants to see what it
+  // does. Disarmed at session close; --disable-touches opts out.
+  process.env.ENNIO_SHOW_TOUCHES = flags.disableTouches ? '0' : '1';
+
   const session = new EnnioMcpSession({
     platform: selectPlatform(platformName),
     udid: process.env.ENNIO_UDID,

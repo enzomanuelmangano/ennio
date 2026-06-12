@@ -54,9 +54,10 @@ export async function runExploreCommand(positional: string[], flags: Flags): Pro
   // toggle below covers the already-running attach); --keep-animations
   // opts back into real timing.
   if (!flags.keepAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
-  // --show-touches: applies from the next (re)launch on iOS (the in-app
-  // overlay reads the env at startup); immediate on Android.
-  if (flags.showTouches) process.env.ENNIO_SHOW_TOUCHES = '1';
+  // Touch visualization is ON by default (armed on attach, disarmed at
+  // close). --disable-touches keeps the per-screen screenshots in the
+  // app map free of mid-fade ripples when pixel-stable artifacts matter.
+  process.env.ENNIO_SHOW_TOUCHES = flags.disableTouches ? '0' : '1';
 
   const session = new EnnioMcpSession({
     platform: selectPlatform(flags.android ? 'android' : 'ios'),

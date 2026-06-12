@@ -59,10 +59,14 @@ export type Flags = {
   /** --relaunch: `ennio smoke` restarts the app before crawling (state
    *  kept). Default off — the crawl roots at the current screen. */
   relaunch?: boolean;
-  /** --show-touches: draw every tap/swipe on screen. iOS: in-app ripple
-   *  overlay (ENNIO_SHOW_TOUCHES); Android: the OS show_touches setting,
-   *  restored on exit. */
+  /** --show-touches: accepted for back-compat — touch visualization is
+   *  ON by default now (see disableTouches). */
   showTouches?: boolean;
+  /** --disable-touches: turn OFF the default touch visualization (iOS:
+   *  in-app ripple overlay via ENNIO_SHOW_TOUCHES; Android: the OS
+   *  show_touches setting). Use for pixel-exact screenshot/visual runs
+   *  where ripples would pollute the artifacts. */
+  disableTouches?: boolean;
   /** --record: capture a video of the whole run (simctl recordVideo).
    *  Saved next to the run's artifacts (--output) or the cwd. Pairs with
    *  --show-touches to make every tap visible in the footage. */
@@ -102,6 +106,7 @@ const BOOL_FLAGS = new Set([
   'keep-animations',
   'relaunch',
   'show-touches',
+  'disable-touches',
   'record',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
@@ -114,6 +119,7 @@ const FLAG_KEY_ALIASES: Record<string, string> = {
   'disable-animations': 'noAnimations',
   'disable-reuse-app': 'disableReuseApp',
   'show-touches': 'showTouches',
+  'disable-touches': 'disableTouches',
 };
 
 export function parseArgs(argv: string[]): ParsedArgs {

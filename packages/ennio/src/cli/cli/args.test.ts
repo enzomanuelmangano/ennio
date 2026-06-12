@@ -39,7 +39,13 @@ describe('parseArgs boolean flags', () => {
     expect(r.flags.noAnimations).toBe(true);
   });
 
-  it('parses --show-touches as a boolean flag', () => {
+  it('parses --disable-touches (visualization is on by default)', () => {
+    const r = parseArgs(['test', 'e2e/', '--disable-touches']);
+    expect(r.flags.disableTouches).toBe(true);
+    expect(r.positional).toEqual(['e2e/']);
+  });
+
+  it('still accepts --show-touches as a back-compat no-op', () => {
     const r = parseArgs(['test', 'e2e/', '--show-touches']);
     expect(r.flags.showTouches).toBe(true);
     expect(r.positional).toEqual(['e2e/']);
