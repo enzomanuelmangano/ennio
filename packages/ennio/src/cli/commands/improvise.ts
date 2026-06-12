@@ -45,6 +45,46 @@ import { selectPlatform } from '../platform';
 import type { ScreenRecording } from '../recorder';
 import { startScreenRecording } from '../recorder';
 import { getTargetUdid } from '../sim';
+import { dim, cyan, SPINNER } from '../ui/ansi';
+import { LiveRegion } from '../ui/live-region';
+
+/**
+ * Live `⠋ improvising · <bundleId>` line on a TTY — a heartbeat that
+ * shows the walk is alive and how far it's gotten. No-op when output
+ * isn't a TTY (CI logs stay clean) or when --verbose streams per-action
+ * lines (the spinner would fight them). Counters are fed from the crawl
+ * log callback; the braille frame advances on its own ~12fps timer.
+ */
+function makeImproviseSpinner(bundleId: string, enabled: boolean) {
+  let screens = 0;
+  let actions = 0;
+  let frame = 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const region = new LiveRegion(process.stderr, 80);
+  const paint = () => {
+    region.render([
+      `${cyan(SPINNER[frame % SPINNER.length])} ${dim('improvising')} · ${bundleId}` +
+        dim(`   ${screens} screens · ${actions} actions`),
+    ]);
+  };
+  return {
+    start() {
+      if (!enabled) return;
+      timer = setInterval(() => {
+        frame++;
+        paint();
+      }, 80);
+    },
+    note(msg: string) {
+      if (msg.startsWith('screen ')) screens++;
+      else if (/^\s*[→·]/.test(msg)) actions++;
+    },
+    stop() {
+      if (timer) clearInterval(timer);
+      region.stop();
+    },
+  };
+}
 
 function intFlag(value: string | undefined, fallback: number): number {
   const n = Number(value);
@@ -204,12 +244,16 @@ export async function runImproviseCommand(positional: string[], flags: Flags): P
       }
     }
     const driver = new LiveExploreDriver(session, bundleId, { clearState: false, realInput: true });
+    // Heartbeat: spinner on a TTY unless --verbose is streaming lines.
+    const spinner = makeImproviseSpinner(bundleId, !flags.verbose && !!process.stderr.isTTY);
+    spinner.start();
     let result;
     try {
       result = await crawl(driver, limits, {
         warmStart: !flags.relaunch,
         log: (msg) => {
           if (flags.verbose) console.error(`[improvise] ${msg}`);
+          else spinner.note(msg);
           const m = msg.match(/[→·✗] (.+?) (?:tap=\d|\d+ms)/);
           if (m) lastAction = m[1];
         },
@@ -225,7 +269,9 @@ export async function runImproviseCommand(positional: string[], flags: Flags): P
             }
           : undefined,
       });
+      spinner.stop();
     } catch (e) {
+      spinner.stop();
       // The crawl aborting mid-walk (describe/socket death) is exactly
       // what this command exists to catch. Diagnose: app crash report,
       // process death, or genuine socket failure.
