@@ -1,14 +1,6 @@
 # Ennio
 
-> [!WARNING]
-> **Experimental.** APIs, package names, internals, and behavior may
-> change without notice. iOS is the primary target and further along;
-> **Android is newer** (opt-in via `--android`) — its full example
-> suite runs green and stable on CI, but it has seen less real-world
-> use than the iOS path. Expect rough edges on both; do not rely on it
-> for production-critical test suites yet.
-
-Maestro-compatible E2E test runner for React Native iOS. The CLI
+Maestro-compatible E2E test runner for React Native. The CLI
 injects a prebuilt ObjC dylib into your simulator app via
 `DYLD_INSERT_LIBRARIES` and drives it through a Unix socket. Real
 CoreSimulator touches are dispatched by an in-house host helper that
@@ -270,12 +262,18 @@ The runner targets [Maestro YAML](https://maestro.mobile.dev/). Covered:
 
 ## Limitations
 
-- **iOS** is the primary target — the most coverage so far (still experimental).
+- **iOS** is the primary target — the most coverage so far.
 - **Android** is **newer** — opt-in via `--android` (or
   `ENNIO_PLATFORM=android`). In-process agent injection (JVMTI attach /
   ptrace — works on non-debuggable release builds). The full example
   suite (40 flows) runs green and stable on CI, but the path has seen
   less real-world use than iOS.
+
+## Sponsor
+
+If ennio saves your team time — faster E2E runs, no XCTest tax —
+consider leaving a star or
+[sponsoring the project](https://github.com/sponsors/enzomanuelmangano).
 
 ## License
 

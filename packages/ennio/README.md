@@ -1,13 +1,6 @@
 # ennio
 
-> [!WARNING]
-> **Experimental.** APIs, package names, internals, and behavior may
-> change without notice. iOS is the primary target; **Android is
-> newer** (opt-in via `--android`) — its full example suite runs green
-> and stable on CI, but it has seen less real-world use. Expect rough
-> edges; do not rely on it for production-critical test suites yet.
-
-Maestro-compatible E2E test runner for React Native iOS.
+Maestro-compatible E2E test runner for React Native.
 
 The CLI injects a prebuilt ObjC dylib into your simulator app via
 `DYLD_INSERT_LIBRARIES` and drives it through a Unix socket. Real
@@ -222,6 +215,12 @@ These bars are enforced by an executable conformance suite
 The interface is tool-agnostic: Argent is just the first consumer. ennio
 declares how it touches the app (`attach: dyld-inject`, `actuation: hid`) so a
 coordinating agent can sequence other controllers around a single actuator.
+
+## Sponsor
+
+If ennio saves your team time — faster E2E runs, no XCTest tax —
+consider leaving a star or
+[sponsoring the project](https://github.com/sponsors/enzomanuelmangano).
 
 ## License
 
