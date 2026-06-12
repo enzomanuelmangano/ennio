@@ -26,7 +26,9 @@ export function startScreenRecording(
   outPath: string,
 ): ScreenRecording | null {
   if (platformName !== 'ios') {
-    console.error('[record] --record is iOS-only today — skipping (Android needs its own screenrecord plumbing)');
+    console.error(
+      '[record] --record is iOS-only today — skipping (Android needs its own screenrecord plumbing)',
+    );
     return null;
   }
   let proc: ChildProcess;

@@ -115,7 +115,10 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     platform: selectPlatform(platformName),
     // --record: one video for the whole suite, --output dir or cwd.
     recordPath: flags.record
-      ? resolve(flags.output ?? '.', `ennio-run-${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`)
+      ? resolve(
+          flags.output ?? '.',
+          `ennio-run-${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`,
+        )
       : undefined,
   });
 
