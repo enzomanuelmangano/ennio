@@ -98,6 +98,71 @@ Native's responder system, and RNGH all see a real touch.
 `setClipboard`, `pasteText`, `runFlow`, `runScript`,
 `extendedWaitUntil`
 
+## CLI reference
+
+### Commands
+
+| Command                                 | What it does                                                                                                                                                       |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ennio test <flow.yaml \| dir \| glob>` | Run Maestro YAML flows (`run` is an alias; a bare path works too)                                                                                                  |
+| `ennio smoke [bundleId]`                | Crawl-based smoke test: walks the app autonomously for a wall-clock budget; the exit code is the product. Defaults to the app already open on the booted simulator |
+| `ennio explore <bundleId>`              | Deterministic app crawler: produces a diffable `app-map.json`, a mermaid graph, and one screenshot per screen                                                      |
+| `ennio screenshot [path]`               | Capture the simulator screen                                                                                                                                       |
+| `ennio hierarchy`                       | Dump the app's view hierarchy                                                                                                                                      |
+| `ennio doctor [--smoke <bundleId>]`     | Diagnose the setup; `--smoke` runs an inject → socket → actuate self-test                                                                                          |
+| `ennio mcp`                             | Start the MCP server on stdio (see below)                                                                                                                          |
+
+### Flags — all commands
+
+| Flag                  | Default       | Effect                                                                                                                                                                                                                                                                                                                        |
+| --------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v`     | on for `test` | Per-step / per-action inline output                                                                                                                                                                                                                                                                                           |
+| `--quiet`, `-q`       | off           | Suppress per-step output                                                                                                                                                                                                                                                                                                      |
+| `--reporter <kind>`   | `pretty`      | `pretty` \| `json`                                                                                                                                                                                                                                                                                                            |
+| `--android` / `--ios` | iOS           | Device backend (`ENNIO_PLATFORM=android` works too)                                                                                                                                                                                                                                                                           |
+| `--disable-touches`   | touches shown | Touch visualization is **on by default**: every tap, swipe, and drag ennio performs is drawn on the device (iOS: in-app ripple overlay; Android: the OS _show touches_ setting) and disarmed the moment the session ends. Disable for pixel-exact screenshot comparisons. `--show-touches` is accepted as a back-compat no-op |
+| `--record`            | off           | Record the whole run to an `.mp4` (`simctl recordVideo`, iOS only). Saved into `--output` or the cwd; the path is printed at the end                                                                                                                                                                                          |
+| `--safe-mode`         | off           | Launch with all in-app hooks disabled (slower settle, survives injection conflicts)                                                                                                                                                                                                                                           |
+| `--trace`             | off           | Detailed timing diagnostics                                                                                                                                                                                                                                                                                                   |
+
+### Flags — `ennio test`
+
+| Flag                   | Default  | Effect                                                                                                                     |
+| ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `--lenient`            | off      | Skip unknown YAML commands with a warning instead of failing                                                               |
+| `--in-process-tap`     | off      | Actuate taps via in-process activation (dylib) with a per-gesture real-HID fallback. Default is real HID for every gesture |
+| `--disable-animations` | off      | Suppress app animations (1000x time-compression — transitions snap to their final frame). Faster, but alters animated UI   |
+| `--disable-reuse-app`  | reuse on | Force a full relaunch on `clearState` instead of the default soft-reset (data wipe + JS reload)                            |
+
+### Flags — `ennio smoke` / `ennio explore`
+
+| Flag                | Default                                           | Effect                                                                                                                            |
+| ------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `--duration <s>`    | 30                                                | Wall-clock budget for the whole crawl — the only global stop                                                                      |
+| `--seed <n>`        | random (smoke) / document order (explore)         | Shuffle per-screen action order with this PRNG seed. smoke prints its seed on every run so any walk replays exactly with `--seed` |
+| `--deny <regex>`    | `logout\|delete\|pay\|purchase\|…`                | Case-insensitive regex of testIDs/labels never tapped                                                                             |
+| `--max-depth <n>`   | 5                                                 | Max action-path length from the root. Primary CTAs (next/submit/checkout/…) may run a few levels deeper so flows get completed    |
+| `--max-nodes <n>`   | 50                                                | Max distinct screens to register                                                                                                  |
+| `--output <dir>`    | explore: `.ennio/explore/<bundleId>`; smoke: none | Artifact directory (app map, per-screen screenshots, recording)                                                                   |
+| `--relaunch`        | off (smoke)                                       | Restart the app before crawling (state kept). Default is a warm start rooted at the current screen                                |
+| `--keep-animations` | off (explore)                                     | Leave app animations running (explore suppresses them by default — it maps structure, not motion)                                 |
+
+Exit codes (`smoke`): `0` — the app survived the crawl (caps/budget cuts
+are fine; a barely-moved walk prints a `low-coverage` warning); `1` —
+the app crashed mid-crawl (diagnosis printed, last action attributed),
+attach failed, or no screen was readable.
+
+### Environment variables
+
+| Variable                                         | Effect                                                      |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| `ENNIO_UDID`                                     | Pin the target simulator UDID / adb serial                  |
+| `ENNIO_DYLIB_PATH`                               | Explicit dylib path (skips the SHA-256 manifest check)      |
+| `ENNIO_PLATFORM`                                 | `android` — env-level equivalent of `--android` for CI      |
+| `ENNIO_ANDROID_AGENT` / `ENNIO_ANDROID_INJECTOR` | Explicit paths to the Android agent `.so` / ptrace injector |
+| `ENNIO_ANDROID_INJECT`                           | Force the injection mode: `attach` \| `ptrace`              |
+| `ENNIO_SAFE_MODE`, `ENNIO_DISABLE_*`             | Granular in-app hook kill switches (see _How it works_)     |
+
 ## MCP server
 
 `ennio mcp` exposes the runner as a [Model Context Protocol](https://modelcontextprotocol.io)

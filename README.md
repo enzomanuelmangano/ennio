@@ -182,6 +182,8 @@ that keeps it safe:
 ennio test <flow.yaml>            # one flow
 ennio test e2e/                   # every *.yaml under the directory
 ennio test --verbose e2e/         # log every step + timing
+ennio smoke [bundleId]            # autonomous crawl smoke test — the exit code is the product
+ennio explore <bundleId>          # deterministic app crawler → diffable app-map.json + screenshots
 ennio hierarchy                   # dump the in-app shadow tree as JSON
 ennio screenshot [path]           # grab the simulator screen
 ennio doctor                      # diagnose Node, Xcode, enniohid, dylib + app socket
@@ -191,17 +193,24 @@ ennio mcp                         # serve ennio over MCP (stdio) for an AI agent
 
 ### Flags
 
-| Flag                   | Default        | What it does                                                                                                                                                                                                                     |
-| ---------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--verbose`, `-v`      | on             | Per-step inline output + timing.                                                                                                                                                                                                 |
-| `--quiet`, `-q`        | off            | Suppress per-step output.                                                                                                                                                                                                        |
-| `--reporter=<kind>`    | `pretty`       | `pretty` or `json`.                                                                                                                                                                                                              |
-| `--lenient`            | off            | Skip unknown commands with a warning instead of failing.                                                                                                                                                                         |
-| `--android` / `--ios`  | iOS            | Backend. `--android` drives an emulator/device over adb.                                                                                                                                                                         |
-| `--disable-reuse-app`  | reuse **on**   | Force a full relaunch on `clearState`. By default ennio reuses the running app (soft-reset: data wipe + JS reload) between flows — much faster across a suite.                                                                   |
-| `--disable-animations` | off            | Suppress app animations (transitions snap to the final frame). Faster, but alters animated UI.                                                                                                                                   |
-| `--in-process-tap`     | off (real HID) | **iOS only.** Actuate taps via in-process activation (with a per-gesture real-HID fallback) instead of real HID touches. Faster on some apps, but skips the real gesture path — the default real-HID actuation is more faithful. |
-| `--safe-mode`          | off            | Disable all in-app hooks (swizzles/observers). Slower settle, but survives injection conflicts.                                                                                                                                  |
+| Flag                   | Default        | What it does                                                                                                                                                                                                                                                  |
+| ---------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v`      | on             | Per-step inline output + timing.                                                                                                                                                                                                                              |
+| `--quiet`, `-q`        | off            | Suppress per-step output.                                                                                                                                                                                                                                     |
+| `--reporter=<kind>`    | `pretty`       | `pretty` or `json`.                                                                                                                                                                                                                                           |
+| `--lenient`            | off            | Skip unknown commands with a warning instead of failing.                                                                                                                                                                                                      |
+| `--android` / `--ios`  | iOS            | Backend. `--android` drives an emulator/device over adb.                                                                                                                                                                                                      |
+| `--disable-reuse-app`  | reuse **on**   | Force a full relaunch on `clearState`. By default ennio reuses the running app (soft-reset: data wipe + JS reload) between flows — much faster across a suite.                                                                                                |
+| `--disable-animations` | off            | Suppress app animations (transitions snap to the final frame). Faster, but alters animated UI.                                                                                                                                                                |
+| `--in-process-tap`     | off (real HID) | **iOS only.** Actuate taps via in-process activation (with a per-gesture real-HID fallback) instead of real HID touches. Faster on some apps, but skips the real gesture path — the default real-HID actuation is more faithful.                              |
+| `--safe-mode`          | off            | Disable all in-app hooks (swizzles/observers). Slower settle, but survives injection conflicts.                                                                                                                                                               |
+| `--disable-touches`    | touches shown  | Touch visualization is **on by default**: every tap/swipe/drag ennio performs is drawn on the device (iOS: in-app ripple overlay; Android: the OS _show touches_ setting) and disarmed when the session ends. Disable for pixel-exact screenshot comparisons. |
+| `--record`             | off            | Record the whole run to an `.mp4` (`simctl recordVideo`, iOS only). Saved into `--output` or the cwd; the path is printed at the end.                                                                                                                         |
+
+`ennio smoke` / `ennio explore` add crawl-specific flags — `--duration`,
+`--seed`, `--deny`, `--max-depth`, `--max-nodes`, `--output`,
+`--relaunch` (smoke), `--keep-animations` (explore). The package README
+documents them in full.
 
 > Discovery and settle are always **in-process** (the injected dylib reads the
 > view tree / React commits / a11y) — `--in-process-tap` only changes how
