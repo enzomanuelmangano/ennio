@@ -251,6 +251,66 @@ export class EnnioMcpSession {
     }
   }
 
+  /**
+   * Native alert state. A UIAlertController lives in its own window
+   * outside the RN view tree — dump_views and the finder never see it,
+   * so callers that enumerate or tap from describe() output are blind
+   * to it (and the alert swallows every touch they fire underneath).
+   */
+  async alertInfo(): Promise<EnnioResult<{ present: boolean; text: string; buttons: string[] }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const p = await a.connection.socket.call('alert_present');
+      const present = !!(p.ok && p.data && (p.data as { present?: boolean }).present);
+      if (!present) return ok({ present: false, text: '', buttons: [] });
+      const [t, b] = await Promise.all([
+        a.connection.socket.call('alert_text'),
+        a.connection.socket.call('alert_buttons'),
+      ]);
+      return ok({
+        present: true,
+        text: (t.ok && (t.data as { text?: string })?.text) || '',
+        buttons: (b.ok && (b.data as { buttons?: string[] })?.buttons) || [],
+      });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /** Tap an alert button by its label — routes through UIAlertAction
+   *  directly, the only reliable way to press a native alert button. */
+  async alertTap(buttonText: string): Promise<EnnioResult<{ tapped: boolean }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const r = await a.connection.socket.call('alert_tap', { buttonText });
+      const tapped = !!(r.ok && r.data && (r.data as { tapped?: boolean }).tapped);
+      if (tapped) {
+        await a.connection.socket.call('wait_commit', { maxMs: 400, stableMs: 60 });
+      }
+      return ok({ tapped });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /** Dismiss a present alert (cancel-equivalent action). */
+  async alertDismiss(): Promise<EnnioResult<{ dismissed: boolean }>> {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    try {
+      const r = await a.connection.socket.call('alert_dismiss');
+      const dismissed = !!(r.ok && r.data && (r.data as { dismissed?: boolean }).dismissed);
+      if (dismissed) {
+        await a.connection.socket.call('wait_commit', { maxMs: 400, stableMs: 60 });
+      }
+      return ok({ dismissed });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
   /** On-screen element inventory (role / testID / text / value). */
   async describe(): Promise<EnnioResult<ScreenDescription>> {
     const a = this.attachment;

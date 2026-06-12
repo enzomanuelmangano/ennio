@@ -49,6 +49,15 @@ export class LiveExploreDriver implements ExploreDriver {
   }
 
   async tap(action: ExploreAction): Promise<{ ok: boolean; detail?: string }> {
+    // Alert-button path: describe() surfaced these as the screen's only
+    // actions, and neither the finder nor a HID tap can reach a
+    // UIAlertAction — route through alert_tap, same as the flow runner.
+    // tapped=false when no alert (or wrong label) — falls through to the
+    // normal paths below.
+    if (action.text) {
+      const al = await this.session.alertTap(action.text);
+      if (al.ok && al.data.tapped) return { ok: true };
+    }
     // Fast path ONLY: the crawler just dumped this screen, so the element
     // is known-present and settled — resolve its rect in one RPC and fire
     // a raw HID tap (commit-aware ~250ms wait). The full execTapOn
@@ -87,12 +96,30 @@ export class LiveExploreDriver implements ExploreDriver {
   }
 
   async back(): Promise<void> {
+    // An alert eats the back gesture; dismissing it IS the back action.
+    const al = await this.session.alertInfo();
+    if (al.ok && al.data.present) {
+      await this.session.alertDismiss();
+      return;
+    }
     await this.session.dispatch({ back: true });
   }
 
   async describe(): Promise<
     { role: string; testID?: string; text?: string; value?: string; enabled: boolean }[]
   > {
+    // A native alert is modal AND invisible to dump_views (it lives in
+    // its own window outside the RN tree): without this probe the crawler
+    // enumerates the dimmed background and taps at it forever while the
+    // alert swallows every touch. When an alert is up, IT is the screen —
+    // its buttons are the only reachable actions.
+    const alert = await this.session.alertInfo();
+    if (alert.ok && alert.data.present) {
+      return [
+        { role: 'Alert', text: alert.data.text || 'alert', enabled: true },
+        ...alert.data.buttons.map((b) => ({ role: 'Button', text: b, button: true, enabled: true })),
+      ];
+    }
     const r = await this.session.describe();
     if (!r.ok) throw new Error(`describe failed: ${r.error.message}`);
     return r.data.elements;
