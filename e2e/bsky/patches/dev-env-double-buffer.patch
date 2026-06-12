@@ -1,0 +1,144 @@
+diff --git a/dev-env/mock-server.ts b/dev-env/mock-server.ts
+index 12f5bb7..be73437 100644
+--- a/dev-env/mock-server.ts
++++ b/dev-env/mock-server.ts
+@@ -1,9 +1,44 @@
+ import {createServer as createHTTPServer} from 'node:http'
++import net from 'node:net'
+ import {parse} from 'node:url'
+ 
+ import {createServer, type TestPDS} from './test-pds.ts'
+ 
++// ---- L4 proxy on the app-facing :3000 ----
++// The e2e app build talks to a hardcoded http://localhost:3000. Real PDS
++// instances bind dynamic ports now, so a STANDBY instance can pre-warm in
++// the background while the live one is still serving; each request swaps
++// the proxy target instead of paying the ~2.8s TestNetwork spin-up inline.
++let currentPdsPort = 0
++net
++  .createServer(sock => {
++    const target = currentPdsPort
++    if (!target) return sock.destroy()
++    const up = net.connect(target, '127.0.0.1')
++    sock.pipe(up)
++    up.pipe(sock)
++    const kill = () => {
++      sock.destroy()
++      up.destroy()
++    }
++    sock.on('error', kill)
++    up.on('error', kill)
++  })
++  .listen(3000)
++
++// Monotonically advancing base ports: a retiring instance's teardown
++// (docker postgres schema drop) can outlive the next pre-warm, so a port
++// can NOT be reused generation-to-generation — every instance gets a
++// fresh +100 window (pds at base, plc/bsky scan upward from it).
++let nextPdsBase = 3000
++function makeServer(inviteRequired: boolean): Promise<TestPDS> {
++  nextPdsBase += 100
++  if (nextPdsBase > 9900) nextPdsBase = 3100
++  return createServer({inviteRequired, pdsPort: nextPdsBase})
++}
++
+ let server: TestPDS
++let standby: Promise<TestPDS> | null = null
+ // eslint-disable-next-line @typescript-eslint/no-misused-promises
+ createHTTPServer(async (req, res) => {
+   const url = parse(req.url || '/', true)
+@@ -11,15 +46,41 @@ createHTTPServer(async (req, res) => {
+     return res.writeHead(200).end()
+   }
+   try {
+-    console.log('Closing old server')
+-    await server?.close()
++    const inviteRequired = !!(url?.query && 'invite' in url.query)
++    // Retire the old instance in the background — the proxy stops routing
++    // to it the moment currentPdsPort flips, so its teardown (docker
++    // postgres schema drop) need not block this response.
++    const old = server
+     console.log('Starting new server')
+-    const inviteRequired = url?.query && 'invite' in url.query
+-    server = await createServer({inviteRequired})
+-    console.log('Listening at', server.pdsUrl)
++    if (standby && !inviteRequired) {
++      const pending = standby
++      standby = null
++      try {
++        server = await pending
++      } catch (e) {
++        // Pre-warm failed (port race, transient docker hiccup) — fall
++        // back to an inline spin-up rather than poisoning this request.
++        console.error('standby was broken, building inline', e)
++        server = await makeServer(inviteRequired)
++      }
++    } else {
++      if (standby) {
++        // Standby was pre-warmed without invites — discard it.
++        standby
++          .then(s => s.close())
++          .catch(e => console.error('standby discard failed', e))
++        standby = null
++      }
++      server = await makeServer(inviteRequired)
++    }
++    old?.close().catch(e => console.error('old server close failed', e))
++    currentPdsPort = Number(new URL(server.pdsUrl).port)
++    console.log('Listening at', server.pdsUrl, '(proxied on :3000)')
+     if (url?.query) {
+       if ('users' in url.query) {
+         console.log('Generating mock users')
++        // NOTE: account creation must stay SEQUENTIAL — concurrent
++        // createAccount calls 500 on the sqlite-backed test PDS.
+         await server.mocker.createUser('alice')
+         await server.mocker.createUser('bob')
+         await server.mocker.createUser('carla')
+@@ -493,16 +554,24 @@ createHTTPServer(async (req, res) => {
+       }
+     }
+     console.log('Ready')
+-    return res
++    res
+       .writeHead(200, {
+         'content-type': 'application/json',
+       })
+       .end(
+         JSON.stringify({
+-          pdsUrl: server.pdsUrl,
++          // App-facing URL is the proxy, not the instance's real port.
++          pdsUrl: 'http://localhost:3000',
+           appviewDid: server.appviewDid,
+         }),
+       )
++    // Pre-warm the next instance AFTER responding — its ~2.8s TestNetwork
++    // spin-up overlaps the e2e flow that is about to run.
++    if (!standby) {
++      standby = makeServer(false)
++      standby.catch(e => console.error('standby pre-warm failed', e))
++    }
++    return
+   } catch (e) {
+     console.error('Error!', e)
+     return res.writeHead(500).end()
+diff --git a/dev-env/test-pds.ts b/dev-env/test-pds.ts
+index 6696868..5a94dd4 100644
+--- a/dev-env/test-pds.ts
++++ b/dev-env/test-pds.ts
+@@ -59,11 +59,14 @@ class StringIdGenerator {
+ const ids = new StringIdGenerator()
+ 
+ export async function createServer(
+-  {inviteRequired}: {inviteRequired: boolean} = {
++  {inviteRequired, pdsPort}: {inviteRequired: boolean; pdsPort?: number} = {
+     inviteRequired: false,
+   },
+ ): Promise<TestPDS> {
+-  const port = 3000
++  // Default stays the app-facing :3000. The mock-server manager passes a
++  // dynamic port instead and fronts :3000 with an L4 proxy so a standby
++  // instance can pre-warm while the previous one is still serving.
++  const port = pdsPort ?? 3000
+   const port2 = await getPort(port + 1)
+   const port3 = await getPort(port2 + 1)
+   const pdsUrl = `http://localhost:${port}`

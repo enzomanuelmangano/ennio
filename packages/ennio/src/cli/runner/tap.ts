@@ -110,7 +110,35 @@ export async function execTapOn(
   // a settle, the tap can land on a still-moving frame or behind a
   // transitioning overlay.
   if (sel.point !== undefined) {
-    await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 250 }).catch(() => undefined);
+    // Settle budget is env-tunable: on slow hosts (CI VMs) a picker
+    // sheet's image grid keeps committing while thumbnails decode, the
+    // 1500ms cap expires mid-load, and the blind point-tap lands on a
+    // not-yet-hittable cell (observed: bsky onboarding's 50%,22% photo
+    // pick dismissing the sheet pick-less).
+    const pointSettleMaxMs =
+      parseInt(process.env.ENNIO_POINT_TAP_SETTLE_MAX_MS ?? '1500', 10) || 1500;
+    await ctx.client
+      .call('wait_commit', { maxMs: pointSettleMaxMs, stableMs: 250 })
+      .catch(() => undefined);
+    // wait_commit tracks REACT commits — a sheet rising via a pure CA /
+    // presentation animation is invisible to it, and a point tap fired
+    // mid-rise lands where the YAML's coordinate WILL be, not where it
+    // is (observed: bsky onboarding's 50%,22% photo pick hitting the
+    // backdrop above the still-rising sheet, dismissing it pick-less on
+    // a slow CI VM). Wait out in-flight animations + presentation
+    // transitions too — one cheap RPC when nothing is animating.
+    {
+      // Animation budget rides the same env knob as the commit settle —
+      // a host slow enough to need a longer commit budget is slow at
+      // animations too.
+      const animDeadline = Date.now() + Math.max(3000, pointSettleMaxMs);
+      while (Date.now() < animDeadline) {
+        const a = await ctx.client.call('animations_active').catch(() => undefined);
+        if (!(a?.ok && (a.data as { active?: boolean } | undefined)?.active)) break;
+        await sleep(60);
+      }
+      await ctx.client.call('wait_presentation_idle', { maxMs: 1500 }).catch(() => undefined);
+    }
     let winW = DEFAULT_WIN_W;
     let winH = DEFAULT_WIN_H;
     const ws = await ctx.client.call('window_size').catch(() => undefined);
@@ -874,6 +902,33 @@ export async function execTapOn(
         await ctx.client
           .call('wait_react_commit', { sinceMs: preLoopReact.ts, maxMs: 4000 })
           .catch(() => undefined);
+      });
+    }
+    // Submit-dismissal settle (opt-in, ENNIO_SUBMIT_DISMISS_MAX_MS): a
+    // publish/submit/send button inside a presented sheet dismisses it
+    // only AFTER an async server round-trip (bsky composer "Post"
+    // uploads blobs first). The flow's next step can reach FLOATING
+    // overlay controls straight through the still-open sheet and reset
+    // app state mid-flight — observed on a slow CI VM: e2eRefreshHome
+    // fired during the upload, the app cancelled the in-flight
+    // uploadBlob task, and the composer wedged in "Uploading images...".
+    // Wait on the SIGNAL — the pre-tap VC chain changing (dismissal
+    // start) — then let presentation-idle absorb the transition. Bails
+    // the moment the chain changes; fast hosts pay ~1 poll.
+    const submitDismissMaxMs = parseInt(process.env.ENNIO_SUBMIT_DISMISS_MAX_MS ?? '0', 10) || 0;
+    if (submitDismissMaxMs > 0 && sel.id && /publish|submit|send/i.test(sel.id)) {
+      await timedAsync(ctx, 'tap.waitSubmitDismiss', async () => {
+        const before = chain.join('>');
+        const deadline = Date.now() + submitDismissMaxMs;
+        while (Date.now() < deadline) {
+          const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
+          const cur = (((r?.data as { chain?: string[] })?.chain ?? []) as string[]).join('>');
+          if (cur && cur !== before) {
+            await ctx.client.call('wait_presentation_idle', { maxMs: 2000 }).catch(() => undefined);
+            return;
+          }
+          await sleep(150);
+        }
       });
     }
   }

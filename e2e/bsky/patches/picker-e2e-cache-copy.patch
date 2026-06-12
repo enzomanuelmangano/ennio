@@ -1,0 +1,38 @@
+diff --git a/src/lib/media/picker.e2e.tsx b/src/lib/media/picker.e2e.tsx
+index 7aaa69c..057a9c4 100644
+--- a/src/lib/media/picker.e2e.tsx
++++ b/src/lib/media/picker.e2e.tsx
+@@ -1,4 +1,6 @@
+ import {
++  cacheDirectory,
++  copyAsync,
+   documentDirectory,
+   getInfoAsync,
+   readDirectoryAsync,
+@@ -23,7 +25,16 @@ async function getFile() {
+   files = files.filter(file => file.endsWith('.JPG'))
+   const file = `${imagesDir}/${files[0]}`
+ 
+-  const fileInfo = await getInfoAsync(file)
++  // Copy into the app's own cache before handing the path to the upload
++  // pipeline — same contract as the real picker. uploadBlob's
++  // withSafeFile writes a sibling .bin next to its input and XHR-reads
++  // it; inside the photod-owned DCIM directory that write is refused on
++  // stricter CoreSimulator hosts (GitHub macOS runners) and the upload
++  // silently never sends.
++  const cached = `${cacheDirectory}e2e-picked-${Date.now()}.jpg`
++  await copyAsync({from: file, to: cached})
++
++  const fileInfo = await getInfoAsync(cached)
+ 
+   if (!fileInfo.exists) {
+     throw new Error('Failed to get file info')
+@@ -31,7 +42,7 @@ async function getFile() {
+ 
+   return await compressIfNeeded(
+     {
+-      path: file,
++      path: cached,
+       mime: 'image/jpeg',
+       size: fileInfo.size,
+       width: 4288,
