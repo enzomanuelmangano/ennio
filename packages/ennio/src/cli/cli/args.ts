@@ -41,19 +41,19 @@ export type Flags = {
   /** --smoke: `ennio doctor --smoke <bundleId>` runs an end-to-end self-test
    *  (inject → socket → read → actuate) against a real app. */
   smoke?: boolean;
-  /** `ennio smoke` crawl caps — see commands/smoke.ts. */
+  /** `ennio improvise` crawl caps — see commands/improvise.ts. */
   maxDepth?: string;
   maxNodes?: string;
   /** --duration: wall-clock budget for the whole crawl in SECONDS
    *  (default 30). */
   duration?: string;
   /** --seed: shuffle per-screen action order with this PRNG seed.
-   *  `ennio smoke` defaults to a random seed (printed for replay). */
+   *  `ennio improvise` defaults to a random seed (printed for replay). */
   seed?: string;
   /** --deny: case-insensitive regex of testIDs the crawl never taps. */
   deny?: string;
-  /** --relaunch: `ennio smoke` restarts the app before crawling (state
-   *  kept). Default off — the crawl roots at the current screen. */
+  /** --relaunch: `ennio improvise` restarts the app before crawling
+   *  (state kept). Default off — the crawl roots at the current screen. */
   relaunch?: boolean;
   /** --show-touches: accepted for back-compat — touch visualization is
    *  ON by default now (see disableTouches). */
@@ -180,6 +180,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     'doctor',
     'mcp',
     'smoke',
+    'improvise',
   ]);
   let command: string | null = null;
   if (positional.length > 0 && KNOWN.has(positional[0])) {

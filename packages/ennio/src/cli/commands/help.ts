@@ -11,7 +11,7 @@ Usage:
   ennio screenshot [path]       grab the simulator screen
   ennio doctor                  diagnose Node, Xcode, enniohid, dylib + app socket
   ennio mcp                     serve ennio over MCP (stdio) for an AI agent
-  ennio smoke [bundleId]        crawl-based smoke test: exit 0/1, no artifacts
+  ennio improvise [bundleId]    play the app without a score: autonomous crash hunt, exit 0/1
   ennio version                 print version
   ennio help [command]          this message, or per-command help
 
@@ -52,11 +52,14 @@ tap path. stdout carries only JSON-RPC; diagnostics go to stderr.
 
 Options: --android (target an emulator), --in-process-tap
 Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
-  smoke: `ennio smoke [bundleId]
+  improvise: `ennio improvise [bundleId]
 
-Crawl-based smoke test — the product is the exit code, for CI: does
-the app survive autonomous exploration? Walks the app for the wall-clock budget, prints a one-line
-summary (plus any warnings) and writes NO files unless --output is set.
+Play the app WITHOUT a score. A YAML flow is sheet music ennio performs
+note for note; improvise is ennio exploring on its own — the product is
+the exit code, for CI: does the app survive? Walks the app for the
+wall-clock budget, prints a one-line summary (plus any warnings) and
+writes NO files unless --output is set. (\`smoke\` is a hidden
+back-compat alias through the 0.1.0 betas.)
 
 Starts WARM: no relaunch, no state reset — the crawl roots at whatever
 screen the app is showing, with session and data intact. Action order
@@ -71,9 +74,6 @@ a user would.
 
 bundleId defaults to the app already open on the booted simulator;
 several running apps is an error listing the candidates, never a guess.
-
-Not \`ennio doctor --smoke\`, which self-tests ennio's own plumbing —
-\`ennio smoke\` tests YOUR app.
 
 Options:
   --output DIR       also write crawl artifacts (app-map.json, map.mmd,

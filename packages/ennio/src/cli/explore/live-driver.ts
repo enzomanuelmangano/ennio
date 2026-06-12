@@ -9,12 +9,12 @@ import type { ExploreAction, ExploreDriver } from './types';
 
 export interface LiveDriverOptions {
   /** Whether relaunches wipe app data. Explore wants the known-zero
-   *  state (deterministic, diffable maps); smoke keeps the user's
+   *  state (deterministic, diffable maps); improvise keeps the user's
    *  state — the test starts from the app exactly as it stands. */
   clearState?: boolean;
   /** Real input only: every tap is a HID touch through the simulator's
    *  event pipeline — no in-process shortcuts (tap_tab drives UIKit
-   *  selection directly). Smoke sets this: it exists to exercise the
+   *  selection directly). Improvise sets this: it exists to exercise the
    *  app the way a finger would. */
   realInput?: boolean;
 }

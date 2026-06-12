@@ -185,8 +185,19 @@ export function isAppRunning(udid: string, bundleId: string): boolean {
  * Build the multi-line diagnosis appended to socket errors. Empty
  * string when the app is alive and no crash report is found — the
  * socket failure is then genuinely a socket/dylib problem.
+ *
+ * `context` steers attribution. A scripted flow crashing mid-run is
+ * suspicious of the injection, so 'flow' keeps the open-an-issue nudge.
+ * 'improvise' exists to FIND app crashes — there the default reading is
+ * "your app has a bug", and ennio's issue tracker is only suggested
+ * when the faulting frames actually implicate libennio.
  */
-export function diagnoseSocketFailure(udid: string, bundleId: string, sinceMs: number): string {
+export function diagnoseSocketFailure(
+  udid: string,
+  bundleId: string,
+  sinceMs: number,
+  context: 'flow' | 'improvise' = 'flow',
+): string {
   const alive = isAppRunning(udid, bundleId);
   const report = findCrashReport(bundleId, sinceMs);
   if (alive && !report) return '';
@@ -195,35 +206,50 @@ export function diagnoseSocketFailure(udid: string, bundleId: string, sinceMs: n
   if (report) {
     const secs = Math.max(0, Math.round((report.crashedAtMs - sinceMs) / 1000));
     lines.push(`the app crashed (${report.exception}) ~${secs}s after launch.`);
+    lines.push(`crash report: ${report.path}`);
     if (report.faultingFrames.length) {
       lines.push('faulting thread:');
       for (const f of report.faultingFrames) lines.push(`    ${f}`);
     }
+    // Hard evidence beats context: ennio's own code in the faulting
+    // frames implicates the injection wherever the crash happened.
+    const ennioInFrames = report.faultingFrames.some((f) => f.includes('libennio'));
     if (report.jsFatal) {
       lines.push(
         "the app's JavaScript threw a fatal exception (RCTFatalException) — " +
           'an app bug, not an ennio issue. Check the JS bundle the app is loading.',
       );
-      lines.push(`crash report: ${report.path}`);
+    } else if (ennioInFrames) {
+      lines.push(
+        'libennio.dylib is on the faulting thread — likely an ennio bug. ' +
+          `Retry with --safe-mode, and please open an issue attaching the report: ${ISSUES_URL}`,
+      );
+    } else if (context === 'improvise') {
+      lines.push(
+        'the crash happened under autonomous exploration — most likely a bug ' +
+          'in the app itself. Replay the exact walk with the seed printed above ' +
+          'and debug from the crash report.',
+      );
     } else {
       if (report.ennioLoaded) {
         lines.push(
-          'libennio.dylib was loaded — likely an injection conflict. ' +
+          'libennio.dylib was loaded — possibly an injection conflict. ' +
             'Retry with --safe-mode to disable in-app hooks.',
         );
       }
-      lines.push(`crash report: ${report.path}`);
       lines.push(
-        'this is likely an ennio bug — please open an issue attaching the ' +
-          `report: ${ISSUES_URL}`,
+        'if the same flow is stable without ennio, please open an issue ' +
+          `attaching the report: ${ISSUES_URL}`,
       );
     }
   } else {
+    lines.push('the app process is no longer running.');
     lines.push(
-      'the app process is no longer running (no crash report found yet — ' +
-        'check ~/Library/Logs/DiagnosticReports in a few seconds, then ' +
-        `open an issue: ${ISSUES_URL}).`,
+      `no crash report found yet — macOS writes them asynchronously; check ${REPORTS_DIR} in a few seconds.`,
     );
+    if (context !== 'improvise') {
+      lines.push(`if a report implicates libennio, open an issue: ${ISSUES_URL}`);
+    }
   }
   return lines.join('\n');
 }
