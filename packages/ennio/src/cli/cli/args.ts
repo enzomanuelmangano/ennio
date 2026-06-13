@@ -67,6 +67,10 @@ export type Flags = {
    *  Saved next to the run's artifacts (--output) or the cwd. Pairs with
    *  --show-touches to make every tap visible in the footage. */
   record?: boolean;
+  /** --threshold: `ennio match` minimum match ratio in [0,1] to pass (default 0.97). */
+  threshold?: string;
+  /** --mask: `ennio match` comma-separated element testIDs to ignore before diffing. */
+  mask?: string;
 };
 
 export type ParsedArgs = {
@@ -84,6 +88,8 @@ const STRING_FLAGS = new Set([
   'duration',
   'seed',
   'deny',
+  'threshold',
+  'mask',
 ]);
 const BOOL_FLAGS = new Set([
   'verbose',
@@ -181,6 +187,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     'mcp',
     'smoke',
     'improvise',
+    'match',
   ]);
   let command: string | null = null;
   if (positional.length > 0 && KNOWN.has(positional[0])) {
