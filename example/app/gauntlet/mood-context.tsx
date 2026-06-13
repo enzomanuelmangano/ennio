@@ -22,15 +22,45 @@ import Animated, {
 } from 'react-native-reanimated';
 
 const EMOTIONS = [
-  'Amazed', 'Amused', 'Brave', 'Calm', 'Confident', 'Content',
-  'Excited', 'Grateful', 'Happy', 'Hopeful', 'Indifferent', 'Joyful',
-  'Passionate', 'Peaceful', 'Proud', 'Relieved', 'Satisfied', 'Surprised',
+  'Amazed',
+  'Amused',
+  'Brave',
+  'Calm',
+  'Confident',
+  'Content',
+  'Excited',
+  'Grateful',
+  'Happy',
+  'Hopeful',
+  'Indifferent',
+  'Joyful',
+  'Passionate',
+  'Peaceful',
+  'Proud',
+  'Relieved',
+  'Satisfied',
+  'Surprised',
 ];
 
 const CONTEXT = [
-  'Community', 'Current Events', 'Dating', 'Education', 'Family', 'Fitness',
-  'Friends', 'Health', 'Hobbies', 'Identity', 'Money', 'Partner',
-  'Self Care', 'Spirituality', 'Tasks', 'Travel', 'Weather', 'Work',
+  'Community',
+  'Current Events',
+  'Dating',
+  'Education',
+  'Family',
+  'Fitness',
+  'Friends',
+  'Health',
+  'Hobbies',
+  'Identity',
+  'Money',
+  'Partner',
+  'Self Care',
+  'Spirituality',
+  'Tasks',
+  'Travel',
+  'Weather',
+  'Work',
 ];
 
 const GOLD = '#E8C45A';
@@ -46,7 +76,7 @@ function Chip({ label, selected }: { label: string; selected?: boolean }) {
           glassEffectStyle="regular"
           colorScheme="dark"
           isInteractive
-          tintColor={selected ? 'rgba(216,183,58,0.5)' : 'rgba(48,42,24,0.22)'}
+          tintColor={selected ? 'rgba(216,183,58,0.5)' : 'rgba(120,108,72,0.42)'}
           style={[styles.chip, selected && styles.chipSelected]}
         >
           <Text style={[styles.chipText, selected && styles.chipTextSel]}>{label}</Text>
@@ -68,7 +98,13 @@ function ChipField({ tags, selected }: { tags: string[]; selected?: string }) {
       ))}
     </View>
   );
-  return GLASS_OK ? <GlassContainer spacing={8} style={styles.field}>{body}</GlassContainer> : body;
+  return GLASS_OK ? (
+    <GlassContainer spacing={8} style={styles.field}>
+      {body}
+    </GlassContainer>
+  ) : (
+    body
+  );
 }
 
 export default function MoodContext() {
@@ -90,7 +126,11 @@ export default function MoodContext() {
 
   const Sheet = GLASS_OK ? GlassView : View;
   const sheetGlass = GLASS_OK
-    ? { glassEffectStyle: 'regular' as const, colorScheme: 'dark' as const, tintColor: 'rgba(14,12,6,0.26)' }
+    ? {
+        glassEffectStyle: 'regular' as const,
+        colorScheme: 'dark' as const,
+        tintColor: 'rgba(14,12,6,0.26)',
+      }
     : {};
 
   return (
@@ -124,10 +164,16 @@ export default function MoodContext() {
       <Sheet {...(sheetGlass as object)} style={styles.sheet} testID="context-sheet">
         <Text style={styles.label}>{mode === 'emotion' ? 'Pleasant' : 'Add context'}</Text>
         <View style={styles.stack}>
-          <Animated.View style={[styles.layer, emotionStyle]} pointerEvents={mode === 'emotion' ? 'auto' : 'none'}>
+          <Animated.View
+            style={[styles.layer, emotionStyle]}
+            pointerEvents={mode === 'emotion' ? 'auto' : 'none'}
+          >
             <ChipField tags={EMOTIONS} selected="Grateful" />
           </Animated.View>
-          <Animated.View style={[styles.layer, contextStyle]} pointerEvents={mode === 'context' ? 'auto' : 'none'}>
+          <Animated.View
+            style={[styles.layer, contextStyle]}
+            pointerEvents={mode === 'context' ? 'auto' : 'none'}
+          >
             <ChipField tags={CONTEXT} />
           </Animated.View>
         </View>
@@ -135,22 +181,36 @@ export default function MoodContext() {
         <View style={styles.footer}>
           {mode === 'emotion' ? (
             <>
-              <PressableScale testID="show-all"><Text style={styles.ghost}>Show all</Text></PressableScale>
+              <PressableScale testID="show-all">
+                <Text style={styles.ghost}>Show all</Text>
+              </PressableScale>
               <PressableScale testID="add-context" onPress={showContext}>
                 {GLASS_OK ? (
-                  <GlassView glassEffectStyle="regular" colorScheme="dark" isInteractive tintColor="rgba(30,26,16,0.5)" style={styles.pill}>
+                  <GlassView
+                    glassEffectStyle="regular"
+                    colorScheme="dark"
+                    isInteractive
+                    tintColor="rgba(30,26,16,0.5)"
+                    style={styles.pill}
+                  >
                     <Text style={styles.pillText}>Add context →</Text>
                   </GlassView>
                 ) : (
-                  <View style={[styles.pill, styles.chipFallback]}><Text style={styles.pillText}>Add context →</Text></View>
+                  <View style={[styles.pill, styles.chipFallback]}>
+                    <Text style={styles.pillText}>Add context →</Text>
+                  </View>
                 )}
               </PressableScale>
             </>
           ) : (
             <>
-              <PressableScale testID="back-chip" onPress={showEmotion}><Text style={styles.ghost}>← 1 emotion</Text></PressableScale>
+              <PressableScale testID="back-chip" onPress={showEmotion}>
+                <Text style={styles.ghost}>← 1 emotion</Text>
+              </PressableScale>
               <PressableScale testID="submit-button">
-                <View style={styles.submit}><Text style={styles.submitGlyph}>↑</Text></View>
+                <View style={styles.submit}>
+                  <Text style={styles.submitGlyph}>↑</Text>
+                </View>
               </PressableScale>
             </>
           )}
@@ -190,6 +250,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.6,
     shadowRadius: 40,
     shadowOffset: { width: 0, height: 0 },
+    borderCurve: 'continuous',
   },
   star: { color: GOLD, fontSize: 23 },
   sheet: {
@@ -204,13 +265,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingHorizontal: 18,
     paddingTop: 18,
+    borderCurve: 'continuous',
   },
   label: { color: 'rgba(245,240,228,0.55)', fontSize: 13, marginBottom: 12, marginLeft: 4 },
   stack: { flex: 1 },
   layer: { ...StyleSheet.absoluteFillObject },
   field: { flex: 1 },
   tags: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10 },
-  chipWrap: { borderRadius: 19 },
+  chipWrap: { borderRadius: 19, borderCurve: 'continuous' },
   chip: {
     paddingVertical: 9,
     paddingHorizontal: 22,
@@ -218,19 +280,47 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
+    borderCurve: 'continuous',
   },
-  chipFallback: { backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  chipFallback: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
   chipSelected: { borderWidth: 1, borderColor: GOLD },
   chipText: { color: TEXT, fontSize: 15 },
   chipTextSel: { color: GOLD },
-  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16 },
-  ghost: { color: 'rgba(245,240,228,0.8)', fontSize: 15, paddingVertical: 12, paddingHorizontal: 16 },
-  pill: { paddingVertical: 12, paddingHorizontal: 18, borderRadius: 22, overflow: 'hidden' },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+  },
+  ghost: {
+    color: 'rgba(245,240,228,0.8)',
+    fontSize: 15,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  pill: {
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
+  },
   pillText: { color: TEXT, fontSize: 15 },
   submit: {
-    width: 64, height: 44, borderRadius: 22, backgroundColor: GOLD,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: GOLD, shadowOpacity: 0.7, shadowRadius: 16, shadowOffset: { width: 0, height: 0 },
+    width: 64,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: GOLD,
+    shadowOpacity: 0.7,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 0 },
   },
   submitGlyph: { color: '#1a1500', fontSize: 22, fontWeight: '700' },
 });
