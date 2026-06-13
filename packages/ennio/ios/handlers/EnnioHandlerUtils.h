@@ -30,10 +30,14 @@ NS_ASSUME_NONNULL_BEGIN
 // JSON parse helpers — `args` is always a JSON object literal.
 // =====================================================================
 
+// `args` is genuinely nullable: callers pass EnnioParseArgs's result
+// straight in (nil on malformed JSON) and these helpers nil-tolerate via
+// objc messaging — so annotate it honestly rather than letting the
+// NS_ASSUME_NONNULL default claim _Nonnull.
 NSDictionary *_Nullable EnnioParseArgs(const std::string &args);
-NSString *_Nullable EnnioArgString(NSDictionary *args, NSString *key);
-double EnnioArgDouble(NSDictionary *args, NSString *key, double fallback);
-int EnnioArgInt(NSDictionary *args, NSString *key, int fallback);
+NSString *_Nullable EnnioArgString(NSDictionary *_Nullable args, NSString *key);
+double EnnioArgDouble(NSDictionary *_Nullable args, NSString *key, double fallback);
+int EnnioArgInt(NSDictionary *_Nullable args, NSString *key, int fallback);
 
 // =====================================================================
 // JSON emit helpers — return string literals the socket can ship as-is.
@@ -46,7 +50,7 @@ std::string EnnioBoolJson(BOOL b);
 std::string EnnioStringJson(NSString *_Nullable s);
 std::string EnnioRectJson(EnnioRect r);
 std::string EnnioElapsedJson(uint32_t elapsedMs, BOOL ok);
-std::string EnnioStringArrayJson(NSArray<NSString *> *arr);
+std::string EnnioStringArrayJson(NSArray<NSString *> *_Nullable arr);
 
 // =====================================================================
 // Main-thread bounce — runs `fn` on the main queue if not already
