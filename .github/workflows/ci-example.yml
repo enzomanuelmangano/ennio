@@ -36,10 +36,19 @@ on:
         type: boolean
         default: false
   # Every PR that can affect the iOS runner or the example suite.
+  #
+  # src/** is the shared cross-platform CLI (runner, settle, rpc, driver
+  # core) — a change there genuinely affects iOS, so it triggers here.
+  # The Android-only TS below is carved out with negations (last-match-
+  # wins, per file): a PR touching ONLY Android-specific TS won't boot a
+  # macOS sim. android/** native isn't listed at all, so it never does.
   pull_request:
     branches: [main]
     paths:
       - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/android/**'
+      - '!packages/ennio/src/cli/platform/android.ts'
+      - '!packages/ennio/src/cli/driver/android-driver.ts'
       - 'packages/ennio/ios/**'
       - 'packages/ennio/cpp/**'
       - 'packages/ennio/native-hid/**'

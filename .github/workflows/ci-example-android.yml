@@ -31,10 +31,20 @@ on:
   # Every PR that can affect the Android runner or the example suite.
   # Flake rate cleared the bar for gating merges: 3 consecutive zero-retry
   # 40/40 dispatch runs on the escalating-backoff injection fix.
+  #
+  # src/** is the shared cross-platform CLI (runner, settle, rpc, driver
+  # core) — a change there genuinely affects Android, so it triggers here.
+  # Only the provably iOS-only TS below is carved out with negations
+  # (last-match-wins, per file): the iOS-simulator manager (sim.ts) and
+  # the iOS platform adapter never run on Android. ios/** native isn't
+  # listed at all, so it never triggers Android.
   pull_request:
     branches: [main]
     paths:
       - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/platform/ios.ts'
+      - '!packages/ennio/src/cli/sim.ts'
+      - '!packages/ennio/src/cli/sim.test.ts'
       - 'packages/ennio/android/**'
       - 'packages/ennio/android-inject/**'
       - 'packages/ennio/cpp/**'
