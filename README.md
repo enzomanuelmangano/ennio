@@ -1,28 +1,20 @@
 # Ennio
 
-Maestro-compatible E2E test runner for React Native. The CLI
-injects a prebuilt ObjC dylib into your simulator app via
-`DYLD_INSERT_LIBRARIES` and drives it through a Unix socket. Real
-CoreSimulator touches are dispatched by an in-house host helper that
-posts Indigo HID events straight to the simulator — the gesture goes
-through the same path a finger would.
-
-No XCTest, no CDP, no Metro required, no companion driver.
+Maestro-compatible E2E test runner for React Native. 
 
 ```bash
 ennio test e2e/01-auth-flow.yaml      # one flow
 ennio test e2e/                       # every *.yaml in the directory
 ```
 
-https://github.com/user-attachments/assets/8734572f-f90c-4658-9cba-98642d0da2d5
+### Why? 
 
-## Getting started
+E2E tests are the most reliable way to ensure your product is stable. As the time it takes to build software keeps shrinking, verification is becoming the bottleneck.
 
-Requires a React Native app (architecture-agnostic — both Paper and
-Fabric commit signals are supported), iOS 17+
-simulator, Xcode 16+, and Node 18+. No extra toolchain — touches are
-driven by an in-house helper that links Xcode's own CoreSimulator /
-SimulatorKit frameworks. No Homebrew formula, no pip.
+The vision behind this package is to:
+- speed up verification as much as possible.
+- give your agent the fastest possible eyes and hands
+- provide a consistent way to [design loops instead of prompts](https://x.com/steipete/status/2063697162748260627?s=20).
 
 ### Install
 
@@ -58,21 +50,6 @@ appId: com.your.app
 ennio test e2e/login.yaml
 ```
 
-The CLI:
-
-1. Picks the dylib from the package's `prebuilt/` directory.
-2. Verifies its SHA-256 against `prebuilt/manifest.json` (refuses on
-   mismatch — see [Security](#security)).
-3. Sets `DYLD_INSERT_LIBRARIES` and `ENNIO_TARGET_BUNDLE_ID` as child
-   env on the `simctl launch` (`SIMCTL_CHILD_*` — only your app
-   inherits them, not the whole simulator).
-4. Launches your app via `simctl`.
-5. The shim dylib gates on bundle-id + RN-app presence and dlopens
-   the real dylib only inside your targeted app.
-6. The dylib bootstraps a Unix socket server, the CLI connects and
-   drives the test flow.
-7. Clears the launchctl env on exit so the simulator is left clean.
-
 ## How it works
 
 ### Discovery
@@ -103,6 +80,8 @@ The dylib observes React commits via swizzled mount methods and tracks
 view-tree stability via a CADisplayLink frame-hash ticker. The CLI
 uses these signals (`wait_commit`, `wait_react_commit`) to know when
 a tap's side effects have settled before proceeding to the next step.
+
+https://github.com/user-attachments/assets/8734572f-f90c-4658-9cba-98642d0da2d5
 
 ## Architecture
 
