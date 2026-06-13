@@ -131,6 +131,20 @@ void RegisterEnnioSystemHandlers(void) {
             while (stack.count) {
                 UIView *v = stack.lastObject;
                 [stack removeLastObject];
+                // Occlusion + visibility pruning — the crawler enumerates
+                // tap targets from this dump, so a flat walk of the whole
+                // window tree makes it tap elements on screens BEHIND the
+                // current one (the screen under a presented sheet/dialog,
+                // or a pushed-away nav screen UIKit keeps in the tree).
+                // Both finder checks fail-open, so an undeterminable view is
+                // kept rather than wrongly dropped:
+                //   * hidden / fully transparent — covered nav screens land
+                //     here; every descendant is hidden too, so prune the
+                //     subtree.
+                //   * behind the topmost presented VC — the screen under a
+                //     modal; its whole subtree shares that hosting VC, prune.
+                if (v.hidden || v.alpha < 0.01) continue;
+                if ([EnnioFinder isBehindTopmostPresentation:v]) continue;
                 NSString *cls = NSStringFromClass([v class]);
                 NSString *al = v.accessibilityLabel ?: @"";
                 NSString *av = v.accessibilityValue ?: @"";
@@ -159,7 +173,11 @@ void RegisterEnnioSystemHandlers(void) {
                         t = [(NSAttributedString *)raw string];
                 } @catch (...) {
                 }
-                if (al.length || av.length || t.length || ident.length) {
+                // Emit only genuinely on-screen views: isOnScreen adds the
+                // window-rect intersection the subtree prune above can't —
+                // e.g. rows scrolled out of a list still live in the tree.
+                if ((al.length || av.length || t.length || ident.length) &&
+                    [EnnioFinder isOnScreen:v]) {
                     [out addObject:[NSString
                                        stringWithFormat:@"%@ | aL=%@ | aV=%@ | t=%@ | id=%@ | tr=%@",
                                                         cls, al, av, t, ident, traits]];

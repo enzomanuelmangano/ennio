@@ -1,4 +1,4 @@
-// The crawl engine behind `ennio smoke` — deterministic app crawler.
+// The crawl engine behind `ennio improvise` — deterministic app crawler.
 // Shared types.
 //
 // The crawler walks the app as a graph: a NODE is a screen (identified by

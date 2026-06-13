@@ -174,7 +174,7 @@ that keeps it safe:
 ennio test <flow.yaml>            # one flow
 ennio test e2e/                   # every *.yaml under the directory
 ennio test --verbose e2e/         # log every step + timing
-ennio smoke [bundleId]            # autonomous crawl smoke test — the exit code is the product
+ennio improvise [bundleId]        # play the app without a score — autonomous crash hunt, exit 0/1
 ennio hierarchy                   # dump the in-app shadow tree as JSON
 ennio screenshot [path]           # grab the simulator screen
 ennio doctor                      # diagnose Node, Xcode, enniohid, dylib + app socket
@@ -198,9 +198,21 @@ ennio mcp                         # serve ennio over MCP (stdio) for an AI agent
 | `--disable-touches`    | touches shown  | Touch visualization is **on by default**: every tap/swipe/drag ennio performs is drawn on the device (iOS: in-app ripple overlay; Android: the OS _show touches_ setting) and disarmed when the session ends. Disable for pixel-exact screenshot comparisons. |
 | `--record`             | off            | Record the whole run to an `.mp4` (`simctl recordVideo`, iOS only). Saved into `--output` or the cwd; the path is printed at the end.                                                                                                                         |
 
-`ennio smoke` adds crawl-specific flags — `--duration`, `--seed`,
-`--deny`, `--max-depth`, `--max-nodes`, `--output`, `--relaunch`. The
-package README documents them in full.
+### `ennio improvise`
+
+Drives the app without a script to find crashes — the exit code is the
+product (`0` survived, `1` crashed, with the `.ips` report path and a
+seed to replay the exact walk). It's not a random tapper: it signs each
+screen to know where it's been, skips elements on screens occluded
+behind a modal or push, fills text inputs with format-plausible values
+before pressing the primary action, follows flow CTAs
+(next/submit/checkout) to completion, scrolls to reveal below-the-fold
+content, and drags sliders. Warm-starts on the current screen by
+default.
+
+Crawl-specific flags — `--duration`, `--seed`, `--deny`, `--max-depth`,
+`--max-nodes`, `--output`, `--relaunch` — are documented in full in the
+package README.
 
 > Discovery and settle are always **in-process** (the injected dylib reads the
 > view tree / React commits / a11y) — `--in-process-tap` only changes how

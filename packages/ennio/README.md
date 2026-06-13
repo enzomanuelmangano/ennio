@@ -95,14 +95,14 @@ Native's responder system, and RNGH all see a real touch.
 
 ### Commands
 
-| Command                                 | What it does                                                                                                                                                       |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ennio test <flow.yaml \| dir \| glob>` | Run Maestro YAML flows (`run` is an alias; a bare path works too)                                                                                                  |
-| `ennio smoke [bundleId]`                | Crawl-based smoke test: walks the app autonomously for a wall-clock budget; the exit code is the product. Defaults to the app already open on the booted simulator |
-| `ennio screenshot [path]`               | Capture the simulator screen                                                                                                                                       |
-| `ennio hierarchy`                       | Dump the app's view hierarchy                                                                                                                                      |
-| `ennio doctor [--smoke <bundleId>]`     | Diagnose the setup; `--smoke` runs an inject → socket → actuate self-test                                                                                          |
-| `ennio mcp`                             | Start the MCP server on stdio (see below)                                                                                                                          |
+| Command                                 | What it does                                                                                                                                                                                                                                           |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ennio test <flow.yaml \| dir \| glob>` | Run Maestro YAML flows (`run` is an alias; a bare path works too)                                                                                                                                                                                      |
+| `ennio improvise [bundleId]`            | Plays the app without a score: walks it autonomously for a wall-clock budget, hunting crashes; the exit code is the product. Defaults to the app already open on the booted simulator. (`smoke` is a hidden back-compat alias through the 0.1.0 betas) |
+| `ennio screenshot [path]`               | Capture the simulator screen                                                                                                                                                                                                                           |
+| `ennio hierarchy`                       | Dump the app's view hierarchy                                                                                                                                                                                                                          |
+| `ennio doctor [--smoke <bundleId>]`     | Diagnose the setup; `--smoke` runs an inject → socket → actuate self-test                                                                                                                                                                              |
+| `ennio mcp`                             | Start the MCP server on stdio (see below)                                                                                                                                                                                                              |
 
 ### Flags — all commands
 
@@ -126,7 +126,7 @@ Native's responder system, and RNGH all see a real touch.
 | `--disable-animations` | off      | Suppress app animations (1000x time-compression — transitions snap to their final frame). Faster, but alters animated UI   |
 | `--disable-reuse-app`  | reuse on | Force a full relaunch on `clearState` instead of the default soft-reset (data wipe + JS reload)                            |
 
-### Flags — `ennio smoke`
+### Flags — `ennio improvise`
 
 | Flag              | Default                            | Effect                                                                                                                         |
 | ----------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -136,12 +136,25 @@ Native's responder system, and RNGH all see a real touch.
 | `--max-depth <n>` | 5                                  | Max action-path length from the root. Primary CTAs (next/submit/checkout/…) may run a few levels deeper so flows get completed |
 | `--max-nodes <n>` | 50                                 | Max distinct screens to register                                                                                               |
 | `--output <dir>`  | none                               | Artifact directory (app map, per-screen screenshots, recording)                                                                |
-| `--relaunch`      | off (smoke)                        | Restart the app before crawling (state kept). Default is a warm start rooted at the current screen                             |
+| `--relaunch`      | off                                | Restart the app before crawling (state kept). Default is a warm start rooted at the current screen                             |
 
-Exit codes (`smoke`): `0` — the app survived the crawl (caps/budget cuts
+Exit codes (`improvise`): `0` — the app survived the crawl (caps/budget cuts
 are fine; a barely-moved walk prints a `low-coverage` warning); `1` —
 the app crashed mid-crawl (diagnosis printed, last action attributed),
 attach failed, or no screen was readable.
+
+**What the walk does.** `improvise` is more than a random tapper. On each
+screen it identifies a structural signature (so it knows where it's been),
+enumerates only the elements actually on screen (occluded screens behind a
+modal or a pushed view are skipped), and works the screen the way a person
+would: it fills text inputs with format-plausible values (an email field
+gets an email, a card field gets a test card) before pressing the primary
+action, follows flow-advancing CTAs (next / submit / checkout / sign-in)
+through to completion instead of abandoning them, scrolls to reveal
+content below the fold, and drags sliders rather than tapping them. Native
+alerts are treated as their own screen. A crash found this way is reported
+against the app, with the `.ips` report path and the seed to replay the
+exact walk.
 
 ### Environment variables
 

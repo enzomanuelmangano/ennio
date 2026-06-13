@@ -1,12 +1,15 @@
 /**
- * `ennio smoke [bundleId]` — crawl-based app smoke test for CI.
+ * `ennio improvise [bundleId]` — autonomous crash hunt for CI.
  *
+ * A YAML flow is the score; this command is ennio playing WITHOUT one.
  * The product is the EXIT CODE. It walks the app (the crawl engine in
  * src/cli/explore/) for the wall-clock budget and answers one question —
  * does the app survive autonomous exploration? — printing a one-screen
  * summary and writing NOTHING unless --output is given.
+ * (`smoke` is accepted as a hidden back-compat alias through the 0.1.0
+ * betas.)
  *
- * Smoke exercises the app the way a user would:
+ * It exercises the app the way a user would:
  *   * WARM START — no relaunch, no clearState, ever: the crawl roots at
  *     whatever screen the app shows right now, with the user's session
  *     and data intact.
@@ -20,10 +23,6 @@
  *   exit 0  crawl completed (caps/budget cuts are fine)
  *   exit 1  the app crashed mid-crawl (diagnosis printed, with the last
  *           action attributed), attach failed, or no screen was readable
- *
- * Not to be confused with `ennio doctor --smoke`, which self-tests
- * ennio's own plumbing (inject → socket → actuate). `ennio smoke` tests
- * YOUR app.
  *
  * The default bundleId is the app already open on the booted simulator:
  * launchctl lists running app processes as "UIKitApplication:<id>", and
@@ -46,6 +45,46 @@ import { selectPlatform } from '../platform';
 import type { ScreenRecording } from '../recorder';
 import { startScreenRecording } from '../recorder';
 import { getTargetUdid } from '../sim';
+import { dim, cyan, SPINNER } from '../ui/ansi';
+import { LiveRegion } from '../ui/live-region';
+
+/**
+ * Live `⠋ improvising · <bundleId>` line on a TTY — a heartbeat that
+ * shows the walk is alive and how far it's gotten. No-op when output
+ * isn't a TTY (CI logs stay clean) or when --verbose streams per-action
+ * lines (the spinner would fight them). Counters are fed from the crawl
+ * log callback; the braille frame advances on its own ~12fps timer.
+ */
+function makeImproviseSpinner(bundleId: string, enabled: boolean) {
+  let screens = 0;
+  let actions = 0;
+  let frame = 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const region = new LiveRegion(process.stderr, 80);
+  const paint = () => {
+    region.render([
+      `${cyan(SPINNER[frame % SPINNER.length])} ${dim('improvising')} · ${bundleId}` +
+        dim(`   ${screens} screens · ${actions} actions`),
+    ]);
+  };
+  return {
+    start() {
+      if (!enabled) return;
+      timer = setInterval(() => {
+        frame++;
+        paint();
+      }, 80);
+    },
+    note(msg: string) {
+      if (msg.startsWith('screen ')) screens++;
+      else if (/^\s*[→·]/.test(msg)) actions++;
+    },
+    stop() {
+      if (timer) clearInterval(timer);
+      region.stop();
+    },
+  };
+}
 
 function intFlag(value: string | undefined, fallback: number): number {
   const n = Number(value);
@@ -96,7 +135,7 @@ function bootedSims(): string[] {
   }
 }
 
-export async function runSmokeCommand(positional: string[], flags: Flags): Promise<number> {
+export async function runImproviseCommand(positional: string[], flags: Flags): Promise<number> {
   let bundleId = positional[0];
   // Device pick, warm-start flavored: with several sims booted and no
   // ENNIO_UDID pin, "first booted" can land the run on a sim that merely
@@ -107,10 +146,10 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     const where = bootedSims().filter((u) => runningApps(u).includes(bundleId));
     if (where.length > 0) {
       process.env.ENNIO_UDID = where[0];
-      console.error(`[smoke] device: ${where[0]} (${bundleId} is running there)`);
+      console.error(`[improvise] device: ${where[0]} (${bundleId} is running there)`);
       if (where.length > 1) {
         console.error(
-          `[smoke] note: ${bundleId} runs on ${where.length} booted sims — pin one with ENNIO_UDID`,
+          `[improvise] note: ${bundleId} runs on ${where.length} booted sims — pin one with ENNIO_UDID`,
         );
       }
     }
@@ -124,14 +163,14 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
     const apps = runningApps(udid);
     if (apps.length === 1) {
       bundleId = apps[0];
-      console.error(`[smoke] target: ${bundleId} (app open on the simulator)`);
+      console.error(`[improvise] target: ${bundleId} (app open on the simulator)`);
     } else if (apps.length === 0) {
       console.error('no app running on the simulator — open one or pass a bundleId');
       return 1;
     } else {
       console.error(
         `several apps running — pass one explicitly:\n  ${apps
-          .map((a) => `ennio smoke ${a}`)
+          .map((a) => `ennio improvise ${a}`)
           .join('\n  ')}`,
       );
       return 1;
@@ -156,7 +195,7 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
   process.env.ENNIO_SHOW_TOUCHES = flags.disableTouches ? '0' : '1';
 
   // As real as it gets: animations run untouched and every tap is a HID
-  // touch through the simulator's event pipeline — smoke exists to
+  // touch through the simulator's event pipeline — improvise exists to
   // exercise the app the way a user would, not to map it fast.
   const session = new EnnioMcpSession({
     platform: selectPlatform(flags.android ? 'android' : 'ios'),
@@ -180,10 +219,10 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
       recording = startScreenRecording(
         session.platformName,
         session.udid,
-        outDir ? join(outDir, 'recording.mp4') : resolve(`ennio-smoke-${seed}.mp4`),
+        outDir ? join(outDir, 'recording.mp4') : resolve(`ennio-improvise-${seed}.mp4`),
       );
     }
-    // Warm start, never clearState: smoke tests the app from EXACTLY the
+    // Warm start, never clearState: improvise tests the app from EXACTLY the
     // state it's in — logged-in session, filled carts and all. --relaunch
     // restarts the process first (data still kept); recovery relaunches
     // behave the same way.
@@ -205,12 +244,16 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
       }
     }
     const driver = new LiveExploreDriver(session, bundleId, { clearState: false, realInput: true });
+    // Heartbeat: spinner on a TTY unless --verbose is streaming lines.
+    const spinner = makeImproviseSpinner(bundleId, !flags.verbose && !!process.stderr.isTTY);
+    spinner.start();
     let result;
     try {
       result = await crawl(driver, limits, {
         warmStart: !flags.relaunch,
         log: (msg) => {
-          if (flags.verbose) console.error(`[smoke] ${msg}`);
+          if (flags.verbose) console.error(`[improvise] ${msg}`);
+          else spinner.note(msg);
           const m = msg.match(/[→·✗] (.+?) (?:tap=\d|\d+ms)/);
           if (m) lastAction = m[1];
         },
@@ -226,18 +269,23 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
             }
           : undefined,
       });
+      spinner.stop();
     } catch (e) {
+      spinner.stop();
       // The crawl aborting mid-walk (describe/socket death) is exactly
-      // what a smoke test exists to catch. Diagnose: app crash report,
+      // what this command exists to catch. Diagnose: app crash report,
       // process death, or genuine socket failure.
       const msg = e instanceof Error ? e.message : String(e);
       const diagnosis = diagnoseSocketFailure(
         session.udid ?? getTargetUdid() ?? '',
         bundleId,
         startedAt,
+        'improvise',
       );
-      console.error(`\nSMOKE FAIL ${bundleId} (seed ${seed}) — crawl aborted after ${lastAction}`);
-      console.error(`  replay exactly: ennio smoke ${bundleId} --seed ${seed}`);
+      console.error(
+        `\nIMPROVISE FAIL ${bundleId} (seed ${seed}) — crawl aborted after ${lastAction}`,
+      );
+      console.error(`  replay exactly: ennio improvise ${bundleId} --seed ${seed}`);
       console.error(`  ${msg}`);
       if (diagnosis) console.error(diagnosis.replace(/^/gm, '  '));
       return 1;
@@ -250,15 +298,15 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
 
     if (outDir) {
       const jsonPath = writeArtifacts(outDir, map);
-      console.error(`[smoke] artifacts → ${jsonPath}`);
+      console.error(`[improvise] artifacts → ${jsonPath}`);
     }
     if (map.stats.screens === 0) {
-      console.error(`SMOKE FAIL ${bundleId} — no screen readable (empty element tree)`);
+      console.error(`IMPROVISE FAIL ${bundleId} — no screen readable (empty element tree)`);
       return 1;
     }
 
     console.log(
-      `SMOKE PASS ${bundleId} (seed ${seed}) — ${map.stats.screens} screens, ` +
+      `IMPROVISE PASS ${bundleId} (seed ${seed}) — ${map.stats.screens} screens, ` +
         `${result.steps} actions (${kinds.nav} nav, ${kinds.state} state, ` +
         `${kinds.error} failed) in ${wallS}s`,
     );
@@ -287,7 +335,7 @@ export async function runSmokeCommand(positional: string[], flags: Flags): Promi
   } finally {
     if (recording) {
       const saved = await recording.stop();
-      if (saved) console.error(`[smoke] recording → ${saved}`);
+      if (saved) console.error(`[improvise] recording → ${saved}`);
     }
     await session.disableShowTouches();
     session.close();

@@ -64,8 +64,34 @@ env:
   EXAMPLE_APK_SHA256: 6b9b91b518324d1937af112a0defd189df9d8e6032d980d93256e1d5840681fd
   EXAMPLE_APK_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/EnnioExample-android.apk
 jobs:
+  # Cheap pre-flight on a Linux runner: don't boot a simulator/emulator
+  # for a PR that can't even lint, typecheck, format, or build. The
+  # expensive job below only starts once this passes.
+  gate:
+    name: Fast checks gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run format:check
+      - run: bun run build
+
   example-android:
     name: Example suite (Android emulator, ptrace inject)
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

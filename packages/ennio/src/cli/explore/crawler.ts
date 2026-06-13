@@ -193,7 +193,7 @@ export interface CrawlerHooks {
   /** Progress line for the human watching. */
   log?: (msg: string) => void;
   /** Skip the initial relaunch: the crawl's root is whatever screen the
-   *  app is showing right now (smoke's warm start). Recovery replays
+   *  app is showing right now (improvise's warm start). Recovery replays
    *  still call driver.relaunch() — what THAT does to app state is the
    *  driver's policy. */
   warmStart?: boolean;

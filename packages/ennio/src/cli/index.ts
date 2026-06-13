@@ -21,7 +21,7 @@ import { runVersionCommand } from './commands/version';
 import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
-import { runSmokeCommand } from './commands/smoke';
+import { runImproviseCommand } from './commands/improvise';
 import { runMcpCommand } from './commands/mcp';
 import { printCrashReport } from './crash-reporter';
 import { currentVersion, printUpdateNotice } from './update-check';
@@ -78,8 +78,11 @@ async function main() {
       return runDoctorCommand(positional, flags);
     case 'mcp':
       return runMcpCommand(positional, flags);
+    case 'improvise':
+    // Hidden back-compat alias from the brief 0.1.0-beta.0 window when
+    // this command shipped as `smoke`.
     case 'smoke':
-      return runSmokeCommand(positional, flags);
+      return runImproviseCommand(positional, flags);
     case 'test':
     case 'run':
       return runTestCommand(positional, flags);
