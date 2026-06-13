@@ -20,7 +20,7 @@ export const PREFERRED_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
  * surface or result shape changes. Reported by `ennio_status` so an agent
  * can reason about capabilities without sniffing tool names.
  */
-export const ENNIO_CONTRACT_VERSION = '1.0.0';
+export const ENNIO_CONTRACT_VERSION = '1.1.0';
 
 export const JSONRPC_VERSION = '2.0';
 

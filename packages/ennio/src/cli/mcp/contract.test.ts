@@ -51,6 +51,9 @@ const MUTATING_TOOLS = [
   'ennio_scroll',
   'ennio_set_animations',
   'ennio_back',
+  'ennio_handle_alert',
+  'ennio_tap_tab',
+  'ennio_scroll_until_visible',
 ];
 
 describe('bar 1 — self-describing tools', () => {
@@ -149,6 +152,54 @@ describe('bar 7 — versioned contract', () => {
     const data = (byName('ennio_status').handler({}) as { data: Record<string, unknown> }).data;
     expect(data.contractVersion).toBe(ENNIO_CONTRACT_VERSION);
     expect(typeof data.protocolVersion).toBe('string');
+  });
+});
+
+describe('bar 8 — the tool surface is snapshot-guarded', () => {
+  // The honesty guard for the versioned contract. `ENNIO_CONTRACT_VERSION`
+  // is hand-maintained, so nothing structural stops the catalog from
+  // changing under a stale version. This snapshot pins the public surface
+  // (every tool's name, side-effect flag, and argument keys). When it
+  // fails you have changed the contract — update BOTH this map AND
+  // `ENNIO_CONTRACT_VERSION` (minor = tool added, major = tool changed or
+  // removed) in the same change, on purpose.
+  it('matches the committed catalog', () => {
+    const surface = Object.fromEntries(
+      tools.map((t) => [
+        t.name,
+        {
+          readOnly: t.readOnly,
+          args: Object.keys(
+            (t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {},
+          ).sort(),
+        },
+      ]),
+    );
+    expect(surface).toEqual({
+      ennio_status: { readOnly: true, args: [] },
+      ennio_describe: { readOnly: true, args: [] },
+      ennio_find: { readOnly: true, args: ['selector'] },
+      ennio_screenshot: { readOnly: true, args: ['path'] },
+      ennio_launch_app: { readOnly: false, args: ['bundleId', 'clearState'] },
+      ennio_stop_app: { readOnly: false, args: [] },
+      ennio_tap: { readOnly: false, args: ['selector'] },
+      ennio_double_tap: { readOnly: false, args: ['selector'] },
+      ennio_long_press: { readOnly: false, args: ['selector'] },
+      ennio_input_text: { readOnly: false, args: ['text'] },
+      ennio_erase_text: { readOnly: false, args: ['count'] },
+      ennio_swipe: { readOnly: false, args: ['direction', 'durationMs', 'from', 'to'] },
+      ennio_scroll: { readOnly: false, args: ['direction'] },
+      ennio_set_animations: { readOnly: false, args: ['enabled'] },
+      ennio_back: { readOnly: false, args: [] },
+      ennio_assert_visible: { readOnly: true, args: ['selector', 'timeoutMs'] },
+      ennio_wait_for: { readOnly: true, args: ['selector', 'timeoutMs'] },
+      ennio_handle_alert: { readOnly: false, args: ['action', 'button'] },
+      ennio_tap_tab: { readOnly: false, args: ['name'] },
+      ennio_scroll_until_visible: {
+        readOnly: false,
+        args: ['direction', 'selector', 'timeoutMs'],
+      },
+    });
   });
 });
 

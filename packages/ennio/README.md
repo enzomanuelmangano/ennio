@@ -189,11 +189,13 @@ client-specific coupling. Add it to a client's MCP config:
 
 **Tools** (`ennio_<verb>`, self-describing via JSON Schema):
 
-- Reads (pure): `ennio_status`, `ennio_describe`, `ennio_screenshot`,
-  `ennio_assert_visible`, `ennio_wait_for`
+- Reads (pure): `ennio_status`, `ennio_describe`, `ennio_find`,
+  `ennio_screenshot`, `ennio_assert_visible`, `ennio_wait_for`
 - Actions (HID): `ennio_launch_app`, `ennio_stop_app`, `ennio_tap`,
   `ennio_double_tap`, `ennio_long_press`, `ennio_input_text`,
-  `ennio_erase_text`, `ennio_swipe`, `ennio_scroll`, `ennio_back`
+  `ennio_erase_text`, `ennio_swipe`, `ennio_scroll`,
+  `ennio_scroll_until_visible`, `ennio_tap_tab`, `ennio_handle_alert`,
+  `ennio_set_animations`, `ennio_back`
 
 **Resources:** `ennio://screen/hierarchy`, `ennio://screen/screenshot`,
 `ennio://session`.

@@ -359,6 +359,99 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
           },
         })),
     },
+    {
+      name: 'ennio_handle_alert',
+      description:
+        'Read or act on a native alert / permission dialog (UIAlertController). These ' +
+        'live outside the RN view tree, so ennio_describe and ennio_tap cannot see or ' +
+        'press them. action "info" reads the title + buttons (a pure read — { present: ' +
+        'false } when none is up), "tap" presses a button by label, "dismiss" cancels. ' +
+        'Example: { "action": "tap", "button": "Allow" }.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['info', 'tap', 'dismiss'] },
+          button: {
+            type: 'string',
+            description: 'Button label to press (required for action=tap).',
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      // info is a pure read, but tap/dismiss mutate — the tool as a whole actuates.
+      readOnly: false,
+      handler: (args) => {
+        switch (args.action) {
+          case 'info':
+            return session.alertInfo();
+          case 'dismiss':
+            return session.alertDismiss();
+          case 'tap':
+            if (typeof args.button !== 'string' || !args.button) {
+              return err('invalid', 'button is required for action=tap');
+            }
+            return session.alertTap(args.button);
+          default:
+            return err('invalid', 'action must be one of: info, tap, dismiss');
+        }
+      },
+    },
+    {
+      name: 'ennio_tap_tab',
+      description:
+        'Tap a tab-bar item by its label. Routed through the deterministic tab handler ' +
+        '(not a coordinate tap), so persistent tab bars switch reliably. A { tapped: ' +
+        'false } result is a clean miss (no such tab), not an error. ' +
+        'Example: { "name": "Profile" }.',
+      inputSchema: {
+        type: 'object',
+        properties: { name: { type: 'string', description: 'The tab item label.' } },
+        required: ['name'],
+        additionalProperties: false,
+      },
+      readOnly: false,
+      handler: (args) => {
+        if (typeof args.name !== 'string' || !args.name) {
+          return err('invalid', 'name must be a non-empty string');
+        }
+        return session.tapTab(args.name);
+      },
+    },
+    {
+      name: 'ennio_scroll_until_visible',
+      description:
+        'Scroll (swipe repeatedly) until an element is visible, then settle. Target by ' +
+        'testID or text — not a point. Optional direction (default DOWN) and timeoutMs. ' +
+        'Example: { "selector": { "text": "Log out" }, "direction": "DOWN" }.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          selector: SELECTOR_SCHEMA,
+          direction: { type: 'string', enum: ['UP', 'DOWN', 'LEFT', 'RIGHT'] },
+          timeoutMs: { type: 'integer', minimum: 0 },
+        },
+        required: ['selector'],
+      },
+      readOnly: false,
+      handler: (args) => {
+        const sel = toMaestroSelector(args.selector as McpSelector | undefined);
+        if (!sel.ok) return sel;
+        if (sel.data.point !== undefined) {
+          return err(
+            'invalid',
+            'ennio_scroll_until_visible takes a testID or text selector, not a point',
+          );
+        }
+        return session.dispatch({
+          scrollUntilVisible: {
+            element: sel.data,
+            ...(typeof args.direction === 'string' && { direction: args.direction }),
+            ...(typeof args.timeoutMs === 'number' && { timeout: args.timeoutMs }),
+          },
+        });
+      },
+    },
   ];
 }
 
