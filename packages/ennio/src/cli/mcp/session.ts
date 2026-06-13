@@ -140,9 +140,34 @@ export class EnnioMcpSession {
       if (process.env.ENNIO_SHOW_TOUCHES === '1' && this.platform.name === 'ios') {
         await connection.socket.call('set_show_touches', { enabled: true }).catch(() => undefined);
       }
+      // platform.connect returns once the socket is up — but a cold launch's
+      // JS tree may still be mounting. Without this gate, a describe / tap /
+      // run_flow fired right after ennio_launch_app races a half-built screen
+      // (an assertVisible then times out against a screen that hasn't
+      // rendered). Block until the tree looks settled, the same readiness
+      // guard improvise applies before it crawls.
+      await this.waitUntilReady();
       return ok({ bundleId, udid: session.udid });
     } catch (e) {
       return classifyError(e);
+    }
+  }
+
+  /**
+   * Block until the attached app's JS tree looks mounted: two element dumps
+   * 250ms apart agree on a non-empty inventory, or `maxMs` elapses. Readiness
+   * is best-effort — a genuinely empty (or non-RN) screen falls through at
+   * the deadline rather than failing the attach.
+   */
+  private async waitUntilReady(maxMs = 8000): Promise<void> {
+    const deadline = Date.now() + maxMs;
+    let prev = '';
+    while (Date.now() < deadline) {
+      const d = await this.describe();
+      const now = d.ok ? JSON.stringify(d.data.elements) : '';
+      if (now && now !== '[]' && now === prev) return;
+      prev = now;
+      await new Promise((r) => setTimeout(r, 250));
     }
   }
 
