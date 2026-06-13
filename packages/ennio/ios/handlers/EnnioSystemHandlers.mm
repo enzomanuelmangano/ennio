@@ -303,13 +303,28 @@ void RegisterEnnioSystemHandlers(void) {
                         }
                         for (UIView *sub in v.subviews) [stack addObject:sub];
                     }
-                    CGRect onScreen = CGRectIsNull(kb)
-                        ? CGRectIntersection(w.frame, screen)
-                        : CGRectIntersection(kb, screen);
+                    // Require an actual keyboard input view (keyplane). A
+                    // bare UITextEffectsWindow persists full-screen with NO
+                    // keyplane while the keyboard is RETRACTED — falling back
+                    // to the WINDOW frame there reports a phantom full-screen
+                    // keyboard, so every tap pays a ~1.2s dismiss-and-wait for
+                    // a keyboard that isn't shown (measured: ~70% of per-tap
+                    // time across the example suite). No keyplane → retracted
+                    // → not visible.
+                    if (CGRectIsNull(kb)) continue;
+                    CGRect onScreen = CGRectIntersection(kb, screen);
                     // A retracted keyboard sits below the screen → empty
                     // intersection, or a sliver. Require it to cover real
-                    // bottom area to count as visible.
+                    // bottom area to count as visible — but REJECT an
+                    // implausible full-screen height: a persistent
+                    // UITextEffectsWindow / its keyplane can report the whole
+                    // screen while the keyboard is retracted, which (since it
+                    // then "covers" every target) made every tap pay a ~1.2s
+                    // dismiss-and-wait for a keyboard that isn't shown. A real
+                    // iPhone keyboard is ~35-45% of screen height; >60% is a
+                    // phantom.
                     if (!CGRectIsEmpty(onScreen) && onScreen.size.height > screen.size.height * 0.05 &&
+                        onScreen.size.height < screen.size.height * 0.6 &&
                         CGRectGetMaxY(onScreen) >= screen.size.height - 2) {
                         visible = YES;
                         nx = onScreen.origin.x / screen.size.width;
