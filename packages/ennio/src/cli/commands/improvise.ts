@@ -337,7 +337,18 @@ export async function runImproviseCommand(positional: string[], flags: Flags): P
       const saved = await recording.stop();
       if (saved) console.error(`[improvise] recording → ${saved}`);
     }
+    // Leave no trace, on EVERY exit path. The clean-exit branch above
+    // calls disableShowTouches(), but a crash/timeout/error returns
+    // through this finally without it — so touch indicators (and the
+    // debug banner) would stay painted on the still-running app. Wipe
+    // both via clear_overlays here BEFORE close() (the socket must still
+    // be open), best-effort and time-bounded: the app may already be
+    // dead, in which case a failed/hung RPC is fine and must not delay
+    // the exit. disableShowTouches() also clears the sticky launchctl env
+    // so a manual relaunch doesn't re-arm touches; clearOverlays() adds
+    // the banner teardown and covers the abnormal-exit paths it misses.
     await session.disableShowTouches();
+    await session.clearOverlays();
     session.close();
   }
 }

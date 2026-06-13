@@ -123,6 +123,12 @@ static CGFloat const kEnnioStripeFromCorner  = 42.0;  // px from corner (along d
     });
 }
 
++ (void)hide {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[self shared] detach];
+    });
+}
+
 - (void)attach {
     if (self.window) return;
 
@@ -162,6 +168,16 @@ static CGFloat const kEnnioStripeFromCorner  = 42.0;  // px from corner (along d
     w.rootViewController = vc;
     w.hidden = NO;
     self.window = w;
+}
+
+- (void)detach {
+    // Null-safe: never shown (or already hidden) → nothing to do. The
+    // retry path in `attach` keys off self.window too, so clearing it
+    // here also cancels a pending re-attach.
+    if (!self.window) return;
+    self.window.hidden = YES;
+    self.window.rootViewController = nil;
+    self.window = nil;
 }
 
 - (UIWindowScene*)foregroundScene {

@@ -8,6 +8,7 @@
 #import "EnnioHandlerUtils.h"
 
 #import "EnnioBootstrap.h"
+#import "../bootstrap/EnnioDebugBanner.h"
 #import "../bootstrap/EnnioNoAnimations.h"
 #import "../bootstrap/EnnioShowTouches.h"
 #import "EnnioFinder.h"
@@ -415,6 +416,22 @@ void RegisterEnnioSystemHandlers(void) {
         BOOL enabled = a[@"enabled"] ? [a[@"enabled"] boolValue] : YES;
         EnnioOnMainVoid([&]() { [EnnioShowTouches setEnabled:enabled]; });
         return std::string("{\"ok\":true,\"enabled\":") + (enabled ? "true" : "false") + "}";
+    });
+
+    // clear_overlays: wipe ennio's transient on-screen instrumentation —
+    // the show-touches indicators/trails and the "E2E" debug banner —
+    // from the still-running app WITHOUT touching app state or the
+    // process. Backs `ennio clean` and improvise's best-effort teardown:
+    // when a run exits abnormally (crash/timeout/error) the normal close
+    // path may not run, leaving overlays painted on the live app. This op
+    // is idempotent and null-safe (no-op when nothing is painted). All
+    // work is UIKit, so it bounces to the main thread.
+    EnnioControlSocket::registerHandler("clear_overlays", [](const std::string &) -> std::string {
+        EnnioOnMainVoid([&]() {
+            [EnnioShowTouches setEnabled:NO];
+            [EnnioDebugBanner hide];
+        });
+        return std::string("{\"cleared\":true}");
     });
 
     EnnioControlSocket::registerHandler("reload_rn", [](const std::string &) -> std::string {

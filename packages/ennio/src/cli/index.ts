@@ -22,6 +22,7 @@ import { runHierarchyCommand } from './commands/hierarchy';
 import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
 import { runImproviseCommand } from './commands/improvise';
+import { runCleanCommand } from './commands/clean';
 import { runMcpCommand } from './commands/mcp';
 import { printCrashReport } from './crash-reporter';
 import { currentVersion, printUpdateNotice } from './update-check';
@@ -83,6 +84,8 @@ async function main() {
     // this command shipped as `smoke`.
     case 'smoke':
       return runImproviseCommand(positional, flags);
+    case 'clean':
+      return runCleanCommand(positional, flags);
     case 'test':
     case 'run':
       return runTestCommand(positional, flags);
