@@ -197,8 +197,15 @@ export class HidDriver implements GestureDriver {
           bestEffort(client, 'wait_react_commit', { sinceMs: reactSinceMs, maxMs: 2500 }),
         );
       }
+      // On the committed + no-transition path, hashAnimLoop has already
+      // confirmed the frame-hash changed and animations are idle, so the
+      // full 200ms stability window is mostly redundant tail latency
+      // (~200ms/tap; wait_commit is the single largest socket cost in the
+      // suite). Trim it to 140ms there; keep the full 200ms for a real
+      // transition or the uncertain no-commit case.
+      const finalStableMs = transitionWaitMs > 50 || !committed ? 200 : 140;
       await tracedLeg('settle.finalWaitCommit', () =>
-        bestEffort(client, 'wait_commit', { maxMs: 1500, stableMs: 200 }),
+        bestEffort(client, 'wait_commit', { maxMs: 1500, stableMs: finalStableMs }),
       );
       return;
     }
