@@ -41,7 +41,10 @@ export interface Capture {
  * Settle, capture the live screen to a PNG buffer, and resolve mask inputs to
  * normalized rects.
  */
-export async function captureForMatch(deps: CaptureDeps, maskInputs: MaskInput[] = []): Promise<Capture> {
+export async function captureForMatch(
+  deps: CaptureDeps,
+  maskInputs: MaskInput[] = [],
+): Promise<Capture> {
   // Gate on frame-hash stability so the shot isn't mid-transition.
   await deps.call('wait_commit', { maxMs: 1200, stableMs: 150 }).catch(() => undefined);
 

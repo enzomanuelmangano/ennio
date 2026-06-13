@@ -40,7 +40,9 @@ export function registerVisualHandlers(registry: CommandRegistry): void {
     async (cmd, { ctx }) => {
       const spec = cmd.assertScreenMatches;
       const flowDir = ctx.flowPath ? dirname(ctx.flowPath) : process.cwd();
-      const refPath = isAbsolute(spec.reference) ? spec.reference : resolve(flowDir, spec.reference);
+      const refPath = isAbsolute(spec.reference)
+        ? spec.reference
+        : resolve(flowDir, spec.reference);
       let refPng: Buffer;
       try {
         refPng = readFileSync(refPath);

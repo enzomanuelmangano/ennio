@@ -41,12 +41,15 @@ function fakeCtx(opts: {
     client: {
       call: async (op: string) => {
         if (op === 'window_size') return { ok: true, data: { w: 100, h: 100 } };
-        if (op === 'find_by_testid') return opts.rect ? { ok: true, data: opts.rect } : { ok: false };
+        if (op === 'find_by_testid')
+          return opts.rect ? { ok: true, data: opts.rect } : { ok: false };
         return { ok: true, data: {} };
       },
     },
     platform: {
-      system: { screenshot: (_udid: string, path: string) => writeFileSync(path, opts.screenshotPng) },
+      system: {
+        screenshot: (_udid: string, path: string) => writeFileSync(path, opts.screenshotPng),
+      },
     },
   } as unknown as RunContext;
 }
@@ -68,7 +71,9 @@ describe('assertScreenMatches handler', () => {
     writeFileSync(ref, solidPng(100, 100, 10, 20, 30));
     const ctx = fakeCtx({ screenshotPng: solidPng(100, 100, 10, 20, 30), flowDir: dir });
 
-    await expect(run(ctx, { assertScreenMatches: { reference: 'ref.png' } })).resolves.toBeUndefined();
+    await expect(
+      run(ctx, { assertScreenMatches: { reference: 'ref.png' } }),
+    ).resolves.toBeUndefined();
     const score = ctx.outputs.screenMatch as { matchRatio: number; passed: boolean };
     expect(score.matchRatio).toBe(1);
     expect(score.passed).toBe(true);

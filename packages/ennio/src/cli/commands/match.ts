@@ -21,7 +21,9 @@ import { runningApps } from './improvise';
 export async function runMatchCommand(positional: string[], flags: Flags): Promise<number> {
   const reference = positional[0];
   if (!reference) {
-    console.error('usage: ennio match <reference.png> [bundleId] [--threshold] [--mask] [--output]');
+    console.error(
+      'usage: ennio match <reference.png> [bundleId] [--threshold] [--mask] [--output]',
+    );
     return 1;
   }
 
