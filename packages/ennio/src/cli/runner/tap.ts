@@ -337,13 +337,13 @@ export async function execTapOn(
       if (process.env.ENNIO_PHASE_TRACE) {
         process.stderr.write(`[ennio] scroll_to id="${sel.id}" scrolled=${scrolled}\n`);
       }
-      // After scrollRectToVisible the carousel snaps, but React
-      // Fabric in Release mode mounts virtualized items lazily —
-      // the target view exists in the UIView tree (its testID
-      // resolves to a rect) yet its Pressability onPress handler
-      // hasn't been wired by the JS thread yet. Tapping in this
-      // window fires the coord but no handler responds.
-      // Wait for one React commit before re-resolving + tapping.
+      // After scrollRectToVisible the carousel snaps, but a virtualized
+      // list (RN Fabric in Release) mounts items lazily — the target
+      // view exists in the UIView tree (its testID resolves to a rect)
+      // yet its press handler hasn't been wired by the JS thread yet.
+      // Tapping in this window fires the coord but no handler responds.
+      // Wait for a commit before re-resolving + tapping (universal
+      // CoreAnimation commit signal, renderer-agnostic).
       await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 600 }).catch(() => undefined);
       const refresh = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
       if (refresh) {
@@ -742,10 +742,11 @@ export async function execTapOn(
     // Captured BEFORE the retap loop. Two uses: (1) the cropper/picker
     // dismissal is pure UIKit (no react commits), so the first commit
     // after this timestamp IS the dismissal's payload (bsky avatar crop:
-    // image reaches JS ~1-2s post-dismissal); (2) the truest "did the
-    // tap register" signal is the React commit its onPress fired — it
-    // lands a frame before the visible view-hash changes, and is a real
-    // signal (onPress ran) rather than an inference from pixels moving.
+    // image reaches JS ~1-2s post-dismissal); (2) a "commit landed strictly
+    // after this timestamp" check is a useful secondary confirm for the
+    // async-onPress case where the visible-tree hash hasn't moved yet but a
+    // commit is in flight. This is the UNIVERSAL commit signal (frame-hash
+    // change through CoreAnimation) — renderer-agnostic, no React hook.
     const preLoopReact = await captureReactTs(ctx);
     const hasObserver = preLoopReact.attach !== 'none';
     const maxRetaps = isLateRecogniserHost ? 5 : 1;
@@ -753,19 +754,17 @@ export async function execTapOn(
     // already confirmed it landed.
     let registered = false;
     for (let i = 0; i < maxRetaps; i++) {
-      // Registration signal: prefer the React commit the tap caused
-      // (event, fires ~16-50ms when onPress runs). Fall back to the
-      // visible-tree hash for native-only changes (UIKit nav) or apps
-      // with no observer. Late-recogniser hosts keep the hash signal —
-      // their continuous repaints make commit timing unreliable.
       // Registration signal: the visible-tree hash change is the
-      // reliable, fast confirm here — wait_hash_change returns the
-      // INSTANT the tap's effect renders (~tens of ms). (An earlier
-      // react-commit-first attempt regressed badly: the RN observer
-      // doesn't fire for many state-only taps in real apps, so it
-      // burned the full 600ms cap before falling back to this hash
-      // check, which then returned in ~1ms. Hash-first, react as a
-      // backup only.)
+      // reliable, fast primary confirm here — wait_hash_change returns
+      // the INSTANT the tap's effect renders (~tens of ms), and it's
+      // renderer-agnostic (any commit through CoreAnimation moves the
+      // frame-hash). The universal commit-since check below is only a
+      // secondary backstop for the async-onPress case. (An earlier
+      // commit-first attempt regressed badly: a "wait for the next
+      // commit" call burned the full 600ms cap on state-only taps that
+      // produced no visible change, before falling back to this hash
+      // check, which then returned in ~1ms. Hash-first, commit-since as
+      // a backup only.)
       const hc = await timedAsync(ctx, 'tap.confirm', () =>
         ctx.client
           .call('wait_hash_change', {
@@ -781,7 +780,10 @@ export async function execTapOn(
       if (registered && !isLateRecogniserHost) break;
       if (!registered && hasObserver && !isLateRecogniserHost) {
         // No visible change yet — a commit may still be in flight
-        // (async onPress). Give the react observer a SHORT window.
+        // (async onPress whose state lands a frame after the hash
+        // window). Give the universal commit signal a SHORT extra
+        // window: wait for a commit strictly after the pre-loop
+        // timestamp (frame-hash change through CoreAnimation).
         const rc = await ctx.client
           .call('wait_react_commit', { sinceMs: preLoopReact.ts, maxMs: 250 })
           .catch(() => undefined);

@@ -1,7 +1,17 @@
 //
 // EnnioSettle.h
 //
-// UIKit-based settle / sync. No React commit hook, no JSI. Two mechanisms:
+// THE universal settle / commit engine. Pure Apple APIs — CFRunLoop,
+// CADisplayLink, UIView/CALayer, mach_time — and ZERO renderer internals.
+// It is renderer-agnostic by construction: Paper, Fabric, SwiftUI, UIKit
+// and Skia all commit through the same main runloop + CoreAnimation
+// transaction, so a settle keyed on the runloop + the visible frame-hash
+// fires for ALL of them with no per-renderer code, no reflection, and no
+// version fragility. There is no separate "React commit" observer — the
+// commit signal here IS the universal commit signal.
+//
+// Three mechanisms, all backed by the same two ground-truth signals
+// (the beforeWaiting runloop observer + the per-vsync frame-hash ticker):
 //
 //   wait_idle  — CFRunLoopObserver for kCFRunLoopBeforeWaiting + main
 //                thread quiet for the requested cooldown.
@@ -9,10 +19,15 @@
 //                accessibilityLabel + accessibilityValue once per vsync,
 //                computes a tiny hash, returns when the hash is stable
 //                for a configured number of frames.
+//   commit "since T" — wake on the runloop's beforeWaiting observer and
+//                the per-vsync hash ticker, return the instant the visible
+//                frame-hash last changed after a baseline timestamp. This
+//                is the fast (~1 frame) post-tap confirm that used to be a
+//                renderer-specific React hook; it is now universal.
 //
-// Both are pure Apple APIs. The settle latencies (~50ms idle, ~100ms
-// commit) are slower than an RN commit hook (~5ms), but the engine has
-// zero React internals to maintain.
+// All timestamps are mach-time ms (monotonic, mach_absolute_time domain),
+// shared across every signal here, so a caller can sample one before a
+// tap and ask for the next commit strictly after it.
 //
 
 #pragma once
@@ -48,6 +63,28 @@ NS_ASSUME_NONNULL_BEGIN
 /// a post-tap event-driven settle in place of a fixed sleep: returns
 /// as soon as the screen reacts to a touch.
 + (uint32_t)waitForHashChangeSince:(uint64_t)baselineHash maxMs:(uint32_t)maxMs;
+
+/// Monotonic timestamp (mach-time ms) of the most recent universal
+/// commit — i.e. the last time the per-vsync frame-hash actually
+/// changed. This is the renderer-agnostic replacement for the old RN
+/// "lastCommitMs": Paper, Fabric, SwiftUI and UIKit all flush their
+/// mutations through CoreAnimation, which the hash ticker samples once
+/// per frame. Returns 0 before the first change (no commit seen yet).
++ (uint64_t)lastCommitMs;
+
+/// Wait until a universal commit lands strictly after `sinceMs`
+/// (i.e. the frame-hash changes after that mach-time-ms baseline), or
+/// until `maxMs` elapses. Wakes on the per-vsync hash ticker and the
+/// beforeWaiting runloop observer, so it confirms within ~1 frame
+/// rather than polling. Renderer-agnostic; this is the fast post-tap
+/// commit confirm. Returns the elapsed wait time in ms.
++ (uint32_t)waitForCommitSince:(uint64_t)sinceMs maxMs:(uint32_t)maxMs;
+
+/// Wait until no universal commit (no frame-hash change) has been seen
+/// for `stableMs` consecutive ms, or until `maxMs` elapses. Renderer-
+/// agnostic "the UI has gone quiet" signal. Returns YES if quiet was
+/// reached, NO if the budget expired while commits were still landing.
++ (BOOL)waitForCommitQuietStableMs:(uint32_t)stableMs maxMs:(uint32_t)maxMs;
 
 @end
 

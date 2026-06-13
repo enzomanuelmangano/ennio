@@ -51,9 +51,14 @@ export interface RpcOps {
   // ---- settle / timing ------------------------------------------------
   frame_hash: { args: Record<string, never>; result: { hash: string } };
   animations_active: { args: Record<string, never>; result: { active: boolean } };
+  // react_commit_ts / wait_react_commit / wait_react_quiet keep their op
+  // names for wire compatibility but are now backed by the UNIVERSAL
+  // EnnioSettle commit signal (per-vsync frame-hash + runloop observer),
+  // not a renderer-specific React hook. `attach` is "universal" on
+  // current dylibs; legacy renderer names are tolerated from older ones.
   react_commit_ts: {
     args: Record<string, never>;
-    result: { ts: number | string; attach: 'paper' | 'fabric' | 'both' | 'none' };
+    result: { ts: number | string; attach: 'universal' | 'paper' | 'fabric' | 'both' | 'none' };
   };
   wait_commit: { args: { maxMs: number; stableMs: number }; result: WaitResult };
   wait_react_commit: { args: { sinceMs: number; maxMs: number }; result: WaitResult };

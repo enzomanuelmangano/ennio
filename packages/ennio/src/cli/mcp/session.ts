@@ -210,12 +210,12 @@ export class EnnioMcpSession {
     if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
     try {
       const { w, h } = await getScreenSize(a.session.udid);
-      // Commit-aware confirm: note the React commit timestamp before the
-      // gesture, then wait for the NEXT commit after it. This returns the
-      // instant React commits the new state — ignoring any CALayer
-      // animation still playing out — which a black-box driver can't do
-      // (it has to wait for the screen to visually settle). Falls back to
-      // frame-stability when no React observer is attached.
+      // Commit-aware confirm: note the universal commit timestamp before
+      // the gesture, then wait for the NEXT commit after it. The commit
+      // signal is renderer-agnostic (a frame-hash change through
+      // CoreAnimation), so this works for Paper, Fabric, SwiftUI and
+      // UIKit alike — and returns the instant the new state commits. Falls
+      // back to frame-stability when no commit signal is available.
       const pre = await a.connection.socket.call('react_commit_ts').catch(() => null);
       const sinceMs = Number((pre?.data as { ts?: number | string })?.ts) || 0;
       const attach = (pre?.data as { attach?: string })?.attach;

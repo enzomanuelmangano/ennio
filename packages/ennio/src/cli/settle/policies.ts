@@ -21,9 +21,11 @@ import {
 export interface SettleInput {
   /** Frame hash captured immediately BEFORE the action. */
   preTapHash?: string;
-  /** Which RN commit observer is attached (drives the afterTap branch). */
-  reactAttach?: 'paper' | 'fabric' | 'both' | 'none';
-  /** React commit ts captured before the action (afterTap nextEditsField wait). */
+  /** Whether a commit signal is live (drives the afterTap branch).
+   *  "universal" on current dylibs (renderer-agnostic CoreAnimation
+   *  commit); legacy renderer names tolerated; "none" = no signal. */
+  reactAttach?: 'universal' | 'paper' | 'fabric' | 'both' | 'none';
+  /** Universal commit ts captured before the action (afterTap nextEditsField wait). */
   reactSinceMs?: number;
   /** True when the NEXT command edits a text field. */
   nextEditsField?: boolean;

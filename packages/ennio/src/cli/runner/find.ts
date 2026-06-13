@@ -39,24 +39,27 @@ export async function captureHash(ctx: RunContext): Promise<string> {
   return '';
 }
 
-/// React Native commit observer — see ios/EnnioReactObserver.mm. Returns
-/// `{ts, attach}`. `attach` is "paper" | "none" (older dylibs may also
-/// report the now-removed "fabric"/"both"). When "none" the dylib has no
-/// RN hook attached and the caller falls back to the UIView frame-hash
-/// signal.
+/// Universal commit timestamp — see ios/observers/EnnioSettle.mm. The
+/// commit signal is renderer-agnostic: it fires when the visible frame
+/// commits through CoreAnimation, which is identical for Paper, Fabric,
+/// SwiftUI and UIKit (no React linkage, no per-renderer hook). Returns
+/// `{ts, attach}`. `attach` is "universal" on current dylibs (a single,
+/// always-live signal); older dylibs may still report the legacy
+/// renderer names "paper" | "fabric" | "both", and "none" when no signal
+/// source is available. Callers only check `attach !== 'none'`.
 export async function captureReactTs(
   ctx: RunContext,
-): Promise<{ ts: number; attach: 'paper' | 'fabric' | 'both' | 'none' }> {
+): Promise<{ ts: number; attach: 'universal' | 'paper' | 'fabric' | 'both' | 'none' }> {
   try {
     const r = await ctx.client.call('react_commit_ts');
     if (r.ok && r.data) {
       const d = r.data as { ts: number | string; attach: string };
       const ts = typeof d.ts === 'number' ? d.ts : Number(d.ts) || 0;
-      const attach = (d.attach || 'none') as 'paper' | 'fabric' | 'both' | 'none';
+      const attach = (d.attach || 'none') as 'universal' | 'paper' | 'fabric' | 'both' | 'none';
       return { ts, attach };
     }
   } catch {
-    /* observer op unavailable on older dylibs */
+    /* commit-ts op unavailable on older dylibs */
   }
   return { ts: 0, attach: 'none' };
 }

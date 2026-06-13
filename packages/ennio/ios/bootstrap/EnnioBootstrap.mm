@@ -19,19 +19,21 @@
 // care what the app is built with — only that it has a UIWindow and
 // propagated accessibility identifiers.
 //
-// Two swizzles ARE installed (both isolated, file-local IMPs, guarded
-// by dispatch_once):
+// One swizzle IS installed (isolated, file-local IMP, guarded by
+// dispatch_once):
 //   - UIView -setAccessibilityIdentifier: (EnnioTestIDIndex) for the
 //     O(1) testID index.
-//   - the RN mount/commit method (EnnioReactObserver) for settle
-//     signals. Paper uses an NSNotification; Fabric is swizzled.
-// They are observation-only — neither alters app behavior.
+// It is observation-only — it does not alter app behavior.
+//
+// Settle / commit signals are provided entirely by EnnioSettle, a pure
+// Apple-API engine (CFRunLoop + CADisplayLink frame-hash). There is no
+// renderer-specific commit observer and no React linkage: the same
+// signal serves Paper, Fabric, SwiftUI and UIKit.
 //
 
 #import "EnnioBootstrap.h"
 #import "EnnioControlSocket.h"
 #import "EnnioNoAnimations.h"
-#import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
 #import "EnnioShowTouches.h"
 #import "EnnioTestIDIndex.h"
@@ -99,10 +101,8 @@ static NSString *ennioDistributionName(EnnioDistribution d) {
 //   ENNIO_SAFE_MODE            — all of the below at once
 //   ENNIO_DISABLE_TESTID_INDEX — no UIView setAccessibilityIdentifier:
 //                                swizzle (finders fall back to walks)
-//   ENNIO_DISABLE_RN_OBSERVER  — no Fabric mount swizzle / Paper
-//                                observer (settle falls back to
-//                                hash polling)
-//   ENNIO_DISABLE_SETTLE       — no CA commit ticker
+//   ENNIO_DISABLE_SETTLE       — no CA commit ticker / runloop observer
+//                                (the universal settle + commit signal)
 //
 // The socket listener itself has no flag: without it the CLI can't
 // talk to the app at all, and it installs no hooks into app code.
@@ -224,11 +224,6 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
     } else {
         [EnnioSettle start];
     }
-    if (ennioHookDisabled("ENNIO_DISABLE_RN_OBSERVER")) {
-        NSLog(@"[Ennio] RN observer DISABLED via env flag");
-    } else {
-        [EnnioReactObserver start];
-    }
 
     // Opt-in animation suppressor (ENNIO_NO_ANIMATIONS) — collapses CA
     // transitions so the runner doesn't wait out 300-500ms slides/fades.
@@ -239,8 +234,8 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
     [EnnioShowTouches installIfEnabled];
 
     g_ennioReady = YES;
-    NSLog(@"[Ennio] Bootstrap ready — socket dispatching commands (RN observer: %@)",
-          [EnnioReactObserver attachmentDescription]);
+    NSLog(@"[Ennio] Bootstrap ready — socket dispatching commands (commit signal: "
+          @"universal CoreAnimation/runloop, renderer-agnostic)");
 }
 
 @end

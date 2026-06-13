@@ -43,7 +43,10 @@ export interface SwipeOutcome {
 /** Inputs the post-tap settle needs, captured BEFORE the tap. */
 export interface PreTapSnapshot {
   preTapHash: string;
-  reactAttach: 'paper' | 'fabric' | 'both' | 'none';
+  // "universal" on current dylibs (renderer-agnostic CoreAnimation commit
+  // signal); legacy renderer names tolerated from older dylibs; "none" =
+  // no signal source. Consumers only branch on `!== 'none'`.
+  reactAttach: 'universal' | 'paper' | 'fabric' | 'both' | 'none';
   reactSinceMs: number;
   nextEditsField: boolean;
 }
