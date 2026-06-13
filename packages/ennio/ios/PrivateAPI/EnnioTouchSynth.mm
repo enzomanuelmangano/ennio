@@ -127,6 +127,11 @@ static BOOL fireFabricSurfaceTouch(UIView *hit, CGPoint pWindow) {
     if (!setTouchPhase(t, UITouchPhaseBegan)) return NO;
 
     NSSet *touches = [NSSet setWithObject:t];
+    // Synthetic delivery passes a nil event deliberately — UIKit's
+    // touch handlers tolerate it on this path, but the SDK marks
+    // withEvent: _Nonnull, so silence -Wnonnull for these calls.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnonnull"
     @try {
         [handler touchesBegan:touches withEvent:nil];
         setTouchPhase(t, UITouchPhaseEnded);
@@ -154,6 +159,7 @@ static BOOL fireFabricSurfaceTouch(UIView *hit, CGPoint pWindow) {
             ((void (*)(id, SEL))objc_msgSend)(handler, resetSel);
         }
     }
+#pragma clang diagnostic pop
     return YES;
 }
 

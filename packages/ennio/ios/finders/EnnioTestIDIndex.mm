@@ -14,9 +14,10 @@
 static NSMutableDictionary<NSString *, NSHashTable<UIView *> *> *g_index;
 static os_unfair_lock g_lock = OS_UNFAIR_LOCK_INIT;
 // Condition broadcasted on every registration so waitFor can wake
-// event-driven (paired with the React commit signal from
-// EnnioReactObserver — both broadcast on commit ticks since RN
-// propagates testID via accessibilityIdentifier during mount).
+// event-driven (paired with EnnioSettle's universal commit signal —
+// both broadcast on commit ticks, since the renderer propagates testID
+// via accessibilityIdentifier during the same mount that moves the
+// frame-hash).
 static NSCondition *g_cond;
 static IMP g_origSetAID = NULL;
 static BOOL g_attached = NO;

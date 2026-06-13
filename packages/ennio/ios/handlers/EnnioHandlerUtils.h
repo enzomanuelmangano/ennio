@@ -24,6 +24,8 @@
 
 #import "EnnioFinder.h"
 
+NS_ASSUME_NONNULL_BEGIN
+
 // =====================================================================
 // JSON parse helpers — `args` is always a JSON object literal.
 // =====================================================================
@@ -52,3 +54,5 @@ std::string EnnioStringArrayJson(NSArray<NSString *> *arr);
 // =====================================================================
 
 void EnnioOnMainVoid(std::function<void()> fn);
+
+NS_ASSUME_NONNULL_END

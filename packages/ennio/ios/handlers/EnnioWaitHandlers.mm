@@ -7,7 +7,6 @@
 
 #import "EnnioFinder.h"
 #import "EnnioOps.h"
-#import "EnnioReactObserver.h"
 #import "EnnioSettle.h"
 
 #include "EnnioControlSocket.h"
@@ -307,13 +306,20 @@ void RegisterEnnioWaitHandlers(void) {
         return std::string(buf);
     });
 
+    // react_commit_ts / wait_react_commit / wait_react_quiet keep their
+    // op names for wire compatibility, but they are now backed by the
+    // UNIVERSAL EnnioSettle commit signal (per-vsync frame-hash change +
+    // beforeWaiting runloop observer) — NOT a renderer-specific hook.
+    // "commit" here means "the visible frame committed through
+    // CoreAnimation", which is identical for Paper, Fabric, SwiftUI and
+    // UIKit. attach is therefore always "universal" (a single, always-
+    // live signal) instead of a paper/fabric/none renderer name.
     EnnioControlSocket::registerHandler("react_commit_ts", [](const std::string &) -> std::string {
-        uint64_t ts = [EnnioReactObserver lastCommitMs];
-        NSString *attach = [EnnioReactObserver attachmentDescription];
+        uint64_t ts = [EnnioSettle lastCommitMs];
         char buf[160];
         std::snprintf(buf, sizeof(buf),
-                      "{\"ts\":%llu,\"attach\":\"%s\"}",
-                      (unsigned long long)ts, attach.UTF8String);
+                      "{\"ts\":%llu,\"attach\":\"universal\"}",
+                      (unsigned long long)ts);
         return std::string(buf);
     });
 
@@ -323,7 +329,7 @@ void RegisterEnnioWaitHandlers(void) {
         uint64_t sinceMs = 0;
         id sinceV = a[@"sinceMs"];
         if ([sinceV isKindOfClass:NSNumber.class]) sinceMs = [(NSNumber *)sinceV unsignedLongLongValue];
-        uint32_t elapsed = [EnnioReactObserver waitForCommitSince:sinceMs maxMs:maxMs];
+        uint32_t elapsed = [EnnioSettle waitForCommitSince:sinceMs maxMs:maxMs];
         BOOL ok = elapsed < maxMs;
         return EnnioElapsedJson(elapsed, ok);
     });
@@ -341,7 +347,7 @@ void RegisterEnnioWaitHandlers(void) {
         NSDictionary *a = EnnioParseArgs(args);
         uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 1000);
         uint32_t stableMs = (uint32_t)EnnioArgInt(a, @"stableMs", 250);
-        BOOL ok = [EnnioReactObserver waitForReactQuietStableMs:stableMs maxMs:maxMs];
+        BOOL ok = [EnnioSettle waitForCommitQuietStableMs:stableMs maxMs:maxMs];
         return std::string("{\"ok\":") + (ok ? "true" : "false") + "}";
     });
 

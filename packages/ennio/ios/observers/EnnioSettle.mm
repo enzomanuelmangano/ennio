@@ -54,6 +54,11 @@ static void idleObserverCallback(CFRunLoopObserverRef observer,
 static NSCondition *g_commitCondition;
 static uint64_t g_lastHashChangeMs = 0;
 static uint64_t g_currentHash = 0;
+// Set true the first time the frame-hash actually changes (a real
+// commit, not the seed value stamped at start). Until then lastCommitMs
+// reports 0 — matching the "no commit observed yet" contract callers
+// rely on when they use it as a strictly-after baseline.
+static bool g_commitSeen = false;
 
 // Hash helper — FNV-1a 64-bit over a sequence of bytes.
 static inline void hashFeed(uint64_t *h, const void *data, size_t len) {
@@ -119,6 +124,7 @@ static void walkAndHash(UIView *v, uint64_t *h) {
     if (h != g_currentHash) {
         g_currentHash = h;
         g_lastHashChangeMs = nowMs();
+        g_commitSeen = true;
         [g_commitCondition broadcast];
     }
     [g_commitCondition unlock];
@@ -226,6 +232,59 @@ static EnnioCommitTicker *g_commitTicker;
     }
     [g_commitCondition unlock];
     return (uint32_t)([[NSDate date] timeIntervalSinceDate:start] * 1000);
+}
+
++ (uint64_t)lastCommitMs {
+    // 0 until a real commit has been observed — the seed timestamp
+    // stamped at +start does not count as a commit.
+    return g_commitSeen ? g_lastHashChangeMs : 0;
+}
+
++ (uint32_t)waitForCommitSince:(uint64_t)sinceMs maxMs:(uint32_t)maxMs {
+    if (!g_commitCondition) return 0; // settle disabled — no signal source
+    // The hash ticker broadcasts g_commitCondition the instant the
+    // visible frame-hash changes (once per vsync), so this wakes within
+    // ~1 frame of the next commit rather than polling. Renderer-agnostic:
+    // the change reflects whatever committed through CoreAnimation
+    // (Paper / Fabric / SwiftUI / UIKit).
+    uint64_t start = nowMs();
+    [g_commitCondition lock];
+    while (g_lastHashChangeMs <= sinceMs) {
+        uint64_t now = nowMs();
+        uint64_t elapsed = now - start;
+        if (elapsed >= maxMs) break;
+        uint64_t remaining = maxMs - elapsed;
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:(NSTimeInterval)remaining / 1000.0];
+        [g_commitCondition waitUntilDate:deadline];
+    }
+    [g_commitCondition unlock];
+    return (uint32_t)(nowMs() - start);
+}
+
++ (BOOL)waitForCommitQuietStableMs:(uint32_t)stableMs maxMs:(uint32_t)maxMs {
+    // No signal source (settle disabled) → report quiet so the caller
+    // proceeds; it falls back to other gates elsewhere.
+    if (!g_commitCondition) return YES;
+    uint64_t start = nowMs();
+    [g_commitCondition lock];
+    while (true) {
+        uint64_t now = nowMs();
+        uint64_t sinceChange = now - g_lastHashChangeMs;
+        if (sinceChange >= stableMs) {
+            [g_commitCondition unlock];
+            return YES;
+        }
+        uint64_t totalElapsed = now - start;
+        if (totalElapsed >= maxMs) {
+            [g_commitCondition unlock];
+            return NO;
+        }
+        uint64_t waitMs = stableMs - sinceChange;
+        uint64_t remaining = maxMs - totalElapsed;
+        if (waitMs > remaining) waitMs = remaining;
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:(NSTimeInterval)waitMs / 1000.0];
+        [g_commitCondition waitUntilDate:deadline];
+    }
 }
 
 @end

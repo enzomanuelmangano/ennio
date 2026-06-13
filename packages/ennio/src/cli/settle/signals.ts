@@ -18,10 +18,14 @@ export async function frameHash(rpc: TypedRpcClient): Promise<string> {
 
 export interface ReactAttachState {
   ts: number;
-  attach: 'paper' | 'fabric' | 'both' | 'none';
+  // "universal" on current dylibs — a single, always-live, renderer-
+  // agnostic commit signal (frame-hash change through CoreAnimation).
+  // Legacy renderer names are tolerated from older dylibs; "none" means
+  // no signal source. Callers only check `attach !== 'none'`.
+  attach: 'universal' | 'paper' | 'fabric' | 'both' | 'none';
 }
 
-/** React commit timestamp + which observer is attached. */
+/** Universal commit timestamp + whether a commit signal is live. */
 export async function reactObserver(rpc: TypedRpcClient): Promise<ReactAttachState> {
   const o = await rpc.bestEffort('react_commit_ts', {});
   if (o.kind !== 'ok') return { ts: 0, attach: 'none' };
