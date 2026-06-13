@@ -91,6 +91,26 @@ Native's responder system, and RNGH all see a real touch.
 `setClipboard`, `pasteText`, `runFlow`, `runScript`,
 `extendedWaitUntil`
 
+ennio extension (not a Maestro command): `assertScreenMatches` —
+deterministically compare the screen against a reference PNG and fail the
+step below a match-ratio threshold. `mask` ignores dynamic regions (testID
+or normalized rect); `output` writes a diff heatmap.
+
+```yaml
+- assertScreenMatches:
+    reference: ./baselines/checkout.png
+    threshold: 0.97
+    mask: ['clock-label', { x: 0, y: 0, w: 1, h: 0.05 }]
+    output: ./artifacts/checkout-diff.png
+    regions: ./artifacts/checkout-regions # side-by-side live|reference crops
+```
+
+The result (on `ctx.outputs` / the `ennio_match_screen` MCP result) carries
+`diffRegions` — clustered bounding boxes of where the screen differs. With a
+`regions` dir it also writes a side-by-side `live|reference` crop per region:
+math-proven "where", so a model only has to name "what" (no whole-screen
+confabulation).
+
 ## CLI reference
 
 ### Commands
@@ -99,6 +119,7 @@ Native's responder system, and RNGH all see a real touch.
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ennio test <flow.yaml \| dir \| glob>` | Run Maestro YAML flows (`run` is an alias; a bare path works too)                                                                                                                                                                                      |
 | `ennio improvise [bundleId]`            | Plays the app without a score: walks it autonomously for a wall-clock budget, hunting crashes; the exit code is the product. Defaults to the app already open on the booted simulator. (`smoke` is a hidden back-compat alias through the 0.1.0 betas) |
+| `ennio match <ref.png> [bundleId]`      | Deterministic visual conformance: compare the current screen to a reference image (pixel diff, no model) and exit 0 (match) / 1 (mismatch). `--threshold`, `--mask` (testIDs), `--output` (diff heatmap).                                              |
 | `ennio screenshot [path]`               | Capture the simulator screen                                                                                                                                                                                                                           |
 | `ennio hierarchy`                       | Dump the app's view hierarchy                                                                                                                                                                                                                          |
 | `ennio doctor [--smoke <bundleId>]`     | Diagnose the setup; `--smoke` runs an inject → socket → actuate self-test                                                                                                                                                                              |
@@ -190,7 +211,8 @@ client-specific coupling. Add it to a client's MCP config:
 **Tools** (`ennio_<verb>`, self-describing via JSON Schema):
 
 - Reads (pure): `ennio_status`, `ennio_describe`, `ennio_find`,
-  `ennio_screenshot`, `ennio_assert_visible`, `ennio_wait_for`
+  `ennio_screenshot`, `ennio_assert_visible`, `ennio_wait_for`,
+  `ennio_match_screen` (deterministic screen-vs-reference pixel match)
 - Actions (HID): `ennio_launch_app`, `ennio_stop_app`, `ennio_tap`,
   `ennio_double_tap`, `ennio_long_press`, `ennio_input_text`,
   `ennio_erase_text`, `ennio_swipe`, `ennio_scroll`,

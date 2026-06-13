@@ -1,0 +1,43 @@
+appId: com.ennio.example
+name: 'Gauntlet — Mood flow (emotion → context crossfade, visual match)'
+---
+# Reproduction of the mood-app flow from the source video. The bottom sheet is
+# persistent; tapping "Add context" crossfades the emotion chips into the
+# context topics. We assert BOTH states against frames cropped from the video
+# (refs/mood-emotion.png @2.6s, refs/mood-context.png @4.0s) and emit an overlay
+# (reference blended over the live screen) so alignment is eyeballable. Status
+# bar masked (live clock). Threshold is deliberate: a from-scratch RN rebuild vs
+# a compressed video frame with a different font has a glyph-edge pixel ceiling.
+#
+# index.tsx redirects straight to this screen, so no Gauntlet navigation.
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: 'mood-context-screen'
+# state 1 — emotion picker (structural reward = primary gate)
+- assertScreenConformance:
+    manifest: ./refs/mood-emotion.manifest.json
+    failOn: blocker
+- assertScreenMatches:
+    reference: ./refs/mood-emotion.png
+    threshold: 0.8
+    mask:
+      - { x: 0, y: 0, w: 1, h: 0.05 }
+    output: /tmp/mood-emotion-diff.png
+    overlay: /tmp/mood-emotion-overlay.png
+# transition — crossfade to context
+- tapOn:
+    id: 'add-context'
+- assertVisible:
+    id: 'tag-Community'
+# state 2 — context topics (structural reward = primary gate)
+- assertScreenConformance:
+    manifest: ./refs/mood-context.manifest.json
+    failOn: blocker
+- assertScreenMatches:
+    reference: ./refs/mood-context.png
+    threshold: 0.8
+    mask:
+      - { x: 0, y: 0, w: 1, h: 0.05 }
+    output: /tmp/mood-context-diff.png
+    overlay: /tmp/mood-context-overlay.png

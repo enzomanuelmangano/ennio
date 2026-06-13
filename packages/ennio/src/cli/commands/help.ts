@@ -12,6 +12,7 @@ Usage:
   ennio doctor                  diagnose Node, Xcode, enniohid, dylib + app socket
   ennio mcp                     serve ennio over MCP (stdio) for an AI agent
   ennio improvise [bundleId]    play the app without a score: autonomous crash hunt, exit 0/1
+  ennio match <ref.png>         compare the screen to a reference image, exit 0/1
   ennio version                 print version
   ennio help [command]          this message, or per-command help
 
@@ -90,6 +91,26 @@ Options:
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)
 Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
+  match: `ennio match <reference.png> [bundleId]
+
+Deterministic visual conformance, as a CI gate. Captures the current screen
+of the running app and compares it against a reference image — a Figma export,
+a mock, or a prior baseline — with an anti-aliasing-aware pixel diff (no model,
+no flakiness). Prints a one-line summary and exits 0 (match) / 1 (mismatch or
+error). The live frame is resized to the reference's dimensions; an aspect
+mismatch is an error.
+
+bundleId defaults to the app already open on the booted simulator; several
+running apps is an error listing the candidates.
+
+Options:
+  --threshold N      minimum match ratio in [0,1] to pass (default 0.97)
+  --mask IDS         comma-separated element testIDs to ignore before diffing
+                     (dynamic content: clocks, avatars, data-driven text)
+  --output PATH      write a diff heatmap PNG showing where they differ
+  --regions DIR      write per-region side-by-side live|reference crops (the
+                     artifact to hand a model to verify WHAT changed)
+Environment: ENNIO_UDID`,
   doctor: `ennio doctor [--smoke <bundleId>]
 
 Pre-flight check. FAIL rows block a run (Node ≥ 18, Xcode/simctl, enniohid,

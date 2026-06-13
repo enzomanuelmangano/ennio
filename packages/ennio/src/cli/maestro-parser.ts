@@ -120,7 +120,32 @@ export type MaestroCommand =
   | { inputRandomEmail: true | Record<string, never> }
   | { inputRandomNumber: true | { length?: number } }
   | { inputRandomText: true | { length?: number } }
-  | { inputRandomPersonName: true | Record<string, never> };
+  | { inputRandomPersonName: true | Record<string, never> }
+  | {
+      // ennio extension: deterministic visual conformance. Compare the live
+      // screen against a reference PNG (Figma export / mock / prior baseline);
+      // fail when the match ratio is below `threshold`. `mask` ignores dynamic
+      // regions (testID or normalized rect). Not a Maestro command.
+      assertScreenMatches: {
+        reference: string;
+        threshold?: number;
+        mask?: (string | { x: number; y: number; w: number; h: number })[];
+        output?: string;
+        overlay?: string;
+        regions?: string;
+        outputVar?: string;
+      };
+    }
+  | {
+      // Structural conformance: compare the live element tree against a
+      // reference manifest (element set + positions). Fails on blocker/major
+      // findings. Not a Maestro command.
+      assertScreenConformance: {
+        manifest: string;
+        failOn?: 'blocker' | 'major' | 'minor';
+        outputVar?: string;
+      };
+    };
 
 export interface RunFlowCommand {
   file?: string;
