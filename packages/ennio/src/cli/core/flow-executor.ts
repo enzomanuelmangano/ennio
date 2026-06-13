@@ -217,6 +217,7 @@ export class FlowExecutor {
           durationMs: Date.now() - flowStart,
           failure,
           stepTimings,
+          outputs: ctx.outputs,
         };
         this.reporter.flowEnd(result);
         return result;
@@ -231,6 +232,7 @@ export class FlowExecutor {
       stepsPassed,
       durationMs: Date.now() - flowStart,
       stepTimings,
+      outputs: ctx.outputs,
     };
     this.reporter.flowEnd(result);
     return result;

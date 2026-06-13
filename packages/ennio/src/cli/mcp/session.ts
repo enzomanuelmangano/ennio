@@ -477,6 +477,9 @@ export class EnnioMcpSession {
       durationMs: number;
       steps: { step: number; ms: number; cmd: string }[];
       failure?: { step: number; command: string; reason: string; screenshotPath?: string };
+      /** Values steps recorded via ctx.outputs (e.g. assertScreenMatches
+       *  scores), exposed so the agent reads them in the same result. */
+      outputs?: Record<string, unknown>;
     }>
   > {
     const a = this.attachment;
@@ -500,6 +503,7 @@ export class EnnioMcpSession {
         durationMs: r.durationMs,
         steps: r.stepTimings,
         ...(r.failure && { failure: r.failure }),
+        ...(r.outputs && Object.keys(r.outputs).length > 0 && { outputs: r.outputs }),
       });
     } catch (e) {
       return classifyError(e);

@@ -19,6 +19,9 @@ export interface FlowResult {
     screenshotPath?: string;
   };
   stepTimings: { step: number; ms: number; cmd: string }[];
+  /** The flow's `output` bag at completion — values steps recorded via
+   *  ctx.outputs (runScript results, assertScreenMatches scores). */
+  outputs?: Record<string, unknown>;
 }
 
 export interface SuiteResult {

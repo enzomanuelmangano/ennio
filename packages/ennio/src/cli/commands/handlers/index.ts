@@ -11,6 +11,7 @@ import { registerRandomInputHandlers } from './random-input';
 import { registerScrollHandlers } from './scroll';
 import { registerSystemHandlers } from './system';
 import { registerTapHandlers } from './tap';
+import { registerVisualHandlers } from './visual';
 
 export function registerAllHandlers(registry: CommandRegistry): void {
   registerSystemHandlers(registry);
@@ -21,4 +22,5 @@ export function registerAllHandlers(registry: CommandRegistry): void {
   registerTapHandlers(registry);
   registerInputHandlers(registry);
   registerScrollHandlers(registry);
+  registerVisualHandlers(registry);
 }
