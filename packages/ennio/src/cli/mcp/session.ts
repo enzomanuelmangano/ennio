@@ -13,11 +13,13 @@
 import { registerAllHandlers } from '../commands/handlers';
 import { CommandRegistry } from '../core/command-registry';
 import type { EnnioConnection } from '../core/ennio-connection';
+import { FlowExecutor } from '../core/flow-executor';
 import { getScreenSize } from '../hid';
-import type { MaestroCommand, MaestroSelector } from '../maestro-parser';
+import type { MaestroCommand, MaestroFlow, MaestroSelector } from '../maestro-parser';
 import type { Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { DeviceSession } from '../platform/types';
+import { SilentReporter } from '../reporters';
 import type { RunContext } from '../runner/context';
 import { setSimLaunchEnv } from '../sim';
 
@@ -138,9 +140,34 @@ export class EnnioMcpSession {
       if (process.env.ENNIO_SHOW_TOUCHES === '1' && this.platform.name === 'ios') {
         await connection.socket.call('set_show_touches', { enabled: true }).catch(() => undefined);
       }
+      // platform.connect returns once the socket is up — but a cold launch's
+      // JS tree may still be mounting. Without this gate, a describe / tap /
+      // run_flow fired right after ennio_launch_app races a half-built screen
+      // (an assertVisible then times out against a screen that hasn't
+      // rendered). Block until the tree looks settled, the same readiness
+      // guard improvise applies before it crawls.
+      await this.waitUntilReady();
       return ok({ bundleId, udid: session.udid });
     } catch (e) {
       return classifyError(e);
+    }
+  }
+
+  /**
+   * Block until the attached app's JS tree looks mounted: two element dumps
+   * 250ms apart agree on a non-empty inventory, or `maxMs` elapses. Readiness
+   * is best-effort — a genuinely empty (or non-RN) screen falls through at
+   * the deadline rather than failing the attach.
+   */
+  private async waitUntilReady(maxMs = 8000): Promise<void> {
+    const deadline = Date.now() + maxMs;
+    let prev = '';
+    while (Date.now() < deadline) {
+      const d = await this.describe();
+      const now = d.ok ? JSON.stringify(d.data.elements) : '';
+      if (now && now !== '[]' && now === prev) return;
+      prev = now;
+      await new Promise((r) => setTimeout(r, 250));
     }
   }
 
@@ -425,6 +452,55 @@ export class EnnioMcpSession {
       const r = await a.connection.socket.call('set_no_animations', { enabled: !enabled });
       if (!r.ok) return err('infra', r.err ?? 'set_no_animations failed');
       return ok({ enabled });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /**
+   * Run a whole Maestro flow against the live attachment and return a
+   * structured per-step outcome with failure context. Reuses the exact
+   * FlowExecutor an `ennio test` run uses — same registry, settle, and HID
+   * actuation — but driven over the already-open MCP connection, so no
+   * second attach happens. The agent composes a flow, runs it here, and on
+   * failure reads `failure.{step,command,reason,screenshotPath}` to iterate.
+   *
+   * A failed flow is a normal answer (`ok({ passed: false, … })`), not an
+   * error turn — the agent branches on `passed`. Only a parse/attach/socket
+   * fault surfaces as an error kind.
+   */
+  async runFlow(flow: MaestroFlow): Promise<
+    EnnioResult<{
+      passed: boolean;
+      stepsRun: number;
+      stepsPassed: number;
+      durationMs: number;
+      steps: { step: number; ms: number; cmd: string }[];
+      failure?: { step: number; command: string; reason: string; screenshotPath?: string };
+    }>
+  > {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    // The agent already chose the app via ennio_launch_app; default the
+    // flow's appId to it so inline flows need no metadata block.
+    const f: MaestroFlow = flow.appId ? flow : { ...flow, appId: a.bundleId };
+    try {
+      const executor = new FlowExecutor({
+        session: a.session,
+        connection: a.connection,
+        platform: this.platform,
+        reporter: new SilentReporter(),
+        driver: this.platform.createDriver(this.opts.inProcessTap ?? false),
+      });
+      const r = await executor.run(f);
+      return ok({
+        passed: r.passed,
+        stepsRun: r.stepsRun,
+        stepsPassed: r.stepsPassed,
+        durationMs: r.durationMs,
+        steps: r.stepTimings,
+        ...(r.failure && { failure: r.failure }),
+      });
     } catch (e) {
       return classifyError(e);
     }
