@@ -12,6 +12,7 @@ ennio test e2e/                       # every *.yaml in the directory
 E2E tests are the most reliable way to ensure your product is stable. As the time it takes to build software keeps shrinking, verification is becoming the bottleneck.
 
 The vision behind this package is to:
+
 - speed up verification as much as possible.
 - give your agent the fastest possible eyes and hands
 - provide a consistent way to [design loops instead of prompts](https://x.com/steipete/status/2063697162748260627?s=20).
@@ -164,13 +165,13 @@ ennio mcp                         # serve ennio over MCP (stdio) for an AI agent
 ### Flags
 
 | Flag                   | Default        | What it does                                                                                                                                           |
-| ---------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ---------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `--verbose`, `-v`      | on             | Per-step inline output + timing.                                                                                                                       |
 | `--quiet`, `-q`        | off            | Suppress per-step output.                                                                                                                              |
 | `--reporter=<kind>`    | `pretty`       | `pretty` or `json`.                                                                                                                                    |
 | `--lenient`            | off            | Skip unknown commands with a warning instead of failing.                                                                                               |
 | `--android` / `--ios`  | iOS            | Backend. `--android` drives an emulator/device over adb.                                                                                               |
-| `--disable-reuse-app`  | reuse **on**   | Force a full relaunch on `clearState`. By default ennio reuses the running app (soft-reset: data wipe + JS reload) between flows — much faster across |
+| `--disable-reuse-app`  | reuse **on**   | Force a full relaunch on `clearState`. By default ennio reuses the running app (soft-reset: data wipe + JS reload) between flows — much faster across  |
 | `--disable-animations` | off            | Suppress app animations (transitions snap to the final frame). Faster, but alters animated UI.                                                         |
 | `--in-process-tap`     | off (real HID) | **iOS only.** Actuate taps via in-process activation (with a per-gesture real-HID fallback) instead of real HID touches. Faster on some apps, but skip |
 | `--safe-mode`          | off            | Disable all in-app hooks (swizzles/observers). Slower settle, but survives injection conflicts.                                                        |
