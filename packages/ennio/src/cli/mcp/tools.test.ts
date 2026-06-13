@@ -23,7 +23,8 @@ function fakeSession() {
     tapTab: vi.fn(async (): Promise<EnnioResult> => ok({ tapped: false })),
     dispatch: vi.fn(async (): Promise<EnnioResult> => ok({ command: 'scrollUntilVisible' })),
     runFlow: vi.fn(
-      async (): Promise<EnnioResult> =>
+      // typed param so mock.calls[0][0] is `unknown`, not an empty tuple
+      async (_flow: unknown): Promise<EnnioResult> =>
         ok({ passed: true, stepsRun: 2, stepsPassed: 2, durationMs: 1, steps: [] }),
     ),
   };
