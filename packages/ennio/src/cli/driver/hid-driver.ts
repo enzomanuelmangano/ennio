@@ -228,7 +228,14 @@ export class HidDriver implements GestureDriver {
   }
 
   async settleScrollStep(client: EnnioSocketClient, _outcome?: SwipeOutcome): Promise<void> {
-    await bestEffort(client, 'wait_commit', { maxMs: 2000, stableMs: 300 });
+    // Intermediate scroll step: the loop re-checks visibility and swipes
+    // again, so the list only needs to settle enough to read the next
+    // position — not the full 300ms stability the FOUND settle uses. A
+    // shorter window cuts ~200ms off every scroll swipe across the
+    // scroll-to-find flows; an under-settled read just triggers another
+    // swipe (the loop is self-correcting) and tap-time exposure self-heal
+    // covers the final placement.
+    await bestEffort(client, 'wait_commit', { maxMs: 1200, stableMs: 120 });
   }
 
   async settleScrollFound(client: EnnioSocketClient, _noMomentum?: boolean): Promise<void> {

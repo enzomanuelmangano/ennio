@@ -82,12 +82,16 @@ static void walkAndHash(UIView *v, uint64_t *h) {
     int32_t y = (int32_t)window.origin.y;
     int32_t w = (int32_t)window.size.width;
     int32_t hgt = (int32_t)window.size.height;
-    uint8_t alphaQ = (uint8_t)(v.alpha * 255);
     hashFeed(h, &x, sizeof(x));
     hashFeed(h, &y, sizeof(y));
     hashFeed(h, &w, sizeof(w));
     hashFeed(h, &hgt, sizeof(hgt));
-    hashFeed(h, &alphaQ, sizeof(alphaQ));
+    // EXPERIMENT: alpha excluded from the settle hash. A Reanimated /
+    // per-frame opacity animation mutates the MODEL alpha every frame,
+    // churning the hash so wait_commit never reaches `stableMs` until the
+    // fade ends — burning the whole animation per tap. Opacity doesn't
+    // affect hittability (a 50%-opacity control is fully tappable), so
+    // dropping it lets settle return once the structural tree is stable.
 
     NSString *aid = v.accessibilityIdentifier;
     if (aid.length) {
