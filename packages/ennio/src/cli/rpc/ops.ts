@@ -95,6 +95,11 @@ export interface RpcOps {
     result: { pong?: boolean; bootstrap?: 'ready' | 'pending' };
   };
   window_size: { args: Record<string, never>; result: { w: number; h: number } };
+  // clear_overlays: wipe ennio's transient on-screen instrumentation
+  // (show-touches indicators + the "E2E" debug banner) from the running
+  // app without disturbing app state. Backs `ennio clean` and improvise's
+  // best-effort teardown on abnormal exit. Always returns cleared:true.
+  clear_overlays: { args: Record<string, never>; result: { cleared: boolean } };
   top_vc_chain: { args: Record<string, never>; result: { chain: string[] } };
   finder_probe: { args: { testID: string }; result: { index: boolean; uiview: boolean } };
   dump_views: { args: Record<string, never>; result: string[] };

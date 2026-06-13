@@ -104,6 +104,7 @@ export const decoders: OpDecoders = {
   // diagnostics / lifecycle
   ping: shape({ pong: 'bool?', bootstrap: 'str?' }),
   window_size: shape({ w: 'num', h: 'num' }),
+  clear_overlays: shape({ cleared: 'bool' }),
   top_vc_chain: shape({ chain: 'str[]' }),
   finder_probe: shape({ index: 'bool', uiview: 'bool' }),
   dump_views: strArray,

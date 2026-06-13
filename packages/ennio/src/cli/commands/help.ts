@@ -12,6 +12,7 @@ Usage:
   ennio doctor                  diagnose Node, Xcode, enniohid, dylib + app socket
   ennio mcp                     serve ennio over MCP (stdio) for an AI agent
   ennio improvise [bundleId]    play the app without a score: autonomous crash hunt, exit 0/1
+  ennio clean [bundleId]        wipe ennio's on-screen overlays in the running app
   ennio version                 print version
   ennio help [command]          this message, or per-command help
 
@@ -89,6 +90,28 @@ Options:
                      default off — the crawl starts on the current screen)
   --deny REGEX       testIDs never tapped (default blocks logout/delete/
                      purchase-looking ids)
+Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
+  clean: `ennio clean [bundleId]
+
+Tidy ennio's on-screen overlays (the touch indicators + the "E2E" debug
+banner) in the running app. ennio's dylib paints these while a run is
+active and normally tears them down on a clean exit — but when a run
+aborts (crash, timeout, error) they can stay painted on the still-running
+app. This wipes them.
+
+Attaches WARM: it reuses the already-running app and never relaunches or
+resets state — the app and its data are left intact (the distinction from
+restart-app, which kills and relaunches the process). Only ennio's own
+instrumentation is removed.
+
+  exit 0   overlays cleared
+  exit 1   attach failed, no app running, several apps (ambiguous), or
+           the clear could not be confirmed
+
+bundleId defaults to the app already open on the booted simulator;
+several running apps is an error listing the candidates, never a guess.
+
+Options: --android (target an emulator)
 Environment: ENNIO_UDID, ENNIO_DYLIB_PATH`,
   doctor: `ennio doctor [--smoke <bundleId>]
 

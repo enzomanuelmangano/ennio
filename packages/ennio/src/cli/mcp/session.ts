@@ -550,6 +550,31 @@ export class EnnioMcpSession {
     setSimLaunchEnv(a.session.udid, 'ENNIO_SHOW_TOUCHES', false);
   }
 
+  /**
+   * Wipe ennio's transient on-screen overlays (show-touches indicators +
+   * the "E2E" debug banner) from the running app via the `clear_overlays`
+   * socket op. App and state are left intact — this only tears down ennio's
+   * own instrumentation, never the app's UI or data.
+   *
+   * Best-effort and bounded: the app may already be dead (improvise's
+   * abnormal-exit teardown calls this), so a failed or hung RPC must not
+   * propagate or block. Returns true only when the op confirmed cleared.
+   */
+  async clearOverlays(timeoutMs = 2000): Promise<boolean> {
+    const a = this.attachment;
+    if (!a || this.platform.name !== 'ios') return false;
+    try {
+      const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+      const r = await Promise.race([
+        a.connection.socket.call('clear_overlays', {}).catch(() => null),
+        timeout,
+      ]);
+      return !!(r && r.ok && (r.data as { cleared?: boolean })?.cleared);
+    } catch {
+      return false;
+    }
+  }
+
   close(): void {
     this.detach();
   }
