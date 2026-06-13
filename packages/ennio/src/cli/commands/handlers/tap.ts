@@ -30,6 +30,18 @@ function has<T extends string>(
   return typeof cmd === 'object' && cmd !== null && key in cmd;
 }
 
+// Gap between the two discrete taps emitted by the repeat-tap collapse.
+// Must sit just BELOW iOS/RN's double-tap recognition window (~250–300ms)
+// so the two touches land OUTSIDE it and each fires the target's onPress
+// separately — a single HID doubleTap landed INSIDE that window and a
+// counter button would coalesce both touches into ONE press, silently
+// dropping an increment (g-reanimated: 3 taps → count stuck at 2). Two
+// discrete taps at this spacing each register as a real press while
+// staying as cheap as the original collapse (no per-tap execTapOn
+// overhead). ~100–120ms is the target: large enough to avoid double-tap
+// coalescing, small enough to keep the collapse fast.
+const REPEAT_TAP_GAP_MS = 110;
+
 export function registerTapHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & TapOnCmd => has(c, 'tapOn'),
@@ -75,9 +87,19 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       if (ctx.driver.collapsesRepeatTaps && nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
         const rect = await findOnce(ctx, sel);
         if (rect && (rect.w > 5 || rect.h > 5)) {
-          await timedAsync(ctx, 'tap.execTapOn', () =>
-            ctx.driver.doubleTap(ctx.udid, rect.x + rect.w / 2, rect.y + rect.h / 2),
-          );
+          const cx = rect.x + rect.w / 2;
+          const cy = rect.y + rect.h / 2;
+          // Two DISCRETE HID taps separated by REPEAT_TAP_GAP_MS instead of
+          // a single doubleTap: the doubleTap landed inside RN's double-tap
+          // window and counter buttons coalesced it into one onPress,
+          // dropping an increment. Spaced discrete taps each fire onPress
+          // separately and stay as fast as the original collapse (no
+          // per-tap execTapOn overhead).
+          await timedAsync(ctx, 'tap.execTapOn', async () => {
+            await ctx.driver.tap(ctx.udid, cx, cy, { intent: 'press' });
+            await sleep(REPEAT_TAP_GAP_MS);
+            await ctx.driver.tap(ctx.udid, cx, cy, { intent: 'press' });
+          });
           ctx.lastTapKey = tapKey;
           ctx.lastTapTestID = sel.id;
           ctx.skipNextCmd = true;
