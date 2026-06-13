@@ -11,6 +11,7 @@
 // tap path, never a passthrough.
 
 import type { MaestroCommand, MaestroSelector } from '../maestro-parser';
+import { parseMaestroFile, parseMaestroString } from '../maestro-parser';
 import { currentVersion } from '../update-check';
 
 import { ENNIO_CONTRACT_VERSION, PREFERRED_PROTOCOL_VERSION } from './protocol';
@@ -450,6 +451,47 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
             ...(typeof args.timeoutMs === 'number' && { timeout: args.timeoutMs }),
           },
         });
+      },
+    },
+    {
+      name: 'ennio_run_flow',
+      description:
+        'Run a whole Maestro flow (inline YAML or a file path) against the attached app, ' +
+        'and return a structured per-step result with failure context — which step ' +
+        'failed, why, and a diagnostic screenshot path. Compose a flow, run it, and on ' +
+        'failure read the reason to iterate. A failed flow is a normal answer ' +
+        '(passed: false), not an error. appId defaults to the attached app. ' +
+        'Example: { "yaml": "- tapOn: Login\\n- assertVisible: Home" }.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          yaml: {
+            type: 'string',
+            description: 'Inline Maestro YAML (a command list, with optional --- metadata).',
+          },
+          path: {
+            type: 'string',
+            description: 'Path to a .yaml flow file (alternative to yaml — provide exactly one).',
+          },
+        },
+        additionalProperties: false,
+      },
+      readOnly: false,
+      handler: (args) => {
+        const hasYaml = typeof args.yaml === 'string' && args.yaml.length > 0;
+        const hasPath = typeof args.path === 'string' && args.path.length > 0;
+        if (hasYaml === hasPath) {
+          return err('invalid', 'provide exactly one of: yaml, path');
+        }
+        let flow;
+        try {
+          flow = hasYaml
+            ? parseMaestroString(args.yaml as string)
+            : parseMaestroFile(args.path as string);
+        } catch (e) {
+          return err('invalid', `flow parse failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        return session.runFlow(flow);
       },
     },
   ];

@@ -9,6 +9,7 @@ export type { Reporter, FlowResult, SuiteResult } from './reporter';
 export { PrettyReporter } from './pretty-reporter';
 export { JsonReporter } from './json-reporter';
 export { LiveReporter } from './live-reporter';
+export { SilentReporter } from './silent-reporter';
 
 export interface PickReporterOptions {
   kind?: 'pretty' | 'json';

@@ -22,6 +22,10 @@ function fakeSession() {
     alertDismiss: vi.fn(async (): Promise<EnnioResult> => ok({ dismissed: true })),
     tapTab: vi.fn(async (): Promise<EnnioResult> => ok({ tapped: false })),
     dispatch: vi.fn(async (): Promise<EnnioResult> => ok({ command: 'scrollUntilVisible' })),
+    runFlow: vi.fn(
+      async (): Promise<EnnioResult> =>
+        ok({ passed: true, stepsRun: 2, stepsPassed: 2, durationMs: 1, steps: [] }),
+    ),
   };
 }
 
@@ -119,5 +123,38 @@ describe('ennio_scroll_until_visible', () => {
     });
     expect(res).toMatchObject({ ok: false, error: { kind: 'invalid' } });
     expect(stub.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('ennio_run_flow', () => {
+  it('parses inline YAML and runs it; passes the parsed flow to the session', async () => {
+    const { byName, stub } = toolsFor(fakeSession());
+    const res = await byName('ennio_run_flow').handler({
+      yaml: '- tapOn: Login\n- assertVisible: Home',
+    });
+    expect(stub.runFlow).toHaveBeenCalledOnce();
+    const flow = stub.runFlow.mock.calls[0][0] as { commands: unknown[] };
+    expect(flow.commands).toHaveLength(2);
+    expect(res).toMatchObject({ ok: true, data: { passed: true } });
+  });
+
+  it('rejects when both yaml and path are given', async () => {
+    const { byName, stub } = toolsFor(fakeSession());
+    const res = await byName('ennio_run_flow').handler({ yaml: '- back', path: '/tmp/f.yaml' });
+    expect(res).toMatchObject({ ok: false, error: { kind: 'invalid' } });
+    expect(stub.runFlow).not.toHaveBeenCalled();
+  });
+
+  it('rejects when neither yaml nor path is given', async () => {
+    const { byName } = toolsFor(fakeSession());
+    const res = await byName('ennio_run_flow').handler({});
+    expect(res).toMatchObject({ ok: false, error: { kind: 'invalid' } });
+  });
+
+  it('reports a parse failure as invalid, not infra', async () => {
+    const { byName, stub } = toolsFor(fakeSession());
+    const res = await byName('ennio_run_flow').handler({ yaml: '- tapOn: [unterminated' });
+    expect(res).toMatchObject({ ok: false, error: { kind: 'invalid' } });
+    expect(stub.runFlow).not.toHaveBeenCalled();
   });
 });

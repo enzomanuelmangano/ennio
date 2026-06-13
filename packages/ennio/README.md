@@ -196,6 +196,8 @@ client-specific coupling. Add it to a client's MCP config:
   `ennio_erase_text`, `ennio_swipe`, `ennio_scroll`,
   `ennio_scroll_until_visible`, `ennio_tap_tab`, `ennio_handle_alert`,
   `ennio_set_animations`, `ennio_back`
+- Flows: `ennio_run_flow` — run a whole Maestro flow (inline YAML or a file
+  path) and get a structured per-step result with failure context
 
 **Resources:** `ennio://screen/hierarchy`, `ennio://screen/screenshot`,
 `ennio://session`.

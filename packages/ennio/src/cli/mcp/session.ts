@@ -13,11 +13,13 @@
 import { registerAllHandlers } from '../commands/handlers';
 import { CommandRegistry } from '../core/command-registry';
 import type { EnnioConnection } from '../core/ennio-connection';
+import { FlowExecutor } from '../core/flow-executor';
 import { getScreenSize } from '../hid';
-import type { MaestroCommand, MaestroSelector } from '../maestro-parser';
+import type { MaestroCommand, MaestroFlow, MaestroSelector } from '../maestro-parser';
 import type { Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { DeviceSession } from '../platform/types';
+import { SilentReporter } from '../reporters';
 import type { RunContext } from '../runner/context';
 import { setSimLaunchEnv } from '../sim';
 
@@ -425,6 +427,55 @@ export class EnnioMcpSession {
       const r = await a.connection.socket.call('set_no_animations', { enabled: !enabled });
       if (!r.ok) return err('infra', r.err ?? 'set_no_animations failed');
       return ok({ enabled });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /**
+   * Run a whole Maestro flow against the live attachment and return a
+   * structured per-step outcome with failure context. Reuses the exact
+   * FlowExecutor an `ennio test` run uses — same registry, settle, and HID
+   * actuation — but driven over the already-open MCP connection, so no
+   * second attach happens. The agent composes a flow, runs it here, and on
+   * failure reads `failure.{step,command,reason,screenshotPath}` to iterate.
+   *
+   * A failed flow is a normal answer (`ok({ passed: false, … })`), not an
+   * error turn — the agent branches on `passed`. Only a parse/attach/socket
+   * fault surfaces as an error kind.
+   */
+  async runFlow(flow: MaestroFlow): Promise<
+    EnnioResult<{
+      passed: boolean;
+      stepsRun: number;
+      stepsPassed: number;
+      durationMs: number;
+      steps: { step: number; ms: number; cmd: string }[];
+      failure?: { step: number; command: string; reason: string; screenshotPath?: string };
+    }>
+  > {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    // The agent already chose the app via ennio_launch_app; default the
+    // flow's appId to it so inline flows need no metadata block.
+    const f: MaestroFlow = flow.appId ? flow : { ...flow, appId: a.bundleId };
+    try {
+      const executor = new FlowExecutor({
+        session: a.session,
+        connection: a.connection,
+        platform: this.platform,
+        reporter: new SilentReporter(),
+        driver: this.platform.createDriver(this.opts.inProcessTap ?? false),
+      });
+      const r = await executor.run(f);
+      return ok({
+        passed: r.passed,
+        stepsRun: r.stepsRun,
+        stepsPassed: r.stepsPassed,
+        durationMs: r.durationMs,
+        steps: r.stepTimings,
+        ...(r.failure && { failure: r.failure }),
+      });
     } catch (e) {
       return classifyError(e);
     }

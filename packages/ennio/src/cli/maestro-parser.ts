@@ -196,7 +196,20 @@ function substituteEnv(value: unknown): unknown {
 export function parseMaestroFile(filePath: string): MaestroFlow {
   const absolutePath = resolve(filePath);
   const content = readFileSync(absolutePath, 'utf-8');
+  return parseMaestroString(content, absolutePath);
+}
 
+/**
+ * Parse Maestro YAML from a string — the file-less entry point used by the
+ * MCP `ennio_run_flow` tool, where an agent supplies a flow inline.
+ * `parseMaestroFile` is a thin reader over this. `filePath` is recorded on
+ * the flow for error messages and `runFlow` subflow resolution; it defaults
+ * to a synthetic path in the cwd for inline flows.
+ */
+export function parseMaestroString(
+  content: string,
+  filePath: string = resolve('mcp-inline.yaml'),
+): MaestroFlow {
   // Maestro YAML uses --- to separate metadata from commands
   const documents = (parseYamlAll(content) as unknown[]).map(substituteEnv);
 
@@ -225,7 +238,7 @@ export function parseMaestroFile(filePath: string): MaestroFlow {
     onFlowStart: metadata.onFlowStart as MaestroCommand[] | undefined,
     onFlowComplete: metadata.onFlowComplete as MaestroCommand[] | undefined,
     commands,
-    filePath: absolutePath,
+    filePath,
     ennio: metadata.ennio as EnnioFlowConfig | undefined,
   };
 }

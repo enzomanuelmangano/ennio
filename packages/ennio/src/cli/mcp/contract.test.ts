@@ -54,6 +54,7 @@ const MUTATING_TOOLS = [
   'ennio_handle_alert',
   'ennio_tap_tab',
   'ennio_scroll_until_visible',
+  'ennio_run_flow',
 ];
 
 describe('bar 1 — self-describing tools', () => {
@@ -199,6 +200,7 @@ describe('bar 8 — the tool surface is snapshot-guarded', () => {
         readOnly: false,
         args: ['direction', 'selector', 'timeoutMs'],
       },
+      ennio_run_flow: { readOnly: false, args: ['path', 'yaml'] },
     });
   });
 });
