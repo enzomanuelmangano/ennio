@@ -1,19 +1,24 @@
 //
 // EnnioReactObserver.h
 //
-// Optional React Native commit observer. Hooks RN internals to receive
-// a direct callback the moment a commit finishes, instead of polling
-// the UIView hash on every CADisplayLink tick.
+// Optional React Native commit observer. Hooks RN's commit notification
+// to receive a direct callback the moment a commit finishes, instead of
+// polling the UIView hash on every CADisplayLink tick.
 //
-// Two strategies, tried in order at +start time:
-//   1. NSNotificationCenter — observe `RCTUIManagerDidUpdateViewsNotification`
-//      (Paper / legacy bridge). No swizzle, no private API.
-//   2. Method swizzle on `RCTMountingManager` (Fabric / new arch). The
-//      class is looked up by name at runtime — if the host app does not
-//      embed Fabric, the swizzle is silently skipped.
+// Single strategy: NSNotificationCenter — observe
+// `RCTUIManagerDidUpdateViewsNotification` (Paper / legacy bridge). No
+// swizzle, no private API, nothing to corrupt.
 //
-// If neither strategy attaches, callers fall back to EnnioSettle's
-// hash-change signal. attached() reports which (if any) is live.
+// A second strategy used to swizzle a Fabric mount method
+// (`RCTMountingManager performTransaction:` et al.) for a commit signal
+// on the New Architecture. It was removed: forwarding Fabric's
+// C++-argument mount methods through an objc IMP crashed third-party
+// Fabric components (Skia, Expo liquid-glass) and SIGSEGV'd on RN 0.85
+// (#44). On Fabric apps the notification simply doesn't fire and callers
+// fall back to EnnioSettle's hash-change signal — which settles fine.
+//
+// If the observer doesn't attach, callers fall back to EnnioSettle's
+// hash-change signal. attached() reports whether it's live.
 //
 // All timestamps are mach-time ms (monotonic), same domain as
 // EnnioSettle, so the CLI can sample one before a tap and ask the
@@ -45,8 +50,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Wait until React has been quiet (no commits) for stableMs.
 + (BOOL)waitForReactQuietStableMs:(uint32_t)stableMs maxMs:(uint32_t)maxMs;
 
-/// "paper" | "fabric" | "both" | "none" — diagnostic string for the
-/// CLI to log on startup so users know which path is active.
+/// "paper" | "none" — diagnostic string for the CLI to log on startup
+/// so users know whether the commit observer is live or the caller is on
+/// the hash-polling fallback.
 + (NSString *)attachmentDescription;
 
 @end

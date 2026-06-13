@@ -40,9 +40,10 @@ export async function captureHash(ctx: RunContext): Promise<string> {
 }
 
 /// React Native commit observer — see ios/EnnioReactObserver.mm. Returns
-/// `{ts, attach}`. `attach` is "paper" | "fabric" | "both" | "none".
-/// When "none" the dylib has no RN hook attached and the caller falls
-/// back to the UIView frame-hash signal.
+/// `{ts, attach}`. `attach` is "paper" | "none" (older dylibs may also
+/// report the now-removed "fabric"/"both"). When "none" the dylib has no
+/// RN hook attached and the caller falls back to the UIView frame-hash
+/// signal.
 export async function captureReactTs(
   ctx: RunContext,
 ): Promise<{ ts: number; attach: 'paper' | 'fabric' | 'both' | 'none' }> {
