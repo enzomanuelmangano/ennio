@@ -1,0 +1,203 @@
+{
+  "name": "mood-context",
+  "elements": [
+    {
+      "id": "tag-Community",
+      "role": "chip",
+      "text": "Community",
+      "rect": {
+        "x": 0.1291,
+        "y": 0.565,
+        "w": 0.3005,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Current Events",
+      "role": "chip",
+      "text": "Current Events",
+      "rect": {
+        "x": 0.4601,
+        "y": 0.565,
+        "w": 0.4108,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Dating",
+      "role": "chip",
+      "text": "Dating",
+      "rect": {
+        "x": 0.0845,
+        "y": 0.6211,
+        "w": 0.2347,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Education",
+      "role": "chip",
+      "text": "Education",
+      "rect": {
+        "x": 0.3498,
+        "y": 0.6211,
+        "w": 0.3005,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Family",
+      "role": "chip",
+      "text": "Family",
+      "rect": {
+        "x": 0.6808,
+        "y": 0.6211,
+        "w": 0.2347,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Fitness",
+      "role": "chip",
+      "text": "Fitness",
+      "rect": {
+        "x": 0.0962,
+        "y": 0.6771,
+        "w": 0.2559,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Friends",
+      "role": "chip",
+      "text": "Friends",
+      "rect": {
+        "x": 0.3826,
+        "y": 0.6771,
+        "w": 0.2559,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Health",
+      "role": "chip",
+      "text": "Health",
+      "rect": {
+        "x": 0.669,
+        "y": 0.6771,
+        "w": 0.2347,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Hobbies",
+      "role": "chip",
+      "text": "Hobbies",
+      "rect": {
+        "x": 0.0951,
+        "y": 0.7332,
+        "w": 0.2559,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Identity",
+      "role": "chip",
+      "text": "Identity",
+      "rect": {
+        "x": 0.3815,
+        "y": 0.7332,
+        "w": 0.2793,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Money",
+      "role": "chip",
+      "text": "Money",
+      "rect": {
+        "x": 0.6913,
+        "y": 0.7332,
+        "w": 0.2136,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Partner",
+      "role": "chip",
+      "text": "Partner",
+      "rect": {
+        "x": 0.2066,
+        "y": 0.7893,
+        "w": 0.2559,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Self Care",
+      "role": "chip",
+      "text": "Self Care",
+      "rect": {
+        "x": 0.493,
+        "y": 0.7893,
+        "w": 0.3005,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Spirituality",
+      "role": "chip",
+      "text": "Spirituality",
+      "rect": {
+        "x": 0.061,
+        "y": 0.8453,
+        "w": 0.3685,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Tasks",
+      "role": "chip",
+      "text": "Tasks",
+      "rect": {
+        "x": 0.4601,
+        "y": 0.8453,
+        "w": 0.2136,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Travel",
+      "role": "chip",
+      "text": "Travel",
+      "rect": {
+        "x": 0.7042,
+        "y": 0.8453,
+        "w": 0.2347,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Weather",
+      "role": "chip",
+      "text": "Weather",
+      "rect": {
+        "x": 0.2617,
+        "y": 0.9014,
+        "w": 0.2559,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Work",
+      "role": "chip",
+      "text": "Work",
+      "rect": {
+        "x": 0.5481,
+        "y": 0.9014,
+        "w": 0.1901,
+        "h": 0.0397
+      }
+    }
+  ]
+}

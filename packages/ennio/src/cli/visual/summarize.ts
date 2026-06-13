@@ -28,6 +28,8 @@ export interface MatchSummary {
   resized: boolean;
   /** Diff heatmap on disk, when a heatmap path was given. */
   heatmapPath?: string;
+  /** Reference-over-live overlay on disk, when an overlay path was given. */
+  overlayPath?: string;
   /** Where the screen differs (largest first) — for agent/VLM verification. */
   diffRegions: RegionSummary[];
 }
@@ -38,9 +40,10 @@ export interface MatchSummary {
  */
 export function writeMatchArtifacts(
   result: MatchResult,
-  paths: { heatmapPath?: string; regionsDir?: string },
+  paths: { heatmapPath?: string; regionsDir?: string; overlayPath?: string },
 ): MatchSummary {
   if (paths.heatmapPath && result.heatmap) writeFileSync(paths.heatmapPath, result.heatmap);
+  if (paths.overlayPath && result.overlay) writeFileSync(paths.overlayPath, result.overlay);
   if (paths.regionsDir) mkdirSync(paths.regionsDir, { recursive: true });
 
   const diffRegions: RegionSummary[] = result.diffRegions.map((r, i) => {
@@ -63,6 +66,7 @@ export function writeMatchArtifacts(
     height: result.height,
     resized: result.resized,
     ...(paths.heatmapPath && result.heatmap && { heatmapPath: paths.heatmapPath }),
+    ...(paths.overlayPath && result.overlay && { overlayPath: paths.overlayPath }),
     diffRegions,
   };
 }

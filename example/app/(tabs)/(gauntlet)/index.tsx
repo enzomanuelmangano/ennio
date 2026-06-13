@@ -39,6 +39,7 @@ const PATTERNS: { id: string; label: string; route: string }[] = [
   { id: 'g-datepicker', label: 'Native UIDatePicker spinner', route: '/gauntlet/datepicker' },
   { id: 'g-playground', label: 'Playground sandbox', route: '/gauntlet/playground' },
   { id: 'g-2048', label: '2048 (swipe-driven game)', route: '/gauntlet/2048' },
+  { id: 'g-mood-context', label: 'Mood context sheet (Skia glow)', route: '/gauntlet/mood-context' },
 ];
 
 export default function GauntletIndex() {

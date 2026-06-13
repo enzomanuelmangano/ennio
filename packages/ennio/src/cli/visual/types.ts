@@ -41,6 +41,11 @@ export interface MatchOptions {
   /** Attach a side-by-side live|reference crop to each diff region — the
    *  artifact an agent/VLM verifies. Default false. */
   emitCrops?: boolean;
+  /** Emit an overlay PNG: the reference blended over the live capture so a
+   *  human can eyeball alignment (ghosting = misalignment). Default false. */
+  emitOverlay?: boolean;
+  /** Overlay blend weight of the reference in [0,1]. Default 0.5. */
+  overlayAlpha?: number;
 }
 
 export interface MatchResult {
@@ -61,6 +66,8 @@ export interface MatchResult {
   passed: boolean;
   /** PNG bytes of the diff heatmap, when emitHeatmap. */
   heatmap?: Buffer;
+  /** PNG bytes of the reference-over-live overlay, when emitOverlay. */
+  overlay?: Buffer;
   /** Where the screen differs, clustered into bounding boxes (largest first).
    *  Empty on a clean match. Crops attached when emitCrops. */
   diffRegions: DiffRegion[];

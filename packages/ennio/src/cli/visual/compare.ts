@@ -61,6 +61,22 @@ export function compareScreens(
   // resizeRGBA already returns a fresh buffer; copy only the no-resize case.
   if (!resized) liveData = Buffer.from(liveData);
 
+  // Overlay: reference blended over the (aligned) live capture so a human can
+  // eyeball alignment — crisp where they line up, ghosted where they don't.
+  // Built before masking so it shows the real screen.
+  let overlay: Buffer | undefined;
+  if (opts.emitOverlay) {
+    const a = opts.overlayAlpha ?? 0.5;
+    const ovl = new PNG({ width, height });
+    for (let i = 0; i < width * height * 4; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        ovl.data[i + c] = Math.round(liveData[i + c] * (1 - a) + ref.data[i + c] * a);
+      }
+      ovl.data[i + 3] = 255;
+    }
+    overlay = PNG.sync.write(ovl);
+  }
+
   // Mask: paint flagged regions to a constant in BOTH images (so pixelmatch
   // sees them equal) and drop their area from the denominator. Masks are
   // normalized, so they're correct regardless of the resize above.
@@ -126,6 +142,7 @@ export function compareScreens(
     passed: matchRatio >= passThreshold,
     diffRegions,
     ...(emitHeatmap && { heatmap: PNG.sync.write(diff) }),
+    ...(overlay && { overlay }),
   };
 }
 

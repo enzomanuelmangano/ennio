@@ -23,6 +23,8 @@ interface AssertScreenMatchesCmd {
     threshold?: number;
     mask?: MaskInput[];
     output?: string;
+    /** Path to write a reference-over-live overlay PNG (eyeball alignment). */
+    overlay?: string;
     /** Directory to write per-region side-by-side crops (live|reference) for
      *  agent/VLM verification of WHAT differs. */
     regions?: string;
@@ -73,12 +75,18 @@ export function registerVisualHandlers(registry: CommandRegistry): void {
           ? spec.regions
           : resolve(flowDir, spec.regions)
         : undefined;
+      const overlayPath = spec.overlay
+        ? isAbsolute(spec.overlay)
+          ? spec.overlay
+          : resolve(flowDir, spec.overlay)
+        : undefined;
 
       const result = compareScreens(livePng, refPng, {
         ...(spec.threshold !== undefined && { passThreshold: spec.threshold }),
         masks,
         emitHeatmap: Boolean(heatmapPath),
         emitCrops: Boolean(regionsDir),
+        emitOverlay: Boolean(overlayPath),
       });
 
       // Write artifacts (heatmap + region crops) and record a JSON-safe summary
@@ -86,6 +94,7 @@ export function registerVisualHandlers(registry: CommandRegistry): void {
       const summary = writeMatchArtifacts(result, {
         ...(heatmapPath && { heatmapPath }),
         ...(regionsDir && { regionsDir }),
+        ...(overlayPath && { overlayPath }),
       });
       ctx.outputs[spec.outputVar ?? 'screenMatch'] = summary;
 

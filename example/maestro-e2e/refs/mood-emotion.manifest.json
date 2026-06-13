@@ -1,0 +1,203 @@
+{
+  "name": "mood-emotion",
+  "elements": [
+    {
+      "id": "tag-Amazed",
+      "role": "chip",
+      "text": "Amazed",
+      "rect": {
+        "x": 0.1279,
+        "y": 0.565,
+        "w": 0.2347,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Amused",
+      "role": "chip",
+      "text": "Amused",
+      "rect": {
+        "x": 0.3932,
+        "y": 0.565,
+        "w": 0.2347,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Brave",
+      "role": "chip",
+      "text": "Brave",
+      "rect": {
+        "x": 0.6585,
+        "y": 0.565,
+        "w": 0.2136,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Calm",
+      "role": "chip",
+      "text": "Calm",
+      "rect": {
+        "x": 0.0962,
+        "y": 0.6211,
+        "w": 0.1901,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Confident",
+      "role": "chip",
+      "text": "Confident",
+      "rect": {
+        "x": 0.3169,
+        "y": 0.6211,
+        "w": 0.3005,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Content",
+      "role": "chip",
+      "text": "Content",
+      "rect": {
+        "x": 0.6479,
+        "y": 0.6211,
+        "w": 0.2559,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Excited",
+      "role": "chip",
+      "text": "Excited",
+      "rect": {
+        "x": 0.0951,
+        "y": 0.6771,
+        "w": 0.2559,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Grateful",
+      "role": "chip",
+      "text": "Grateful",
+      "rect": {
+        "x": 0.3815,
+        "y": 0.6771,
+        "w": 0.2793,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Happy",
+      "role": "chip",
+      "text": "Happy",
+      "rect": {
+        "x": 0.6913,
+        "y": 0.6771,
+        "w": 0.2136,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Hopeful",
+      "role": "chip",
+      "text": "Hopeful",
+      "rect": {
+        "x": 0.0516,
+        "y": 0.7332,
+        "w": 0.2559,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Indifferent",
+      "role": "chip",
+      "text": "Indifferent",
+      "rect": {
+        "x": 0.338,
+        "y": 0.7332,
+        "w": 0.3451,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Joyful",
+      "role": "chip",
+      "text": "Joyful",
+      "rect": {
+        "x": 0.7136,
+        "y": 0.7332,
+        "w": 0.2347,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Passionate",
+      "role": "chip",
+      "text": "Passionate",
+      "rect": {
+        "x": 0.061,
+        "y": 0.7893,
+        "w": 0.3239,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Peaceful",
+      "role": "chip",
+      "text": "Peaceful",
+      "rect": {
+        "x": 0.4155,
+        "y": 0.7893,
+        "w": 0.2793,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Proud",
+      "role": "chip",
+      "text": "Proud",
+      "rect": {
+        "x": 0.7254,
+        "y": 0.7893,
+        "w": 0.2136,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Relieved",
+      "role": "chip",
+      "text": "Relieved",
+      "rect": {
+        "x": 0.1948,
+        "y": 0.8453,
+        "w": 0.2793,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Satisfied",
+      "role": "chip",
+      "text": "Satisfied",
+      "rect": {
+        "x": 0.5047,
+        "y": 0.8453,
+        "w": 0.3005,
+        "h": 0.0397
+      }
+    },
+    {
+      "id": "tag-Surprised",
+      "role": "chip",
+      "text": "Surprised",
+      "rect": {
+        "x": 0.3498,
+        "y": 0.9014,
+        "w": 0.3005,
+        "h": 0.0397
+      }
+    }
+  ]
+}

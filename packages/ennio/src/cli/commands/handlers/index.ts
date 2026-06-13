@@ -4,6 +4,7 @@
 import type { CommandRegistry } from '../../core/command-registry';
 
 import { registerAssertHandlers } from './assert';
+import { registerConformanceHandlers } from './conformance';
 import { registerControlFlowHandlers } from './control-flow';
 import { registerInputHandlers } from './input';
 import { registerLifecycleHandlers } from './lifecycle';
@@ -23,4 +24,5 @@ export function registerAllHandlers(registry: CommandRegistry): void {
   registerInputHandlers(registry);
   registerScrollHandlers(registry);
   registerVisualHandlers(registry);
+  registerConformanceHandlers(registry);
 }

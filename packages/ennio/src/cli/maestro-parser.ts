@@ -131,7 +131,18 @@ export type MaestroCommand =
         threshold?: number;
         mask?: (string | { x: number; y: number; w: number; h: number })[];
         output?: string;
+        overlay?: string;
         regions?: string;
+        outputVar?: string;
+      };
+    }
+  | {
+      // Structural conformance: compare the live element tree against a
+      // reference manifest (element set + positions). Fails on blocker/major
+      // findings. Not a Maestro command.
+      assertScreenConformance: {
+        manifest: string;
+        failOn?: 'blocker' | 'major' | 'minor';
         outputVar?: string;
       };
     };
