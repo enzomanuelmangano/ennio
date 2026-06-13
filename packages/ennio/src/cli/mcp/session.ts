@@ -10,6 +10,8 @@
 // swipes go through the HID driver by default — ennio is always the
 // actuator, never a passthrough.
 
+import { readFileSync, writeFileSync } from 'node:fs';
+
 import { registerAllHandlers } from '../commands/handlers';
 import { CommandRegistry } from '../core/command-registry';
 import type { EnnioConnection } from '../core/ennio-connection';
@@ -22,6 +24,9 @@ import type { DeviceSession } from '../platform/types';
 import { SilentReporter } from '../reporters';
 import type { RunContext } from '../runner/context';
 import { setSimLaunchEnv } from '../sim';
+import { captureForMatch } from '../visual/capture';
+import type { MaskInput } from '../visual/capture';
+import { compareScreens } from '../visual/compare';
 
 import { describeViews } from './describe';
 import type { ScreenDescription } from './describe';
@@ -505,6 +510,66 @@ export class EnnioMcpSession {
         ...(r.failure && { failure: r.failure }),
         ...(r.outputs && Object.keys(r.outputs).length > 0 && { outputs: r.outputs }),
       });
+    } catch (e) {
+      return classifyError(e);
+    }
+  }
+
+  /**
+   * Deterministically compare the current screen against a reference PNG.
+   * Captures (settle-gated), masks author-flagged regions, runs the pixel
+   * comparator, optionally writes a diff heatmap. A below-threshold match is a
+   * normal answer (`ok({ passed:false, … })`) — the agent branches on
+   * `passed`/`matchRatio`. Only a missing reference / socket fault errors.
+   */
+  async matchScreen(opts: {
+    reference: string;
+    threshold?: number;
+    mask?: MaskInput[];
+    output?: string;
+  }): Promise<
+    EnnioResult<{
+      matchRatio: number;
+      passed: boolean;
+      diffPixels: number;
+      comparedPixels: number;
+      maskedPixels: number;
+      totalPixels: number;
+      width: number;
+      height: number;
+      resized: boolean;
+      heatmapPath?: string;
+    }>
+  > {
+    const a = this.attachment;
+    if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
+    let refPng: Buffer;
+    try {
+      refPng = readFileSync(opts.reference);
+    } catch {
+      return err('invalid', `reference image not found: ${opts.reference}`);
+    }
+    try {
+      const { livePng, masks } = await captureForMatch(
+        {
+          call: (op, args) => a.connection.socket.call(op, args),
+          udid: a.session.udid,
+          screenshot: this.platform.system.screenshot,
+        },
+        opts.mask ?? [],
+      );
+      const result = compareScreens(livePng, refPng, {
+        ...(opts.threshold !== undefined && { passThreshold: opts.threshold }),
+        masks,
+        emitHeatmap: Boolean(opts.output),
+      });
+      const { heatmap, ...summary } = result;
+      let heatmapPath: string | undefined;
+      if (opts.output && heatmap) {
+        writeFileSync(opts.output, heatmap);
+        heatmapPath = opts.output;
+      }
+      return ok({ ...summary, ...(heatmapPath && { heatmapPath }) });
     } catch (e) {
       return classifyError(e);
     }

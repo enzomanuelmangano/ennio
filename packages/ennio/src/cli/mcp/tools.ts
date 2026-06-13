@@ -13,6 +13,7 @@
 import type { MaestroCommand, MaestroSelector } from '../maestro-parser';
 import { parseMaestroFile, parseMaestroString } from '../maestro-parser';
 import { currentVersion } from '../update-check';
+import type { MaskInput } from '../visual/capture';
 
 import { ENNIO_CONTRACT_VERSION, PREFERRED_PROTOCOL_VERSION } from './protocol';
 import { err, ok } from './result';
@@ -492,6 +493,52 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
           return err('invalid', `flow parse failed: ${e instanceof Error ? e.message : String(e)}`);
         }
         return session.runFlow(flow);
+      },
+    },
+    {
+      name: 'ennio_match_screen',
+      description:
+        'Compare the current screen against a reference PNG and return a DETERMINISTIC ' +
+        'match score — no model, an anti-aliasing-aware pixel diff. matchRatio is in ' +
+        '[0,1]; passed reflects the threshold (default 0.97). A below-threshold result ' +
+        'is a normal answer, not an error. mask ignores dynamic regions (element ' +
+        'testIDs or normalized [0,1] rects). Optionally writes a diff heatmap PNG that ' +
+        'shows where they differ. The reference is just an image — a design export, a ' +
+        'mock, or a prior baseline. Example: ' +
+        '{ "reference": "/tmp/checkout.png", "threshold": 0.97, "mask": ["clock-label"] }.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          reference: { type: 'string', description: 'Path to the reference PNG.' },
+          threshold: {
+            type: 'number',
+            minimum: 0,
+            maximum: 1,
+            description: 'Minimum matchRatio to pass. Default 0.97.',
+          },
+          mask: {
+            type: 'array',
+            description:
+              'Regions to ignore before diffing: element testIDs (strings) or ' +
+              'normalized [0,1] rects { x, y, w, h }.',
+          },
+          output: { type: 'string', description: 'Path to write the diff heatmap PNG.' },
+        },
+        required: ['reference'],
+        additionalProperties: false,
+      },
+      // Reads the screen + computes a score; no device actuation.
+      readOnly: true,
+      handler: (args) => {
+        if (typeof args.reference !== 'string' || !args.reference) {
+          return err('invalid', 'reference (PNG path) is required');
+        }
+        return session.matchScreen({
+          reference: args.reference,
+          ...(typeof args.threshold === 'number' && { threshold: args.threshold }),
+          ...(Array.isArray(args.mask) && { mask: args.mask as MaskInput[] }),
+          ...(typeof args.output === 'string' && { output: args.output }),
+        });
       },
     },
   ];

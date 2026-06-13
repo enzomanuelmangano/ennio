@@ -38,6 +38,7 @@ const READ_TOOLS = [
   'ennio_screenshot',
   'ennio_assert_visible',
   'ennio_wait_for',
+  'ennio_match_screen',
 ];
 const MUTATING_TOOLS = [
   'ennio_launch_app',
@@ -201,6 +202,10 @@ describe('bar 8 — the tool surface is snapshot-guarded', () => {
         args: ['direction', 'selector', 'timeoutMs'],
       },
       ennio_run_flow: { readOnly: false, args: ['path', 'yaml'] },
+      ennio_match_screen: {
+        readOnly: true,
+        args: ['mask', 'output', 'reference', 'threshold'],
+      },
     });
   });
 });

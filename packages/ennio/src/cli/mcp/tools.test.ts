@@ -27,6 +27,9 @@ function fakeSession() {
       async (_flow: unknown): Promise<EnnioResult> =>
         ok({ passed: true, stepsRun: 2, stepsPassed: 2, durationMs: 1, steps: [] }),
     ),
+    matchScreen: vi.fn(
+      async (_opts: unknown): Promise<EnnioResult> => ok({ matchRatio: 1, passed: true }),
+    ),
   };
 }
 
@@ -157,5 +160,36 @@ describe('ennio_run_flow', () => {
     const res = await byName('ennio_run_flow').handler({ yaml: '- tapOn: [unterminated' });
     expect(res).toMatchObject({ ok: false, error: { kind: 'invalid' } });
     expect(stub.runFlow).not.toHaveBeenCalled();
+  });
+});
+
+describe('ennio_match_screen', () => {
+  it('passes reference + options through to the session', async () => {
+    const { byName, stub } = toolsFor(fakeSession());
+    const res = await byName('ennio_match_screen').handler({
+      reference: '/tmp/ref.png',
+      threshold: 0.95,
+      mask: ['clock', { x: 0, y: 0, w: 1, h: 0.05 }],
+      output: '/tmp/diff.png',
+    });
+    expect(stub.matchScreen).toHaveBeenCalledWith({
+      reference: '/tmp/ref.png',
+      threshold: 0.95,
+      mask: ['clock', { x: 0, y: 0, w: 1, h: 0.05 }],
+      output: '/tmp/diff.png',
+    });
+    expect(res).toMatchObject({ ok: true, data: { passed: true } });
+  });
+
+  it('requires a reference path', async () => {
+    const { byName, stub } = toolsFor(fakeSession());
+    const res = await byName('ennio_match_screen').handler({});
+    expect(res).toMatchObject({ ok: false, error: { kind: 'invalid' } });
+    expect(stub.matchScreen).not.toHaveBeenCalled();
+  });
+
+  it('is a read-only tool', () => {
+    const { byName } = toolsFor(fakeSession());
+    expect(byName('ennio_match_screen').readOnly).toBe(true);
   });
 });
