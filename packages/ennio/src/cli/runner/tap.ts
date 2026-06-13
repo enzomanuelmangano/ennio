@@ -187,11 +187,41 @@ export async function execTapOn(
     // it and verify the frame moved. High-confidence (testID-backed) and
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
-    const axEl = sel.childOf
-      ? null
-      : await timedAsync(ctx, 'tap.axFastResolve', () =>
-          ctx.platform.ax.resolve(ctx.udid, { text: sel.text }),
-        );
+    //
+    // Gate (perf): the AX tree resolve is a cross-process macOS query
+    // costing ~300-800 ms, and it ran UNCONDITIONALLY on every text tap —
+    // even when the in-app finder would already land the tap correctly.
+    // It only earns its keep in the mis-location case (label inside a
+    // pager-tab / segmented container). So probe the in-app finder FIRST
+    // with the cheap in-process is_exposed op (~tens of ms): when the
+    // text target is FOUND, EXPOSED (a hit-test at its center reaches the
+    // target or a descendant), and NOT child-hijacked (the hit doesn't
+    // divert to an inner interactive child), an in-app HID tap will reach
+    // the target's own responder chain — skip the AX resolve entirely.
+    // The residual small-control label mis-location (the documented
+    // pager-tab / segmented case — those controls are well under 12% of
+    // the screen tall) is still corrected downstream by the AX
+    // cross-resolve below, which taps device-authoritative coords and
+    // verifies the frame moved. The AX resolve is preserved verbatim for
+    // every case that genuinely needs it: target missing from the in-app
+    // walk, occluded / mid-animation (not exposed), child-hijacked, or
+    // the probe unavailable on an older dylib.
+    let inAppTapClean = false;
+    if (!sel.childOf) {
+      const ex = await timedAsync(ctx, 'tap.axGateProbe', () =>
+        ctx.client.call('is_exposed', { text: sel.text }).catch(() => undefined),
+      );
+      const d = ex?.data as
+        | { found?: boolean; exposed?: boolean; childHijack?: boolean }
+        | undefined;
+      inAppTapClean = !!(ex?.ok && d && d.found && d.exposed && !d.childHijack);
+    }
+    const axEl =
+      sel.childOf || inAppTapClean
+        ? null
+        : await timedAsync(ctx, 'tap.axFastResolve', () =>
+            ctx.platform.ax.resolve(ctx.udid, { text: sel.text }),
+          );
     if (axEl) {
       // Doomed-tap gate for the AX fast path: a VC transition in flight
       // at dispatch time swallows the touch AND means the AX snapshot
