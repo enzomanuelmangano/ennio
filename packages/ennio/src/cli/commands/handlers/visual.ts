@@ -5,7 +5,7 @@
 // when the match ratio is below threshold. The reference is just a PNG —
 // source-agnostic (Figma export, mock, or a prior baseline).
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { CommandRegistry } from '../../core/command-registry';
@@ -13,6 +13,7 @@ import type { MaestroCommand } from '../../maestro-parser';
 import { captureForMatch } from '../../visual/capture';
 import type { MaskInput } from '../../visual/capture';
 import { compareScreens } from '../../visual/compare';
+import { writeMatchArtifacts } from '../../visual/summarize';
 
 const DEFAULT_PASS_THRESHOLD = 0.97;
 
@@ -22,6 +23,9 @@ interface AssertScreenMatchesCmd {
     threshold?: number;
     mask?: MaskInput[];
     output?: string;
+    /** Directory to write per-region side-by-side crops (live|reference) for
+     *  agent/VLM verification of WHAT differs. */
+    regions?: string;
     /** ctx.outputs key to record the score under (default 'screenMatch'). */
     outputVar?: string;
   };
@@ -59,24 +63,34 @@ export function registerVisualHandlers(registry: CommandRegistry): void {
         spec.mask ?? [],
       );
 
+      const heatmapPath = spec.output
+        ? isAbsolute(spec.output)
+          ? spec.output
+          : resolve(flowDir, spec.output)
+        : undefined;
+      const regionsDir = spec.regions
+        ? isAbsolute(spec.regions)
+          ? spec.regions
+          : resolve(flowDir, spec.regions)
+        : undefined;
+
       const result = compareScreens(livePng, refPng, {
         ...(spec.threshold !== undefined && { passThreshold: spec.threshold }),
         masks,
-        emitHeatmap: Boolean(spec.output),
+        emitHeatmap: Boolean(heatmapPath),
+        emitCrops: Boolean(regionsDir),
       });
 
-      // Record a JSON-safe summary (drop the heatmap buffer) for ${output.X}
-      // and the run_flow result.
-      const { heatmap, ...summary } = result;
+      // Write artifacts (heatmap + region crops) and record a JSON-safe summary
+      // for ${output.X} and the run_flow result.
+      const summary = writeMatchArtifacts(result, {
+        ...(heatmapPath && { heatmapPath }),
+        ...(regionsDir && { regionsDir }),
+      });
       ctx.outputs[spec.outputVar ?? 'screenMatch'] = summary;
 
-      if (spec.output && heatmap) {
-        const outPath = isAbsolute(spec.output) ? spec.output : resolve(flowDir, spec.output);
-        writeFileSync(outPath, heatmap);
-      }
-
       if (!result.passed) {
-        const where = spec.output ? ` (heatmap: ${spec.output})` : '';
+        const where = heatmapPath ? ` (heatmap: ${heatmapPath})` : '';
         throw new Error(
           `assertScreenMatches: matchRatio ${result.matchRatio.toFixed(4)} < ` +
             `${spec.threshold ?? DEFAULT_PASS_THRESHOLD} — ${result.diffPixels}/` +

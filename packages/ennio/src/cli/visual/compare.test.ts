@@ -107,4 +107,35 @@ describe('compareScreens', () => {
     const res = compareScreens(a, solid(50, 50, 1, 2, 3), { emitHeatmap: false });
     expect(res.heatmap).toBeUndefined();
   });
+
+  it('clusters the diff into a region that localizes the change', () => {
+    const live = solid(100, 100, 255, 255, 255);
+    const ref = withRect(100, 100, [255, 255, 255], { x: 60, y: 70, w: 20, h: 20 }, [255, 0, 0]);
+    const res = compareScreens(live, ref);
+    expect(res.diffRegions.length).toBe(1);
+    const r = res.diffRegions[0].rect;
+    // The region's bounding box should contain the 20x20 block at (60,70).
+    expect(r.x).toBeLessThanOrEqual(0.6);
+    expect(r.y).toBeLessThanOrEqual(0.7);
+    expect(r.x + r.w).toBeGreaterThanOrEqual(0.8);
+    expect(r.y + r.h).toBeGreaterThanOrEqual(0.9);
+    expect(res.diffRegions[0].crop).toBeUndefined(); // not requested
+  });
+
+  it('emitCrops attaches a side-by-side PNG per region', () => {
+    const live = solid(100, 100, 255, 255, 255);
+    const ref = withRect(100, 100, [255, 255, 255], { x: 10, y: 10, w: 30, h: 30 }, [0, 0, 0]);
+    const res = compareScreens(live, ref, { emitCrops: true });
+    expect(res.diffRegions.length).toBeGreaterThanOrEqual(1);
+    expect(res.diffRegions[0].crop).toBeInstanceOf(Buffer);
+    // It's a valid PNG, wider than tall (live | gap | reference).
+    const png = PNG.sync.read(res.diffRegions[0].crop as Buffer);
+    expect(png.width).toBeGreaterThan(png.height);
+  });
+
+  it('a clean match yields no diff regions', () => {
+    const a = solid(80, 80, 12, 34, 56);
+    const res = compareScreens(a, solid(80, 80, 12, 34, 56));
+    expect(res.diffRegions).toEqual([]);
+  });
 });

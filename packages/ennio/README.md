@@ -102,7 +102,14 @@ or normalized rect); `output` writes a diff heatmap.
     threshold: 0.97
     mask: ['clock-label', { x: 0, y: 0, w: 1, h: 0.05 }]
     output: ./artifacts/checkout-diff.png
+    regions: ./artifacts/checkout-regions # side-by-side live|reference crops
 ```
+
+The result (on `ctx.outputs` / the `ennio_match_screen` MCP result) carries
+`diffRegions` — clustered bounding boxes of where the screen differs. With a
+`regions` dir it also writes a side-by-side `live|reference` crop per region:
+math-proven "where", so a model only has to name "what" (no whole-screen
+confabulation).
 
 ## CLI reference
 

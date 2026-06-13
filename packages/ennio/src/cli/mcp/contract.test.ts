@@ -204,7 +204,7 @@ describe('bar 8 — the tool surface is snapshot-guarded', () => {
       ennio_run_flow: { readOnly: false, args: ['path', 'yaml'] },
       ennio_match_screen: {
         readOnly: true,
-        args: ['mask', 'output', 'reference', 'threshold'],
+        args: ['mask', 'output', 'reference', 'regions', 'threshold'],
       },
     });
   });

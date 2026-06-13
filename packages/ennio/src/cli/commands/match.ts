@@ -74,6 +74,7 @@ export async function runMatchCommand(positional: string[], flags: Flags): Promi
       ...(flags.threshold !== undefined && { threshold: Number(flags.threshold) }),
       ...(masks.length > 0 && { mask: masks }),
       ...(flags.output && { output: resolve(flags.output) }),
+      ...(flags.regions && { regions: resolve(flags.regions) }),
     });
     if (!res.ok) {
       console.error(`match failed: ${res.error.message}`);
@@ -83,9 +84,10 @@ export async function runMatchCommand(positional: string[], flags: Flags): Promi
     const pct = (d.matchRatio * 100).toFixed(2);
     const masked = d.maskedPixels > 0 ? `, ${d.maskedPixels} masked` : '';
     const heat = d.heatmapPath ? ` — heatmap: ${d.heatmapPath}` : '';
+    const regions = d.diffRegions.length > 0 ? ` — ${d.diffRegions.length} diff regions` : '';
     console.log(
       `${d.passed ? 'MATCH' : 'MISMATCH'} ${bundleId} — ${pct}% ` +
-        `(${d.diffPixels}/${d.comparedPixels} px differ${masked})${heat}`,
+        `(${d.diffPixels}/${d.comparedPixels} px differ${masked})${regions}${heat}`,
     );
     return d.passed ? 0 : 1;
   } finally {

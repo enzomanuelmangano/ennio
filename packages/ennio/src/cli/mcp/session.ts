@@ -10,7 +10,7 @@
 // swipes go through the HID driver by default — ennio is always the
 // actuator, never a passthrough.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 import { registerAllHandlers } from '../commands/handlers';
 import { CommandRegistry } from '../core/command-registry';
@@ -27,6 +27,8 @@ import { setSimLaunchEnv } from '../sim';
 import { captureForMatch } from '../visual/capture';
 import type { MaskInput } from '../visual/capture';
 import { compareScreens } from '../visual/compare';
+import { writeMatchArtifacts } from '../visual/summarize';
+import type { MatchSummary } from '../visual/summarize';
 
 import { describeViews } from './describe';
 import type { ScreenDescription } from './describe';
@@ -527,20 +529,8 @@ export class EnnioMcpSession {
     threshold?: number;
     mask?: MaskInput[];
     output?: string;
-  }): Promise<
-    EnnioResult<{
-      matchRatio: number;
-      passed: boolean;
-      diffPixels: number;
-      comparedPixels: number;
-      maskedPixels: number;
-      totalPixels: number;
-      width: number;
-      height: number;
-      resized: boolean;
-      heatmapPath?: string;
-    }>
-  > {
+    regions?: string;
+  }): Promise<EnnioResult<MatchSummary>> {
     const a = this.attachment;
     if (!a) return err('invalid', 'not attached to an app — call ennio_launch_app first');
     let refPng: Buffer;
@@ -562,14 +552,14 @@ export class EnnioMcpSession {
         ...(opts.threshold !== undefined && { passThreshold: opts.threshold }),
         masks,
         emitHeatmap: Boolean(opts.output),
+        emitCrops: Boolean(opts.regions),
       });
-      const { heatmap, ...summary } = result;
-      let heatmapPath: string | undefined;
-      if (opts.output && heatmap) {
-        writeFileSync(opts.output, heatmap);
-        heatmapPath = opts.output;
-      }
-      return ok({ ...summary, ...(heatmapPath && { heatmapPath }) });
+      return ok(
+        writeMatchArtifacts(result, {
+          ...(opts.output && { heatmapPath: opts.output }),
+          ...(opts.regions && { regionsDir: opts.regions }),
+        }),
+      );
     } catch (e) {
       return classifyError(e);
     }

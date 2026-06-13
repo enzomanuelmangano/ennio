@@ -12,6 +12,17 @@ export interface NormRect {
   h: number;
 }
 
+/** A clustered diff region: where the screen differs, for a model to inspect.
+ *  Pixels already proved the difference here — a VLM only has to NAME it. */
+export interface DiffRegion {
+  /** Bounding box of the cluster, normalized [0,1]. */
+  rect: NormRect;
+  /** Diff pixels inside the cluster. */
+  diffPixels: number;
+  /** Side-by-side live|reference crop (PNG bytes), when crops are requested. */
+  crop?: Buffer;
+}
+
 export interface MatchOptions {
   /** pixelmatch per-pixel color-distance threshold in [0,1]; higher tolerates
    *  more color drift before a pixel counts as different. Default 0.1. */
@@ -25,6 +36,11 @@ export interface MatchOptions {
   passThreshold?: number;
   /** Emit the diff heatmap PNG (where it differs). Default true. */
   emitHeatmap?: boolean;
+  /** Cap on clustered diff regions returned (default 6). */
+  maxRegions?: number;
+  /** Attach a side-by-side live|reference crop to each diff region — the
+   *  artifact an agent/VLM verifies. Default false. */
+  emitCrops?: boolean;
 }
 
 export interface MatchResult {
@@ -45,4 +61,7 @@ export interface MatchResult {
   passed: boolean;
   /** PNG bytes of the diff heatmap, when emitHeatmap. */
   heatmap?: Buffer;
+  /** Where the screen differs, clustered into bounding boxes (largest first).
+   *  Empty on a clean match. Crops attached when emitCrops. */
+  diffRegions: DiffRegion[];
 }

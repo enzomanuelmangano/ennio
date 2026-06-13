@@ -108,6 +108,8 @@ Options:
   --mask IDS         comma-separated element testIDs to ignore before diffing
                      (dynamic content: clocks, avatars, data-driven text)
   --output PATH      write a diff heatmap PNG showing where they differ
+  --regions DIR      write per-region side-by-side live|reference crops (the
+                     artifact to hand a model to verify WHAT changed)
 Environment: ENNIO_UDID`,
   doctor: `ennio doctor [--smoke <bundleId>]
 

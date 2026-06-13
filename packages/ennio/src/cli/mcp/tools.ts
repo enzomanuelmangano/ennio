@@ -502,9 +502,11 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
         'match score — no model, an anti-aliasing-aware pixel diff. matchRatio is in ' +
         '[0,1]; passed reflects the threshold (default 0.97). A below-threshold result ' +
         'is a normal answer, not an error. mask ignores dynamic regions (element ' +
-        'testIDs or normalized [0,1] rects). Optionally writes a diff heatmap PNG that ' +
-        'shows where they differ. The reference is just an image — a design export, a ' +
-        'mock, or a prior baseline. Example: ' +
+        'testIDs or normalized [0,1] rects). The result includes diffRegions — the ' +
+        'clustered bounding boxes of where it differs; pass a regions dir to also get ' +
+        'side-by-side live|reference crops per region (the artifact to verify WHAT ' +
+        'changed). Optionally writes a diff heatmap. The reference is just an image — a ' +
+        'design export, a mock, or a prior baseline. Example: ' +
         '{ "reference": "/tmp/checkout.png", "threshold": 0.97, "mask": ["clock-label"] }.',
       inputSchema: {
         type: 'object',
@@ -523,6 +525,12 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
               'normalized [0,1] rects { x, y, w, h }.',
           },
           output: { type: 'string', description: 'Path to write the diff heatmap PNG.' },
+          regions: {
+            type: 'string',
+            description:
+              'Directory to write per-region side-by-side live|reference crops, for ' +
+              'verifying what differs.',
+          },
         },
         required: ['reference'],
         additionalProperties: false,
@@ -538,6 +546,7 @@ export function buildTools(session: EnnioMcpSession): ToolDef[] {
           ...(typeof args.threshold === 'number' && { threshold: args.threshold }),
           ...(Array.isArray(args.mask) && { mask: args.mask as MaskInput[] }),
           ...(typeof args.output === 'string' && { output: args.output }),
+          ...(typeof args.regions === 'string' && { regions: args.regions }),
         });
       },
     },

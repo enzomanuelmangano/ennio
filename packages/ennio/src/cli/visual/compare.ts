@@ -8,6 +8,7 @@
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
 
+import { clusterRegions } from './regions';
 import { resizeRGBA } from './resize';
 import type { MatchOptions, MatchResult, NormRect } from './types';
 
@@ -87,9 +88,25 @@ export function compareScreens(
 
   const emitHeatmap = opts.emitHeatmap ?? true;
   const diff = new PNG({ width, height });
+  // Explicit diff color so the region mask below is unambiguous: counted diff
+  // pixels are red; anti-aliased pixels (not counted) are yellow.
   const diffPixels = pixelmatch(liveData, refData, diff.data, width, height, {
     threshold: opts.threshold ?? DEFAULT_PIXEL_THRESHOLD,
     includeAA: false,
+    diffColor: [255, 0, 0],
+  });
+
+  // Cluster the changed pixels into bounding-box regions — the artifact an
+  // agent/VLM verifies (math-proven "where", so the model only NAMES "what").
+  // A pixel is a counted diff iff pixelmatch painted it red.
+  const changed = new Uint8Array(width * height);
+  for (let p = 0; p < width * height; p++) {
+    const i = p * 4;
+    if (diff.data[i] > 200 && diff.data[i + 1] < 80 && diff.data[i + 2] < 80) changed[p] = 1;
+  }
+  const diffRegions = clusterRegions(changed, width, height, liveData, refData, {
+    ...(opts.maxRegions !== undefined && { maxRegions: opts.maxRegions }),
+    emitCrops: opts.emitCrops ?? false,
   });
 
   const totalPixels = width * height;
@@ -107,6 +124,7 @@ export function compareScreens(
     height,
     resized,
     passed: matchRatio >= passThreshold,
+    diffRegions,
     ...(emitHeatmap && { heatmap: PNG.sync.write(diff) }),
   };
 }

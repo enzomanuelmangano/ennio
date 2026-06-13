@@ -131,6 +131,7 @@ export type MaestroCommand =
         threshold?: number;
         mask?: (string | { x: number; y: number; w: number; h: number })[];
         output?: string;
+        regions?: string;
         outputVar?: string;
       };
     };

@@ -71,6 +71,8 @@ export type Flags = {
   threshold?: string;
   /** --mask: `ennio match` comma-separated element testIDs to ignore before diffing. */
   mask?: string;
+  /** --regions: `ennio match` directory to write per-region live|reference crops. */
+  regions?: string;
 };
 
 export type ParsedArgs = {
@@ -90,6 +92,7 @@ const STRING_FLAGS = new Set([
   'deny',
   'threshold',
   'mask',
+  'regions',
 ]);
 const BOOL_FLAGS = new Set([
   'verbose',
