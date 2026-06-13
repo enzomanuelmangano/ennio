@@ -117,7 +117,12 @@ export async function tap(udid: string, x: number, y: number, holdSec?: number):
   const cx = Math.max(0, Math.min(w, x));
   const cy = Math.max(0, Math.min(h, y));
   trace(`[hid] tap px=(${cx.toFixed(1)},${cy.toFixed(1)})${holdSec ? ` hold=${holdSec}s` : ''}`);
-  await getActuator(udid).tap(cx, cy, holdSec ?? 0.08);
+  // 50ms down→up: a deliberate, reliably-recognized tap that's ~30ms
+  // faster than the old 80ms default. Across ~400 taps/suite that's
+  // ~12s saved. Still a clean down+up (not a press/drag), so it does
+  // not reintroduce the RN-Screens drag-misread that the runner/tap.ts
+  // path once hit with a held hidPress.
+  await getActuator(udid).tap(cx, cy, holdSec ?? 0.05);
 }
 
 export async function doubleTap(udid: string, x: number, y: number): Promise<void> {
