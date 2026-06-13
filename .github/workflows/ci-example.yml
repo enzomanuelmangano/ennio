@@ -88,10 +88,23 @@ jobs:
       - run: bun run build
 
   example:
-    name: Example suite (iOS sim, prebuilt fixture)
+    # Two variants run in parallel:
+    #   normal     — ennio's in-app swizzles ON (the shipping default).
+    #   safe-mode  — ENNIO_SAFE_MODE / --safe-mode: the React/mount swizzles
+    #                are skipped. This is the only known workaround for apps
+    #                that use third-party Fabric/native components (Skia,
+    #                native liquid-glass), where the swizzles crash the app —
+    #                but it degrades settle. We run it here purely to measure
+    #                the CI-time cost of safe-mode against the normal run
+    #                (read the "suite duration" line in each variant's log).
+    name: Example suite (iOS sim, prebuilt fixture) — ${{ matrix.mode }}
     needs: gate
     runs-on: macos-15
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [normal, safe-mode]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -183,6 +196,11 @@ jobs:
           ENNIO_FAST_FLAG: ${{ inputs.in_process_tap && '--in-process-tap' || '' }}
           ENNIO_NOANIM_FLAG: ${{ inputs.no_animations && '--disable-animations' || '' }}
           ENNIO_REUSE_FLAG: ${{ inputs.disable_reuse_app && '--disable-reuse-app' || '' }}
+          # safe-mode variant only: --safe-mode sets ENNIO_SAFE_MODE at launch,
+          # so the dylib skips its in-app (React/mount) swizzles. Empty on the
+          # normal variant, leaving its behavior untouched.
+          ENNIO_SAFE_MODE_FLAG: ${{ matrix.mode == 'safe-mode' && '--safe-mode' || '' }}
+          MODE: ${{ matrix.mode }}
           # GitHub Actions macos runners are ~1.5-2× slower than a dev Mac
           # for simulator workloads. Give assertVisible / waitFor more headroom
           # so slow dark-mode re-renders and logout navigations don't timeout.
@@ -193,8 +211,11 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p /tmp/ennio-logs
-          FLAGS="$ENNIO_FAST_FLAG $ENNIO_NOANIM_FLAG $ENNIO_REUSE_FLAG"
-          echo "mode:${FLAGS:- hid}"
+          FLAGS="$ENNIO_FAST_FLAG $ENNIO_NOANIM_FLAG $ENNIO_REUSE_FLAG $ENNIO_SAFE_MODE_FLAG"
+          echo "mode:${MODE} flags:${FLAGS:- hid}"
+          # Wall-clock the whole suite so the safe-mode variant's duration can
+          # be compared against the normal variant straight from the CI logs.
+          SECONDS=0
           PASS=0; FAIL=0; FAILED=""
           for f in example/maestro-e2e/*.yaml; do
             base=$(basename "$f")
@@ -219,14 +240,17 @@ jobs:
             fi
           done
           echo ""
-          echo "Example suite: Pass=$PASS Fail=$FAIL${FAILED:+ — failed:$FAILED}"
+          echo "suite duration: ${SECONDS}s (mode=${MODE})"
+          echo "Example suite [${MODE}]: Pass=$PASS Fail=$FAIL${FAILED:+ — failed:$FAILED}"
           [ "$FAIL" -eq 0 ]
 
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: example-logs
+          # Per-mode name: upload-artifact v4 rejects two jobs writing the
+          # same artifact name, and the matrix runs both variants in parallel.
+          name: example-logs-${{ matrix.mode }}
           path: |
             /tmp/ennio-logs/
             /tmp/ennio-shots/
