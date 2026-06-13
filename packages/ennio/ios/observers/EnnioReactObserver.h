@@ -1,24 +1,35 @@
 //
 // EnnioReactObserver.h
 //
-// Optional React Native commit observer. Hooks RN's commit notification
-// to receive a direct callback the moment a commit finishes, instead of
-// polling the UIView hash on every CADisplayLink tick.
+// Optional React Native commit observer. Receives a direct callback the
+// moment a commit finishes, instead of polling the UIView hash on every
+// CADisplayLink tick.
 //
-// Single strategy: NSNotificationCenter — observe
-// `RCTUIManagerDidUpdateViewsNotification` (Paper / legacy bridge). No
-// swizzle, no private API, nothing to corrupt.
+// Two crash-safe strategies, both signal-by-callback — no method
+// swizzling, no interception of any C++-argument method, so neither can
+// corrupt the host app:
 //
-// A second strategy used to swizzle a Fabric mount method
-// (`RCTMountingManager performTransaction:` et al.) for a commit signal
-// on the New Architecture. It was removed: forwarding Fabric's
-// C++-argument mount methods through an objc IMP crashed third-party
-// Fabric components (Skia, Expo liquid-glass) and SIGSEGV'd on RN 0.85
-// (#44). On Fabric apps the notification simply doesn't fire and callers
-// fall back to EnnioSettle's hash-change signal — which settles fine.
+//   1. Paper / legacy bridge — an NSNotificationCenter observer for
+//      `RCTUIManagerDidUpdateViewsNotification`, keyed by name (no React
+//      link). Posts once per UIView-mutation batch.
+//   2. Fabric / new arch — our own object registered as an
+//      RCTSurfacePresenterObserver; RN calls its
+//      `didMountComponentsWithRootTag:` (NSInteger arg only) once per
+//      mount. We declare the protocol locally and reach the live
+//      RCTSurfacePresenter purely via the Obj-C runtime, every selector
+//      respondsToSelector:-guarded; any nil/missing link bails to the
+//      hash-polling fallback rather than crashing. This replaces the
+//      removed `performTransaction:` swizzle (#44), which forwarded a
+//      C++ const& arg through an objc IMP and crashed Skia / Expo
+//      liquid-glass Fabric components on creation. There is NO swizzle
+//      anywhere now.
 //
-// If the observer doesn't attach, callers fall back to EnnioSettle's
-// hash-change signal. attached() reports whether it's live.
+// A source counts as live only AFTER it has actually fired at least once
+// (registration alone always "succeeds"). On a Fabric app the paper
+// notification never posts, so it never reports as a live signal there —
+// the presenter observer is the Fabric commit signal. If neither source
+// is live, callers fall back to EnnioSettle's hash-change signal.
+// attachmentDescription() reports which sources are live.
 //
 // All timestamps are mach-time ms (monotonic), same domain as
 // EnnioSettle, so the CLI can sample one before a tap and ask the
@@ -34,7 +45,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface EnnioReactObserver : NSObject
 
 /// Install the observer hooks. Idempotent. Safe to call before RN
-/// classes are loaded — re-checks at every commit-sample call.
+/// classes are loaded — the Fabric presenter attach retries on a bounded
+/// backoff until the bridge/host comes up (or gives up to the fallback).
 + (void)start;
 
 /// Current monotonic timestamp of the most recent RN commit observed,
@@ -50,9 +62,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// Wait until React has been quiet (no commits) for stableMs.
 + (BOOL)waitForReactQuietStableMs:(uint32_t)stableMs maxMs:(uint32_t)maxMs;
 
-/// "paper" | "none" — diagnostic string for the CLI to log on startup
-/// so users know whether the commit observer is live or the caller is on
-/// the hash-polling fallback.
+/// "paper" | "fabric" | "both" | "none" — diagnostic string for the CLI
+/// to log on startup so users know which commit signal is live (or that
+/// the caller is on the hash-polling fallback). Reports a source only
+/// once it has actually fired, not on mere registration.
 + (NSString *)attachmentDescription;
 
 @end
