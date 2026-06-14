@@ -272,11 +272,12 @@ void RegisterEnnioFindHandlers(void) {
         NSString *text = EnnioArgString(a, @"text");
         if (!text.length) throw std::runtime_error("missing text");
         BOOL relaxed = [a[@"relaxed"] boolValue];
+        BOOL regex = [a[@"regex"] boolValue];
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
         NSString *cls = nil;
         EnnioOnMainVoid([&]() {
-            UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed];
+            UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
@@ -376,10 +377,11 @@ void RegisterEnnioFindHandlers(void) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *text = EnnioArgString(a, @"text");
         if (!text.length) throw std::runtime_error("missing text");
+        BOOL regex = [a[@"regex"] boolValue];
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
         EnnioOnMainVoid([&]() {
-            rect = [EnnioFinder findAxRectByText:text found:&found];
+            rect = [EnnioFinder findAxRectByText:text found:&found regex:regex];
         });
         if (!found) throw std::runtime_error("ax-text not found");
         return EnnioRectJson(rect);
@@ -586,13 +588,14 @@ void RegisterEnnioFindHandlers(void) {
         NSDictionary *a = EnnioParseArgs(args);
         NSString *text = EnnioArgString(a, @"text");
         if (!text.length) throw std::runtime_error("missing text");
+        BOOL regex = [a[@"regex"] boolValue];
         uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 5000);
         NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:maxMs / 1000.0];
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
         while ([deadline timeIntervalSinceNow] > 0) {
             EnnioOnMainVoid([&]() {
-                UIView *v = [EnnioFinder findViewByText:text];
+                UIView *v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
                 if (v && [EnnioFinder isOnScreen:v]) {
                     rect = [EnnioFinder windowRectFor:v];
                     found = YES;

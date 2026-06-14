@@ -153,14 +153,13 @@ static BOOL strContainsCI(NSString *haystack, NSString *needle) {
     return [haystack rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
 }
 
-// Maestro semantics: a text selector that contains regex
-// metacharacters is treated as a regex pattern; otherwise plain
-// substring. Used to match e.g. "Search for posts, users[,]? or feeds".
-static BOOL looksLikeRegex(NSString *s) {
-    if (s.length == 0) return NO;
-    NSCharacterSet *meta = [NSCharacterSet characterSetWithCharactersInString:@"[]?*+(){}|^$\\"];
-    return [s rangeOfCharacterFromSet:meta].location != NSNotFound;
-}
+// Whether the CURRENT text find treats its selector as a regex. The CLI is the
+// single source of truth — it computes isRegexText once and passes the `regex`
+// flag on find_by_text / find_ax_by_text; the finder used to RE-derive this
+// with its own metachar scan (looksLikeRegex), a second definition that could
+// silently diverge from the CLI's. Set once at the find entry (single-threaded,
+// main-thread finder), read by the matchers below.
+static BOOL g_textSelectorIsRegex = NO;
 
 static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
     if (!haystack.length || !pattern.length) return NO;
@@ -182,14 +181,14 @@ static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
 static BOOL strContainsOrRegex(NSString *haystack, NSString *needle) {
     if (!haystack.length || !needle.length) return NO;
     if (strContainsCI(haystack, needle)) return YES;
-    if (looksLikeRegex(needle)) return regexMatchCI(haystack, needle);
+    if (g_textSelectorIsRegex) return regexMatchCI(haystack, needle);
     return NO;
 }
 
 static BOOL strEqualsOrRegex(NSString *a, NSString *b) {
     if (!a || !b) return NO;
     if ([a caseInsensitiveCompare:b] == NSOrderedSame) return YES;
-    if (looksLikeRegex(b)) return regexMatchCI(a, b);
+    if (g_textSelectorIsRegex) return regexMatchCI(a, b);
     return NO;
 }
 
@@ -769,6 +768,11 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
 }
 
 + (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found {
+    return [self findAxRectByText:text found:found regex:NO];
+}
+
++ (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found regex:(BOOL)regex {
+    g_textSelectorIsRegex = regex;
     EnnioRect zero = {0, 0, 0, 0};
     if (found) *found = NO;
     if (text.length == 0) return zero;
@@ -827,10 +831,16 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
 }
 
 + (UIView *)findViewByText:(NSString *)text {
-    return [self findViewByText:text relaxed:NO];
+    return [self findViewByText:text relaxed:NO regex:NO];
 }
 
 + (UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed {
+    return [self findViewByText:text relaxed:relaxed regex:NO];
+}
+
++ (UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed regex:(BOOL)regex {
+    // Set the selector mode for the matchers, from the CLI's authoritative flag.
+    g_textSelectorIsRegex = regex;
     if (text.length == 0) return nil;
     UIWindow *keyWin = [EnnioBootstrap keyWindow];
     UIView *match = walkByTextEx(keyWin, text, relaxed);

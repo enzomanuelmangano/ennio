@@ -48,6 +48,10 @@ typedef struct {
 /// where any on-screen match counts, not for tap targeting.
 + (nullable UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed;
 
+/// As above, with the selector's regex mode explicit (the CLI's
+/// authoritative isRegexText flag) instead of re-derived in the finder.
++ (nullable UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed regex:(BOOL)regex;
+
 /// Resolve text against the UIAccessibility element tree. Walks
 /// accessibilityElements / accessibilityElementAtIndex: in addition
 /// to subviews, so cross-process UIRemoteView contents (PHPicker,
@@ -55,6 +59,9 @@ typedef struct {
 /// UIAccessibilityElement proxies. Returns an opaque match rect in
 /// window-space coords; the caller taps the rect's center.
 + (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found;
+
+/// As above, with the selector's regex mode explicit (CLI's isRegexText flag).
++ (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found regex:(BOOL)regex;
 
 /// Convert a UIView's bounds to window coordinates. Returns CGRectZero
 /// if the view is not attached to a window.
