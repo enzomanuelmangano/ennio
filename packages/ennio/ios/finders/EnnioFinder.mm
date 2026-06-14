@@ -174,16 +174,23 @@ static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
     return r.location != NSNotFound;
 }
 
+// Literal match is primary; the regex interpretation is a fallback. A
+// selector whose metacharacters are actually literal — e.g.
+// "Change position (left)", where "(left)" reads as a regex group but the
+// on-screen label has real parentheses — resolves by its literal text,
+// while a genuine pattern ("users[,]? or feeds") still matches via regex.
 static BOOL strContainsOrRegex(NSString *haystack, NSString *needle) {
     if (!haystack.length || !needle.length) return NO;
+    if (strContainsCI(haystack, needle)) return YES;
     if (looksLikeRegex(needle)) return regexMatchCI(haystack, needle);
-    return strContainsCI(haystack, needle);
+    return NO;
 }
 
 static BOOL strEqualsOrRegex(NSString *a, NSString *b) {
     if (!a || !b) return NO;
+    if ([a caseInsensitiveCompare:b] == NSOrderedSame) return YES;
     if (looksLikeRegex(b)) return regexMatchCI(a, b);
-    return [a caseInsensitiveCompare:b] == NSOrderedSame;
+    return NO;
 }
 
 // UIKit decorates tab-bar items and similar controls with comma-

@@ -602,12 +602,23 @@ public final class EnnioAgent {
                 if (!isShown(v)) return;
                 String t = textOf(v);
                 if (t == null) return;
+                // Literal match is primary (Maestro treats text as a substring
+                // first); the compiled pattern is only a fallback. This keeps a
+                // selector whose metacharacters are actually literal — e.g.
+                // "Change position (left)", where "(left)" reads as a regex
+                // group but the on-screen text contains real parentheses —
+                // resolving by its literal text, while a genuine pattern like
+                // "users[,]? or feeds" still matches via the regex branch.
+                String lt = t.toLowerCase();
                 int matchScore;
-                if (pat != null) {
-                    matchScore = pat.matcher(t).find() ? 1 : -1;
+                if (lt.equals(needle)) {
+                    matchScore = 4;
+                } else if (lt.contains(needle)) {
+                    matchScore = 1;
+                } else if (pat != null && pat.matcher(t).find()) {
+                    matchScore = 1;
                 } else {
-                    String lt = t.toLowerCase();
-                    matchScore = lt.equals(needle) ? 4 : (lt.contains(needle) ? 1 : -1);
+                    matchScore = -1;
                 }
                 if (matchScore < 0) return;
                 int score = matchScore + (isTappable(v) ? 2 : 0) + (inViewport(v) ? 8 : 0)
