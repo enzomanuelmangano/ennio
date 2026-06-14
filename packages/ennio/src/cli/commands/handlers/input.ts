@@ -235,6 +235,14 @@ export function registerInputHandlers(registry: CommandRegistry): void {
         esc: 41,
       };
       const code = map[name];
+      // An unrecognised key name used to be a silent no-op: the step
+      // "passed" having pressed nothing, hiding a typo'd flow. Fail loud
+      // with the supported set instead.
+      if (code == null) {
+        throw new Error(
+          `pressKey: unsupported key "${cmd.pressKey}". Supported: ${Object.keys(map).join(', ')}`,
+        );
+      }
       // A submit key (Enter/Return) fires the form's handler, which reads
       // state populated by an earlier async lookup. On Android, drain any
       // in-flight (or imminent — grace window) request and let React
@@ -253,7 +261,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
             .catch(() => undefined);
         }
       }
-      if (code != null) await ctx.client.call('hardware_key', { keyCode: code });
+      await ctx.client.call('hardware_key', { keyCode: code });
       // pressKey Enter on a form input typically triggers submit + a
       // chain of React state updates. Wait for commit + UIView stable
       // before the next step.
