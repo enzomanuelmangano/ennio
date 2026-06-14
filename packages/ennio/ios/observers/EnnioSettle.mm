@@ -108,6 +108,27 @@ static void walkAndHash(UIView *v, uint64_t *h) {
         const char *s = val.UTF8String;
         hashFeed(h, s, std::strlen(s));
     }
+    // Control state — parity with Android's recHash folding isChecked/
+    // isSelected/isEnabled. accessibilityValue alone misses a toggle whose
+    // visual state flips without its a11y value tracking it (a custom
+    // control, a disabled→enabled button): frame + label + value all stay
+    // put, the hash doesn't move, settle reports "no change", and the tap
+    // self-heal fires a SECOND time that flips the control back. isSelected
+    // / isEnabled / UISwitch.isOn / UISegmentedControl.selectedSegmentIndex
+    // are the stable post-interaction signals (isHighlighted is transient
+    // press feedback — deliberately excluded so it doesn't churn settle).
+    if ([v isKindOfClass:UIControl.class]) {
+        UIControl *ctrl = (UIControl *)v;
+        uint8_t state = (uint8_t)((ctrl.isSelected ? 1 : 0) | (ctrl.isEnabled ? 2 : 0));
+        hashFeed(h, &state, sizeof(state));
+        if ([v isKindOfClass:UISwitch.class]) {
+            uint8_t on = ((UISwitch *)v).isOn ? 1 : 0;
+            hashFeed(h, &on, sizeof(on));
+        } else if ([v isKindOfClass:UISegmentedControl.class]) {
+            int32_t seg = (int32_t)((UISegmentedControl *)v).selectedSegmentIndex;
+            hashFeed(h, &seg, sizeof(seg));
+        }
+    }
     for (UIView *sub in v.subviews) walkAndHash(sub, h);
 }
 
