@@ -80,6 +80,12 @@ export interface RpcOps {
   back: { args: Record<string, never>; result: { popped: boolean } };
   /** Deliver a deep link in-process (posts RN's RCTOpenURLNotification). */
   open_url: { args: { url: string }; result: { ok: boolean } };
+  /** In-process scroll/page primitive: setContentOffset for a scroll view at
+   *  the start point (one page for a paging view), else declines (ok:false). */
+  swipe_points: {
+    args: { x1: number; y1: number; x2: number; y2: number; durationMs: number };
+    result: { ok: boolean };
+  };
 
   // ---- alerts ---------------------------------------------------------
   alert_present: { args: Record<string, never>; result: { present: boolean } };

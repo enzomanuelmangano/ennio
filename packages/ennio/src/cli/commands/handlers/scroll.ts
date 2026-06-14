@@ -346,6 +346,25 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
         !!a && !!b && (Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1);
 
       const pre = verifyAdvance ? await offset() : null;
+      // A navigational swipe (no explicit coords) prefers the in-process
+      // scroll/page primitive over an HID drag, independent of the tap driver.
+      // For a PAGING view this is the only deterministic option: a momentum HID
+      // drag advances zero pages when slow and skips one when fast, so its
+      // page-delta is non-deterministic; setContentOffset of exactly one page
+      // (animated:YES, which commits the page index) advances exactly one. The
+      // dylib declines for non-scroll gesture surfaces, where a real HID gesture
+      // is then used. Explicit-coordinate swipes (drag-to-dismiss, precise
+      // drags) keep the HID path — their effect isn't a scroll.
+      if (verifyAdvance) {
+        const handled = await ctx.client
+          .call('swipe_points', { x1: from.x, y1: from.y, x2: to.x, y2: to.y, durationMs: durMs })
+          .then((r) => !!(r.ok && (r.data as { ok?: boolean } | undefined)?.ok))
+          .catch(() => false);
+        if (handled) {
+          await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
+          return;
+        }
+      }
       let outcome = await ctx.driver.swipe(ctx.udid, from.x, from.y, to.x, to.y, durMs);
       await ctx.driver.settleAfterSwipe(ctx.client, outcome);
       // Only retry when we had a baseline offset (a scroll view is
