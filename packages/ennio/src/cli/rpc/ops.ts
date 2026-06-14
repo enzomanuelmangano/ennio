@@ -78,6 +78,8 @@ export interface RpcOps {
   };
   tap_tab: { args: { name: string }; result: { tapped: boolean } };
   back: { args: Record<string, never>; result: { popped: boolean } };
+  /** Deliver a deep link in-process (posts RN's RCTOpenURLNotification). */
+  open_url: { args: { url: string }; result: { ok: boolean } };
 
   // ---- alerts ---------------------------------------------------------
   alert_present: { args: Record<string, never>; result: { present: boolean } };

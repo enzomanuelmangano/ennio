@@ -93,6 +93,7 @@ export const decoders: OpDecoders = {
   scroll_to: shape({ scrolled: 'bool' }),
   tap_tab: shape({ tapped: 'bool' }),
   back: shape({ popped: 'bool' }),
+  open_url: shape({ ok: 'bool' }),
   // alerts
   alert_present: shape({ present: 'bool' }),
   alert_text: shape({ text: 'str' }),
