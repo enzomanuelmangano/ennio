@@ -440,6 +440,22 @@ public final class EnnioAgent {
                 && v.isShown() && v.getAlpha() > 0.01f;
     }
 
+    // Does the view's on-screen rect overlap the device viewport at all? A
+    // pager (material-top-tabs, tab-view) renders its OFF-screen pages with
+    // VISIBLE visibility, just translated outside the window (e.g. x=-1016),
+    // so isShown() alone can't tell the on-screen tab label from an off-screen
+    // page's identical text. find prefers in-viewport matches so a tab tap
+    // lands on the real label, not the hidden page.
+    private static boolean inViewport(View v) {
+        View root = decorView();
+        int w = root != null ? root.getWidth() : 0;
+        int h = root != null ? root.getHeight() : 0;
+        if (w == 0 || h == 0) return true; // unknown bounds — don't penalise
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        return loc[0] + v.getWidth() > 0 && loc[0] < w && loc[1] + v.getHeight() > 0 && loc[1] < h;
+    }
+
     // The view (or an ancestor) handles taps — used to prefer an actionable
     // match (a button) over a same-text label (a dialog title) in find-by-text.
     private static boolean isTappable(View v) {
@@ -464,9 +480,19 @@ public final class EnnioAgent {
 
     private static View findByTestIdOrNull(String testID, int index) {
         return runOnUi(() -> {
-            ArrayList<View> matches = new ArrayList<>();
-            walkAll(v -> { if (isShown(v) && testID.equals(testIdOf(v))) matches.add(v); });
-            return index < matches.size() ? matches.get(index) : null;
+            // On-screen matches first (preserving tree order within each group):
+            // a pager renders off-screen pages VISIBLE, so an off-screen
+            // testID duplicate must not shadow the on-screen one. Off-screen
+            // matches stay as a fallback (the CLI scrolls them in).
+            ArrayList<View> onScreen = new ArrayList<>();
+            ArrayList<View> offScreen = new ArrayList<>();
+            walkAll(v -> {
+                if (isShown(v) && testID.equals(testIdOf(v))) {
+                    (inViewport(v) ? onScreen : offScreen).add(v);
+                }
+            });
+            onScreen.addAll(offScreen);
+            return index < onScreen.size() ? onScreen.get(index) : null;
         });
     }
 
@@ -513,36 +539,32 @@ public final class EnnioAgent {
             // dialog never dismissed. Tracking a clickable candidate separately
             // makes tapOn target the button; assertVisible still resolves via
             // the non-clickable fallback.
-            View[] exact = new View[1];
-            View[] exactClickable = new View[1];
-            View[] contains = new View[1];
-            View[] containsClickable = new View[1];
+            // Score every match and keep the best. Priority (high→low):
+            // on-screen ≫ exact > contains, and clickable breaks ties — so a
+            // visible, clickable, exact label always wins over an off-screen
+            // pager page (the material-top-tabs / tab-view bug) or a
+            // non-clickable dialog title that repeats a button's text.
+            View[] best = new View[1];
+            int[] bestScore = { -1 };
             walkAll(v -> {
                 if (!isShown(v)) return;
                 String t = textOf(v);
                 if (t == null) return;
-                boolean clk = isTappable(v);
+                int matchScore;
                 if (pat != null) {
-                    if (pat.matcher(t).find()) {
-                        if (contains[0] == null) contains[0] = v;
-                        if (clk && containsClickable[0] == null) containsClickable[0] = v;
-                    }
-                    return;
+                    matchScore = pat.matcher(t).find() ? 1 : -1;
+                } else {
+                    String lt = t.toLowerCase();
+                    matchScore = lt.equals(needle) ? 4 : (lt.contains(needle) ? 1 : -1);
                 }
-                String lt = t.toLowerCase();
-                if (lt.equals(needle)) {
-                    if (exact[0] == null) exact[0] = v;
-                    if (clk && exactClickable[0] == null) exactClickable[0] = v;
-                }
-                if (lt.contains(needle)) {
-                    if (contains[0] == null) contains[0] = v;
-                    if (clk && containsClickable[0] == null) containsClickable[0] = v;
+                if (matchScore < 0) return;
+                int score = matchScore + (isTappable(v) ? 2 : 0) + (inViewport(v) ? 8 : 0);
+                if (score > bestScore[0]) {
+                    bestScore[0] = score;
+                    best[0] = v;
                 }
             });
-            if (exactClickable[0] != null) return exactClickable[0];
-            if (exact[0] != null) return exact[0];
-            if (containsClickable[0] != null) return containsClickable[0];
-            return contains[0];
+            return best[0];
         });
     }
 
