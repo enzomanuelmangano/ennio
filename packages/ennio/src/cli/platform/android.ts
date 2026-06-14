@@ -19,7 +19,7 @@ import { getActiveConnection } from '../core/active-connections';
 import { EnnioConnection } from '../core/ennio-connection';
 import { createAndroidDriver } from '../driver';
 import type { GestureDriver } from '../driver';
-import { POST_LAUNCH_SETTLE_MS, sleep } from '../runner/context';
+import { sleep } from '../runner/context';
 import type { RunContext } from '../runner/context';
 import type { ConnectTarget } from '../socket-client';
 import {
@@ -306,8 +306,19 @@ export class AndroidPlatform implements Platform {
   }
 
   async openUrl(ctx: RunContext, url: string): Promise<void> {
-    openAndroidUrl(ctx.udid, ctx.bundleId, url);
-    await sleep(POST_LAUNCH_SETTLE_MS);
+    const serial = ctx.udid;
+    // A deep link (openLink) typically follows a stopApp, so it COLD-STARTS a
+    // fresh process — which runs agent-less unless we re-attach. Without this,
+    // every find after an openLink fails (the stopApp + openLink launch
+    // pattern many suites use, e.g. react-navigation). Launch via the VIEW
+    // intent (so the app opens on the deep-linked route, not MainActivity),
+    // then attach + reconnect through the same path as a relaunch.
+    ctx.client.close();
+    const reopen = await this.establishReady(serial, ctx.bundleId, () =>
+      openAndroidUrl(serial, ctx.bundleId, url),
+    );
+    ctx.client = reopen.socket;
+    await this.waitForFirstPaint(reopen);
   }
 
   // ── helpers ────────────────────────────────────────────────────────
@@ -327,7 +338,11 @@ export class AndroidPlatform implements Platform {
    * socket. The retry loop only covers ordinary launch hiccups (the process
    * failing to appear, or a rare attach error), not a probabilistic inject.
    */
-  private async establishReady(serial: string, bundleId: string): Promise<EnnioConnection> {
+  private async establishReady(
+    serial: string,
+    bundleId: string,
+    launch: () => void = () => launchAndroidApp(serial, bundleId),
+  ): Promise<EnnioConnection> {
     let lastErr = '';
     // Each failed inject is cheap (the socket-bind check below fails in
     // ~ms-to-4s vs the old ~14s readiness timeout), so we can afford many
@@ -344,7 +359,7 @@ export class AndroidPlatform implements Platform {
         terminateAndroidApp(serial, bundleId);
         await sleep(Math.min(400 + attempt * 600, 6_000));
       }
-      launchAndroidApp(serial, bundleId);
+      launch();
       const pid = waitForAppPid(serial, bundleId, 8_000);
       if (!pid) {
         lastErr = 'app process never started';
