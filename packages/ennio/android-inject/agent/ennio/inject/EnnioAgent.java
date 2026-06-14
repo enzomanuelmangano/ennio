@@ -1402,9 +1402,29 @@ public final class EnnioAgent {
             if (!(f instanceof EditText)) throw new RuntimeException("no EditText focused");
             if (!f.isFocused()) f.requestFocus();
             EditText edit = (EditText) f;
-            CharSequence cur = edit.getText();
-            edit.setText((cur == null ? "" : cur.toString()) + text);
+            // Enter text through the field's InputConnection (commitText) — the
+            // same path the IME uses. On a CONTROLLED React Native TextInput
+            // (value={state}), a bare edit.setText() races onChangeText: if RN
+            // re-renders before the change reaches JS state (common on a freshly
+            // presented autoFocus modal field), it resets the field to the
+            // stale value="" and the typed text vanishes. commitText dispatches
+            // through ReactEditText's input handling so onChangeText fires and
+            // the controlled value sticks. Fall back to setText if the field
+            // yields no InputConnection.
             edit.setSelection(edit.getText().length());
+            boolean committed = false;
+            try {
+                android.view.inputmethod.EditorInfo ei = new android.view.inputmethod.EditorInfo();
+                android.view.inputmethod.InputConnection ic = edit.onCreateInputConnection(ei);
+                if (ic != null) committed = ic.commitText(text, 1);
+            } catch (Throwable ignored) {
+                committed = false;
+            }
+            if (!committed) {
+                CharSequence cur = edit.getText();
+                edit.setText((cur == null ? "" : cur.toString()) + text);
+                edit.setSelection(edit.getText().length());
+            }
             return new JSONObject().put("ok", true);
         });
     }
