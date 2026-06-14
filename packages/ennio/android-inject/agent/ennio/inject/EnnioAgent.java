@@ -1061,6 +1061,18 @@ public final class EnnioAgent {
             CharSequence t = ((TextView) v).getText();
             if (t != null) feed(h, t.toString());
         }
+        // Visual STATE a tap can flip without moving geometry or text: a
+        // Switch/CheckBox toggling (CompoundButton.isChecked), a segmented
+        // option or list row selecting (isSelected/isActivated), a button
+        // enabling/disabling. Without these in the hash, a toggle tap leaves
+        // the frame-hash unchanged, so the settle/confirm that watches it
+        // never sees the effect — it burns the full wait window and then
+        // spuriously re-taps (which flips the toggle back). Folding the state
+        // in makes such taps register on the first frame they take effect.
+        if (v instanceof android.widget.CompoundButton) {
+            feedInt(h, ((android.widget.CompoundButton) v).isChecked() ? 1 : 0);
+        }
+        feedInt(h, (v.isSelected() ? 1 : 0) | (v.isActivated() ? 2 : 0) | (v.isEnabled() ? 0 : 4));
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) recHash(g.getChildAt(i), h, loc);
