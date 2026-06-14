@@ -36,6 +36,10 @@ export class AndroidDriver implements GestureDriver {
   // RN's double-tap window doesn't apply to MotionEvent dispatch the way
   // the HID tap-gap does; keep consecutive taps distinct.
   readonly collapsesRepeatTaps = false;
+  // In-process MotionEvent dispatch at the exposed target's coords —
+  // onPress fires synchronously, no physical miss. The self-heal retap
+  // would only double-fire it.
+  readonly deterministicTaps = true;
   // The agent owns the pre-draw frame hash, so the CLI-side stability gate
   // can sample wide.
   readonly stabilityGateGapMs = 16;

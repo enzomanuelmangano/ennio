@@ -34,6 +34,10 @@ export class FastDriver implements GestureDriver {
   // per call; mixing one HID doubleTap with a follow-up activation has
   // been seen to drop a press (g-switch-stepper).
   readonly collapsesRepeatTaps = false;
+  // General taps route through the wrapped HidDriver (out-of-process, can
+  // miss), so the self-heal retap stays in play. Tab taps use in-process
+  // tap_tab on their own path, outside the retap loop.
+  readonly deterministicTaps = false;
   // Wider gate: trimmed post-settle makes this the main defence
   // against tapping a target mid-entrance-animation. Springs have
   // ~30ms-still frames near inflection points; 3×40ms = 120ms window.

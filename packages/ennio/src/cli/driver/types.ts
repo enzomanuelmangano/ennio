@@ -63,6 +63,22 @@ export interface GestureDriver {
   readonly collapsesRepeatTaps: boolean;
 
   /**
+   * Whether a tap is delivered deterministically to the resolved target.
+   * The in-process MotionEvent driver dispatches DOWN/UP at the exposed
+   * target's coordinates synchronously — onPress fires; it cannot
+   * physically miss the way an out-of-process HID tap can. The post-tap
+   * self-heal RETAP (and the AX-activation fallback) exist only to recover
+   * a missed HID tap, so for a deterministic driver they would never
+   * recover anything — they would only re-fire onPress a second time.
+   * That double-fire is silent and corrupting for a handler with no
+   * immediate visible effect: e.g. react-navigation's preload button
+   * starts a timer kept in a single ref, so a second onPress orphans the
+   * first timer past the screen's blur cleanup. Drivers that can miss
+   * (HID, and Fast which wraps HID for general taps) set this false.
+   */
+  readonly deterministicTaps: boolean;
+
+  /**
    * Sample spacing for the position-stability gate in execTapOn.
    * Wider in fast mode: trimmed post-settle makes the gate the main
    * defence against tapping mid-entrance-animation.
