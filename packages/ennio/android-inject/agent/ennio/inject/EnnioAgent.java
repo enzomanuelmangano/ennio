@@ -456,6 +456,52 @@ public final class EnnioAgent {
         return loc[0] + v.getWidth() > 0 && loc[0] < w && loc[1] + v.getHeight() > 0 && loc[1] < h;
     }
 
+    // The deepest VISIBLE view at a screen point, honouring z-order (later
+    // children draw on top) — where a real touch would land.
+    private static View hitTest(View root, int x, int y) {
+        if (root == null || root.getVisibility() != View.VISIBLE || root.getAlpha() < 0.01f) return null;
+        int[] loc = new int[2];
+        root.getLocationOnScreen(loc);
+        if (x < loc[0] || x >= loc[0] + root.getWidth() || y < loc[1] || y >= loc[1] + root.getHeight()) {
+            return null;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) root;
+            for (int i = g.getChildCount() - 1; i >= 0; i--) {
+                View hit = hitTest(g.getChildAt(i), x, y);
+                if (hit != null) return hit;
+            }
+        }
+        return root;
+    }
+
+    // Is the view EXPOSED at its centre — would a touch there reach it (or its
+    // own subtree) rather than a view on top? react-navigation keeps lower stack
+    // screens MOUNTED behind the foreground one, so a covered screen's duplicate
+    // label has a valid on-screen rect but is hidden under the top screen. find
+    // prefers the exposed match so a tap lands on the visible control, not its
+    // buried twin (auth-flow's two "Sign out": behind Home vs visible Chat).
+    private static boolean isExposedAt(View v) {
+        List<View> roots = rootViews();
+        if (roots.isEmpty()) return true;
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        int cx = loc[0] + v.getWidth() / 2;
+        int cy = loc[1] + v.getHeight() / 2;
+        View hit = null;
+        for (int i = roots.size() - 1; i >= 0 && hit == null; i--) {
+            hit = hitTest(roots.get(i), cx, cy);
+        }
+        if (hit == null) return false;
+        for (View c = hit; c != null; c = (c.getParent() instanceof View) ? (View) c.getParent() : null) {
+            if (c == v) return true;
+        }
+        for (View c = v; c != null; c = (c.getParent() instanceof View) ? (View) c.getParent() : null) {
+            if (c == hit) return true;
+        }
+        return false;
+    }
+
     // The view (or an ancestor) handles taps — used to prefer an actionable
     // match (a button) over a same-text label (a dialog title) in find-by-text.
     private static boolean isTappable(View v) {
@@ -480,19 +526,25 @@ public final class EnnioAgent {
 
     private static View findByTestIdOrNull(String testID, int index) {
         return runOnUi(() -> {
-            // On-screen matches first (preserving tree order within each group):
-            // a pager renders off-screen pages VISIBLE, so an off-screen
-            // testID duplicate must not shadow the on-screen one. Off-screen
-            // matches stay as a fallback (the CLI scrolls them in).
-            ArrayList<View> onScreen = new ArrayList<>();
+            // Exposed matches first, then on-screen-but-covered, then
+            // off-screen — tree order within each tier. A pager renders
+            // off-screen pages VISIBLE and react-navigation keeps lower stack
+            // screens mounted behind the top one, so a buried/translated
+            // testID duplicate must not shadow the visible one. Lower tiers
+            // stay as a fallback (the CLI scrolls/reveals them).
+            ArrayList<View> exposed = new ArrayList<>();
+            ArrayList<View> covered = new ArrayList<>();
             ArrayList<View> offScreen = new ArrayList<>();
             walkAll(v -> {
                 if (isShown(v) && testID.equals(testIdOf(v))) {
-                    (inViewport(v) ? onScreen : offScreen).add(v);
+                    if (!inViewport(v)) offScreen.add(v);
+                    else if (isExposedAt(v)) exposed.add(v);
+                    else covered.add(v);
                 }
             });
-            onScreen.addAll(offScreen);
-            return index < onScreen.size() ? onScreen.get(index) : null;
+            exposed.addAll(covered);
+            exposed.addAll(offScreen);
+            return index < exposed.size() ? exposed.get(index) : null;
         });
     }
 
@@ -558,7 +610,8 @@ public final class EnnioAgent {
                     matchScore = lt.equals(needle) ? 4 : (lt.contains(needle) ? 1 : -1);
                 }
                 if (matchScore < 0) return;
-                int score = matchScore + (isTappable(v) ? 2 : 0) + (inViewport(v) ? 8 : 0);
+                int score = matchScore + (isTappable(v) ? 2 : 0) + (inViewport(v) ? 8 : 0)
+                        + (isExposedAt(v) ? 16 : 0);
                 if (score > bestScore[0]) {
                     bestScore[0] = score;
                     best[0] = v;
