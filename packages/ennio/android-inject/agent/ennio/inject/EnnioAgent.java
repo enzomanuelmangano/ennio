@@ -596,8 +596,15 @@ public final class EnnioAgent {
             // visible, clickable, exact label always wins over an off-screen
             // pager page (the material-top-tabs / tab-view bug) or a
             // non-clickable dialog title that repeats a button's text.
+            // Explicit lexicographic precedence, NOT an additive score. The
+            // signals rank strictly: exposed ≫ on-screen ≫ exact-over-contains
+            // ≫ tappable — an exposed match always wins over a buried one, etc.
+            // The old sum (exposed 16, viewport 8, exactness 3, tappable 2)
+            // happened to encode exactly this order; packing it into a sum only
+            // works while the weights stay separated, and adding one more signal
+            // can silently invert it. Comparing field-by-field can't.
             View[] best = new View[1];
-            int[] bestScore = { -1 };
+            final int[] bExposed = { -1 }, bViewport = { -1 }, bTappable = { -1 }, bMatch = { -1 };
             walkAll(v -> {
                 if (!isShown(v)) return;
                 String t = textOf(v);
@@ -621,11 +628,23 @@ public final class EnnioAgent {
                     matchScore = -1;
                 }
                 if (matchScore < 0) return;
-                int score = matchScore + (isTappable(v) ? 2 : 0) + (inViewport(v) ? 8 : 0)
-                        + (isExposedAt(v) ? 16 : 0);
-                if (score > bestScore[0]) {
-                    bestScore[0] = score;
+                int exposed = isExposedAt(v) ? 1 : 0;
+                int viewport = inViewport(v) ? 1 : 0;
+                int tappable = isTappable(v) ? 1 : 0;
+                // Order: exposed > viewport > matchScore (exact=4 > contains=1)
+                // > tappable. Matches the old sum's precedence exactly.
+                boolean better = best[0] == null
+                        || exposed > bExposed[0]
+                        || (exposed == bExposed[0] && viewport > bViewport[0])
+                        || (exposed == bExposed[0] && viewport == bViewport[0] && matchScore > bMatch[0])
+                        || (exposed == bExposed[0] && viewport == bViewport[0] && matchScore == bMatch[0]
+                                && tappable > bTappable[0]);
+                if (better) {
                     best[0] = v;
+                    bExposed[0] = exposed;
+                    bViewport[0] = viewport;
+                    bTappable[0] = tappable;
+                    bMatch[0] = matchScore;
                 }
             });
             return best[0];
