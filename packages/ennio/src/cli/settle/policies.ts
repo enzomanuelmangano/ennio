@@ -12,6 +12,7 @@ import {
   animationsActive,
   frameHash,
   presentationIdle,
+  scrollIdle,
   sleep,
   waitCommit,
   waitHashChange,
@@ -119,7 +120,6 @@ export async function afterTextInput(rpc: TypedRpcClient): Promise<void> {
 /** After pressKey (Enter → submit handler → re-render). */
 export async function afterPressKey(rpc: TypedRpcClient): Promise<void> {
   const C = SETTLE.afterPressKey;
-  await sleep(C.preSleepMs);
   await waitReactCommit(rpc, { sinceMs: 0, maxMs: C.reactCommitMaxMs });
   await waitCommit(rpc, C.commit);
 }
@@ -134,9 +134,10 @@ export async function afterNav(rpc: TypedRpcClient): Promise<void> {
   }
 }
 
-/** After hideKeyboard. */
-export async function afterHideKeyboard(): Promise<void> {
-  await sleep(SETTLE.afterHideKeyboard.sleepMs);
+/** After hideKeyboard: the dismiss + content reflow commits a frame; wait for
+ *  that instead of a blind sleep. */
+export async function afterHideKeyboard(rpc: TypedRpcClient): Promise<void> {
+  await waitCommit(rpc, SETTLE.afterHideKeyboard.commit);
 }
 
 /** Before a swipe: let the destination view settle so the gesture lands. */
@@ -145,9 +146,10 @@ export async function preSwipe(rpc: TypedRpcClient): Promise<void> {
   await presentationIdle(rpc, SETTLE.preSwipe.presentationIdleMaxMs);
 }
 
-/** After a swipe: let scroll momentum / page-snap settle. */
+/** After a swipe: let scroll momentum / page-snap settle on the dylib's
+ *  deterministic scroll-idle signal, then the commit. */
 export async function afterSwipe(rpc: TypedRpcClient): Promise<void> {
-  await sleep(SETTLE.afterSwipe.sleepMs);
+  await scrollIdle(rpc, SETTLE.afterSwipe.scrollIdleMaxMs);
   await waitCommit(rpc, SETTLE.afterSwipe.commit);
 }
 

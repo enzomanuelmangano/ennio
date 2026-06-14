@@ -75,18 +75,20 @@ export const SETTLE = {
   /** After inputText: catch the post-insert layout + onChangeText commit. */
   afterTextInput: { commit: { maxMs: 500, stableMs: noAnimations ? 30 : 80 } },
 
-  /** After pressKey (Enter often triggers a submit → re-render). */
-  afterPressKey: { preSleepMs: 80, reactCommitMaxMs: 800, commit: { maxMs: 1500, stableMs: 150 } },
+  /** After pressKey (Enter often triggers a submit → re-render). The submit
+   *  re-render IS the signal waitReactCommit waits for — no pre-sleep needed. */
+  afterPressKey: { reactCommitMaxMs: 800, commit: { maxMs: 1500, stableMs: 150 } },
 
   /** After `back`: poll the pop transition to completion. */
   afterNav: { animationsPollCapMs: 800, animationsPollStepMs: 20 },
 
-  /** After hideKeyboard. */
-  afterHideKeyboard: { sleepMs: 150 },
+  /** After hideKeyboard: the dismiss + content reflow commits a frame. */
+  afterHideKeyboard: { commit: { maxMs: 700, stableMs: 120 } },
 
-  /** Around a swipe gesture. */
+  /** Around a swipe gesture. scroll momentum settles on the dylib's
+   *  scroll-idle signal, not a blind sleep. */
   preSwipe: { commit: { maxMs: 2500, stableMs: 350 }, presentationIdleMaxMs: 800 },
-  afterSwipe: { sleepMs: 500, commit: { maxMs: 1000, stableMs: 150 } },
+  afterSwipe: { scrollIdleMaxMs: 1200, commit: { maxMs: 1000, stableMs: 150 } },
 
   /** First paint after launch / relaunch / clearState. */
   afterLaunch: {

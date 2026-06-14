@@ -83,6 +83,7 @@ export const decoders: OpDecoders = {
   wait_react_commit: shape({ ok: 'bool', elapsedMs: 'num?' }),
   wait_hash_change: shape({ ok: 'bool', elapsedMs: 'num?' }),
   wait_presentation_idle: shape({ ok: 'bool', elapsedMs: 'num?' }),
+  wait_scroll_idle: shape({ ok: 'bool', elapsedMs: 'num?' }),
   // interaction
   activate_testid: shape({ ok: 'bool' }),
   activate_by_text: shape({ ok: 'bool' }),

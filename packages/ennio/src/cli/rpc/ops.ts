@@ -64,6 +64,7 @@ export interface RpcOps {
   wait_react_commit: { args: { sinceMs: number; maxMs: number }; result: WaitResult };
   wait_hash_change: { args: { sinceHash: string; maxMs: number }; result: WaitResult };
   wait_presentation_idle: { args: { maxMs: number }; result: WaitResult };
+  wait_scroll_idle: { args: { maxMs: number }; result: WaitResult };
 
   // ---- interaction ----------------------------------------------------
   activate_testid: { args: { testID: string }; result: { ok: boolean } };
