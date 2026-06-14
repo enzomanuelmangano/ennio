@@ -7,7 +7,7 @@ import { createContext, runInContext } from 'node:vm';
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { interpolateSelector } from '../../runner/context';
+import { interpolate, interpolateSelector } from '../../runner/context';
 
 interface InputRandomTextCmd {
   inputRandomText: true | { length?: number };
@@ -128,7 +128,7 @@ export function registerRandomInputHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & EvalScriptCmd => has(c, 'evalScript'),
     async (cmd, { ctx }) => {
-      const expr = stripExpressionWrapper(String(cmd.evalScript));
+      const expr = stripExpressionWrapper(interpolate(String(cmd.evalScript), ctx));
       const vmCtx = createContext({ output: ctx.outputs });
       runInContext(expr, vmCtx, { timeout: 5000 });
     },
@@ -137,7 +137,7 @@ export function registerRandomInputHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & AssertTrueCmd => has(c, 'assertTrue'),
     async (cmd, { ctx }) => {
-      const expr = stripExpressionWrapper(String(cmd.assertTrue));
+      const expr = stripExpressionWrapper(interpolate(String(cmd.assertTrue), ctx));
       const vmCtx = createContext({ output: ctx.outputs });
       const result = runInContext(expr, vmCtx, { timeout: 5000 });
       if (!result) throw new Error(`assertTrue failed: ${expr}`);

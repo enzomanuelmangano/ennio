@@ -143,6 +143,44 @@ describe('parseMaestroFile', () => {
     expect(flow.onFlowStart).toEqual(['launchApp']);
     expect(flow.commands).toEqual([{ tapOn: 'A' }]);
   });
+
+  // The single interpolation boundary: parse-time substitution resolves only
+  // metadata that is consumed BEFORE a runtime context exists (appId). Command
+  // bodies must keep their ${VAR} placeholders so the runtime pass — where
+  // flowEnv / runFlow.env take precedence over process.env — can resolve them.
+  // Pre-resolving a command-body var at parse time (the old behaviour) made
+  // process.env silently shadow a runFlow.env override.
+  describe('interpolation boundary', () => {
+    it('resolves ${VAR} in the metadata appId at parse time', () => {
+      process.env.ENNIO_TEST_APPID = 'org.example.app';
+      const p = write('appid.yaml', ['appId: ${ENNIO_TEST_APPID}', '---', '- back', ''].join('\n'));
+      expect(parseMaestroFile(p).appId).toBe('org.example.app');
+      delete process.env.ENNIO_TEST_APPID;
+    });
+
+    it('does NOT pre-resolve a command-body ${VAR} even when it exists in process.env', () => {
+      process.env.LINK = 'from-process';
+      const p = write(
+        'cmdvar.yaml',
+        ['appId: com.x', '---', '- openLink: ${LINK}', ''].join('\n'),
+      );
+      const flow = parseMaestroFile(p);
+      // Placeholder survives parse → runtime flowEnv can still override it.
+      expect(flow.commands[0]).toEqual({ openLink: '${LINK}' });
+      delete process.env.LINK;
+    });
+
+    it('does NOT pre-resolve a ${VAR} inside a selector at parse time', () => {
+      process.env.TEXT = 'from-process';
+      const p = write(
+        'selvar.yaml',
+        ['appId: com.x', '---', '- assertVisible:', '    text: ${TEXT}', ''].join('\n'),
+      );
+      const flow = parseMaestroFile(p);
+      expect(flow.commands[0]).toEqual({ assertVisible: { text: '${TEXT}' } });
+      delete process.env.TEXT;
+    });
+  });
 });
 
 describe('expandFlow', () => {

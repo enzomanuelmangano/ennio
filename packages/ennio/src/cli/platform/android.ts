@@ -307,25 +307,36 @@ export class AndroidPlatform implements Platform {
 
   async openUrl(ctx: RunContext, url: string): Promise<void> {
     const serial = ctx.udid;
-    // If the app is already up with a LIVE agent (an in-app deep link, e.g.
-    // openLink to a route while the app is running), just fire the VIEW intent
-    // — the link navigates in place and the agent survives. Tearing the
-    // process down and relaunching here would be destructive (it dropped a
-    // signed-out app to the launcher on auth-flow's openLink-to-profile).
+    // Two distinct cases, because a deep link delivered as the COLD initial
+    // intent and one delivered as onNewIntent to a running app route
+    // differently in react-navigation: the initial URL replays the full path
+    // (including the target tab/sub-route), whereas onNewIntent only routes to
+    // the screen and leaves sub-routes at their defaults. The suite's deep
+    // links always follow a stopApp, so they must go through the cold path to
+    // land on the exact route (e.g. the Contacts tab, not the default tab).
     const agentAlive = await ctx.client
       .call('ping')
-      .then((r) => !!(r.ok && (r.data as { bootstrap?: string } | undefined)?.bootstrap === 'ready'))
+      .then(
+        (r) => !!(r.ok && (r.data as { bootstrap?: string } | undefined)?.bootstrap === 'ready'),
+      )
       .catch(() => false);
     if (waitForAppPid(serial, ctx.bundleId, 300) && agentAlive) {
+      // App already up with a live agent (an in-app openLink, e.g. auth-flow's
+      // openLink-to-profile). Navigate in place — the agent survives and the
+      // app keeps its state. Tearing it down here would drop to the launcher.
       openAndroidUrl(serial, ctx.bundleId, url);
-      await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 8000 }).catch(() => undefined);
+      await ctx.client
+        .call('wait_react_commit', { sinceMs: 0, maxMs: 8000 })
+        .catch(() => undefined);
       await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
       return;
     }
-    // Cold case: the deep link follows a stopApp, so it starts a fresh,
-    // agent-less process — re-attach. Launch via the VIEW intent (so the app
-    // opens on the deep-linked route, not MainActivity), then attach +
-    // reconnect through the same path as a relaunch.
+    // Cold path: the link follows a stopApp, so the process is dead. Launch it
+    // VIA the VIEW intent so the deep link is the initial URL and the full
+    // route is replayed, then attach + reconnect. (The "lands on home" flake
+    // once blamed on this path was actually an empty ${LINK} from the
+    // runFlow.env bug — now that the link interpolates correctly, the cold
+    // launch routes deterministically.)
     ctx.client.close();
     const reopen = await this.establishReady(serial, ctx.bundleId, () =>
       openAndroidUrl(serial, ctx.bundleId, url),

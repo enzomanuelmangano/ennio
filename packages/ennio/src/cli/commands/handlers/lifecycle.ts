@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
-import { sleep } from '../../runner/context';
+import { interpolate, sleep } from '../../runner/context';
 // Relaunch / terminate / soft-reset all route through ctx.platform (the
 // iOS/Android backend abstraction); the launch-args reuse gate is the
 // one direct lifecycle helper import.
@@ -74,10 +74,10 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
       const launchArgs: string[] = [];
       if (opts.arguments) {
         for (const [k, v] of Object.entries(opts.arguments)) {
-          launchArgs.push(k);
+          launchArgs.push(interpolate(k, ctx));
           if (v === true) launchArgs.push('YES');
           else if (v === false) launchArgs.push('NO');
-          else launchArgs.push(String(v));
+          else launchArgs.push(interpolate(String(v), ctx));
         }
       }
       if (opts.clearState) {
@@ -134,8 +134,8 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & OpenLinkCmd => has(c, 'openLink'),
     async (cmd, { ctx }) => {
-      const link = typeof cmd.openLink === 'string' ? cmd.openLink : cmd.openLink.link;
-      await ctx.platform.openUrl(ctx, link);
+      const raw = typeof cmd.openLink === 'string' ? cmd.openLink : cmd.openLink.link;
+      await ctx.platform.openUrl(ctx, interpolate(raw, ctx));
     },
   );
 
