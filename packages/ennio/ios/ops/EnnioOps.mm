@@ -705,6 +705,47 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
     return NO;
 }
 
++ (UIView *)firstEditableTextInput {
+    // Walk every window + presented-VC chain (sheets host content
+    // detached from the window subtree, same as EnnioFindKeyInputResponder)
+    // and collect on-screen editable text inputs. "Editable" is identity,
+    // not class: conforms to UIKeyInput AND canBecomeFirstResponder — that
+    // accepts RCTUITextField / UITextView / UISearchBarTextField and
+    // rejects disabled fields, without enumerating subclasses. Return the
+    // topmost (smallest window-Y) so a screen with several inputs focuses
+    // the first the user would, deterministically.
+    __block UIView *best = nil;
+    __block double bestY = 0;
+    void (^scan)(UIView *) = nil;
+    __block __weak void (^weakScan)(UIView *);
+    weakScan = scan = ^(UIView *v) {
+        if (v.hidden || v.alpha < 0.01) return;
+        if ([v conformsToProtocol:@protocol(UIKeyInput)] &&
+            [v canBecomeFirstResponder] && v.userInteractionEnabled &&
+            [EnnioFinder isOnScreen:v]) {
+            EnnioRect r = [EnnioFinder windowRectFor:v];
+            if (r.w > 0 && r.h > 0 && (!best || r.y < bestY)) {
+                best = v;
+                bestY = r.y;
+            }
+        }
+        for (UIView *sub in v.subviews) weakScan(sub);
+    };
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            scan(w);
+            UIViewController *vc = w.rootViewController;
+            while (vc) {
+                UIView *vcView = vc.viewIfLoaded;
+                if (vcView && !vcView.superview) scan(vcView);
+                vc = vc.presentedViewController;
+            }
+        }
+    }
+    return best;
+}
+
 + (BOOL)insertText:(NSString *)text {
     UIResponder *first = EnnioFindKeyInputResponder();
     if (!first) {

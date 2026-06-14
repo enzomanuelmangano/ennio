@@ -184,6 +184,25 @@ void RegisterEnnioFindHandlers(void) {
         return EnnioRectJson(rect);
     });
 
+    // Rect of the topmost on-screen editable text input — no selector.
+    // The CLI calls this when inputText finds no focused field: an
+    // `autoFocus` TextInput that lost the focus race during a push
+    // transition has no testID and is invisible to cross-process AX, so
+    // the only honest way to focus it is to REAL-tap its rect.
+    EnnioControlSocket::registerHandler("find_text_input", [](const std::string &) -> std::string {
+        EnnioRect rect = {0, 0, 0, 0};
+        BOOL found = NO;
+        EnnioOnMainVoid([&]() {
+            UIView *v = [EnnioOps firstEditableTextInput];
+            if (v) {
+                rect = [EnnioFinder windowRectFor:v];
+                found = YES;
+            }
+        });
+        if (!found) throw std::runtime_error("no text input on screen");
+        return EnnioRectJson(rect);
+    });
+
     // Variant of find_by_testid that returns the LARGEST interactive
     // descendant's rect when the testID view itself is a plain
     // (non-interactive) container. Used for tap-target disambiguation

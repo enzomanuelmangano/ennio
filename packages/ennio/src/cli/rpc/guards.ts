@@ -66,6 +66,7 @@ export const decoders: OpDecoders = {
   find_by_text: decRect,
   find_ax_by_text: decRect,
   find_child_by_testid: decRect,
+  find_text_input: decRect,
   find_tap_target_by_testid: shape({ x: 'num', y: 'num', w: 'num', h: 'num', kind: 'str?' }),
   wait_find_by_testid: decRect,
   wait_find_by_text: decRect,
