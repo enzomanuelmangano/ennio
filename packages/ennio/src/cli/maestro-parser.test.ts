@@ -160,10 +160,7 @@ describe('parseMaestroFile', () => {
 
     it('does NOT pre-resolve a command-body ${VAR} even when it exists in process.env', () => {
       process.env.LINK = 'from-process';
-      const p = write(
-        'cmdvar.yaml',
-        ['appId: com.x', '---', '- openLink: ${LINK}', ''].join('\n'),
-      );
+      const p = write('cmdvar.yaml', ['appId: com.x', '---', '- openLink: ${LINK}', ''].join('\n'));
       const flow = parseMaestroFile(p);
       // Placeholder survives parse → runtime flowEnv can still override it.
       expect(flow.commands[0]).toEqual({ openLink: '${LINK}' });
