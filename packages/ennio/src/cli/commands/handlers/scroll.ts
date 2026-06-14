@@ -361,7 +361,9 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           .then((r) => !!(r.ok && (r.data as { ok?: boolean } | undefined)?.ok))
           .catch(() => false);
         if (handled) {
-          await ctx.client.call('wait_commit', { maxMs: 1000, stableMs: 150 }).catch(() => undefined);
+          await ctx.client
+            .call('wait_commit', { maxMs: 1000, stableMs: 150 })
+            .catch(() => undefined);
           return;
         }
       }
