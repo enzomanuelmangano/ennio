@@ -239,24 +239,27 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
           else if (d === 'LEFT') to = { x: from.x - dist, y: from.y };
           else if (d === 'RIGHT') to = { x: from.x + dist, y: from.y };
         } else {
-          // No selector — full-screen swing. 700 pt covers a bottom-
-          // sheet drag-to-dismiss with margin for tab/page scrolls.
-          const full = 700;
+          // No selector — full-screen swing, proportional to the axis so it
+          // covers a bottom-sheet drag-to-dismiss on any device (the old fixed
+          // 700pt was ~0.8 of a phone's height but ~1.8 of its width). ~80% of
+          // the axis, Maestro-style.
+          const vFull = winH * 0.8;
+          const hFull = winW * 0.8;
           if (d === 'DOWN') {
             // Start ABOVE the sheet's grab handle (y~80 on iOS 26
             // UISheetPresentationController) so drag-to-dismiss wins
             // over the inner scroll view's eat-as-content-scroll.
             from = { x: winW / 2, y: 60 };
-            to = { x: winW / 2, y: 60 + full };
+            to = { x: winW / 2, y: 60 + vFull };
           } else if (d === 'UP') {
             from = { x: winW / 2, y: winH - 120 };
-            to = { x: winW / 2, y: winH - 120 - full };
+            to = { x: winW / 2, y: winH - 120 - vFull };
           } else if (d === 'LEFT') {
-            from = { x: winW - 40, y: winH / 2 };
-            to = { x: winW - 40 - full, y: winH / 2 };
+            from = { x: winW * 0.9, y: winH / 2 };
+            to = { x: winW * 0.9 - hFull, y: winH / 2 };
           } else if (d === 'RIGHT') {
-            from = { x: 40, y: winH / 2 };
-            to = { x: 40 + full, y: winH / 2 };
+            from = { x: winW * 0.1, y: winH / 2 };
+            to = { x: winW * 0.1 + hFull, y: winH / 2 };
           }
         }
       }
@@ -387,26 +390,42 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & ScrollCmd => has(c, 'scroll'),
     async (cmd, { ctx }) => {
       const dir = (cmd.scroll.direction || 'DOWN').toLowerCase();
-      // Centre swipe approximation. Window size assumed 390x844.
-      const cx = 195;
-      const cy = 422;
-      const dist = 300;
+      // Real device dims — never assume 390×844 (the old hardcode was off by
+      // tens of points on every other device). A centre swipe of half the
+      // relevant axis, Maestro-style.
+      const sizeResp = await ctx.client.call('window_size').catch(() => undefined);
+      const sd = (sizeResp?.data as { w?: number; h?: number }) ?? {};
+      const winW = sd.w && sd.w > 0 ? sd.w : DEFAULT_WIN_W;
+      const winH = sd.h && sd.h > 0 ? sd.h : DEFAULT_WIN_H;
+      const cx = winW / 2;
+      const cy = winH / 2;
+      const vDist = winH / 2;
+      const hDist = winW / 2;
       let x1 = cx,
         y1 = cy,
         x2 = cx,
         y2 = cy;
       if (dir === 'down') {
-        y1 = cy + dist / 2;
-        y2 = cy - dist / 2;
+        y1 = cy + vDist / 2;
+        y2 = cy - vDist / 2;
       } else if (dir === 'up') {
-        y1 = cy - dist / 2;
-        y2 = cy + dist / 2;
+        y1 = cy - vDist / 2;
+        y2 = cy + vDist / 2;
       } else if (dir === 'left') {
-        x1 = cx + dist / 2;
-        x2 = cx - dist / 2;
+        x1 = cx + hDist / 2;
+        x2 = cx - hDist / 2;
       } else if (dir === 'right') {
-        x1 = cx - dist / 2;
-        x2 = cx + dist / 2;
+        x1 = cx - hDist / 2;
+        x2 = cx + hDist / 2;
+      }
+      // Prefer the deterministic in-process scroll (axis-aware), HID fallback.
+      const handled = await ctx.client
+        .call('swipe_points', { x1, y1, x2, y2, durationMs: 250 })
+        .then((r) => !!(r.ok && (r.data as { ok?: boolean } | undefined)?.ok))
+        .catch(() => false);
+      if (handled) {
+        await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 100 }).catch(() => undefined);
+        return;
       }
       const outcome = await ctx.driver.swipe(ctx.udid, x1, y1, x2, y2, 250);
       if (outcome.inProcess) {
