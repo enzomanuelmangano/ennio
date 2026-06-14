@@ -307,12 +307,25 @@ export class AndroidPlatform implements Platform {
 
   async openUrl(ctx: RunContext, url: string): Promise<void> {
     const serial = ctx.udid;
-    // A deep link (openLink) typically follows a stopApp, so it COLD-STARTS a
-    // fresh process — which runs agent-less unless we re-attach. Without this,
-    // every find after an openLink fails (the stopApp + openLink launch
-    // pattern many suites use, e.g. react-navigation). Launch via the VIEW
-    // intent (so the app opens on the deep-linked route, not MainActivity),
-    // then attach + reconnect through the same path as a relaunch.
+    // If the app is already up with a LIVE agent (an in-app deep link, e.g.
+    // openLink to a route while the app is running), just fire the VIEW intent
+    // — the link navigates in place and the agent survives. Tearing the
+    // process down and relaunching here would be destructive (it dropped a
+    // signed-out app to the launcher on auth-flow's openLink-to-profile).
+    const agentAlive = await ctx.client
+      .call('ping')
+      .then((r) => !!(r.ok && (r.data as { bootstrap?: string } | undefined)?.bootstrap === 'ready'))
+      .catch(() => false);
+    if (waitForAppPid(serial, ctx.bundleId, 300) && agentAlive) {
+      openAndroidUrl(serial, ctx.bundleId, url);
+      await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 8000 }).catch(() => undefined);
+      await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
+      return;
+    }
+    // Cold case: the deep link follows a stopApp, so it starts a fresh,
+    // agent-less process — re-attach. Launch via the VIEW intent (so the app
+    // opens on the deep-linked route, not MainActivity), then attach +
+    // reconnect through the same path as a relaunch.
     ctx.client.close();
     const reopen = await this.establishReady(serial, ctx.bundleId, () =>
       openAndroidUrl(serial, ctx.bundleId, url),
