@@ -126,9 +126,17 @@ export function launchAndroidApp(serial: string, pkg: string): void {
   adb(serial, ['shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1']);
 }
 
+/** Block the calling (synchronous) path for `ms` without busy-spinning the
+ *  CPU. Atomics.wait on a private buffer parks the thread; used to pace the
+ *  few sync poll loops here where async/await isn't available. */
+function syncSleep(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /** Resolve the app's pid, polling up to maxMs for the process to appear after
- *  a launch (each `pidof` round-trip is ~50ms, which paces the loop). Returns
- *  null if it never starts. */
+ *  a launch. Returns null if it never starts. Paces each poll explicitly
+ *  rather than leaning on the `pidof` round-trip as an implicit timer — a
+ *  bounded poll, not a hot spin (see no-blind-sleeps). */
 export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string | null {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
@@ -138,6 +146,7 @@ export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string
     } catch {
       /* not up yet */
     }
+    syncSleep(50);
   }
   return null;
 }
