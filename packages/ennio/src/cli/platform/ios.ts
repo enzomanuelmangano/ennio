@@ -86,8 +86,7 @@ export class IosPlatform implements Platform {
     // before the first action. Skip straight to launch in that case.
     const appAlreadyRunning = isAppRunning(session.udid, session.bundleId);
     const reusedSocket =
-      appAlreadyRunning &&
-      (await tracePhaseAsync('socketOpenFast', () => connection.open(2_000)));
+      appAlreadyRunning && (await tracePhaseAsync('socketOpenFast', () => connection.open(2_000)));
     if (!reusedSocket) {
       // App isn't running with the dylib loaded — launch + retry.
       tracePhase('terminate', () => session.terminate());
