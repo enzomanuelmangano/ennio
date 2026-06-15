@@ -8,6 +8,7 @@ import {
   parseMaestroFile,
   expandFlow,
   resolveSubflowPath,
+  isRegexText,
 } from './maestro-parser';
 
 describe('normalizeSelector', () => {
@@ -162,5 +163,57 @@ describe('expandFlow', () => {
     const flow = parseMaestroFile(p);
     expect(() => expandFlow(flow)).not.toThrow();
     expect(expandFlow(flow).subflows).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Conformance spec: text matcher mode.
+//
+// Pins the CURRENT behavior of `isRegexText` — the metacharacter sniff that
+// decides whether a text selector is a literal substring or a regex. This is a
+// fragile heuristic (it cannot tell "the user meant a pattern" from "the user
+// typed a $"). Phase 1 deletes it in favor of an explicit `matchMode` computed
+// once at parse time. These tests document what IS so the replacement is a
+// deliberate, visible change, and they enumerate the cases the new matchMode
+// must get right.
+//
+// Maps to matrix.json rows: selector.text.* (see docs/maestro-parity.md).
+// ---------------------------------------------------------------------------
+describe('isRegexText (current matcher sniff — Phase 1 replaces with matchMode)', () => {
+  it('treats plain text as a literal (not regex)', () => {
+    // matrix: selector.text.literal-plain — status pass
+    expect(isRegexText('Sign In')).toBe(false);
+    expect(isRegexText('Home')).toBe(false);
+    expect(isRegexText('3')).toBe(false);
+  });
+
+  it('treats an explicit .* anchor as a regex', () => {
+    // matrix: selector.text.regex-explicit — status pass
+    expect(isRegexText('.*Settings.*')).toBe(true);
+    expect(isRegexText('Settings.*')).toBe(true);
+    expect(isRegexText('.*Settings')).toBe(true);
+  });
+
+  it('treats a genuine pattern with character classes/quantifiers as a regex', () => {
+    // matrix: selector.text.regex-explicit — status pass
+    expect(isRegexText('users[,]? or feeds')).toBe(true);
+    expect(isRegexText('item-(1|2|3)')).toBe(true);
+  });
+
+  // The unfixable cases: literal content that happens to contain a
+  // metacharacter is mis-detected as a pattern. Documented here as the SNIFF's
+  // failure mode — the new matchMode (Phase 1) must let these be matched
+  // literally via an explicit `literal:` escape hatch.
+  // matrix: selector.text.literal-with-metachars — status fragile
+  it('MISFIRES: a literal price string with $ ( ) is wrongly flagged regex', () => {
+    expect(isRegexText('Price: $5 (USD)')).toBe(true); // <- bug: should be literal
+  });
+
+  it('MISFIRES: a literal label with parentheses is wrongly flagged regex', () => {
+    expect(isRegexText('Change position (left)')).toBe(true); // <- bug: should be literal
+  });
+
+  it('MISFIRES: a literal label with a trailing question mark is wrongly flagged regex', () => {
+    expect(isRegexText('Delete account?')).toBe(true); // <- bug: should be literal
   });
 });

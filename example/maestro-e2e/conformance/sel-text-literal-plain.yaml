@@ -1,0 +1,9 @@
+# matrix row: selector.text.literal-plain (status pass)
+# A plain text selector with no metacharacters matches its on-screen label.
+appId: com.ennio.example
+name: 'conformance — text literal (plain)'
+---
+- runFlow:
+    file: _prelude.yaml
+# Bare-string shorthand is a TEXT match.
+- assertVisible: 'Toggles'

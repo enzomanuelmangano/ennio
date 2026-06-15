@@ -1,0 +1,18 @@
+# matrix row: selector.text.regex-by-default-anchor (status divergent — Phase 1 target)
+#
+# Maestro anchors the whole string: text "Toggle" matches ONLY an element
+# labeled exactly "Toggle", NOT "Toggles". ennio today does substring contains,
+# so "Toggle" also matches "Toggles" and this flow's assertNotVisible FAILS
+# (xfail) until the maestro profile lands whole-string anchoring in Phase 1.
+appId: com.ennio.example
+name: 'conformance — text whole-string anchoring'
+---
+- runFlow:
+    file: _prelude.yaml
+# The real label is "Toggles". Under Maestro anchoring, the substring "Toggle"
+# is NOT a match. Under today's substring semantics it IS — so this assertion
+# is the converge target.
+- assertNotVisible:
+    text: 'Toggle'
+- assertVisible:
+    text: 'Toggles'

@@ -1,0 +1,16 @@
+# Shared opening: cold-launch the example app and land on the g-playground
+# screen. Conformance fixtures `runFlow: { file: _prelude.yaml }` first, then
+# make their single-row assertion. Mirrors ../11-grammar-selectors.yaml.
+appId: com.ennio.example
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Gauntlet'
+- scrollUntilVisible:
+    element:
+      id: 'g-playground'
+    direction: DOWN
+- tapOn:
+    id: 'g-playground'
+- assertVisible:
+    id: 'playground-scroll'
