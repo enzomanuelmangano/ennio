@@ -759,6 +759,12 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
 
 // ─── Swipe at points ────────────────────────────────────────────────
 
+// Sub-pixel equality: a setContentOffset to within half a point of the
+// current offset moves nothing the user would see.
+static inline BOOL offsetsEqual(CGPoint a, CGPoint b) {
+    return fabs(a.x - b.x) < 0.5 && fabs(a.y - b.y) < 0.5;
+}
+
 + (BOOL)swipeFromX:(double)x1 y:(double)y1 toX:(double)x2 y:(double)y2 durationMs:(double)durationMs {
     UIWindow *win = [EnnioBootstrap keyWindow];
     if (!win) return NO;
@@ -794,6 +800,15 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
         UIEdgeInsets ins = sv.adjustedContentInset;
         offset.x = MAX(-ins.left, MIN(offset.x, MAX(0, content.width - frame.width + ins.right)));
         offset.y = MAX(-ins.top, MIN(offset.y, MAX(0, content.height - frame.height + ins.bottom)));
+        // The clamped target collapses to the CURRENT offset when the picked
+        // scroll view can't advance in the swipe's direction — it's at the
+        // edge already, or findScrollViewForAxis landed on the wrong view (an
+        // inner vertical list under a horizontal carousel that isn't itself a
+        // UIScrollView). Reporting YES there is the lie the CLI used to trust:
+        // it returns having "handled" the swipe while nothing moved (bsky
+        // onboarding's feed carousel stuck on dot 1/3). Report NO so the CLI
+        // falls back to a real HID gesture that can drive the actual pager.
+        if (offsetsEqual(offset, sv.contentOffset)) return NO;
         [sv setContentOffset:offset animated:YES];
         return YES;
     }
@@ -810,6 +825,8 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
         CGFloat maxY = MAX(0, content.height - frame.height + ins.bottom);
         offset.x = MAX(-ins.left, MIN(offset.x, maxX));
         offset.y = MAX(-ins.top, MIN(offset.y, maxY));
+        // Same edge/wrong-view guard as the paging path above.
+        if (offsetsEqual(offset, sv.contentOffset)) return NO;
         [sv setContentOffset:offset animated:NO];
         return YES;
     }
