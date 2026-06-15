@@ -27,6 +27,14 @@ FLOWS_DIR="$RNNAV_DIR/example/e2e/maestro"
 LOGD=${SUITE_LOG_DIR:-/tmp/rnnav-e2e-logs}
 rm -rf "$LOGD"; mkdir -p "$LOGD"
 
+# Per-flow hard cap, portable: GNU `timeout` ships on the Linux (Android)
+# runner; macOS (iOS runner) has it only as `gtimeout` with coreutils, and may
+# have neither — fall back to running unguarded (each ennio step is already
+# bounded by its own wait budget, and the CI job has a timeout-minutes cap).
+if command -v timeout >/dev/null 2>&1; then TIMEOUT="timeout 180"
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT="gtimeout 180"
+else TIMEOUT=""; fi
+
 if [ "$ENNIO_PLATFORM" = "android" ]; then
   PLATFORM_FLAG="--android"
   stop_app() { adb -s "$ENNIO_UDID" shell am force-stop "$APP_ID" >/dev/null 2>&1; }
@@ -38,7 +46,7 @@ else
 fi
 
 run_flow() { # $1 = flow file, $2 = LINK, $3 = TEXT, $4 = log path
-  LINK="$2" TEXT="$3" timeout 180 node "$ENNIO_CLI" test "$1" $PLATFORM_FLAG ${ENNIO_NO_ANIM_FLAG:-} > "$4" 2>&1
+  LINK="$2" TEXT="$3" $TIMEOUT node "$ENNIO_CLI" test "$1" $PLATFORM_FLAG ${ENNIO_NO_ANIM_FLAG:-} > "$4" 2>&1
 }
 
 PASS=0; FAIL=0; FAILED=""
