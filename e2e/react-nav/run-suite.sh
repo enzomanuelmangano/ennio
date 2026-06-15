@@ -9,16 +9,24 @@
 # `openLink ${APP_SCHEME}${LINK}` and waits for `${TEXT}` — LINK/TEXT come
 # from each flow's own `runFlow.env` block (per-flow scoped, not process env).
 #
-# SINGLE-DAEMON model: ONE ennio process drives the WHOLE suite, not a fresh
-# node per flow. launch.yml's per-flow stopApp + cold deep-link keeps every
-# flow's state isolated regardless, so what the one-process model drops is the
-# pure per-flow overhead — node/CLI cold-start, the redundant shell-level
-# force-stop, the connect probe (~4.5s/flow measured on iOS 18.2). This is how
-# `maestro test <dir>` and on-device runners drive the same suite, and is why
-# they outrun a node-per-flow loop.
+# Two process models, chosen by platform:
 #
-# STRICT: --fail-fast — one attempt per flow, abort on the first failure. A
-# flow that needs a second try is a real flake to fix at the source.
+#   iOS  → SINGLE DAEMON: one ennio process drives the WHOLE suite. launch.yml's
+#          per-flow stopApp + cold deep-link keeps every flow's state isolated
+#          regardless, so what the one-process model drops is the pure per-flow
+#          overhead — node/CLI cold-start, a redundant shell-level force-stop,
+#          the connect probe (~4.5s/flow, ~33% off the suite, measured on iOS
+#          18.2). DYLD re-injection is clean across flows in one process
+#          (validated 38/38). This is how `maestro test <dir>` and on-device
+#          runners drive the suite, and is why they outrun a node-per-flow loop.
+#
+#   Android → PER FLOW: a fresh CLI process per flow. The ptrace/JVMTI agent
+#          re-attach does NOT survive 10+ stopApp+relaunch cycles in one
+#          long-lived process (socket drops mid-suite), so Android keeps the
+#          proven fresh-process-per-flow model.
+#
+# STRICT: one attempt per flow, no retry. A flow that needs a second try is a
+# real flake to fix at the source.
 #
 # Required env:
 #   ENNIO_CLI        path to ennio dist/cli.js
@@ -44,10 +52,9 @@ else
   shot() { xcrun simctl io "$ENNIO_UDID" screenshot "$1" >/dev/null 2>&1 || true; }
 fi
 
-# The flow list the one daemon runs: every *.yml in the maestro dir, in sorted
-# order. launch.yml lives one level up (example/e2e/) so the glob never picks
-# it up. FLOW_FILTER keeps only flows whose basename starts with the prefix
-# (iterate on a subset without paying for the whole suite).
+# The flow list both models walk: every *.yml in the maestro dir, sorted.
+# launch.yml lives one level up (example/e2e/) so the glob never picks it up.
+# FLOW_FILTER keeps only flows whose basename starts with the prefix.
 FILES=()
 for fp in "$FLOWS_DIR"/*.yml; do
   f=$(basename "$fp" .yml)
@@ -59,20 +66,59 @@ if [ "${#FILES[@]}" -eq 0 ]; then
   exit 1
 fi
 
-echo "=== react-nav suite ($ENNIO_PLATFORM, single-daemon) ${#FILES[@]} flows $(date +%T) ==="
-# Clean slate so the first flow's launch.yml cold-launch is deterministic
-# (the remaining flows each stopApp themselves inside launch.yml).
-stop_app
+# ── iOS: single daemon, all flows in one process ─────────────────────────────
+if [ "$ENNIO_PLATFORM" != "android" ]; then
+  echo "=== react-nav suite (ios, single-daemon) ${#FILES[@]} flows $(date +%T) ==="
+  # Clean slate so the first flow's launch.yml cold-launch is deterministic
+  # (the rest each stopApp themselves inside launch.yml).
+  stop_app
+  SUITE_T0=$(date +%s)
+  # One process; --fail-fast stops at the first failing flow (a single failure
+  # fails CI anyway, so don't burn the rest of the wall-clock).
+  node "$ENNIO_CLI" test "${FILES[@]}" $PLATFORM_FLAG --fail-fast ${ENNIO_NO_ANIM_FLAG:-} 2>&1 \
+    | tee "$LOGD/suite.log"
+  RC=${PIPESTATUS[0]}
+  SUITE_T1=$(date +%s)
+  [ "$RC" -ne 0 ] && shot "$LOGD/suite.fail.png"
+  echo ""
+  echo "=== SUITE(react-nav/ios): rc=$RC wall=$((SUITE_T1-SUITE_T0))s ==="
+  exit $RC
+fi
+
+# ── Android: fresh CLI process per flow ──────────────────────────────────────
+run_flow() { # $1 = flow file, $2 = LINK, $3 = TEXT, $4 = log path
+  LINK="$2" TEXT="$3" $TIMEOUT node "$ENNIO_CLI" test "$1" $PLATFORM_FLAG ${ENNIO_NO_ANIM_FLAG:-} > "$4" 2>&1
+}
+
+# Per-flow hard cap, portable: GNU `timeout` on the Linux (Android) runner.
+if command -v timeout >/dev/null 2>&1; then TIMEOUT="timeout 180"
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT="gtimeout 180"
+else TIMEOUT=""; fi
+
+PASS=0; FAIL=0; FAILED=""; CONSEC=0
+echo "=== react-nav suite (android, per-flow) ${#FILES[@]} flows $(date +%T) ==="
 SUITE_T0=$(date +%s)
-# One process, all flows. The runner reports per-flow pass/fail + a suite
-# summary; --fail-fast stops at the first failing flow (a single failure fails
-# CI anyway, so don't burn the rest of the wall-clock).
-node "$ENNIO_CLI" test "${FILES[@]}" $PLATFORM_FLAG --fail-fast ${ENNIO_NO_ANIM_FLAG:-} 2>&1 | tee "$LOGD/suite.log"
-RC=${PIPESTATUS[0]}
+for fp in "${FILES[@]}"; do
+  f=$(basename "$fp" .yml)
+  L=$(grep -m1 'LINK:' "$fp" | sed -E "s/.*LINK:[[:space:]]*//;s/[\"']//g;s/[[:space:]]*$//")
+  T=$(grep -m1 'TEXT:' "$fp" | sed -E "s/.*TEXT:[[:space:]]*//;s/[\"']//g;s/[[:space:]]*$//")
+  stop_app
+  # STRICT: one attempt, no retry.
+  if run_flow "$fp" "$L" "$T" "$LOGD/$f.log"; then
+    echo "PASS  $f  $(grep -o 'total .*' "$LOGD/$f.log" | head -1)"
+    PASS=$((PASS+1)); CONSEC=0
+  else
+    shot "$LOGD/$f.fail.png"
+    echo "FAIL  $f"; FAIL=$((FAIL+1)); FAILED="$FAILED $f"; CONSEC=$((CONSEC+1))
+    # Fail-fast: 2 consecutive failures = systemic break (app not launching,
+    # injection dead) — abort instead of burning the whole suite.
+    if [ "$CONSEC" -ge 2 ]; then
+      echo "ABORT: $CONSEC consecutive failures — bailing out"
+      break
+    fi
+  fi
+done
 SUITE_T1=$(date +%s)
-# On failure, grab the screen — element-not-found failures produce no in-app
-# shot and the screen is the fastest "app wedged vs wrong element" signal.
-[ "$RC" -ne 0 ] && shot "$LOGD/suite.fail.png"
 echo ""
-echo "=== SUITE(react-nav/$ENNIO_PLATFORM): rc=$RC wall=$((SUITE_T1-SUITE_T0))s ==="
-exit $RC
+echo "=== SUITE(react-nav/$ENNIO_PLATFORM): Pass=$PASS Fail=$FAIL wall=$((SUITE_T1-SUITE_T0))s — failed:${FAILED:- none} ==="
+[ "$FAIL" -eq 0 ]
