@@ -57,7 +57,15 @@ async function bestEffort(
 
 export class HidDriver implements GestureDriver {
   readonly name = 'hid' as const;
-  readonly collapsesRepeatTaps = true;
+  // Two consecutive same-target tapOns are NOT a double-tap gesture — flows
+  // that want one use the explicit `doubleTapOn` primitive (which emits a
+  // controlled ~90ms-gap down/up pair). Collapsing them into a native double
+  // tap instead DROPPED a press on counters/steppers: a worklet "pulse +
+  // count" button (g-reanimated) registers the double tap as a single onPress,
+  // so `tapOn ×3` landed "Pressed: 2", not 3, then burned the assert's wait
+  // before a re-fire recovered. Fire discrete spaced taps (postSleepRepeat) so
+  // each onPress lands; double-tap gestures keep using doubleTapOn.
+  readonly collapsesRepeatTaps = false;
   // An out-of-process HID tap can land off the hit-box (integer rounding,
   // a late-armed recogniser) — the self-heal retap is the recovery.
   readonly deterministicTaps = false;
