@@ -82,13 +82,14 @@ jobs:
         with:
           node-version: 24
 
-      # iOS 18.x runtime (Xcode 16.x), matching the locally-verified target
-      # the fixture was validated on. The default runner Xcode may be newer;
-      # pin to an available 16.x like the other suites.
+      # The fixture is built with Xcode 26 (DTSDKName=iphonesimulator26.0); an
+      # iOS-26-SDK app FAILS to launch on an iOS-18 runtime, so the toolchain
+      # AND the sim runtime must match the SDK. Select Xcode 26 if present (best
+      # match for the injected dylib too); fall back to 16.x only as a backstop.
       - name: Select Xcode
         run: |
           set -euo pipefail
-          for x in Xcode_16.4.app Xcode_16.3.app Xcode_16.2.app; do
+          for x in Xcode_26.app Xcode_26.0.app Xcode_16.4.app Xcode_16.3.app; do
             if [ -d "/Applications/$x" ]; then sudo xcode-select -switch "/Applications/$x"; break; fi
           done
           xcodebuild -version
@@ -100,8 +101,12 @@ jobs:
         id: boot
         run: |
           set -euo pipefail
-          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-18-[0-9]+' | head -1)
-          test -n "$RUNTIME" || { echo "No iOS 18 runtime on image"; xcrun simctl list runtimes; exit 1; }
+          # Prefer an iOS 26 runtime (matches the fixture's iphonesimulator26.0
+          # SDK); fall back to iOS 18 only if 26 isn't on the image. sort -rV
+          # picks the newest patch within the chosen major.
+          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-26-[0-9]+' | sort -rV | head -1)
+          [ -n "$RUNTIME" ] || RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-18-[0-9]+' | sort -rV | head -1)
+          test -n "$RUNTIME" || { echo "No iOS 26/18 runtime on image"; xcrun simctl list runtimes; exit 1; }
           UDID=$(xcrun simctl create "react-nav-e2e" "iPhone 16 Pro" "$RUNTIME")
           echo "created $UDID on $RUNTIME"
           xcrun simctl boot "$UDID"
