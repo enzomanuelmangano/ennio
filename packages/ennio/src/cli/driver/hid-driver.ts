@@ -57,7 +57,15 @@ async function bestEffort(
 
 export class HidDriver implements GestureDriver {
   readonly name = 'hid' as const;
-  readonly collapsesRepeatTaps = true;
+  // Two consecutive same-target tapOns are NOT a double-tap gesture — flows
+  // that want one use the explicit `doubleTapOn` primitive (which emits a
+  // controlled ~90ms-gap down/up pair). Collapsing them into a native double
+  // tap instead DROPPED a press on counters/steppers: a worklet "pulse +
+  // count" button (g-reanimated) registers the double tap as a single onPress,
+  // so `tapOn ×3` landed "Pressed: 2", not 3, then burned the assert's wait
+  // before a re-fire recovered. Fire discrete spaced taps (postSleepRepeat) so
+  // each onPress lands; double-tap gestures keep using doubleTapOn.
+  readonly collapsesRepeatTaps = false;
   // An out-of-process HID tap can land off the hit-box (integer rounding,
   // a late-armed recogniser) — the self-heal retap is the recovery.
   readonly deterministicTaps = false;
@@ -200,8 +208,22 @@ export class HidDriver implements GestureDriver {
           bestEffort(client, 'wait_react_commit', { sinceMs: reactSinceMs, maxMs: 2500 }),
         );
       }
+      // Final quiescence confirm. When hashAnimLoop already saw a clean commit
+      // (committed) and no real VC transition ran (transitionWaitMs <= 50), the
+      // UI is settled — a SHORT window confirms no late re-render, no need for
+      // the full 200ms tail on every tap. The trim was reverted once because it
+      // dropped g-reanimated presses, but the real cause was the tap COLLAPSE
+      // (two same-target taps → one native double-tap → a single onPress),
+      // disabled since — discrete taps each land their press regardless of this
+      // window (g-reanimated 3/3 across repeated runs with the trim on). Only the
+      // uncertain paths (no commit seen, or a real VC transition with a possible
+      // late payload commit) keep the conservative window.
+      const cleanCommit = committed && transitionWaitMs <= 50;
       await tracedLeg('settle.finalWaitCommit', () =>
-        bestEffort(client, 'wait_commit', { maxMs: 1500, stableMs: 200 }),
+        bestEffort(client, 'wait_commit', {
+          maxMs: cleanCommit ? 600 : 1500,
+          stableMs: cleanCommit ? 100 : 200,
+        }),
       );
       return;
     }
@@ -223,7 +245,15 @@ export class HidDriver implements GestureDriver {
   }
 
   async settleAfterSwipe(client: EnnioSocketClient, _outcome?: SwipeOutcome): Promise<void> {
-    if (SWIPE_SETTLE_PAUSE_MS > 0) await sleep(SWIPE_SETTLE_PAUSE_MS);
+    // Wait for scroll MOMENTUM to actually stop on the dylib's deterministic
+    // scroll-idle signal, not a blind fixed pause — returns the instant the
+    // list quiesces (smooth, no fixed jank) instead of always burning 500ms.
+    // The env override stays as an escape hatch but defaults to the signal.
+    if (SWIPE_SETTLE_PAUSE_MS > 0 && process.env.ENNIO_SWIPE_SETTLE_MS !== undefined) {
+      await sleep(SWIPE_SETTLE_PAUSE_MS);
+    } else {
+      await bestEffort(client, 'wait_scroll_idle', { maxMs: 1000 });
+    }
     await bestEffort(client, 'wait_commit', {
       maxMs: SWIPE_SETTLE_MAX_MS,
       stableMs: SWIPE_SETTLE_STABLE_MS,
@@ -242,12 +272,17 @@ export class HidDriver implements GestureDriver {
   }
 
   async settleScrollFound(client: EnnioSocketClient, _noMomentum?: boolean): Promise<void> {
-    await sleep(600);
+    // Target is in view — let residual scroll momentum stop on the
+    // deterministic scroll-idle signal (returns immediately when the list is
+    // already still, e.g. a nudge with no fling) instead of a blind 600ms, then
+    // confirm the commit. The follow-up tap carries its own settle + exposure
+    // self-heal, so this only needs the list to stop moving.
+    await bestEffort(client, 'wait_scroll_idle', { maxMs: 1200 });
     await bestEffort(client, 'wait_commit', { maxMs: 2000, stableMs: 300 });
   }
 
   async settleAfterNudge(client: EnnioSocketClient, _outcome?: SwipeOutcome): Promise<void> {
-    await sleep(500);
+    await bestEffort(client, 'wait_scroll_idle', { maxMs: 1000 });
     await bestEffort(client, 'wait_commit', { maxMs: 1500, stableMs: 200 });
   }
 

@@ -84,19 +84,24 @@ export function registerTapHandlers(registry: CommandRegistry): void {
           return;
         }
       }
-      // After typing, the editing-menu popover floats over the screen
-      // and eats the next tap. Resign first responder unless the next
-      // tap is another text input.
-      const tapIsIntoInput = sel.id && /Input$/i.test(sel.id);
-      if (ctx.lastWasTextInput && !tapIsIntoInput) {
-        // The keyboard may still be animating UP from the prior inputText.
-        // Hiding it mid-presentation is a no-op (resignFirstResponder
-        // before becomeFirstResponder settles), AND the retract poll below
-        // would exit immediately on the not-yet-docked frame — then the
-        // keyboard finishes rising and eats this tap (the flaky
-        // custom-server "Done" case). So first wait for it to finish
-        // presenting (docked = keyboard_frame visible), bounded; the common
-        // already-docked path breaks on the first probe (near-zero cost).
+      const nextEditsField =
+        !!nextCmd &&
+        typeof nextCmd === 'object' &&
+        ('inputText' in nextCmd || 'eraseText' in nextCmd || 'clearText' in nextCmd);
+      // After inputText, a tap onto a NON-input target (a "Continue"/"Done"
+      // button) must DISMISS the keyboard first: RN's keyboardShouldPersistTaps
+      // makes the first tap on a non-input view only close the keyboard, so the
+      // button's onPress never fires and the step stalls until a retry (the
+      // checkout next-btn / custom-server "Done" cases). Wait for the keyboard
+      // to finish docking — probing mid-rise reads a not-yet-docked frame and
+      // the tap fires through a still-covering keyboard — then hide it.
+      //
+      // Gate on !nextEditsField: when the NEXT command edits a field, the tap is
+      // just moving focus to another input (focus_testid keeps the keyboard up),
+      // so skip the dismiss entirely. That stops the keyboard being churned
+      // (hidden + re-raised) between every field of a form — the dominant cost of
+      // multi-field flows — while still dismissing before a real button tap.
+      if (ctx.lastWasTextInput && !nextEditsField) {
         const upDeadline = Date.now() + 700;
         while (Date.now() < upDeadline) {
           const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
@@ -104,16 +109,29 @@ export function registerTapHandlers(registry: CommandRegistry): void {
           await sleep(30);
         }
         await ctx.client.call('hide_keyboard').catch(() => undefined);
-        // Wait for the keyboard window to actually retract — wait_commit
-        // tracks the app view-hash, not the separate keyboard window's
-        // dismiss animation, so a tap could fire while it still covers
-        // the target (the custom-server "Done" case).
         const kbDeadline = Date.now() + 1200;
         while (Date.now() < kbDeadline) {
           const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
           if (!(kr?.data as { visible?: boolean } | undefined)?.visible) break;
           await sleep(50);
         }
+        // The keyboard is gone, but on a KeyboardAvoidingView / auto-scrolling
+        // form the content reflows AFTER dismissal — the button we're about to
+        // tap slides to a new Y over the dismiss animation. Tapping now resolves
+        // a mid-flight rect and misses (the g-keyboard / checkout next-btn
+        // stall: the tap "succeeds" on empty space, onPress never fires, the
+        // assert then burns its full wait before a re-fire recovers). Wait for
+        // the reflow ANIMATION to actually end — frame-hash stability alone can
+        // read quiet between spring frames — then a brief commit, so execTapOn
+        // below resolves the button's final position.
+        const reflowDeadline = Date.now() + 800;
+        while (Date.now() < reflowDeadline) {
+          const r = await ctx.client.call('animations_active').catch(() => undefined);
+          const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
+          if (!active) break;
+          await sleep(20);
+        }
+        await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 120 }).catch(() => undefined);
       }
       ctx.lastWasTextInput = false;
       if (!isRepeatTap) {
@@ -133,10 +151,7 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       // If next op edits the field AND we have a testID, route the
       // "tap to focus" through focus_testid (calls becomeFirstResponder
       // in-process — deterministic, no race with onPress-driven focus).
-      const nextEditsField =
-        !!nextCmd &&
-        typeof nextCmd === 'object' &&
-        ('inputText' in nextCmd || 'eraseText' in nextCmd || 'clearText' in nextCmd);
+      // (nextEditsField computed above for the keyboard-rise gate.)
       let focusedViaTestId = false;
       if (sel.id && nextEditsField) {
         const r = await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
@@ -152,13 +167,17 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         }
       }
       if (focusedViaTestId) {
-        // Field is firstResponder — skip the HID tap so the
-        // mid-animation keyboard doesn't intercept the touch.
-        // With --no-animations the in-app render after focus settles in
-        // ~1 frame — 50ms stability window is sufficient vs 200ms.
-        const focusStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 50 : 200;
+        // Field is firstResponder (becomeFirstResponder ran synchronously) —
+        // skip the HID tap so the mid-animation keyboard doesn't intercept the
+        // touch. The next command is ALWAYS an inputText/eraseText (that's the
+        // gate to enter this path), and it carries its own post-edit commit
+        // settle — so we only need a brief confirm that focus committed, NOT a
+        // full 200ms stable tail. Typing into a firstResponder field doesn't
+        // wait on the keyboard's rise animation. This shaves the per-field
+        // focus cost across form-fill flows.
+        const focusStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 30 : 80;
         await ctx.client
-          .call('wait_commit', { maxMs: 1000, stableMs: focusStableMs })
+          .call('wait_commit', { maxMs: 500, stableMs: focusStableMs })
           .catch(() => undefined);
         ctx.lastTapKey = tapKey;
         ctx.lastTapTestID = sel.id;

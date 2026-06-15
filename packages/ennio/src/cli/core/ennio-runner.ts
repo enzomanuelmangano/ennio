@@ -50,6 +50,8 @@ export interface EnnioRunnerOptions {
   platform?: Platform;
   /** --record: capture a video of the whole suite to this path. */
   recordPath?: string;
+  /** --fail-fast: stop the suite after the first failing flow. */
+  failFast?: boolean;
 }
 
 export class EnnioRunner {
@@ -66,6 +68,7 @@ export class EnnioRunner {
   private lastUdid?: string;
   private recordPath?: string;
   private recording: ScreenRecording | null = null;
+  private failFast: boolean;
 
   constructor(opts: EnnioRunnerOptions = {}) {
     this.udid = opts.udid;
@@ -73,6 +76,7 @@ export class EnnioRunner {
     this.verbose = opts.verbose ?? false;
     this.lenient = opts.lenient ?? false;
     this.safeMode = opts.safeMode ?? false;
+    this.failFast = opts.failFast ?? false;
     this.platform = opts.platform ?? selectPlatform('ios');
     this.recordPath = opts.recordPath;
     this.driver = this.platform.createDriver(opts.inProcessTap ?? false);
@@ -99,6 +103,9 @@ export class EnnioRunner {
       results.push(result);
       if (result.passed) pass++;
       else fail++;
+      // --fail-fast: a single failure fails the suite (strict, no retry), so
+      // don't burn the remaining flows' wall-clock — stop here.
+      if (this.failFast && !result.passed) break;
     }
 
     const suiteResult: SuiteResult = {
