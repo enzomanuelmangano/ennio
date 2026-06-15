@@ -209,11 +209,17 @@ jobs:
           # react-nav suite), instead of a fresh node per flow. clearState
           # soft-resets the app in-process between flows, so state isolation
           # holds; what the per-flow loop paid for nothing was node/CLI
-          # cold-start every flow. Pass the EXPLICIT top-level flow list (NOT the
-          # directory — a dir glob would pull in subflows/ + conformance/). The
-          # runner streams the full per-step output live (verbose), so CI logs
-          # show every flow's steps; --fail-fast stops at the first failing flow.
-          mapfile -t FILES < <(ls example/maestro-e2e/*.yaml | grep -vE '/(_|00-)')
+          # cold-start every flow. Build the EXPLICIT top-level flow list (NOT
+          # the directory — a dir glob would pull in subflows/ + conformance/)
+          # with a portable loop: the macOS runner ships bash 3.2, which has no
+          # `mapfile`. The runner streams the full per-step output live
+          # (verbose); --fail-fast stops at the first failing flow.
+          FILES=()
+          for f in example/maestro-e2e/*.yaml; do
+            base=$(basename "$f")
+            case "$base" in _*|00-*) continue;; esac
+            FILES+=("$f")
+          done
           echo "flows: ${#FILES[@]}"
           node packages/ennio/dist/cli.js test "${FILES[@]}" --verbose --fail-fast $FLAGS \
             2>&1 | tee /tmp/ennio-logs/suite.log
