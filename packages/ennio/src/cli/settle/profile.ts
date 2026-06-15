@@ -51,7 +51,8 @@ export interface TuningProfile {
 // "env-or-15000"; detect whether the env was actually set so the maestro
 // profile can fall back to 7 s instead of 15 s when it wasn't.
 const _envWait = parseInt(process.env.ENNIO_DEFAULT_WAIT_MS ?? '', 10);
-const ENV_WAIT_OVERRIDE: number | null = Number.isFinite(_envWait) && _envWait > 0 ? _envWait : null;
+const ENV_WAIT_OVERRIDE: number | null =
+  Number.isFinite(_envWait) && _envWait > 0 ? _envWait : null;
 
 // Today's behavior. Budgets reference the live constants (which themselves honor
 // ENNIO_DEFAULT_WAIT_MS / ENNIO_TAP_SETTLE_MS), so this preset == current runtime.

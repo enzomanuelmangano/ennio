@@ -66,12 +66,16 @@
       "area": "selector",
       "case": "text: \"Done\" must NOT match \"Done editing\" (Maestro anchors the whole string)",
       "maestro": "whole-string regex => \"Done\" matches only \"Done\", not \"Done editing\"",
-      "ennioCurrent": "substring contains => \"Done\" ALSO matches \"Done editing\"",
+      "ennioCurrent": "maestro profile anchors the pattern whole-string (textMatchArgs ^(?:…)$); resilient keeps legacy substring",
       "deviceBacked": true,
       "fixture": "example/maestro-e2e/conformance/sel-text-anchor.yaml",
-      "status": "divergent",
-      "note": "Core semantic divergence. Under the maestro profile this becomes whole-string regex; under resilient it stays substring during migration.",
-      "targetPhase": 1
+      "status": "pass",
+      "note": "Closed under maestro (Phase 6, CLI-side anchoring over the existing native regex path). Resilient keeps substring for the migration window.",
+      "targetPhase": 6,
+      "statusByProfile": {
+        "maestro": "pass",
+        "resilient": "divergent"
+      }
     },
     {
       "id": "selector.id.regex",
@@ -82,8 +86,8 @@
       "deviceBacked": true,
       "fixture": "example/maestro-e2e/conformance/sel-id-regex.yaml",
       "status": "divergent",
-      "note": "ennio id is exact; Maestro id is regex. Decide in Phase 1 whether id gets matchMode too.",
-      "targetPhase": 1
+      "note": "Remaining native gap. id is matched by an exact hash lookup in the testID index on BOTH platforms; regex-id needs a coordinated EnnioFinder.mm + EnnioAgent.java change and a rebuild of both binaries to keep iOS/Android parity. Deferred — an iOS-only change would itself create a new cross-platform divergence.",
+      "targetPhase": 7
     },
     {
       "id": "selector.index",

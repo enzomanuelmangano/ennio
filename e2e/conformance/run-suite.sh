@@ -41,12 +41,18 @@ fi
 # Emit "fixture<TAB>status" for every device-backed row, resolving the fixture
 # path relative to the repo root. Node is already an ennio dependency.
 rows() {
-  node -e '
+  # A row may carry `statusByProfile: { maestro, resilient }` for behavior that
+  # is correct under one profile but an accepted gap under the other (e.g.
+  # whole-string anchoring passes under maestro, stays divergent under
+  # resilient). Resolve to the active profile, falling back to `status`.
+  ENNIO_PROFILE="${ENNIO_PROFILE:-maestro}" node -e '
     const m = require(process.argv[1]);
+    const prof = process.env.ENNIO_PROFILE || "maestro";
     for (const r of m.rows) {
       if (!r.deviceBacked) continue;
       if (!r.fixture || !r.fixture.endsWith(".yaml")) continue;
-      process.stdout.write(r.id + "\t" + r.fixture + "\t" + r.status + "\n");
+      const st = (r.statusByProfile && r.statusByProfile[prof]) || r.status;
+      process.stdout.write(r.id + "\t" + r.fixture + "\t" + st + "\n");
     }
   ' "$MATRIX"
 }

@@ -11,7 +11,7 @@
 //      rendered by remote view services (PHPicker, share sheet).
 
 import { axQueryByText } from '../hid';
-import { MaestroSelector, textMatchMode } from '../maestro-parser';
+import { MaestroSelector, textMatchArgs } from '../maestro-parser';
 
 import {
   DEFAULT_WIN_H,
@@ -91,8 +91,7 @@ export async function findOnce(ctx: RunContext, sel: MaestroSelector): Promise<R
   }
   if (sel.text) {
     const r = await ctx.client.call('find_by_text', {
-      text: sel.text,
-      regex: textMatchMode(sel, ctx.profile.textMatchDefault) === 'regex',
+      ...textMatchArgs(sel, ctx.profile.textMatchDefault),
     });
     if (r.ok) return r.data as Rect;
   }
@@ -155,9 +154,8 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     const r = await timedAsync(ctx, 'tap.findFast', () =>
       ctx.client
         .call('wait_find_by_text', {
-          text: sel.text!,
+          ...textMatchArgs(sel, ctx.profile.textMatchDefault),
           maxMs: 2500,
-          regex: textMatchMode(sel, ctx.profile.textMatchDefault) === 'regex',
         })
         .catch(() => undefined),
     );
@@ -174,7 +172,9 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   // through to the poll + scroll below. Skipped for childOf (own path).
   if (sel.text && !sel.childOf) {
     const ax = await ctx.client
-      .call('find_ax_by_text', { text: sel.text, regex: textMatchMode(sel, ctx.profile.textMatchDefault) === 'regex' })
+      .call('find_ax_by_text', {
+        ...textMatchArgs(sel, ctx.profile.textMatchDefault),
+      })
       .catch(() => undefined);
     if (ax && ax.ok && ax.data) return ax.data as Rect;
   }
@@ -276,7 +276,9 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   if (sel.text) {
     const r = await timedAsync(ctx, 'tap.findAxFallback', () =>
       ctx.client
-        .call('find_ax_by_text', { text: sel.text!, regex: textMatchMode(sel, ctx.profile.textMatchDefault) === 'regex' })
+        .call('find_ax_by_text', {
+          ...textMatchArgs(sel, ctx.profile.textMatchDefault),
+        })
         .catch(() => undefined),
     );
     if (r && r.ok && r.data) return r.data as Rect;

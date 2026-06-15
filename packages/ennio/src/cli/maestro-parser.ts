@@ -382,6 +382,30 @@ export function textMatchMode(
 }
 
 /**
+ * Build the `{ text, regex }` args for a native find_*_by_text call from a
+ * selector + the profile's default mode. The single place text-match args are
+ * shaped, so anchoring is applied uniformly.
+ *
+ * Under the `maestro` profile (defaultMode === 'regex') a regex match is
+ * WHOLE-STRING, per Maestro: the pattern is anchored with `^(?:…)$` so
+ * `text: "Done"` matches only "Done", not "Done editing". The native finder
+ * tries a literal substring first and only falls to its regex path on miss — an
+ * anchored pattern is never a literal substring, so it cleanly takes the regex
+ * path and anchors there, with no native change required. Under `resilient`
+ * (sniff) the pattern stays unanchored, preserving the legacy partial-match
+ * behavior for the migration window.
+ */
+export function textMatchArgs(
+  sel: Pick<MaestroSelector, 'text' | 'regex' | 'literal'>,
+  defaultMode: 'sniff' | 'literal' | 'regex' = 'sniff',
+): { text: string; regex: boolean } {
+  const text = sel.text ?? '';
+  if (textMatchMode(sel, defaultMode) !== 'regex') return { text, regex: false };
+  const anchored = defaultMode === 'regex' ? `^(?:${text})$` : text;
+  return { text: anchored, regex: true };
+}
+
+/**
  * Resolve a subflow file path relative to the current flow
  */
 export function resolveSubflowPath(currentFlowPath: string, subflowPath: string): string {

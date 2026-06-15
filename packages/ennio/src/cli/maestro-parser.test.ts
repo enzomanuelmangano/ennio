@@ -10,6 +10,7 @@ import {
   resolveSubflowPath,
   isRegexText,
   textMatchMode,
+  textMatchArgs,
   extractModifiers,
 } from './maestro-parser';
 import type { MaestroCommand } from './maestro-parser';
@@ -262,6 +263,38 @@ describe('textMatchMode', () => {
     expect(textMatchMode({ text: 'users[,]? or feeds' }, 'literal')).toBe('literal');
     // explicit flags still beat the profile default
     expect(textMatchMode({ text: 'Done', literal: true }, 'regex')).toBe('literal');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// textMatchArgs: the { text, regex } the finder sends. Under the maestro profile
+// regex is whole-string anchored (Maestro). Maps to matrix row
+// selector.text.regex-by-default-anchor (Phase 6).
+// ---------------------------------------------------------------------------
+describe('textMatchArgs', () => {
+  it('literal mode sends the raw text, regex off', () => {
+    expect(textMatchArgs({ text: 'Done' }, 'literal')).toEqual({ text: 'Done', regex: false });
+    expect(textMatchArgs({ text: 'Done', literal: true }, 'regex')).toEqual({
+      text: 'Done',
+      regex: false,
+    });
+  });
+
+  it('maestro profile anchors the pattern whole-string', () => {
+    expect(textMatchArgs({ text: 'Done' }, 'regex')).toEqual({ text: '^(?:Done)$', regex: true });
+    // an explicit pattern is anchored too (Maestro anchors all regex)
+    expect(textMatchArgs({ text: '(Toggles|Switches)', regex: true }, 'regex')).toEqual({
+      text: '^(?:(Toggles|Switches))$',
+      regex: true,
+    });
+  });
+
+  it('resilient/sniff regex stays unanchored (legacy partial match)', () => {
+    // explicit regex under resilient: partial, no anchor
+    expect(textMatchArgs({ text: 'users[,]? or feeds', regex: true }, 'sniff')).toEqual({
+      text: 'users[,]? or feeds',
+      regex: true,
+    });
   });
 });
 

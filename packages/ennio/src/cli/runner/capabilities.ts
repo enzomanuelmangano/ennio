@@ -103,7 +103,8 @@ export const isAsyncPayloadHost = (cls: string): boolean =>
   includesAny(cls, ASYNC_PAYLOAD_HOST_CLASSES);
 
 /** Does a VC chain contain any async-payload host? */
-export const chainHasAsyncPayloadHost = (chain: string[]): boolean => chain.some(isAsyncPayloadHost);
+export const chainHasAsyncPayloadHost = (chain: string[]): boolean =>
+  chain.some(isAsyncPayloadHost);
 
 /** Does a VC chain contain any cross-process presenter? */
 export const chainHasCrossProcessPresenter = (chain: string[]): boolean =>
