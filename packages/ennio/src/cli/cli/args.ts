@@ -67,6 +67,10 @@ export type Flags = {
    *  Saved next to the run's artifacts (--output) or the cwd. Pairs with
    *  --show-touches to make every tap visible in the footage. */
   record?: boolean;
+  /** --fail-fast: abort the suite after the first failing flow instead of
+   *  running the rest. Strict CI mode — a single failure fails the suite, so
+   *  there's no point burning the remaining wall-clock. */
+  failFast?: boolean;
 };
 
 export type ParsedArgs = {
@@ -103,6 +107,7 @@ const BOOL_FLAGS = new Set([
   'show-touches',
   'disable-touches',
   'record',
+  'fail-fast',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {
@@ -114,6 +119,7 @@ const FLAG_KEY_ALIASES: Record<string, string> = {
   'disable-reuse-app': 'disableReuseApp',
   'show-touches': 'showTouches',
   'disable-touches': 'disableTouches',
+  'fail-fast': 'failFast',
 };
 
 export function parseArgs(argv: string[]): ParsedArgs {

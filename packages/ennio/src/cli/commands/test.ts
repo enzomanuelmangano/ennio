@@ -114,6 +114,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     lenient: flags.lenient ?? false,
     safeMode: flags.safeMode ?? false,
     inProcessTap: flags.inProcessTap ?? false,
+    failFast: flags.failFast ?? false,
     platform: selectPlatform(platformName),
     // --record: one video for the whole suite, --output dir or cwd.
     recordPath: flags.record
