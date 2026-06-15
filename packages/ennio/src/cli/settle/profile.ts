@@ -1,37 +1,32 @@
-// Tuning profiles — the single selector for ennio's behavioral defaults.
+// Tuning profile — ennio's behavioral defaults.
 //
-// ennio ships two profiles:
-//   • `maestro`   — faithful Maestro drop-in (7 s waits, regex-by-default text,
-//                   id-as-regex). The intended shipped default.
-//   • `resilient` — today's empirically-tuned values (15 s waits for the slow
-//                   iOS-26 simulator, the legacy text-match sniff). What ennio's
-//                   own react-nav / bsky e2e suites run under.
+// ennio ships ONE profile, `resilient`: the empirically-tuned values that drive
+// real apps reliably (waits sized for the slow iOS-26 simulator, literal-first
+// text matching with the metacharacter sniff as a regex fallback). There is no
+// strict "Maestro drop-in" profile: faithful-Maestro whole-string regex
+// anchoring (`^(?:…)$`) broke literal text that merely CONTAINS regex
+// metacharacters — e.g. the on-screen label "Change position (left)", where the
+// `(left)` parsed as a capture group and never matched. Resilient is the only
+// behavior, and the default.
 //
-// The active profile is threaded onto RunContext (core/flow-executor) and read
-// by the assert/wait handlers (defaultWaitMs) and the finder/visibility layers
-// (textMatchDefault). The shipped default is `maestro`; ennio's own e2e suites
-// opt into `resilient` via ENNIO_PROFILE. id-as-regex (maestroProfile.idMatch)
-// is carried here but consumed in Phase 6 when the native finder gains regex id
-// matching; today id stays an exact compare.
+// The profile is still threaded onto RunContext (core/flow-executor) and read by
+// the assert/wait handlers (defaultWaitMs) and the finder/visibility layers
+// (textMatchDefault) — one indirection, one profile.
 //
-// `resilientProfile` references the LIVE constants (runner/context.ts) so it can
-// never silently drift from current behavior — if a constant changes, the
-// preset changes with it, and the parity test below pins the relationship.
+// Budgets reference the LIVE constants (runner/context.ts) so the preset can
+// never silently drift from current behavior; the parity test pins it.
 
 import { DEFAULT_WAIT_MS, POST_TAP_SETTLE_MS } from '../runner/context';
 
-export type ProfileName = 'maestro' | 'resilient';
+export type ProfileName = 'resilient';
 
 /** How an UNannotated text selector (no explicit `regex:`/`literal:`) is matched. */
 export type TextMatchDefault =
-  | 'regex' // whole-string regex, Maestro semantics
   | 'literal' // literal substring
-  | 'sniff'; // legacy isRegexText metacharacter heuristic (transitional)
+  | 'sniff'; // isRegexText metacharacter heuristic: literal first, regex fallback
 
 /** How an `id` selector is matched. */
-export type IdMatchMode =
-  | 'regex' // Maestro treats id as a regex
-  | 'exact'; // ennio legacy: exact accessibilityIdentifier compare
+export type IdMatchMode = 'exact'; // exact accessibilityIdentifier compare
 
 export interface TuningProfile {
   name: ProfileName;
@@ -45,59 +40,29 @@ export interface TuningProfile {
   idMatch: IdMatchMode;
 }
 
-// An explicit ENNIO_DEFAULT_WAIT_MS is an operator override and wins over EITHER
-// profile's natural default — slow CI runners set it (e.g. 25 s) and must get
-// that headroom regardless of profile. DEFAULT_WAIT_MS already bakes
-// "env-or-15000"; detect whether the env was actually set so the maestro
-// profile can fall back to 7 s instead of 15 s when it wasn't.
-const _envWait = parseInt(process.env.ENNIO_DEFAULT_WAIT_MS ?? '', 10);
-const ENV_WAIT_OVERRIDE: number | null =
-  Number.isFinite(_envWait) && _envWait > 0 ? _envWait : null;
-
-// Today's behavior. Budgets reference the live constants (which themselves honor
+// The one profile. Budgets reference the live constants (which themselves honor
 // ENNIO_DEFAULT_WAIT_MS / ENNIO_TAP_SETTLE_MS), so this preset == current runtime.
 export const resilientProfile: TuningProfile = {
   name: 'resilient',
   defaultWaitMs: DEFAULT_WAIT_MS,
   postTapSettleMs: POST_TAP_SETTLE_MS,
-  // Unannotated text still goes through the legacy sniff during migration, so a
-  // flow that relied on `text: "users[,]? or feeds"` auto-promoting to regex
-  // keeps working until the author opts into the maestro profile.
+  // Unannotated text goes through the sniff: a literal substring match is tried
+  // first (so "Change position (left)" resolves by its real text), and only a
+  // selector that LOOKS like a pattern ("users[,]? or feeds") falls to regex.
   textMatchDefault: 'sniff',
   idMatch: 'exact',
 };
 
-// Faithful Maestro defaults. defaultWaitMs is the headline delta (Maestro's
-// fluent assertions default to ~7 s); text/id become regex-by-default. An
-// explicit ENNIO_DEFAULT_WAIT_MS still wins for slow-CI headroom.
-export const maestroProfile: TuningProfile = {
-  name: 'maestro',
-  defaultWaitMs: ENV_WAIT_OVERRIDE ?? 7000,
-  postTapSettleMs: POST_TAP_SETTLE_MS,
-  textMatchDefault: 'regex',
-  idMatch: 'regex',
-};
-
 export const PROFILES: Record<ProfileName, TuningProfile> = {
-  maestro: maestroProfile,
   resilient: resilientProfile,
 };
 
-/**
- * Resolve the active profile NAME from `ENNIO_PROFILE` (or an explicit arg).
- *
- * The shipped default is `maestro` (faithful Maestro semantics). `resilient` is
- * opt-in via `ENNIO_PROFILE=resilient` — ennio's own react-nav / bsky e2e suites
- * set it for the slow iOS-26 simulator. Any unset / unrecognized value resolves
- * to `maestro`.
- */
-export function resolveProfileName(
-  raw: string | undefined = process.env.ENNIO_PROFILE,
-): ProfileName {
-  return raw === 'resilient' ? 'resilient' : 'maestro';
+/** Resolve the active profile NAME. Only `resilient` exists; it is the default. */
+export function resolveProfileName(_raw?: string | undefined): ProfileName {
+  return 'resilient';
 }
 
 /** Resolve the active TuningProfile. */
-export function resolveProfile(raw?: string): TuningProfile {
-  return PROFILES[resolveProfileName(raw)];
+export function resolveProfile(_raw?: string): TuningProfile {
+  return resilientProfile;
 }
