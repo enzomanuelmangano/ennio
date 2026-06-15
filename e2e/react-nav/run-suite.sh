@@ -49,7 +49,7 @@ run_flow() { # $1 = flow file, $2 = LINK, $3 = TEXT, $4 = log path
   LINK="$2" TEXT="$3" $TIMEOUT node "$ENNIO_CLI" test "$1" $PLATFORM_FLAG ${ENNIO_NO_ANIM_FLAG:-} > "$4" 2>&1
 }
 
-PASS=0; FAIL=0; FAILED=""
+PASS=0; FAIL=0; FAILED=""; CONSEC=0
 echo "=== react-nav suite ($ENNIO_PLATFORM) $(date +%T) ==="
 SUITE_T0=$(date +%s)
 for fp in "$FLOWS_DIR"/*.yml; do
@@ -63,10 +63,17 @@ for fp in "$FLOWS_DIR"/*.yml; do
   # flake to fix at the source, not to paper over — the suite fails outright.
   if run_flow "$fp" "$L" "$T" "$LOGD/$f.log"; then
     echo "PASS  $f  $(grep -o 'total .*' "$LOGD/$f.log" | head -1)"
-    PASS=$((PASS+1))
+    PASS=$((PASS+1)); CONSEC=0
   else
     shot "$LOGD/$f.fail.png"
-    echo "FAIL  $f"; FAIL=$((FAIL+1)); FAILED="$FAILED $f"
+    echo "FAIL  $f"; FAIL=$((FAIL+1)); FAILED="$FAILED $f"; CONSEC=$((CONSEC+1))
+    # Fail-fast: 2 consecutive failures means the run is systemically broken
+    # (app not launching, injection dead) — abort instead of burning the whole
+    # suite's wall-clock to report the inevitable.
+    if [ "$CONSEC" -ge 2 ]; then
+      echo "ABORT: $CONSEC consecutive failures — bailing out"
+      break
+    fi
   fi
 done
 SUITE_T1=$(date +%s)

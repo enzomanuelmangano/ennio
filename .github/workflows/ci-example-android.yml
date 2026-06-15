@@ -190,7 +190,7 @@ jobs:
           export ENNIO_ANDROID_INJECTOR=/tmp/ennio-android/ennio_ptrace
           NO_ANIM='${ENNIO_NO_ANIM_FLAG}'
           mkdir -p /tmp/ennio-logs
-          PASS=0; FAIL=0; FAILED=""
+          PASS=0; FAIL=0; FAILED=""; CONSEC=0
           for f in example/maestro-e2e/*.yaml; do
             base=\$(basename "\$f")
             case "\$base" in _*|00-*) continue;; esac
@@ -199,14 +199,19 @@ jobs:
             # flake to fix at the source — the suite fails outright.
             if node packages/ennio/dist/cli.js test "\$f" --verbose \$NO_ANIM \
                 > "/tmp/ennio-logs/\$base.log" 2>&1; then
-              echo "PASS  \$base"; PASS=\$((PASS+1))
+              echo "PASS  \$base"; PASS=\$((PASS+1)); CONSEC=0
             else
               echo "FAIL  \$base"; tail -30 "/tmp/ennio-logs/\$base.log"
               # Agent-side truth for an injection/readiness failure: did the
               # agent inject, bind its socket, or crash?
               adb logcat -d -s Ennio:V EnnioInject:V AndroidRuntime:E ActivityManager:W \
                 2>/dev/null | tail -150 > "/tmp/ennio-logs/\$base.logcat.txt" || true
-              FAIL=\$((FAIL+1)); FAILED="\$FAILED \$base"
+              FAIL=\$((FAIL+1)); FAILED="\$FAILED \$base"; CONSEC=\$((CONSEC+1))
+              # Fail-fast: 2 consecutive failures = systemic break, abort.
+              if [ "\$CONSEC" -ge 2 ]; then
+                echo "ABORT: \$CONSEC consecutive failures — bailing out"
+                break
+              fi
             fi
           done
           echo ""

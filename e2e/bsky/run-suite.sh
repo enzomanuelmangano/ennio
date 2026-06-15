@@ -16,7 +16,7 @@ set -u
 cd "$BLUESKY_DIR"
 LOGD=${SUITE_LOG_DIR:-/tmp/bsky-e2e-logs}
 rm -rf "$LOGD"; mkdir -p "$LOGD"
-PASS=0; FAIL=0; FAILED=""
+PASS=0; FAIL=0; FAILED=""; CONSEC=0
 echo "=== bsky suite (fast profile, STRICT no-retry) $(date +%T) ==="
 SUITE_T0=$(date +%s)
 for f in __e2e__/flows/*.yml; do
@@ -38,13 +38,18 @@ for f in __e2e__/flows/*.yml; do
   if ENNIO_PHASE_TRACE=1 node "$ENNIO_CLI" test "$f" --verbose $ANIM_FLAG \
        > "$LOGD/$b.log" 2>&1; then
     echo "PASS  $b  $(grep -o 'total .*' "$LOGD/$b.log" | head -1)"
-    PASS=$((PASS+1))
+    PASS=$((PASS+1)); CONSEC=0
   else
     # Screen state at failure — element-not-found failures don't produce an
     # in-app screenshot, and the screen is the fastest way to tell "app
     # wedged" from "wrong element" on a slow runner.
     xcrun simctl io "$ENNIO_UDID" screenshot "$LOGD/$b.fail.png" || true
-    echo "FAIL  $b"; FAIL=$((FAIL+1)); FAILED="$FAILED $b"
+    echo "FAIL  $b"; FAIL=$((FAIL+1)); FAILED="$FAILED $b"; CONSEC=$((CONSEC+1))
+    # Fail-fast: 2 consecutive failures = systemic break, abort the suite.
+    if [ "$CONSEC" -ge 2 ]; then
+      echo "ABORT: $CONSEC consecutive failures — bailing out"
+      break
+    fi
   fi
 done
 SUITE_T1=$(date +%s)
