@@ -291,57 +291,6 @@ export function isRegexText(text: string): boolean {
 }
 
 /**
- * Convert Maestro selector to Ennio selector format
- */
-export function toEnnioSelector(selector: MaestroSelector): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  if (selector.id !== undefined) result.id = selector.id;
-
-  // Handle text selector - Maestro semantics: text matches as substring (or regex if it
-  // contains regex metacharacters / explicit .* anchors). Plain text falls back to
-  // 'contains' so e.g. text: "Wireless" matches "Wireless Headphones".
-  // Use TextMatcher shape so client.selectorToJson serializes flat form expected by
-  // the native SelectorParser ({ text, textMatchMode }).
-  if (selector.text !== undefined) {
-    if (isRegexText(selector.text)) {
-      result.text = { pattern: selector.text, mode: 'regex' };
-    } else {
-      result.text = { pattern: selector.text, mode: 'contains' };
-    }
-  }
-
-  if (selector.index !== undefined) result.index = selector.index;
-  if (selector.enabled !== undefined) result.enabled = selector.enabled;
-  if (selector.checked !== undefined) result.checked = selector.checked;
-  if (selector.focused !== undefined) result.focused = selector.focused;
-  if (selector.selected !== undefined) result.selected = selector.selected;
-
-  // Spatial selectors (recursive)
-  if (selector.below) result.below = toEnnioSelector(selector.below);
-  if (selector.above) result.above = toEnnioSelector(selector.above);
-  if (selector.leftOf) result.leftOf = toEnnioSelector(selector.leftOf);
-  if (selector.rightOf) result.rightOf = toEnnioSelector(selector.rightOf);
-
-  // Hierarchical selectors
-  if (selector.containsChild) result.containsChild = toEnnioSelector(selector.containsChild);
-  if (selector.childOf) result.childOf = toEnnioSelector(selector.childOf);
-  if (selector.containsDescendants) {
-    result.containsDescendants = selector.containsDescendants.map(toEnnioSelector);
-  }
-
-  // Dimension selectors
-  if (selector.width !== undefined) result.width = selector.width;
-  if (selector.height !== undefined) result.height = selector.height;
-  if (selector.tolerance !== undefined) result.tolerance = selector.tolerance;
-
-  // Trait selectors
-  if (selector.traits) result.traits = selector.traits;
-
-  return result;
-}
-
-/**
  * Resolve a subflow file path relative to the current flow
  */
 export function resolveSubflowPath(currentFlowPath: string, subflowPath: string): string {

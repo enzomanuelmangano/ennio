@@ -368,17 +368,19 @@ export class AndroidPlatform implements Platform {
     launch: () => void = () => launchAndroidApp(serial, bundleId),
   ): Promise<EnnioConnection> {
     let lastErr = '';
-    // Each failed inject is cheap (the socket-bind check below fails in
-    // ~ms-to-4s vs the old ~14s readiness timeout), so we can afford many
-    // tries to ride out the x86 emulator's transient bad patches — windows
-    // (~40s seen) where ptrace silently no-ops because the target VM is
-    // momentarily unresponsive under GC / system_server load. Crucially the
-    // inter-attempt backoff ESCALATES: rapid-fire relaunches add load and
-    // prolong the bad patch, so later attempts space out (up to ~6s) to both
-    // span more wall-clock and let the emulator recover. 12 attempts ×
-    // escalating backoff spans ~90s, comfortably outlasting the observed
-    // patches so the flow recovers in-place instead of needing a suite retry.
-    for (let attempt = 0; attempt < 12; attempt++) {
+    // Retry against a WALL-CLOCK BUDGET, not a fixed attempt count. Each failed
+    // inject is cheap (the socket-bind check below fails in ~ms-to-4s), so we
+    // keep retrying to ride out the x86 emulator's transient "bad patches" —
+    // windows (~40s seen) where ptrace silently no-ops because the target VM is
+    // momentarily unresponsive under GC / system_server load. The budget is the
+    // principled bound: it outlasts the observed patches and self-scales to a
+    // slower runner (where each attempt costs more, so fewer fit) instead of a
+    // hardcoded 12 fitted to one machine. The inter-attempt backoff ESCALATES —
+    // rapid-fire relaunches add load and prolong the patch, so later attempts
+    // space out (up to ~6s) to span more wall-clock and let the emulator recover.
+    const budgetMs = Number(process.env.ENNIO_INJECT_BUDGET_MS) || 90_000;
+    const injectDeadline = Date.now() + budgetMs;
+    for (let attempt = 0; Date.now() < injectDeadline; attempt++) {
       if (attempt > 0) {
         terminateAndroidApp(serial, bundleId);
         await sleep(Math.min(400 + attempt * 600, 6_000));

@@ -153,14 +153,13 @@ static BOOL strContainsCI(NSString *haystack, NSString *needle) {
     return [haystack rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
 }
 
-// Maestro semantics: a text selector that contains regex
-// metacharacters is treated as a regex pattern; otherwise plain
-// substring. Used to match e.g. "Search for posts, users[,]? or feeds".
-static BOOL looksLikeRegex(NSString *s) {
-    if (s.length == 0) return NO;
-    NSCharacterSet *meta = [NSCharacterSet characterSetWithCharactersInString:@"[]?*+(){}|^$\\"];
-    return [s rangeOfCharacterFromSet:meta].location != NSNotFound;
-}
+// Whether the CURRENT text find treats its selector as a regex. The CLI is the
+// single source of truth — it computes isRegexText once and passes the `regex`
+// flag on find_by_text / find_ax_by_text; the finder used to RE-derive this
+// with its own metachar scan (looksLikeRegex), a second definition that could
+// silently diverge from the CLI's. Set once at the find entry (single-threaded,
+// main-thread finder), read by the matchers below.
+static BOOL g_textSelectorIsRegex = NO;
 
 static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
     if (!haystack.length || !pattern.length) return NO;
@@ -182,14 +181,14 @@ static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
 static BOOL strContainsOrRegex(NSString *haystack, NSString *needle) {
     if (!haystack.length || !needle.length) return NO;
     if (strContainsCI(haystack, needle)) return YES;
-    if (looksLikeRegex(needle)) return regexMatchCI(haystack, needle);
+    if (g_textSelectorIsRegex) return regexMatchCI(haystack, needle);
     return NO;
 }
 
 static BOOL strEqualsOrRegex(NSString *a, NSString *b) {
     if (!a || !b) return NO;
     if ([a caseInsensitiveCompare:b] == NSOrderedSame) return YES;
-    if (looksLikeRegex(b)) return regexMatchCI(a, b);
+    if (g_textSelectorIsRegex) return regexMatchCI(a, b);
     return NO;
 }
 
@@ -327,22 +326,64 @@ static CGFloat viewWindowArea(UIView *v) {
     return r.size.width * r.size.height;
 }
 
+static UIView *_Nullable promoteToInteractiveAncestor(UIView *v);
+
+// YES when a tap at the view's window-space center would actually reach
+// the button it belongs to. The discriminator that separates the visible
+// match from a stale duplicate: a JS-stack (createStackNavigator) keeps
+// the previous screen MOUNTED and translated off behind the pushed one,
+// so the same label exists twice — once on the top screen and once off
+// to the side, covered. A real finger only reaches the top one.
+static BOOL viewIsFrontmostAtCenter(UIView *v) {
+    UIWindow *w = v.window;
+    if (!w) return NO;
+    CGRect win = [w convertRect:v.bounds fromView:v];
+    if (win.size.width <= 0 || win.size.height <= 0) return NO;
+    CGPoint c = CGPointMake(CGRectGetMidX(win), CGRectGetMidY(win));
+    if (!CGRectContainsPoint(w.bounds, c)) return NO; // center off-screen
+    UIView *hit = [w hitTest:c withEvent:nil];
+    if (!hit) return NO;
+    // The interactive button v belongs to (v itself when it's already the
+    // button; the wrapping Pressable when v is its inner label). A tap at
+    // v's center reaches it iff the frontmost view there lies within that
+    // button's subtree (hit == target or a descendant of it). When another
+    // screen covers v, hit lands in a different subtree — or on a shared
+    // root container that is an ANCESTOR of target, never a descendant —
+    // so the walk never reaches target and the tap is correctly rejected.
+    UIView *target = promoteToInteractiveAncestor(v) ?: v;
+    for (UIView *p = hit; p; p = p.superview) if (p == target) return YES;
+    return NO;
+}
+
 static UIView *_Nullable bestFrom(NSArray<UIView *> *list) {
     if (list.count == 0) return nil;
     if (list.count == 1) return list.firstObject;
-    // Tie-break by smallest area — Maestro-equivalent semantics where
-    // text-targeted taps preferentially hit the narrowest matching
-    // element rather than a wrapping container.
+    // Prefer a candidate a tap would actually reach (frontmost at its
+    // center) over one covered by the top screen — otherwise a stack-
+    // pushed-away previous screen's duplicate label outranks the visible
+    // one (auth-flow: Home's "Sign out", slid to x=-96 behind Chat, won
+    // over Chat's). Within the chosen set, tie-break by smallest area —
+    // Maestro-equivalent semantics where text-targeted taps hit the
+    // narrowest matching element rather than a wrapping container.
     UIView *best = nil;
     CGFloat bestArea = CGFLOAT_MAX;
+    UIView *bestAny = nil;
+    CGFloat bestAnyArea = CGFLOAT_MAX;
     for (UIView *v in list) {
         CGFloat a = viewWindowArea(v);
-        if (a < bestArea) {
+        if (a < bestAnyArea) {
+            bestAnyArea = a;
+            bestAny = v;
+        }
+        if (viewIsFrontmostAtCenter(v) && a < bestArea) {
             bestArea = a;
             best = v;
         }
     }
-    return best ?: list.firstObject;
+    // Fall back to smallest-area when nothing is frontmost (e.g. the
+    // match sits under a touch-forwarding transparent overlay): the
+    // prior behaviour, so no regression for the single-screen case.
+    return best ?: bestAny ?: list.firstObject;
 }
 
 // When `walkByText` lands on a UILabel / RCTText whose parent is the
@@ -769,6 +810,11 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
 }
 
 + (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found {
+    return [self findAxRectByText:text found:found regex:NO];
+}
+
++ (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found regex:(BOOL)regex {
+    g_textSelectorIsRegex = regex;
     EnnioRect zero = {0, 0, 0, 0};
     if (found) *found = NO;
     if (text.length == 0) return zero;
@@ -827,10 +873,16 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
 }
 
 + (UIView *)findViewByText:(NSString *)text {
-    return [self findViewByText:text relaxed:NO];
+    return [self findViewByText:text relaxed:NO regex:NO];
 }
 
 + (UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed {
+    return [self findViewByText:text relaxed:relaxed regex:NO];
+}
+
++ (UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed regex:(BOOL)regex {
+    // Set the selector mode for the matchers, from the CLI's authoritative flag.
+    g_textSelectorIsRegex = regex;
     if (text.length == 0) return nil;
     UIWindow *keyWin = [EnnioBootstrap keyWindow];
     UIView *match = walkByTextEx(keyWin, text, relaxed);

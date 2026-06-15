@@ -144,7 +144,7 @@ describe('other policies pin their op sequence', () => {
     expect(rpc.ops()).toEqual(['wait_commit']);
   });
 
-  it('afterPressKey: react-commit then commit (after a fixed pre-sleep)', async () => {
+  it('afterPressKey: react-commit then commit (no blind pre-sleep)', async () => {
     const rpc = new MockRpc(defaultResponder);
     await afterPressKey(rpc.asClient());
     expect(rpc.ops()).toEqual(['wait_react_commit', 'wait_commit']);
@@ -162,10 +162,10 @@ describe('other policies pin their op sequence', () => {
     expect(rpc.ops()).toEqual(['wait_commit', 'wait_presentation_idle']);
   });
 
-  it('afterSwipe waits a commit (after momentum sleep)', async () => {
+  it('afterSwipe: scroll-idle then commit (signal, not a blind sleep)', async () => {
     const rpc = new MockRpc(defaultResponder);
     await afterSwipe(rpc.asClient());
-    expect(rpc.ops()).toEqual(['wait_commit']);
+    expect(rpc.ops()).toEqual(['wait_scroll_idle', 'wait_commit']);
   });
 
   it('afterLaunch: first-paint commit, react commit, final commit (react ok → no fallback sleep)', async () => {

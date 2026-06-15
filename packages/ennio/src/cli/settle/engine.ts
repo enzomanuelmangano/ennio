@@ -51,7 +51,7 @@ export class RpcSettleEngine implements SettleEngine {
       case 'afterNav':
         return policies.afterNav(rpc);
       case 'afterHideKeyboard':
-        return policies.afterHideKeyboard();
+        return policies.afterHideKeyboard(rpc);
       case 'preSwipe':
         return policies.preSwipe(rpc);
       case 'afterSwipe':
