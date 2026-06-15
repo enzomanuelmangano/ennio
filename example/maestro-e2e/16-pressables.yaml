@@ -96,14 +96,14 @@ name: Pressables — every RN pressable variant
 - assertVisible:
     text: 'LongPress'
 
-# Double-tap — DoubleTapBox uses Date.now()-based gap detection
-# (<350 ms). Ennio's `doubleTap` synth UITouches at the same coords get
-# coalesced by UIKit's gesture coordinator and only one onPress fires.
-# Two consecutive `tapOn`s engage RN's Pressable each time (the runner's
-# settle delay is ~150-200 ms, well within the 350 ms window).
-- tapOn:
-    id: 'press-double'
-- tapOn:
+# Double-tap — DoubleTapBox fires onDoubleTap when two onPress land within
+# its gap window. Use the real `doubleTapOn` primitive: it emits two
+# down/up pairs at the same point with a controlled ~90-100 ms gap (iOS HID
+# events / Android in-process MotionEvents), so the double-tap registers
+# deterministically regardless of runner speed. Two plain `tapOn`s instead
+# raced the window — the second tap's find+settle ran ~880 ms on a slow
+# emulator, past the gap, so only single presses fired.
+- doubleTapOn:
     id: 'press-double'
 - assertVisible:
     text: 'DoubleTap'
