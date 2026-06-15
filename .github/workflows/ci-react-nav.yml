@@ -67,7 +67,12 @@ env:
 jobs:
   react-nav:
     name: react-navigation suite (iOS sim, prebuilt fixture)
-    runs-on: macos-15
+    # macos-26 (Xcode 26 + iOS 26 simulator). The fixture is built with the
+    # iOS 26 SDK (DTSDKName=iphonesimulator26.0) and uses iOS-26-only Swift
+    # APIs (setNeedsUpdateProperties, LayoutRegion, DrawOnSymbolEffect), so it
+    # hard-crashes (siriAssetIsNotReady) on the iOS 18 runtime of macos-15.
+    # The fixture's SDK must match the runtime — iOS 26 ⇒ macos-26.
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -82,10 +87,10 @@ jobs:
         with:
           node-version: 24
 
-      - name: Select Xcode
+      - name: Select Xcode 26
         run: |
           set -euo pipefail
-          for x in Xcode_16.4.app Xcode_16.3.app Xcode_16.2.app; do
+          for x in Xcode_26.0.1.app Xcode_26.0.app Xcode_26.app; do
             if [ -d "/Applications/$x" ]; then sudo xcode-select -switch "/Applications/$x"; break; fi
           done
           xcodebuild -version
@@ -97,8 +102,8 @@ jobs:
         id: boot
         run: |
           set -euo pipefail
-          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-18-[0-9]+' | sort -rV | head -1)
-          test -n "$RUNTIME" || { echo "No iOS 18 runtime on image"; xcrun simctl list runtimes; exit 1; }
+          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-26-[0-9]+' | sort -rV | head -1)
+          test -n "$RUNTIME" || { echo "No iOS 26 runtime on image"; xcrun simctl list runtimes; exit 1; }
           UDID=$(xcrun simctl create "react-nav-e2e" "iPhone 16 Pro" "$RUNTIME")
           echo "created $UDID on $RUNTIME"
           xcrun simctl boot "$UDID"
