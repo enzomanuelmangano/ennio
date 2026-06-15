@@ -9,8 +9,9 @@
 # launch.yml turns into an `openLink ${APP_SCHEME}${LINK}` + wait-for `${TEXT}`.
 #
 # A fresh CLI process per flow (the app is force-stopped between flows so each
-# starts from the deep-link cold path, matching how the suite runs locally),
-# retry-once to absorb a transient settle flake on a slow CI runner.
+# starts from the deep-link cold path, matching how the suite runs locally).
+# STRICT: one attempt per flow, no retry — a flow that needs a second try is a
+# real flake to fix at the source.
 #
 # Required env:
 #   ENNIO_CLI        path to ennio dist/cli.js
@@ -40,7 +41,7 @@ run_flow() { # $1 = flow file, $2 = LINK, $3 = TEXT, $4 = log path
   LINK="$2" TEXT="$3" timeout 180 node "$ENNIO_CLI" test "$1" $PLATFORM_FLAG ${ENNIO_NO_ANIM_FLAG:-} > "$4" 2>&1
 }
 
-PASS=0; FAIL=0; FAILED=""; RETRIED=""
+PASS=0; FAIL=0; FAILED=""
 echo "=== react-nav suite ($ENNIO_PLATFORM) $(date +%T) ==="
 SUITE_T0=$(date +%s)
 for fp in "$FLOWS_DIR"/*.yml; do
@@ -50,21 +51,17 @@ for fp in "$FLOWS_DIR"/*.yml; do
   L=$(grep -m1 'LINK:' "$fp" | sed -E "s/.*LINK:[[:space:]]*//;s/[\"']//g;s/[[:space:]]*$//")
   T=$(grep -m1 'TEXT:' "$fp" | sed -E "s/.*TEXT:[[:space:]]*//;s/[\"']//g;s/[[:space:]]*$//")
   stop_app
+  # STRICT: one attempt, no retry. A flow that needs a second try is a real
+  # flake to fix at the source, not to paper over — the suite fails outright.
   if run_flow "$fp" "$L" "$T" "$LOGD/$f.log"; then
     echo "PASS  $f  $(grep -o 'total .*' "$LOGD/$f.log" | head -1)"
     PASS=$((PASS+1))
   else
-    shot "$LOGD/$f.fail1.png"
-    stop_app
-    if run_flow "$fp" "$L" "$T" "$LOGD/$f.retry.log"; then
-      echo "PASS  $f (retry)"; PASS=$((PASS+1)); RETRIED="$RETRIED $f"
-    else
-      shot "$LOGD/$f.fail2.png"
-      echo "FAIL  $f"; FAIL=$((FAIL+1)); FAILED="$FAILED $f"
-    fi
+    shot "$LOGD/$f.fail.png"
+    echo "FAIL  $f"; FAIL=$((FAIL+1)); FAILED="$FAILED $f"
   fi
 done
 SUITE_T1=$(date +%s)
 echo ""
-echo "=== SUITE(react-nav/$ENNIO_PLATFORM): Pass=$PASS Fail=$FAIL wall=$((SUITE_T1-SUITE_T0))s — retried:${RETRIED:- none} failed:${FAILED:- none} ==="
+echo "=== SUITE(react-nav/$ENNIO_PLATFORM): Pass=$PASS Fail=$FAIL wall=$((SUITE_T1-SUITE_T0))s — failed:${FAILED:- none} ==="
 [ "$FAIL" -eq 0 ]

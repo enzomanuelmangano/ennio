@@ -16,8 +16,8 @@ set -u
 cd "$BLUESKY_DIR"
 LOGD=${SUITE_LOG_DIR:-/tmp/bsky-e2e-logs}
 rm -rf "$LOGD"; mkdir -p "$LOGD"
-PASS=0; FAIL=0; FAILED=""; RETRIED=""
-echo "=== bsky suite (fast profile, retry-once) $(date +%T) ==="
+PASS=0; FAIL=0; FAILED=""
+echo "=== bsky suite (fast profile, STRICT no-retry) $(date +%T) ==="
 SUITE_T0=$(date +%s)
 for f in __e2e__/flows/*.yml; do
   b=$(basename "$f" .yml); case "$b" in _*) continue;; esac
@@ -33,25 +33,21 @@ for f in __e2e__/flows/*.yml; do
   # position depends on the animated picker-sheet timeline — animations
   # must stay on for that flow.
   ANIM_FLAG="--disable-animations"; [ "$b" = "onboarding" ] && ANIM_FLAG=""
+  # STRICT: one attempt, no retry. A flow that needs a second try is a real
+  # flake to fix at the source — the suite fails outright.
   if ENNIO_PHASE_TRACE=1 node "$ENNIO_CLI" test "$f" --verbose $ANIM_FLAG \
        > "$LOGD/$b.log" 2>&1; then
     echo "PASS  $b  $(grep -o 'total .*' "$LOGD/$b.log" | head -1)"
     PASS=$((PASS+1))
   else
-    # Screen state at first-attempt failure — element-not-found failures
-    # don't produce an in-app screenshot, and the screen is the fastest
-    # way to tell "app wedged" from "wrong element" on a slow runner.
-    xcrun simctl io "$ENNIO_UDID" screenshot "$LOGD/$b.fail1.png" || true
-    if ENNIO_PHASE_TRACE=1 node "$ENNIO_CLI" test "$f" --verbose $ANIM_FLAG \
-         > "$LOGD/$b.retry.log" 2>&1; then
-      echo "PASS  $b (retry)"; PASS=$((PASS+1)); RETRIED="$RETRIED $b"
-    else
-      xcrun simctl io "$ENNIO_UDID" screenshot "$LOGD/$b.fail2.png" || true
-      echo "FAIL  $b"; FAIL=$((FAIL+1)); FAILED="$FAILED $b"
-    fi
+    # Screen state at failure — element-not-found failures don't produce an
+    # in-app screenshot, and the screen is the fastest way to tell "app
+    # wedged" from "wrong element" on a slow runner.
+    xcrun simctl io "$ENNIO_UDID" screenshot "$LOGD/$b.fail.png" || true
+    echo "FAIL  $b"; FAIL=$((FAIL+1)); FAILED="$FAILED $b"
   fi
 done
 SUITE_T1=$(date +%s)
 echo ""
-echo "=== SUITE(bsky): Pass=$PASS Fail=$FAIL wall=$((SUITE_T1-SUITE_T0))s — retried:${RETRIED:- none} failed:${FAILED:- none} ==="
+echo "=== SUITE(bsky): Pass=$PASS Fail=$FAIL wall=$((SUITE_T1-SUITE_T0))s — failed:${FAILED:- none} ==="
 [ "$FAIL" -eq 0 ]

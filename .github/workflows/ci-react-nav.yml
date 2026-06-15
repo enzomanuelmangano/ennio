@@ -31,6 +31,19 @@ on:
         description: 'Run only flows whose name starts with this prefix (empty = all)'
         type: string
         default: ''
+  # Every PR that can affect the iOS runner or the react-nav suite. src/** is
+  # the shared cross-platform CLI; ios/** is the dylib/HID. Android-only TS is
+  # carved out (last-match-wins) so an Android-only change won't boot a sim.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/android/**'
+      - '!packages/ennio/src/cli/platform/android.ts'
+      - '!packages/ennio/src/cli/driver/android-driver.ts'
+      - 'packages/ennio/ios/**'
+      - 'e2e/react-nav/**'
+      - '.github/workflows/ci-react-nav.yml'
 
 permissions:
   contents: read

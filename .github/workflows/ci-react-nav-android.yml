@@ -32,6 +32,19 @@ on:
         description: 'Run only flows whose name starts with this prefix (empty = all)'
         type: string
         default: ''
+  # Every PR that can affect the Android runner or the react-nav suite. src/**
+  # is the shared CLI; android/** + android-inject/** are the agent + injector.
+  # iOS-only native (ios/**) isn't listed, so it never boots an emulator.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/platform/ios.ts'
+      - '!packages/ennio/src/cli/sim.ts'
+      - 'packages/ennio/android/**'
+      - 'packages/ennio/android-inject/**'
+      - 'e2e/react-nav/**'
+      - '.github/workflows/ci-react-nav-android.yml'
 
 permissions:
   contents: read

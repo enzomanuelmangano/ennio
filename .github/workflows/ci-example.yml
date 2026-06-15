@@ -209,22 +209,16 @@ jobs:
             base=$(basename "$f")
             [[ "$base" == _* ]] && continue
             [[ "$base" == 00-* ]] && continue
+            # STRICT: one attempt, no retry. A flow that needs a retry is a
+            # real flake to fix at the source — the suite fails outright.
             if node packages/ennio/dist/cli.js test "$f" --verbose $FLAGS > "/tmp/ennio-logs/$base.log" 2>&1; then
               echo "PASS  $base"
               PASS=$((PASS+1))
             else
-              # Retry once — absorbs transient runner slowness without
-              # masking real regressions (a real bug fails twice).
-              echo "RETRY $base"
-              if node packages/ennio/dist/cli.js test "$f" --verbose $FLAGS > "/tmp/ennio-logs/$base.retry.log" 2>&1; then
-                echo "PASS  $base (retry)"
-                PASS=$((PASS+1))
-              else
-                echo "FAIL  $base"
-                tail -25 "/tmp/ennio-logs/$base.retry.log"
-                FAIL=$((FAIL+1))
-                FAILED="$FAILED $base"
-              fi
+              echo "FAIL  $base"
+              tail -25 "/tmp/ennio-logs/$base.log"
+              FAIL=$((FAIL+1))
+              FAILED="$FAILED $base"
             fi
           done
           echo ""

@@ -194,23 +194,18 @@ jobs:
           for f in example/maestro-e2e/*.yaml; do
             base=\$(basename "\$f")
             case "\$base" in _*|00-*) continue;; esac
-            ok=0
-            for attempt in 1 2; do
-              adb logcat -c 2>/dev/null || true
-              if node packages/ennio/dist/cli.js test "\$f" --verbose \$NO_ANIM \
-                  > "/tmp/ennio-logs/\$base.\$attempt.log" 2>&1; then
-                ok=1; break
-              fi
-              echo "RETRY \$base (attempt \$attempt failed)"
+            adb logcat -c 2>/dev/null || true
+            # STRICT: one attempt, no retry. A flow that needs a retry is a real
+            # flake to fix at the source — the suite fails outright.
+            if node packages/ennio/dist/cli.js test "\$f" --verbose \$NO_ANIM \
+                > "/tmp/ennio-logs/\$base.log" 2>&1; then
+              echo "PASS  \$base"; PASS=\$((PASS+1))
+            else
+              echo "FAIL  \$base"; tail -30 "/tmp/ennio-logs/\$base.log"
               # Agent-side truth for an injection/readiness failure: did the
               # agent inject, bind its socket, or crash?
               adb logcat -d -s Ennio:V EnnioInject:V AndroidRuntime:E ActivityManager:W \
-                2>/dev/null | tail -150 > "/tmp/ennio-logs/\$base.\$attempt.logcat.txt" || true
-            done
-            if [ "\$ok" -eq 1 ]; then
-              echo "PASS  \$base"; PASS=\$((PASS+1))
-            else
-              echo "FAIL  \$base"; tail -30 "/tmp/ennio-logs/\$base.2.log"
+                2>/dev/null | tail -150 > "/tmp/ennio-logs/\$base.logcat.txt" || true
               FAIL=\$((FAIL+1)); FAILED="\$FAILED \$base"
             fi
           done

@@ -42,6 +42,19 @@ on:
     # Nightly at 02:00 Europe/Rome (00:00 UTC). The gate job below skips
     # the suite when main hasn't moved since the last successful nightly.
     - cron: '0 0 * * *'
+  # Every PR that can affect the iOS runner or the bsky suite — src/** shared
+  # CLI, ios/** dylib/HID, the bsky harness, this workflow. The gate job runs
+  # the suite for any non-schedule event (pull_request included).
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/android/**'
+      - '!packages/ennio/src/cli/platform/android.ts'
+      - '!packages/ennio/src/cli/driver/android-driver.ts'
+      - 'packages/ennio/ios/**'
+      - 'e2e/bsky/**'
+      - '.github/workflows/ci-bsky.yml'
 
 permissions:
   contents: read
