@@ -28,6 +28,7 @@ export interface RpcOps {
   find_by_text: { args: { text: string; relaxed?: boolean }; result: Rect };
   find_ax_by_text: { args: { text: string }; result: Rect };
   find_child_by_testid: { args: { childTestID: string; parentTestID: string }; result: Rect };
+  find_text_input: { args: Record<string, never>; result: Rect };
   find_tap_target_by_testid: {
     args: { testID: string };
     result: Rect & { kind: 'self' | 'descendant' };

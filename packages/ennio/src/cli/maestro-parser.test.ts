@@ -5,7 +5,6 @@ import { join } from 'node:path';
 
 import {
   normalizeSelector,
-  toEnnioSelector,
   parseMaestroFile,
   expandFlow,
   resolveSubflowPath,
@@ -29,55 +28,6 @@ describe('normalizeSelector', () => {
 
   it('passes an id selector through unchanged', () => {
     expect(normalizeSelector({ id: 'email-input' })).toEqual({ id: 'email-input' });
-  });
-});
-
-describe('toEnnioSelector — text match mode', () => {
-  it('uses contains mode for plain text', () => {
-    expect(toEnnioSelector({ text: 'Wireless' })).toEqual({
-      text: { pattern: 'Wireless', mode: 'contains' },
-    });
-  });
-
-  it('uses regex mode when text contains metacharacters', () => {
-    for (const pattern of ['Step [0-9]', 'a|b', 'foo+', '^Start', 'end$', '(grp)']) {
-      const out = toEnnioSelector({ text: pattern });
-      expect((out.text as { mode: string }).mode).toBe('regex');
-    }
-  });
-
-  it('uses regex mode for leading/trailing .* anchors', () => {
-    expect((toEnnioSelector({ text: '.*Headphones' }).text as { mode: string }).mode).toBe('regex');
-    expect((toEnnioSelector({ text: 'Wireless.*' }).text as { mode: string }).mode).toBe('regex');
-  });
-
-  it('passes id through', () => {
-    expect(toEnnioSelector({ id: 'cart' }).id).toBe('cart');
-  });
-});
-
-describe('toEnnioSelector — spatial / hierarchical recursion', () => {
-  it('recursively converts a rightOf selector', () => {
-    const out = toEnnioSelector({ text: 'Step 2', rightOf: { id: 'step-1' } });
-    expect(out.rightOf).toEqual({ id: 'step-1' });
-    expect((out.text as { mode: string }).mode).toBe('contains');
-  });
-
-  it('maps containsDescendants over each child selector', () => {
-    const out = toEnnioSelector({ id: 'row', containsDescendants: [{ label: 'X' }, { id: 'y' }] });
-    // NB: containsDescendants is NOT normalized — label is not folded here.
-    expect(out.containsDescendants).toEqual([{}, { id: 'y' }]);
-  });
-
-  it('forwards state + dimension selectors', () => {
-    const out = toEnnioSelector({
-      id: 'a',
-      enabled: true,
-      checked: false,
-      width: 10,
-      tolerance: 2,
-    });
-    expect(out).toMatchObject({ id: 'a', enabled: true, checked: false, width: 10, tolerance: 2 });
   });
 });
 

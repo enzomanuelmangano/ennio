@@ -83,12 +83,15 @@ export function registerInputHandlers(registry: CommandRegistry): void {
           // Wrong field focused, or none. Recovery order:
           //   1. The INTENDED field (last tap's testID) via the dylib
           //      focus path, rect-tap fallback.
-          //   2. The live text field per the cross-process AX tree —
-          //      composer/sheet inputs without a prior testID tap.
-          //      Deliberately second: during a focus switch AX still
-          //      reports the OLD field; preferring it typed into the
-          //      wrong input.
-          //   3. axFocusTextField as the last resort.
+          //   2. The on-screen text input, found structurally and
+          //      REAL-tapped — the autoFocus field that lost the focus
+          //      race, with no testID. Works headless.
+          //   3. The live text field per the cross-process AX tree —
+          //      composer/sheet inputs. Deliberately after the real tap:
+          //      during a focus switch AX still reports the OLD field;
+          //      preferring it typed into the wrong input, and it needs a
+          //      visible Simulator window the real-tap path doesn't.
+          //   4. axFocusTextField as the last resort.
           // Never re-tap the opener here — that toggles an open sheet
           // SHUT (the bug behind consecutive replies failing).
           let focusTap = false;
@@ -108,6 +111,22 @@ export function registerInputHandlers(registry: CommandRegistry): void {
                 });
                 focusTap = true;
               }
+            }
+          }
+          // No known field: a bare inputText into an autoFocus TextInput
+          // whose focus race was lost during the screen's push transition
+          // (no testID, no software keyboard up). Find the on-screen text
+          // input structurally and REAL-tap it — the honest equivalent of
+          // a user tapping the field. Needs no testID and no cross-process
+          // AX, so it works headless where the AX paths below are blind.
+          if (!focusTap) {
+            const rect = await ctx.client.call('find_text_input', {}).catch(() => undefined);
+            if (rect && rect.ok && rect.data) {
+              const rr = rect.data as { x: number; y: number; w: number; h: number };
+              await ctx.driver.tap(ctx.udid, rr.x + rr.w / 2, rr.y + rr.h / 2, {
+                intent: 'focus',
+              });
+              focusTap = true;
             }
           }
           if (!focusTap) {
@@ -216,6 +235,14 @@ export function registerInputHandlers(registry: CommandRegistry): void {
         esc: 41,
       };
       const code = map[name];
+      // An unrecognised key name used to be a silent no-op: the step
+      // "passed" having pressed nothing, hiding a typo'd flow. Fail loud
+      // with the supported set instead.
+      if (code == null) {
+        throw new Error(
+          `pressKey: unsupported key "${cmd.pressKey}". Supported: ${Object.keys(map).join(', ')}`,
+        );
+      }
       // A submit key (Enter/Return) fires the form's handler, which reads
       // state populated by an earlier async lookup. On Android, drain any
       // in-flight (or imminent — grace window) request and let React
@@ -234,7 +261,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
             .catch(() => undefined);
         }
       }
-      if (code != null) await ctx.client.call('hardware_key', { keyCode: code });
+      await ctx.client.call('hardware_key', { keyCode: code });
       // pressKey Enter on a form input typically triggers submit + a
       // chain of React state updates. Wait for commit + UIView stable
       // before the next step.
