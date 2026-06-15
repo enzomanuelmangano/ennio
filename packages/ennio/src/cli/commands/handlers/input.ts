@@ -9,14 +9,14 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { typeText as hidType, getActuator } from '../../hid';
+import { isRichTextField } from '../../runner/capabilities';
 import { interpolate, sleep } from '../../runner/context';
 
-// Fields whose value is driven by an onChangeText handler that
-// UIKeyInput.insertText doesn't trigger (rich-text editors). For these
-// we must type via REAL keyboard HID events so the controlled value
-// updates — Bluesky's composer is the canonical case: its publish button
-// stays disabled (canPost=false) under insert_text on a reopened sheet.
-const REAL_KEYBOARD_FIELDS = new Set(['composerTextInput']);
+// Rich-text fields that need HID typing (insertText doesn't fire their
+// onChangeText) live in the overridable capability registry —
+// runner/capabilities.ts explains why this can't be signal-detected. The
+// canonical case is a controlled rich-text composer whose submit button stays
+// disabled (e.g. canPost=false) under insert_text on a reopened sheet.
 
 interface InputTextCmd {
   inputText: string | number;
@@ -49,7 +49,7 @@ export function registerInputHandlers(registry: CommandRegistry): void {
       // HID events (host Indigo keyboard builder) which traverse the full
       // text-input delegate chain.
       const liveField = await ctx.platform.ax.textFieldId(ctx.udid);
-      if (liveField && REAL_KEYBOARD_FIELDS.has(liveField)) {
+      if (isRichTextField(liveField)) {
         await ctx.client.call('focus_testid', { testID: liveField }).catch(() => undefined);
         await ctx.client.call('first_responder_ready', { maxMs: 800 }).catch(() => undefined);
         await getActuator(ctx.udid).typeText(text);
