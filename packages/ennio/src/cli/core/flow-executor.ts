@@ -114,9 +114,11 @@ export class FlowExecutor {
     // "eaten tap": the tap actuated but its onPress never fired (keyboard
     // reflow moved the button, a gesture-handler button missed, a press
     // dropped). Probe the target with a SHORT budget; if it appears, done (the
-    // common path, no penalty). If it misses AND the screen hasn't changed
-    // since the tap settled, the tap was eaten — re-fire it once, then assert
-    // the full budget. If the screen IS changing, it's a legit slow transition:
+    // common path, no penalty — and on that path we capture NO frame hashes at
+    // all). Only if it misses do we sample the frame hash twice ~120ms apart: if
+    // the screen hasn't changed between the two samples, the tap was eaten —
+    // re-fire it once, then assert the full budget. If the screen IS changing,
+    // it's a legit slow transition:
     // assert the full budget WITHOUT re-firing (re-firing a tap that worked
     // would double-act — over-count a counter, double-navigate). Caps the
     // eaten-tap stall at ~1.5s instead of the full assert timeout the outer
@@ -133,16 +135,23 @@ export class FlowExecutor {
         await this.registry.dispatch(cmd, buildDctx(nextCmd));
         return;
       }
-      const preHash = await captureHash(ctx).catch(() => '');
       try {
         await this.registry.dispatch(probe, buildDctx(nextCmd));
-        return; // target appeared within the probe — fast path
+        return; // target appeared within the probe — fast path, ZERO hash round-trips
       } catch (e) {
         if (!FIND_MISS_RE.test(e instanceof Error ? e.message : String(e))) throw e;
       }
-      const postHash = await captureHash(ctx).catch(() => '');
-      const quiet = preHash !== '' && postHash === preHash;
-      if (quiet) {
+      // MISS path only — sample the frame hash twice ~120ms apart to decide
+      // whether the screen is STILL (eaten tap) or ANIMATING (slow nav). The
+      // common fast path above never pays for either round-trip; this is the
+      // sole place hashes are captured.
+      const h1 = await captureHash(ctx).catch(() => '');
+      await sleep(120);
+      const h2 = await captureHash(ctx).catch(() => '');
+      const still = h1 !== '' && h1 === h2;
+      if (still) {
+        // Screen is frozen on the same frame → the tap was eaten. Re-fire it
+        // once, then run the full-budget assert.
         this.reporter.stepRetry?.(
           stepIdx + 1,
           `re-firing previous tap (${describeCommand(lastTapCmd)})`,
@@ -150,6 +159,9 @@ export class FlowExecutor {
         await this.registry.dispatch(lastTapCmd, buildDctx(cmd));
         await sleep(150);
       }
+      // If the hashes differ the screen is animating (slow nav) — just run the
+      // full-budget assert WITHOUT re-firing, so a tap that already worked
+      // doesn't double-act.
       await this.registry.dispatch(cmd, buildDctx(nextCmd));
     };
 
