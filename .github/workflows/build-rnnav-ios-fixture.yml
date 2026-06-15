@@ -45,7 +45,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version-file: /tmp/rnnav/.nvmrc
+          # react-navigation@211c1d82 pins v24.13.0 (.nvmrc); node-version-file
+          # can't take the absolute /tmp clone path (it resolves vs the
+          # workspace), so pin it directly.
+          node-version: '24.13.0'
 
       - name: Install deps (yarn 4, immutable)
         working-directory: /tmp/rnnav
