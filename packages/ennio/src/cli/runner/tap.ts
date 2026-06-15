@@ -21,6 +21,7 @@
 import type { TapIntent } from '../driver/types';
 import { bumpActuationGen, getScreenSize } from '../hid';
 import { MaestroSelector } from '../maestro-parser';
+import { chainHasAsyncPayloadHost, SUBMIT_DISMISS_TESTID_PATTERN } from './capabilities';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, captureReactTs, parsePoint, resolveRect } from './find';
@@ -733,12 +734,10 @@ export async function execTapOn(
     const baseHash = preHash ?? (await captureHash(ctx));
     const chainResp = await ctx.client.call('top_vc_chain').catch(() => undefined);
     const chain = ((chainResp?.data as { chain?: string[] })?.chain ?? []) as string[];
-    const isAsyncPayloadHost = (cls: string): boolean =>
-      cls.includes('CropViewController') ||
-      cls.includes('Mantis') ||
-      cls.includes('PHPicker') ||
-      cls.includes('PhotoPicker');
-    const isLateRecogniserHost = chain.some(isAsyncPayloadHost);
+    // A continuously-repainting host whose payload lands after dismissal
+    // (image cropper, system photo picker). The class set lives in the
+    // overridable capability registry, not inline here.
+    const isLateRecogniserHost = chainHasAsyncPayloadHost(chain);
     // Captured BEFORE the retap loop. Two uses: (1) the cropper/picker
     // dismissal is pure UIKit (no react commits), so the first commit
     // after this timestamp IS the dismissal's payload (bsky avatar crop:
@@ -879,17 +878,16 @@ export async function execTapOn(
         }
       }
     }
-    // Tab-bar resilience: iOS 26's liquid-glass tab bar drops HID
-    // taps when the host is mid-transition (slow CI runners reproduce
-    // this on roughly every nav-after-state-transition pattern). The
-    // press-feedback layer still bumps the frame hash so the
-    // !finalChanged gate above doesn't fire; meanwhile the tab never
-    // actually swaps and the next assertVisible times out. Always
-    // probe tap_tab when the selector is a bare text name — the
-    // dylib op no-ops if the name doesn't resolve to a UITabBarItem,
-    // and if it DOES resolve UIKit's setSelectedIndex is idempotent
-    // (no-op when the target tab is already selected).
-    if (sel.text && !sel.id) {
+    // Tab-bar resilience: iOS 26's liquid-glass tab bar drops HID taps when the
+    // host is mid-transition (slow CI runners reproduce this on roughly every
+    // nav-after-state-transition pattern). The press-feedback layer still bumps
+    // the frame hash so the !finalChanged gate above doesn't fire; meanwhile the
+    // tab never actually swaps and the next assertVisible times out. Probe
+    // tap_tab when the selector is a bare text name — the dylib op no-ops if the
+    // name doesn't resolve to a UITabBarItem, and if it DOES resolve UIKit's
+    // setSelectedIndex is idempotent. This is an iOS platform behavior; Android
+    // MotionEvent taps are deterministic and don't drop, so gate it to iOS.
+    if (sel.text && !sel.id && ctx.platform.name === 'ios') {
       bumpActuationGen();
       await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
     }
@@ -906,7 +904,7 @@ export async function execTapOn(
         while (Date.now() < deadline) {
           const cr = await ctx.client.call('top_vc_chain').catch(() => undefined);
           const cls = ((cr?.data as { chain?: string[] })?.chain ?? []) as string[];
-          if (!cls.some(isAsyncPayloadHost)) break;
+          if (!chainHasAsyncPayloadHost(cls)) break;
           await sleep(80);
         }
         await ctx.client
@@ -926,7 +924,7 @@ export async function execTapOn(
     // start) — then let presentation-idle absorb the transition. Bails
     // the moment the chain changes; fast hosts pay ~1 poll.
     const submitDismissMaxMs = parseInt(process.env.ENNIO_SUBMIT_DISMISS_MAX_MS ?? '0', 10) || 0;
-    if (submitDismissMaxMs > 0 && sel.id && /publish|submit|send/i.test(sel.id)) {
+    if (submitDismissMaxMs > 0 && sel.id && SUBMIT_DISMISS_TESTID_PATTERN.test(sel.id)) {
       await timedAsync(ctx, 'tap.waitSubmitDismiss', async () => {
         const before = chain.join('>');
         const deadline = Date.now() + submitDismissMaxMs;

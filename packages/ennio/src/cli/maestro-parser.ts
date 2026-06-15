@@ -51,11 +51,65 @@ export interface MaestroSelector {
   /** Maestro: per-step settle budget hint. Accepted; ennio's settle is
    *  signal-driven, so this only caps, never extends. */
   waitToSettleTimeoutMs?: number;
+  /**
+   * Explicit text match-mode escape hatches (ennio extension, Phase 1).
+   * `regex: true` forces the `text` selector to be a pattern; `literal: true`
+   * forces a literal substring even when the string carries metacharacters
+   * (e.g. "Price: $5 (USD)"). When neither is set the mode is resolved by
+   * `textMatchMode()` — see there for the transitional default. Mutually
+   * exclusive; `literal` wins if both are set (the more conservative choice).
+   */
+  regex?: boolean;
+  literal?: boolean;
 }
 
 export interface MaestroCondition {
   visible?: MaestroSelector;
   notVisible?: MaestroSelector;
+  /** Maestro `when: { platform: iOS | Android }` — gate on the runtime backend. */
+  platform?: string;
+  /** Maestro `when: { true: ${expr} }` — gate on a JS expression. */
+  true?: string;
+}
+
+/**
+ * Per-command modifiers Maestro allows as sibling keys on ANY command map
+ * (`- tapOn: X\n  optional: true\n  when: {...}\n  label: "..."`). Evaluated at
+ * the dispatch seam (core/flow-executor) so every command gets them uniformly,
+ * instead of each handler re-implementing optional/when.
+ */
+export interface CommandModifiers {
+  /** Failure of this step does not fail the flow (the step is skipped). */
+  optional?: boolean;
+  /** Human-readable step name for the report. */
+  label?: string;
+  /** Conditional execution — the command runs only if the condition holds. */
+  when?: MaestroCondition;
+}
+
+const MODIFIER_KEYS = ['optional', 'label', 'when'] as const;
+
+/**
+ * Split a parsed command map into its bare command and its per-command
+ * modifiers. Modifiers are sibling keys alongside the command verb; the bare
+ * command keeps everything else so the existing matchers still recognize it.
+ * Bare-string commands (`- back`) carry no modifiers.
+ */
+export function extractModifiers(cmd: MaestroCommand): {
+  command: MaestroCommand;
+  modifiers: CommandModifiers;
+} {
+  if (typeof cmd !== 'object' || cmd === null) return { command: cmd, modifiers: {} };
+  const modifiers: CommandModifiers = {};
+  const command: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(cmd)) {
+    if ((MODIFIER_KEYS as readonly string[]).includes(k)) {
+      (modifiers as Record<string, unknown>)[k] = v;
+    } else {
+      command[k] = v;
+    }
+  }
+  return { command: command as MaestroCommand, modifiers };
 }
 
 export type MaestroCommand =
@@ -96,7 +150,7 @@ export type MaestroCommand =
   | { openLink: string | { link: string } }
   | { takeScreenshot: string | { path: string } }
   | { hideKeyboard: true }
-  | { repeat: { times: number; commands: MaestroCommand[] } }
+  | { repeat: { times?: number; while?: MaestroCondition; commands: MaestroCommand[] } }
   | { retry: { maxRetries?: number; commands: MaestroCommand[] } }
   | { assertTrue: string }
   | { evalScript: string }
@@ -283,11 +337,72 @@ export function normalizeSelector(selector: MaestroSelector | string): MaestroSe
 /**
  * A Maestro text selector is a regex (not a literal substring) when it carries
  * regex metacharacters or explicit `.*` anchors — e.g. "users[,]? or feeds".
- * Used both to tag the native iOS selector and to flag Android find_* calls so
- * the in-app agent applies Pattern matching instead of a literal contains.
+ *
+ * This is the legacy metacharacter SNIFF. It is fragile by construction: it
+ * cannot tell "the user meant a pattern" from "the user typed a $" — see the
+ * misfire cases in maestro-parser.test.ts. It is NO LONGER the default: the
+ * `maestro` profile matches text as regex-by-default and never calls this. It
+ * survives as the implementation of the `sniff` mode, selected only by the
+ * `resilient` migration profile so existing ennio flows that relied on
+ * auto-regex keep working. Removed once `resilient` is retired.
  */
 export function isRegexText(text: string): boolean {
   return text.startsWith('.*') || text.endsWith('.*') || /[[\]{}()|\\^$+?]/.test(text);
+}
+
+export type TextMatchMode = 'literal' | 'regex';
+
+/**
+ * Resolve how a selector's `text` should be matched, in ONE place, so the
+ * finder/visibility layers never re-decide it per call. Precedence:
+ *   1. explicit `literal: true`  -> literal   (escape hatch, wins ties)
+ *   2. explicit `regex: true`    -> regex     (escape hatch)
+ *   3. otherwise                 -> the active profile's `defaultMode`
+ *
+ * `defaultMode` comes from the run's TuningProfile (`ctx.profile.textMatchDefault`):
+ * `regex` (Maestro), `literal`, or `sniff` (resilient migration — the legacy
+ * isRegexText heuristic). Defaults to `sniff` when omitted (device-free callers /
+ * tests) so the parser-level contract is unchanged. Taken as a plain literal, not
+ * the TuningProfile type, to keep the parser below the profile module in the
+ * import graph.
+ *
+ * NOTE: whole-string anchoring under `regex` mode (Maestro anchors the full
+ * string) is applied in the native finder and lands in Phase 6; today the
+ * `regex` path is a partial match.
+ */
+export function textMatchMode(
+  sel: Pick<MaestroSelector, 'text' | 'regex' | 'literal'>,
+  defaultMode: 'sniff' | 'literal' | 'regex' = 'sniff',
+): TextMatchMode {
+  if (sel.literal) return 'literal';
+  if (sel.regex) return 'regex';
+  if (defaultMode === 'regex') return 'regex';
+  if (defaultMode === 'literal') return 'literal';
+  return sel.text && isRegexText(sel.text) ? 'regex' : 'literal';
+}
+
+/**
+ * Build the `{ text, regex }` args for a native find_*_by_text call from a
+ * selector + the profile's default mode. The single place text-match args are
+ * shaped, so anchoring is applied uniformly.
+ *
+ * Under the `maestro` profile (defaultMode === 'regex') a regex match is
+ * WHOLE-STRING, per Maestro: the pattern is anchored with `^(?:…)$` so
+ * `text: "Done"` matches only "Done", not "Done editing". The native finder
+ * tries a literal substring first and only falls to its regex path on miss — an
+ * anchored pattern is never a literal substring, so it cleanly takes the regex
+ * path and anchors there, with no native change required. Under `resilient`
+ * (sniff) the pattern stays unanchored, preserving the legacy partial-match
+ * behavior for the migration window.
+ */
+export function textMatchArgs(
+  sel: Pick<MaestroSelector, 'text' | 'regex' | 'literal'>,
+  defaultMode: 'sniff' | 'literal' | 'regex' = 'sniff',
+): { text: string; regex: boolean } {
+  const text = sel.text ?? '';
+  if (textMatchMode(sel, defaultMode) !== 'regex') return { text, regex: false };
+  const anchored = defaultMode === 'regex' ? `^(?:${text})$` : text;
+  return { text: anchored, regex: true };
 }
 
 /**

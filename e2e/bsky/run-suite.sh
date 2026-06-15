@@ -13,6 +13,7 @@
 #   BLUESKY_DIR       bluesky checkout (patched, with __e2e__/flows)
 #   ENNIO_CLI         path to ennio dist/cli.js
 set -u
+
 cd "$BLUESKY_DIR"
 LOGD=${SUITE_LOG_DIR:-/tmp/bsky-e2e-logs}
 rm -rf "$LOGD"; mkdir -p "$LOGD"

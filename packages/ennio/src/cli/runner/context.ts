@@ -8,6 +8,7 @@
 
 import type { GestureDriver } from '../driver/types';
 import type { Platform } from '../platform/types';
+import type { TuningProfile } from '../settle/profile';
 import type { EnnioSocketClient } from '../socket-client';
 
 // =====================================================================
@@ -114,6 +115,10 @@ export interface RunContext {
   /** Flow-level `env:` block + runFlow-passed overrides. Resolved by
    *  `${VAR}` bare interpolation in command args. */
   flowEnv?: Record<string, string>;
+  /** Active tuning profile (resilient — the only one). Owns the behavioral
+   *  defaults: implicit-wait budget, post-tap settle, and the default
+   *  text/id match mode. */
+  profile: TuningProfile;
 }
 
 export interface RunResult {

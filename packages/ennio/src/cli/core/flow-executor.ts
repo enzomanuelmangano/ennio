@@ -15,10 +15,13 @@ import { diagnoseSocketFailure } from '../crash-detector';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
+import { extractModifiers } from '../maestro-parser';
+import { evaluateCondition } from '../runner/conditions';
 import type { DeviceSession, Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { RunContext } from '../runner/context';
 import { describeCommand } from '../runner/index';
+import { resolveProfile } from '../settle/profile';
 
 import { CommandRegistry } from './command-registry';
 import type { EnnioConnection } from './ennio-connection';
@@ -93,6 +96,7 @@ export class FlowExecutor {
       flowPath: flow.filePath,
       outputs: {},
       flowEnv: { ...(flow.env ?? {}) },
+      profile: resolveProfile(),
     };
 
     this.reporter.flowStart(flow);
@@ -125,12 +129,31 @@ export class FlowExecutor {
       // `- back`, `- launchApp`. js-yaml parses those as plain
       // strings. Normalise to `{op: true}` so registry matchers using
       // `'op' in cmd` work uniformly.
-      const cmd = normalizeBareString(rawCmd);
+      // Maestro per-command modifiers (optional / label / when) ride as
+      // sibling keys on the command map. Split them off so the bare command
+      // reaches the registry and the modifiers are evaluated here, once, for
+      // every command — rather than each handler re-implementing them.
+      const { command: cmd, modifiers } = extractModifiers(normalizeBareString(rawCmd));
+      const stepLabel = modifiers.label ? ` «${modifiers.label}»` : '';
       const nextCmd = rawNext === undefined ? undefined : normalizeBareString(rawNext);
       // Any non-tapOn command breaks the repeat-tap chain — the next
       // tapOn should NOT see the previous tapOn as its "last tap".
       if (typeof cmd !== 'object' || cmd === null || !('tapOn' in cmd)) {
         ctx.lastTapKey = undefined;
+      }
+      // when: gate — skip the step (counts as passed) if the condition is not
+      // satisfied. A skipped step is not a tap, so it can't re-fire below.
+      if (modifiers.when && !(await evaluateCondition(ctx, modifiers.when))) {
+        this.reporter.stepStart?.(i + 1, cmd);
+        stepTimings.push({
+          step: i + 1,
+          ms: 0,
+          cmd: describeCommand(cmd) + stepLabel + ' (skipped: when)',
+        });
+        this.reporter.stepPass(i + 1, cmd, 0);
+        stepsPassed++;
+        lastTapCmd = undefined;
+        continue;
       }
       const t0 = Date.now();
       this.reporter.stepStart?.(i + 1, cmd);
@@ -161,6 +184,20 @@ export class FlowExecutor {
         stepsPassed++;
         lastTapCmd = cmdIsTap(cmd) ? cmd : undefined;
       } catch (err) {
+        // optional: a failed step is skipped, not fatal (Maestro). Soft-pass
+        // before any retry/fail handling, and don't let it re-fire a prior tap.
+        if (modifiers.optional) {
+          const dt = Date.now() - t0;
+          stepTimings.push({
+            step: i + 1,
+            ms: dt,
+            cmd: describeCommand(cmd) + stepLabel + ' (optional, skipped)',
+          });
+          this.reporter.stepPass(i + 1, cmd, dt);
+          stepsPassed++;
+          lastTapCmd = undefined;
+          continue;
+        }
         // Step-level retry: if a find-failure follows a tapOn, re-fire
         // the previous tap once and retry the current step.
         const msg = err instanceof Error ? err.message : String(err);

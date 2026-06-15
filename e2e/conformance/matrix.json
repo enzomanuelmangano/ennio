@@ -1,0 +1,253 @@
+{
+  "$schema": "./matrix.schema.json",
+  "description": "Maestro conformance matrix for ennio. Each row pins one command/selector/modifier behavior against documented Maestro semantics. `status` is the CURRENT ennio behavior; `targetPhase` is the plan phase that converges it. Device-free rows are asserted by maestro-parser.test.ts; deviceBacked rows by e2e/conformance/run-suite.sh. Source of truth: docs/maestro-parity.md.",
+  "profilesUnderTest": ["maestro", "resilient"],
+  "platformsUnderTest": ["ios", "android"],
+  "statusLegend": {
+    "pass": "ennio matches documented Maestro behavior",
+    "divergent": "ennio intentionally or unintentionally differs (see note)",
+    "fragile": "works by heuristic that can misfire (target for removal)",
+    "todo": "fixture/assertion not yet written"
+  },
+  "rows": [
+    {
+      "id": "selector.text.literal-plain",
+      "area": "selector",
+      "case": "text: \"Sign In\" matches an element whose label is exactly \"Sign In\"",
+      "maestro": "regex match of the whole string; plain text with no metachars matches literally",
+      "ennioCurrent": "literal case-insensitive substring contains (find_by_text), regex fallback off",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-text-literal-plain.yaml",
+      "status": "pass",
+      "targetPhase": 1
+    },
+    {
+      "id": "selector.text.literal-with-metachars",
+      "area": "selector",
+      "case": "text: \"Price: $5 (USD)\" — literal content that contains regex metacharacters $ ( )",
+      "maestro": "treated as a regex; the literal would need escaping. Documented behavior: regex.",
+      "ennioCurrent": "isRegexText() sniff sees $ ( ) and switches to regex => \"$5\" anchors end-of-string, \"(USD)\" is a group => MISMATCH against literal on-screen text",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-text-literal-metachars.yaml",
+      "status": "fragile",
+      "note": "Phase 1 added an explicit `literal: true` escape hatch (textMatchMode) so this is now author-fixable; the unannotated default still sniffs until Phase 2 flips it per-profile.",
+      "targetPhase": 2
+    },
+    {
+      "id": "selector.text.literal-escape-hatch",
+      "area": "selector",
+      "case": "literal: true forces a literal substring even for metachar content",
+      "maestro": "n/a (ennio extension); the Maestro-faithful path is to escape the regex, this is the ergonomic equivalent",
+      "ennioCurrent": "textMatchMode honors explicit literal:/regex: over the sniff (Phase 1)",
+      "deviceBacked": false,
+      "fixture": "parser-test:textMatchMode",
+      "status": "pass",
+      "targetPhase": 1
+    },
+    {
+      "id": "selector.text.regex-explicit",
+      "area": "selector",
+      "case": "regex pattern \"users[,]? or feeds\" must match \"users or feeds\" and \"users, or feeds\"",
+      "maestro": "regex by default; matches both",
+      "ennioCurrent": "isRegexText() sees [,]? => regex branch => matches",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-text-regex-explicit.yaml",
+      "status": "pass",
+      "targetPhase": 1
+    },
+    {
+      "id": "selector.text.regex-by-default-anchor",
+      "area": "selector",
+      "case": "text: \"Done\" must NOT match \"Done editing\" (Maestro anchors the whole string)",
+      "maestro": "whole-string regex => \"Done\" matches only \"Done\", not \"Done editing\"",
+      "ennioCurrent": "maestro profile anchors the pattern whole-string (textMatchArgs ^(?:…)$); resilient keeps legacy substring",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-text-anchor.yaml",
+      "status": "pass",
+      "note": "Closed under maestro (Phase 6, CLI-side anchoring over the existing native regex path). Resilient keeps substring for the migration window.",
+      "targetPhase": 6,
+      "statusByProfile": {
+        "maestro": "pass",
+        "resilient": "divergent"
+      }
+    },
+    {
+      "id": "selector.id.regex",
+      "area": "selector",
+      "case": "id is a regex in Maestro: id: \"item-.*\" matches item-1",
+      "maestro": "id treated as regex",
+      "ennioCurrent": "id is exact-match (isEqualToString) on accessibilityIdentifier — NOT regex",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-id-regex.yaml",
+      "status": "divergent",
+      "note": "Remaining native gap. id is matched by an exact hash lookup in the testID index on BOTH platforms; regex-id needs a coordinated EnnioFinder.mm + EnnioAgent.java change and a rebuild of both binaries to keep iOS/Android parity. Deferred — an iOS-only change would itself create a new cross-platform divergence.",
+      "targetPhase": 7
+    },
+    {
+      "id": "selector.index",
+      "area": "selector",
+      "case": "index: 2 picks the 3rd match (0-based), top-to-bottom by Y",
+      "maestro": "0-based index among matches",
+      "ennioCurrent": "find_by_testid_nth, sorted top-to-bottom by window Y",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-index.yaml",
+      "status": "pass",
+      "targetPhase": 0
+    },
+    {
+      "id": "selector.childOf",
+      "area": "selector",
+      "case": "childOf scopes the match under a parent testID",
+      "maestro": "hierarchical scoping",
+      "ennioCurrent": "find_child_by_testid; returns null if parent missing (no flat fallback)",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-childof.yaml",
+      "status": "pass",
+      "targetPhase": 0
+    },
+    {
+      "id": "selector.relational",
+      "area": "selector",
+      "case": "below/above/leftOf/rightOf anchor selectors",
+      "maestro": "position-relative matching combined with AND logic",
+      "ennioCurrent": "parsed into MaestroSelector; runner support varies — assert coverage",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-relational.yaml",
+      "status": "todo",
+      "targetPhase": 0
+    },
+    {
+      "id": "selector.traits-dimensions",
+      "area": "selector",
+      "case": "traits: [text|long-text|square], width/height/tolerance",
+      "maestro": "trait + dimension matchers",
+      "ennioCurrent": "fields exist on MaestroSelector; runner coverage unverified",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/sel-traits.yaml",
+      "status": "todo",
+      "targetPhase": 0
+    },
+    {
+      "id": "modifier.optional",
+      "area": "modifier",
+      "case": "optional: true on ANY command — missing element skips the step instead of failing",
+      "maestro": "applies to every command",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/mod-optional.yaml",
+      "status": "pass",
+      "targetPhase": 3
+    },
+    {
+      "id": "modifier.label",
+      "area": "modifier",
+      "case": "label: \"step name\" on any command shows in the report",
+      "maestro": "per-command annotation",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
+      "deviceBacked": false,
+      "fixture": "parser-test:modifier.label",
+      "status": "pass",
+      "targetPhase": 3
+    },
+    {
+      "id": "modifier.when.visible",
+      "area": "modifier",
+      "case": "when: { visible } gates a command",
+      "maestro": "conditional execution on any command",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/mod-when-visible.yaml",
+      "status": "pass",
+      "targetPhase": 3
+    },
+    {
+      "id": "modifier.when.platform-true",
+      "area": "modifier",
+      "case": "when: { platform: iOS } and when: { true: ${expr} }",
+      "maestro": "platform + JS-expression conditions",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
+      "deviceBacked": false,
+      "fixture": "parser-test:modifier.when.platform-true",
+      "status": "pass",
+      "targetPhase": 3
+    },
+    {
+      "id": "control.repeat.times",
+      "area": "control",
+      "case": "repeat: { times: N, commands }",
+      "maestro": "loop N times",
+      "ennioCurrent": "supported",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/ctl-repeat-times.yaml",
+      "status": "pass",
+      "targetPhase": 0
+    },
+    {
+      "id": "control.repeat.while",
+      "area": "control",
+      "case": "repeat: { while: <condition>, commands }",
+      "maestro": "loop while condition holds, optionally combined with times",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/ctl-repeat-while.yaml",
+      "status": "pass",
+      "targetPhase": 3
+    },
+    {
+      "id": "control.retry",
+      "area": "control",
+      "case": "retry: { maxRetries, commands }",
+      "maestro": "retry the block on failure",
+      "ennioCurrent": "supported (default maxRetries 3)",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/ctl-retry.yaml",
+      "status": "pass",
+      "targetPhase": 0
+    },
+    {
+      "id": "wait.assertVisible.default-timeout",
+      "area": "wait",
+      "case": "assertVisible default timeout",
+      "maestro": "7000 ms",
+      "ennioCurrent": "DEFAULT_WAIT_MS 15000 ms (resilient); maestro profile = 7000 ms",
+      "deviceBacked": false,
+      "fixture": "parser-test:profile.default-wait",
+      "status": "divergent",
+      "note": "Profile-gated. maestro profile ships 7s; resilient keeps 15s for iOS-26 sim.",
+      "targetPhase": 2
+    },
+    {
+      "id": "wait.extendedWaitUntil",
+      "area": "wait",
+      "case": "extendedWaitUntil requires explicit timeout, supports visible XOR notVisible",
+      "maestro": "no default timeout; user must specify",
+      "ennioCurrent": "supported",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/wait-extended.yaml",
+      "status": "pass",
+      "targetPhase": 0
+    },
+    {
+      "id": "flow.hooks",
+      "area": "flow",
+      "case": "onFlowStart aborts flow on failure; onFlowComplete runs in finally",
+      "maestro": "lifecycle hooks",
+      "ennioCurrent": "onFlowStart aborts on failure; onFlowComplete runs in finally (implemented)",
+      "deviceBacked": true,
+      "fixture": "example/maestro-e2e/conformance/flow-hooks.yaml",
+      "status": "pass",
+      "targetPhase": 5
+    },
+    {
+      "id": "flow.env-precedence",
+      "area": "flow",
+      "case": "runFlow.env > flow env: defaults > process.env at runtime",
+      "maestro": "subflow env overrides parent",
+      "ennioCurrent": "single-pass interpolation, per-flow env wins (recent fix)",
+      "deviceBacked": false,
+      "fixture": "parser-test:flow.env-precedence",
+      "status": "pass",
+      "targetPhase": 0
+    }
+  ]
+}

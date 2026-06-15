@@ -1,0 +1,21 @@
+# matrix row: selector.text.regex-by-default-anchor
+#   maestro profile  -> PASS (whole-string anchoring, Phase 6)
+#   resilient profile -> xfail (legacy substring during migration)
+#
+# Maestro anchors the whole string: text "Toggle" matches ONLY an element
+# labeled exactly "Toggle", NOT "Toggles". Under the maestro profile ennio
+# anchors the pattern (^(?:…)$) so this passes; under resilient it keeps
+# substring matching, so "Toggle" still matches "Toggles" and the
+# assertNotVisible xfails.
+appId: com.ennio.example
+name: 'conformance — text whole-string anchoring'
+---
+- runFlow:
+    file: _prelude.yaml
+# The real label is "Toggles". Under Maestro anchoring, the substring "Toggle"
+# is NOT a match. Under today's substring semantics it IS — so this assertion
+# is the converge target.
+- assertNotVisible:
+    text: 'Toggle'
+- assertVisible:
+    text: 'Toggles'

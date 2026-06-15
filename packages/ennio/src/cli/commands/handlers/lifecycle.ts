@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
+import { chainHasCrossProcessPresenter } from '../../runner/capabilities';
 import { interpolate, sleep } from '../../runner/context';
 // Relaunch / terminate / soft-reset all route through ctx.platform (the
 // iOS/Android backend abstraction); the launch-args reuse gate is the
@@ -170,22 +171,15 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         if (!animActive || hashQuiet) break;
         await sleep(20);
       }
-      // Cross-process safety: PHPicker / share sheet / document picker
-      // dismiss in another XPC process — animations_active is blind.
+      // Cross-process safety: PHPicker / share sheet / document picker dismiss
+      // in another XPC process — animations_active is blind. The class set lives
+      // in the overridable capability registry.
       const dismissDeadline = Date.now() + 2500;
       while (Date.now() < dismissDeadline) {
         const r = await ctx.client.call('top_vc_chain').catch(() => undefined);
         if (!r || !r.ok) break;
         const chain = (r.data as { chain?: string[] })?.chain ?? [];
-        const hasCrossProcess = chain.some(
-          (cls) =>
-            cls.includes('PHPicker') ||
-            cls.includes('PhotoPicker') ||
-            cls.includes('PHImagePicker') ||
-            cls.includes('UIActivityViewController') ||
-            cls.includes('UIDocumentPickerViewController'),
-        );
-        if (!hasCrossProcess) break;
+        if (!chainHasCrossProcessPresenter(chain)) break;
         await sleep(80);
       }
     },

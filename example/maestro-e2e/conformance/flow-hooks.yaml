@@ -1,0 +1,25 @@
+# matrix row: flow.hooks (status pass)
+# onFlowStart runs before the main command list (and aborts the flow on
+# failure); onFlowComplete runs after, in a finally. Here onFlowStart performs
+# the cold launch + navigation, so the body can assert it already ran.
+appId: com.ennio.example
+name: 'conformance — flow hooks'
+onFlowStart:
+  - launchApp:
+      clearState: true
+  - tapOn: 'Gauntlet'
+  - scrollUntilVisible:
+      element:
+        id: 'g-playground'
+      direction: DOWN
+  - tapOn:
+      id: 'g-playground'
+onFlowComplete:
+  # Runs in a finally; a no-op tap on a known control is enough to prove it
+  # executes without affecting the flow's pass/fail.
+  - tapOn:
+      id: 'counter-reset-btn'
+---
+# Body: onFlowStart already navigated us here.
+- assertVisible:
+    id: 'playground-scroll'

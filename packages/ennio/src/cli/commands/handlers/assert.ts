@@ -7,7 +7,7 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand, MaestroSelector } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { DEFAULT_WAIT_MS, interpolateSelector } from '../../runner/context';
+import { interpolateSelector } from '../../runner/context';
 import {
   waitUntilAnyVisible,
   waitUntilNotVisible,
@@ -46,7 +46,7 @@ export function registerAssertHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & AssertVisibleCmd => has(c, 'assertVisible'),
     async (cmd, { ctx }) => {
       const spec = cmd.assertVisible;
-      const timeout = spec.timeout ?? DEFAULT_WAIT_MS;
+      const timeout = spec.timeout ?? ctx.profile.defaultWaitMs;
       // Maestro `assertVisible: { anyOf: [...] }` — passes when ANY of
       // the selectors becomes visible. Without this branch the whole
       // object normalizes to an id/text-less selector that never matches.
@@ -63,7 +63,7 @@ export function registerAssertHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & AssertNotVisibleCmd => has(c, 'assertNotVisible'),
     async (cmd, { ctx }) => {
       const sel = normalizeSelector(interpolateSelector(cmd.assertNotVisible, ctx));
-      const timeout = cmd.assertNotVisible.timeout ?? DEFAULT_WAIT_MS;
+      const timeout = cmd.assertNotVisible.timeout ?? ctx.profile.defaultWaitMs;
       await waitUntilNotVisible(ctx, sel, timeout);
     },
   );
@@ -72,7 +72,7 @@ export function registerAssertHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & WaitForCmd => has(c, 'waitFor'),
     async (cmd, { ctx }) => {
       const sel = normalizeSelector(interpolateSelector(cmd.waitFor, ctx));
-      const timeout = cmd.waitFor.timeout ?? DEFAULT_WAIT_MS;
+      const timeout = cmd.waitFor.timeout ?? ctx.profile.defaultWaitMs;
       await waitUntilVisible(ctx, sel, timeout);
     },
   );
@@ -80,7 +80,7 @@ export function registerAssertHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & AssertAnyVisibleCmd => has(c, 'assertAnyVisible'),
     async (cmd, { ctx }) => {
-      const timeout = cmd.assertAnyVisible.timeout ?? DEFAULT_WAIT_MS;
+      const timeout = cmd.assertAnyVisible.timeout ?? ctx.profile.defaultWaitMs;
       const selectors = interpolateSelector(cmd.assertAnyVisible.anyOf, ctx).map(normalizeSelector);
       await waitUntilAnyVisible(ctx, selectors, timeout);
     },

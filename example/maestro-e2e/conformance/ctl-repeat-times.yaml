@@ -1,0 +1,20 @@
+# matrix row: control.repeat.times (status pass)
+# repeat { times: N } runs its commands exactly N times.
+appId: com.ennio.example
+name: 'conformance — repeat.times'
+---
+- runFlow:
+    file: _prelude.yaml
+- tapOn:
+    id: 'counter-reset-btn'
+- assertVisible:
+    text: '0'
+- repeat:
+    times: 3
+    commands:
+      - tapOn:
+          id: 'counter-inc-btn'
+# Exactly three increments => counter reads 3. Off-by-one in repeat would
+# surface as '2' or '4'.
+- assertVisible:
+    text: '3'

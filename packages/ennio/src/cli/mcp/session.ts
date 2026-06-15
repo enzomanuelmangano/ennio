@@ -21,6 +21,7 @@ import { selectPlatform } from '../platform';
 import type { DeviceSession } from '../platform/types';
 import { SilentReporter } from '../reporters';
 import type { RunContext } from '../runner/context';
+import { resolveProfile } from '../settle/profile';
 import { setSimLaunchEnv } from '../sim';
 
 import { describeViews } from './describe';
@@ -127,6 +128,9 @@ export class EnnioMcpSession {
         lenient: false,
         driver,
         platform: this.platform,
+        // Active tuning profile (resilient — the only one); same resolution
+        // the flow runner uses.
+        profile: resolveProfile(),
         // Synthetic flow path: only used to resolve runFlow subflows,
         // which the MCP surface never issues.
         flowPath: process.cwd() + '/mcp-session.yaml',

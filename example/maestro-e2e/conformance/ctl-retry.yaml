@@ -1,0 +1,17 @@
+# matrix row: control.retry (status pass)
+# retry: { maxRetries, commands } re-runs the block on failure. The happy path
+# (no failure) must run the block exactly once and pass.
+appId: com.ennio.example
+name: 'conformance — retry'
+---
+- runFlow:
+    file: _prelude.yaml
+- tapOn:
+    id: 'counter-reset-btn'
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: 'counter-inc-btn'
+      - assertVisible:
+          text: '1'

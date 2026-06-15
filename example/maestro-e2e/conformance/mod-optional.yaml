@@ -1,0 +1,16 @@
+# matrix row: modifier.optional (Phase 3)
+# optional: true on any command — a missing target skips the step instead of
+# failing the flow.
+appId: com.ennio.example
+name: 'conformance — optional modifier'
+---
+- runFlow:
+    file: _prelude.yaml
+# This element does not exist. Without optional the flow would fail here.
+- tapOn:
+    id: 'this-element-does-not-exist'
+  optional: true
+  label: 'tap a ghost (optional)'
+# Flow continues — the playground is still up.
+- assertVisible:
+    id: 'playground-scroll'

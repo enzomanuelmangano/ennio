@@ -55,6 +55,7 @@ on:
       - 'packages/ennio/native-ax/**'
       - 'packages/ennio/native-shim/**'
       - 'example/maestro-e2e/**'
+      - 'e2e/conformance/**'
       - '.github/workflows/ci-example.yml'
 
 permissions:
@@ -231,6 +232,13 @@ jobs:
           echo "Example suite: Pass=$PASS Fail=$FAIL${FAILED:+ — failed:$FAILED}"
           [ "$FAIL" -eq 0 ]
 
+      # NOTE: the Maestro conformance suite (e2e/conformance/) is NOT gated in
+      # CI. Its per-row fixtures assert on example-app screens (g-playground,
+      # toggle-1..5) that aren't in the published fixture yet, and several rows
+      # encoded the maestro-parity anchoring we've since dropped (single
+      # resilient profile). The suite stays in the repo to revisit once the
+      # fixture grows those screens; re-add a gated step here then.
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -238,6 +246,8 @@ jobs:
           name: example-logs
           path: |
             /tmp/ennio-logs/
+            /tmp/ennio-conf-maestro/
+            /tmp/ennio-conf-resilient/
             /tmp/ennio-shots/
           retention-days: 7
           if-no-files-found: warn

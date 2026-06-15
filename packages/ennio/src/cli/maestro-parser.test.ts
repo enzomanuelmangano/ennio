@@ -8,7 +8,12 @@ import {
   parseMaestroFile,
   expandFlow,
   resolveSubflowPath,
+  isRegexText,
+  textMatchMode,
+  textMatchArgs,
+  extractModifiers,
 } from './maestro-parser';
+import type { MaestroCommand } from './maestro-parser';
 
 describe('normalizeSelector', () => {
   it('treats a bare string as a TEXT match (Maestro shorthand)', () => {
@@ -162,5 +167,176 @@ describe('expandFlow', () => {
     const flow = parseMaestroFile(p);
     expect(() => expandFlow(flow)).not.toThrow();
     expect(expandFlow(flow).subflows).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Conformance spec: text matcher mode.
+//
+// Pins the CURRENT behavior of `isRegexText` — the metacharacter sniff that
+// decides whether a text selector is a literal substring or a regex. This is a
+// fragile heuristic (it cannot tell "the user meant a pattern" from "the user
+// typed a $"). Phase 1 deletes it in favor of an explicit `matchMode` computed
+// once at parse time. These tests document what IS so the replacement is a
+// deliberate, visible change, and they enumerate the cases the new matchMode
+// must get right.
+//
+// Maps to matrix.json rows: selector.text.*.
+// ---------------------------------------------------------------------------
+describe('isRegexText (current matcher sniff — Phase 1 replaces with matchMode)', () => {
+  it('treats plain text as a literal (not regex)', () => {
+    // matrix: selector.text.literal-plain — status pass
+    expect(isRegexText('Sign In')).toBe(false);
+    expect(isRegexText('Home')).toBe(false);
+    expect(isRegexText('3')).toBe(false);
+  });
+
+  it('treats an explicit .* anchor as a regex', () => {
+    // matrix: selector.text.regex-explicit — status pass
+    expect(isRegexText('.*Settings.*')).toBe(true);
+    expect(isRegexText('Settings.*')).toBe(true);
+    expect(isRegexText('.*Settings')).toBe(true);
+  });
+
+  it('treats a genuine pattern with character classes/quantifiers as a regex', () => {
+    // matrix: selector.text.regex-explicit — status pass
+    expect(isRegexText('users[,]? or feeds')).toBe(true);
+    expect(isRegexText('item-(1|2|3)')).toBe(true);
+  });
+
+  // The unfixable cases: literal content that happens to contain a
+  // metacharacter is mis-detected as a pattern. Documented here as the SNIFF's
+  // failure mode — the new matchMode (Phase 1) must let these be matched
+  // literally via an explicit `literal:` escape hatch.
+  // matrix: selector.text.literal-with-metachars — status fragile
+  it('MISFIRES: a literal price string with $ ( ) is wrongly flagged regex', () => {
+    expect(isRegexText('Price: $5 (USD)')).toBe(true); // <- bug: should be literal
+  });
+
+  it('MISFIRES: a literal label with parentheses is wrongly flagged regex', () => {
+    expect(isRegexText('Change position (left)')).toBe(true); // <- bug: should be literal
+  });
+
+  it('MISFIRES: a literal label with a trailing question mark is wrongly flagged regex', () => {
+    expect(isRegexText('Delete account?')).toBe(true); // <- bug: should be literal
+  });
+});
+
+// ---------------------------------------------------------------------------
+// textMatchMode: the single resolver the finder/visibility layers use. Phase 1
+// routes every text match through this so the mode is decided ONCE, and adds
+// explicit `regex:`/`literal:` escape hatches over the legacy sniff.
+//
+// Maps to matrix.json rows: selector.text.* and the Phase-1 escape hatch.
+// ---------------------------------------------------------------------------
+describe('textMatchMode', () => {
+  it('honors an explicit literal escape hatch even for metachar content', () => {
+    // The misfire cases above become correct once the author opts in.
+    expect(textMatchMode({ text: 'Price: $5 (USD)', literal: true })).toBe('literal');
+    expect(textMatchMode({ text: 'Change position (left)', literal: true })).toBe('literal');
+  });
+
+  it('honors an explicit regex escape hatch for plain text', () => {
+    expect(textMatchMode({ text: 'Settings', regex: true })).toBe('regex');
+  });
+
+  it('literal wins when both flags are set (conservative tie-break)', () => {
+    expect(textMatchMode({ text: 'x', regex: true, literal: true })).toBe('literal');
+  });
+
+  it('transitional default is byte-identical to the legacy sniff', () => {
+    // No explicit flag => same decision the scattered isRegexText() calls made,
+    // so existing flows are unaffected until Phase 2 flips the profile default.
+    for (const t of ['Sign In', 'Home', '3', '.*Settings.*', 'users[,]? or feeds', 'Price: $5']) {
+      const expected = isRegexText(t) ? 'regex' : 'literal';
+      expect(textMatchMode({ text: t })).toBe(expected);
+    }
+  });
+
+  it('defaults to literal for an empty/absent text', () => {
+    expect(textMatchMode({})).toBe('literal');
+    expect(textMatchMode({ text: '' })).toBe('literal');
+  });
+
+  it('honors the profile defaultMode when no explicit flag is set', () => {
+    expect(textMatchMode({ text: 'Done' }, 'regex')).toBe('regex');
+    expect(textMatchMode({ text: 'users[,]? or feeds' }, 'literal')).toBe('literal');
+    // explicit flags still beat the profile default
+    expect(textMatchMode({ text: 'Done', literal: true }, 'regex')).toBe('literal');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// textMatchArgs: the { text, regex } the finder sends. Under the maestro profile
+// regex is whole-string anchored (Maestro). Maps to matrix row
+// selector.text.regex-by-default-anchor (Phase 6).
+// ---------------------------------------------------------------------------
+describe('textMatchArgs', () => {
+  it('literal mode sends the raw text, regex off', () => {
+    expect(textMatchArgs({ text: 'Done' }, 'literal')).toEqual({ text: 'Done', regex: false });
+    expect(textMatchArgs({ text: 'Done', literal: true }, 'regex')).toEqual({
+      text: 'Done',
+      regex: false,
+    });
+  });
+
+  it('maestro profile anchors the pattern whole-string', () => {
+    expect(textMatchArgs({ text: 'Done' }, 'regex')).toEqual({ text: '^(?:Done)$', regex: true });
+    // an explicit pattern is anchored too (Maestro anchors all regex)
+    expect(textMatchArgs({ text: '(Toggles|Switches)', regex: true }, 'regex')).toEqual({
+      text: '^(?:(Toggles|Switches))$',
+      regex: true,
+    });
+  });
+
+  it('resilient/sniff regex stays unanchored (legacy partial match)', () => {
+    // explicit regex under resilient: partial, no anchor
+    expect(textMatchArgs({ text: 'users[,]? or feeds', regex: true }, 'sniff')).toEqual({
+      text: 'users[,]? or feeds',
+      regex: true,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractModifiers: splits Maestro per-command modifiers (optional/label/when)
+// from the bare command. Maps to matrix.json rows: modifier.* (Phase 3).
+// ---------------------------------------------------------------------------
+describe('extractModifiers', () => {
+  it('splits sibling optional/label/when off the bare command', () => {
+    const cmd = {
+      tapOn: 'Submit',
+      optional: true,
+      label: 'tap submit',
+      when: { visible: { id: 'form' } },
+    } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(command).toEqual({ tapOn: 'Submit' });
+    expect(modifiers).toEqual({
+      optional: true,
+      label: 'tap submit',
+      when: { visible: { id: 'form' } },
+    });
+  });
+
+  it('returns empty modifiers for a command with none', () => {
+    const { command, modifiers } = extractModifiers({ tapOn: 'X' } as MaestroCommand);
+    expect(command).toEqual({ tapOn: 'X' });
+    expect(modifiers).toEqual({});
+  });
+
+  it('leaves a bare-string command untouched', () => {
+    const { command, modifiers } = extractModifiers('back' as unknown as MaestroCommand);
+    expect(command).toBe('back');
+    expect(modifiers).toEqual({});
+  });
+
+  it('does NOT extract a selector-level optional nested inside the verb', () => {
+    // `tapOn: { id, optional }` keeps optional on the selector (handled by the
+    // tap handler), not as a command-level modifier.
+    const cmd = { tapOn: { id: 'X', optional: true } } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(command).toEqual({ tapOn: { id: 'X', optional: true } });
+    expect(modifiers).toEqual({});
   });
 });
