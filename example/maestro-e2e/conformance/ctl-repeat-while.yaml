@@ -1,0 +1,23 @@
+# matrix row: control.repeat.while (Phase 3)
+# repeat: { while: <condition>, commands } loops until the condition flips false.
+# Increment the counter while "3" is NOT yet on screen; it must stop exactly at 3.
+appId: com.ennio.example
+name: 'conformance — repeat.while'
+---
+- runFlow:
+    file: _prelude.yaml
+- tapOn:
+    id: 'counter-reset-btn'
+- assertVisible:
+    text: '0'
+- repeat:
+    while:
+      notVisible:
+        text: '3'
+    commands:
+      - tapOn:
+          id: 'counter-inc-btn'
+# The while condition (notVisible "3") goes false the moment the counter reads
+# 3, so the loop stops there — not before, not after.
+- assertVisible:
+    text: '3'

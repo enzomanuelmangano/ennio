@@ -5,14 +5,18 @@
 import { dirname, resolve } from 'node:path';
 
 import { CommandRegistry } from '../../core/command-registry';
-import type { MaestroCommand } from '../../maestro-parser';
-import { normalizeSelector, parseMaestroFile } from '../../maestro-parser';
+import type { MaestroCommand, MaestroCondition } from '../../maestro-parser';
+import { parseMaestroFile } from '../../maestro-parser';
+import { evaluateCondition } from '../../runner/conditions';
 import { interpolate, type RunContext } from '../../runner/context';
 import { describeCommand, runMaestroScript } from '../../runner/index';
-import { isVisible } from '../../runner/visibility';
+
+/** Belt-and-braces cap so a `repeat.while` whose condition never flips false
+ *  can't spin forever (a flow bug should fail loudly, not hang CI). */
+const REPEAT_WHILE_MAX_ITERATIONS = 1000;
 
 interface RepeatCmd {
-  repeat: { times: number; commands: MaestroCommand[] };
+  repeat: { times?: number; while?: MaestroCondition; commands: MaestroCommand[] };
 }
 interface RetryCmd {
   retry: { maxRetries?: number; commands: MaestroCommand[] };
@@ -21,7 +25,7 @@ interface RunFlowCmd {
   runFlow:
     | string
     | {
-        when?: { visible?: unknown; notVisible?: unknown; platform?: string };
+        when?: MaestroCondition;
         commands?: MaestroCommand[];
         file?: string;
         env?: Record<string, string>;
@@ -41,12 +45,23 @@ function has<T extends string>(
 export function registerControlFlowHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & RepeatCmd => has(c, 'repeat'),
-    async (cmd, { dispatch }) => {
-      for (let t = 0; t < cmd.repeat.times; t++) {
-        for (const sub of cmd.repeat.commands) {
-          await dispatch(sub);
+    async (cmd, { ctx, dispatch }) => {
+      const { times, while: whileCond, commands } = cmd.repeat;
+      const runOnce = async () => {
+        for (const sub of commands) await dispatch(sub);
+      };
+      // Maestro: `while` and `times` can combine — loop while the condition
+      // holds, but never more than `times` iterations when both are given.
+      if (whileCond) {
+        for (let iter = 0; iter < REPEAT_WHILE_MAX_ITERATIONS; iter++) {
+          if (times != null && iter >= times) break;
+          if (!(await evaluateCondition(ctx, whileCond))) break;
+          await runOnce();
         }
+        return;
       }
+      const n = times ?? 0;
+      for (let t = 0; t < n; t++) await runOnce();
     },
   );
 
@@ -76,23 +91,9 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
       // `runFlow: { file: path.yaml }`. Without this the string fell
       // through every branch below and silently ran nothing.
       const sub = typeof cmd.runFlow === 'string' ? { file: cmd.runFlow } : cmd.runFlow;
-      // `when:` predicate — skip subflow if not satisfied.
-      if (sub.when) {
-        let satisfied = true;
-        if (sub.when.platform) {
-          // Maestro `when: { platform: iOS | Android }` — run the subflow only
-          // on the matching backend. Compare against the RUNTIME platform
-          // (ctx.platform.name), not a hardcoded 'ios' — that made every iOS
-          // branch run on Android and every Android branch get skipped.
-          satisfied = String(sub.when.platform).toLowerCase() === ctx.platform.name;
-        }
-        if (satisfied && sub.when.visible) {
-          satisfied = await isVisible(ctx, normalizeSelector(sub.when.visible as never));
-        } else if (satisfied && sub.when.notVisible) {
-          satisfied = !(await isVisible(ctx, normalizeSelector(sub.when.notVisible as never)));
-        }
-        if (!satisfied) return;
-      }
+      // `when:` predicate — skip the subflow if not satisfied. Same evaluator
+      // as per-command `when` and `repeat.while`, so semantics never diverge.
+      if (sub.when && !(await evaluateCondition(ctx, sub.when))) return;
       // Inline commands form.
       if (sub.commands && Array.isArray(sub.commands)) {
         for (const c of sub.commands) await dispatch(c);

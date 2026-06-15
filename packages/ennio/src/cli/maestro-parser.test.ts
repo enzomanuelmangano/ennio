@@ -10,7 +10,9 @@ import {
   resolveSubflowPath,
   isRegexText,
   textMatchMode,
+  extractModifiers,
 } from './maestro-parser';
+import type { MaestroCommand } from './maestro-parser';
 
 describe('normalizeSelector', () => {
   it('treats a bare string as a TEXT match (Maestro shorthand)', () => {
@@ -253,5 +255,55 @@ describe('textMatchMode', () => {
   it('defaults to literal for an empty/absent text', () => {
     expect(textMatchMode({})).toBe('literal');
     expect(textMatchMode({ text: '' })).toBe('literal');
+  });
+
+  it('honors the profile defaultMode when no explicit flag is set', () => {
+    expect(textMatchMode({ text: 'Done' }, 'regex')).toBe('regex');
+    expect(textMatchMode({ text: 'users[,]? or feeds' }, 'literal')).toBe('literal');
+    // explicit flags still beat the profile default
+    expect(textMatchMode({ text: 'Done', literal: true }, 'regex')).toBe('literal');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractModifiers: splits Maestro per-command modifiers (optional/label/when)
+// from the bare command. Maps to matrix.json rows: modifier.* (Phase 3).
+// ---------------------------------------------------------------------------
+describe('extractModifiers', () => {
+  it('splits sibling optional/label/when off the bare command', () => {
+    const cmd = {
+      tapOn: 'Submit',
+      optional: true,
+      label: 'tap submit',
+      when: { visible: { id: 'form' } },
+    } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(command).toEqual({ tapOn: 'Submit' });
+    expect(modifiers).toEqual({
+      optional: true,
+      label: 'tap submit',
+      when: { visible: { id: 'form' } },
+    });
+  });
+
+  it('returns empty modifiers for a command with none', () => {
+    const { command, modifiers } = extractModifiers({ tapOn: 'X' } as MaestroCommand);
+    expect(command).toEqual({ tapOn: 'X' });
+    expect(modifiers).toEqual({});
+  });
+
+  it('leaves a bare-string command untouched', () => {
+    const { command, modifiers } = extractModifiers('back' as unknown as MaestroCommand);
+    expect(command).toBe('back');
+    expect(modifiers).toEqual({});
+  });
+
+  it('does NOT extract a selector-level optional nested inside the verb', () => {
+    // `tapOn: { id, optional }` keeps optional on the selector (handled by the
+    // tap handler), not as a command-level modifier.
+    const cmd = { tapOn: { id: 'X', optional: true } } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(command).toEqual({ tapOn: { id: 'X', optional: true } });
+    expect(modifiers).toEqual({});
   });
 });

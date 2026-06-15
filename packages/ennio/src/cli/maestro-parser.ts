@@ -66,6 +66,50 @@ export interface MaestroSelector {
 export interface MaestroCondition {
   visible?: MaestroSelector;
   notVisible?: MaestroSelector;
+  /** Maestro `when: { platform: iOS | Android }` — gate on the runtime backend. */
+  platform?: string;
+  /** Maestro `when: { true: ${expr} }` — gate on a JS expression. */
+  true?: string;
+}
+
+/**
+ * Per-command modifiers Maestro allows as sibling keys on ANY command map
+ * (`- tapOn: X\n  optional: true\n  when: {...}\n  label: "..."`). Evaluated at
+ * the dispatch seam (core/flow-executor) so every command gets them uniformly,
+ * instead of each handler re-implementing optional/when.
+ */
+export interface CommandModifiers {
+  /** Failure of this step does not fail the flow (the step is skipped). */
+  optional?: boolean;
+  /** Human-readable step name for the report. */
+  label?: string;
+  /** Conditional execution — the command runs only if the condition holds. */
+  when?: MaestroCondition;
+}
+
+const MODIFIER_KEYS = ['optional', 'label', 'when'] as const;
+
+/**
+ * Split a parsed command map into its bare command and its per-command
+ * modifiers. Modifiers are sibling keys alongside the command verb; the bare
+ * command keeps everything else so the existing matchers still recognize it.
+ * Bare-string commands (`- back`) carry no modifiers.
+ */
+export function extractModifiers(cmd: MaestroCommand): {
+  command: MaestroCommand;
+  modifiers: CommandModifiers;
+} {
+  if (typeof cmd !== 'object' || cmd === null) return { command: cmd, modifiers: {} };
+  const modifiers: CommandModifiers = {};
+  const command: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(cmd)) {
+    if ((MODIFIER_KEYS as readonly string[]).includes(k)) {
+      (modifiers as Record<string, unknown>)[k] = v;
+    } else {
+      command[k] = v;
+    }
+  }
+  return { command: command as MaestroCommand, modifiers };
 }
 
 export type MaestroCommand =
@@ -106,7 +150,7 @@ export type MaestroCommand =
   | { openLink: string | { link: string } }
   | { takeScreenshot: string | { path: string } }
   | { hideKeyboard: true }
-  | { repeat: { times: number; commands: MaestroCommand[] } }
+  | { repeat: { times?: number; while?: MaestroCondition; commands: MaestroCommand[] } }
   | { retry: { maxRetries?: number; commands: MaestroCommand[] } }
   | { assertTrue: string }
   | { evalScript: string }

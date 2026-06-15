@@ -1,8 +1,14 @@
 {
   "$schema": "./matrix.schema.json",
   "description": "Maestro conformance matrix for ennio. Each row pins one command/selector/modifier behavior against documented Maestro semantics. `status` is the CURRENT ennio behavior; `targetPhase` is the plan phase that converges it. Device-free rows are asserted by maestro-parser.test.ts; deviceBacked rows by e2e/conformance/run-suite.sh. Source of truth: docs/maestro-parity.md.",
-  "profilesUnderTest": ["maestro", "resilient"],
-  "platformsUnderTest": ["ios", "android"],
+  "profilesUnderTest": [
+    "maestro",
+    "resilient"
+  ],
+  "platformsUnderTest": [
+    "ios",
+    "android"
+  ],
   "statusLegend": {
     "pass": "ennio matches documented Maestro behavior",
     "divergent": "ennio intentionally or unintentionally differs (see note)",
@@ -128,10 +134,10 @@
       "area": "modifier",
       "case": "optional: true on ANY command — missing element skips the step instead of failing",
       "maestro": "applies to every command",
-      "ennioCurrent": "ad-hoc in tap handler only; not general across commands",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
       "deviceBacked": true,
       "fixture": "example/maestro-e2e/conformance/mod-optional.yaml",
-      "status": "divergent",
+      "status": "pass",
       "targetPhase": 3
     },
     {
@@ -139,10 +145,10 @@
       "area": "modifier",
       "case": "label: \"step name\" on any command shows in the report",
       "maestro": "per-command annotation",
-      "ennioCurrent": "label only recognized as a selector alias for text, not a per-command annotation",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
       "deviceBacked": false,
       "fixture": "parser-test:modifier.label",
-      "status": "divergent",
+      "status": "pass",
       "targetPhase": 3
     },
     {
@@ -150,10 +156,10 @@
       "area": "modifier",
       "case": "when: { visible } gates a command",
       "maestro": "conditional execution on any command",
-      "ennioCurrent": "when supported only on runFlow",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
       "deviceBacked": true,
       "fixture": "example/maestro-e2e/conformance/mod-when-visible.yaml",
-      "status": "divergent",
+      "status": "pass",
       "targetPhase": 3
     },
     {
@@ -161,10 +167,10 @@
       "area": "modifier",
       "case": "when: { platform: iOS } and when: { true: ${expr} }",
       "maestro": "platform + JS-expression conditions",
-      "ennioCurrent": "MaestroCondition only has visible/notVisible; no platform/true",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
       "deviceBacked": false,
       "fixture": "parser-test:modifier.when.platform-true",
-      "status": "divergent",
+      "status": "pass",
       "targetPhase": 3
     },
     {
@@ -183,10 +189,10 @@
       "area": "control",
       "case": "repeat: { while: <condition>, commands }",
       "maestro": "loop while condition holds, optionally combined with times",
-      "ennioCurrent": "repeat only supports times; while missing",
+      "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
       "deviceBacked": true,
       "fixture": "example/maestro-e2e/conformance/ctl-repeat-while.yaml",
-      "status": "divergent",
+      "status": "pass",
       "targetPhase": 3
     },
     {

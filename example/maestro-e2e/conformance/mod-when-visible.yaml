@@ -1,0 +1,29 @@
+# matrix row: modifier.when.visible (Phase 3)
+# when: { visible | notVisible } gates a command. Here we exercise both the
+# run-because-true and skip-because-false branches against real playground state.
+appId: com.ennio.example
+name: 'conformance — when modifier'
+---
+- runFlow:
+    file: _prelude.yaml
+- tapOn:
+    id: 'counter-reset-btn'
+- assertVisible:
+    text: '0'
+# Runs: counter-display IS visible -> the increment happens.
+- tapOn:
+    id: 'counter-inc-btn'
+  when:
+    visible:
+      id: 'counter-display'
+- assertVisible:
+    text: '1'
+# Skipped: condition is notVisible of an element that IS visible -> false ->
+# the increment is NOT performed, so the counter stays at 1.
+- tapOn:
+    id: 'counter-inc-btn'
+  when:
+    notVisible:
+      id: 'counter-display'
+- assertVisible:
+    text: '1'
