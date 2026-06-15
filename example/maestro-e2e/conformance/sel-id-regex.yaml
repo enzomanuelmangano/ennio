@@ -1,0 +1,14 @@
+# matrix row: selector.id.regex (status divergent — Phase 6 target)
+#
+# Maestro treats `id` as a regex. ennio's native finder matches id with an exact
+# isEqualToString compare, so a pattern like "toggle-." does NOT resolve — this
+# flow xfails until Phase 6 gives the native finder regex id matching under the
+# maestro profile.
+appId: com.ennio.example
+name: 'conformance — id regex'
+---
+- runFlow:
+    file: _prelude.yaml
+# "toggle-." should match toggle-1 under Maestro id-as-regex. Today it doesn't.
+- assertVisible:
+    id: 'toggle-.'

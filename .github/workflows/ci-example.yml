@@ -55,6 +55,7 @@ on:
       - 'packages/ennio/native-ax/**'
       - 'packages/ennio/native-shim/**'
       - 'example/maestro-e2e/**'
+      - 'e2e/conformance/**'
       - '.github/workflows/ci-example.yml'
 
 permissions:
@@ -189,6 +190,10 @@ jobs:
         env:
           ENNIO_UDID: ${{ steps.sim.outputs.udid }}
           ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
+          # ennio's own app suites run under the resilient profile (legacy text
+          # sniff + the slow-CI wait headroom below). Maestro-semantics parity is
+          # exercised separately by ci-conformance under both profiles.
+          ENNIO_PROFILE: resilient
           ENNIO_FAST_FLAG: ${{ inputs.in_process_tap && '--in-process-tap' || '' }}
           ENNIO_NOANIM_FLAG: ${{ inputs.no_animations && '--disable-animations' || '' }}
           ENNIO_REUSE_FLAG: ${{ inputs.disable_reuse_app && '--disable-reuse-app' || '' }}
@@ -231,6 +236,28 @@ jobs:
           echo "Example suite: Pass=$PASS Fail=$FAIL${FAILED:+ — failed:$FAILED}"
           [ "$FAIL" -eq 0 ]
 
+      # Maestro conformance: the per-row parity fixtures, run under BOTH tuning
+      # profiles on the same sim/app. Only a `pass` matrix row that regresses
+      # fails the suite; `divergent`/`fragile` rows xfail until their phase lands
+      # (see e2e/conformance/run-suite.sh + matrix.json). Reuses the booted sim,
+      # built dylib, and installed example app from the steps above.
+      - name: Run conformance suite (both profiles)
+        env:
+          ENNIO_CLI: packages/ennio/dist/cli.js
+          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+          ENNIO_PLATFORM: ios
+          ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
+          ENNIO_DEFAULT_WAIT_MS: '25000'
+        run: |
+          set -uo pipefail
+          rc=0
+          for prof in maestro resilient; do
+            echo "==== conformance profile=$prof ===="
+            ENNIO_PROFILE="$prof" SUITE_LOG_DIR="/tmp/ennio-conf-$prof" \
+              bash e2e/conformance/run-suite.sh || rc=1
+          done
+          exit $rc
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -238,6 +265,8 @@ jobs:
           name: example-logs
           path: |
             /tmp/ennio-logs/
+            /tmp/ennio-conf-maestro/
+            /tmp/ennio-conf-resilient/
             /tmp/ennio-shots/
           retention-days: 7
           if-no-files-found: warn

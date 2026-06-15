@@ -57,15 +57,35 @@ differs is a bug. (Filled in as phases land — Phase 5 finalizes.)
 | `wait.assertVisible.default-timeout`    | `resilient` profile waits 15 s vs Maestro 7 s                 | RN bundle execute + UIKit layout + RNGH gesture acceptance on the iOS-26 simulator takes 4–7 s; the `maestro` profile still ships 7 s for parity. |
 | `selector.text.regex-by-default-anchor` | `resilient` profile keeps substring matching during migration | Deprecation window so existing ennio flows that rely on substring don't break overnight; the `maestro` profile anchors per spec.                  |
 
-_(More rows added as Phases 1–6 land; each `divergent` matrix row that survives gets
-an entry here with its justification.)_
+Notes:
+
+- An explicit `ENNIO_DEFAULT_WAIT_MS` overrides EITHER profile's wait (operator
+  override for slow CI — e.g. ci-example sets 25 s).
+- `selector.text.regex-by-default-anchor` and `selector.id.regex` need the native
+  finder's whole-string-regex / regex-id support, which lands in **Phase 6**;
+  until then the `maestro` profile's regex path is a partial match, so those two
+  rows remain `divergent` even under `maestro`.
+
+## Capability registry (de-hardcoding)
+
+The fixture-specific class-name allowlists (cropper/PHPicker, rich-text composer
+testID, system-sheet classes, submit-dismiss pattern) live in one overridable
+registry — `packages/ennio/src/cli/runner/capabilities.ts` — not inline across
+the handlers. Each set is overridable via an `ENNIO_CAP_*` env var. These are the
+cases that genuinely can't be signal-detected from in-process (a cross-process
+XPC sheet the dylib is blind to; a rich-text field whose swallowed `onChangeText`
+is unobservable), so a documented registry of platform facts is the right tool.
+The liquid-glass tab-bar `tap_tab` fallback is an iOS-26 platform behavior and is
+gated to iOS.
 
 ## Command coverage
 
-Tracked per-row in `matrix.json`. Summary of known gaps at Phase 0:
+Tracked per-row in `matrix.json`. Status after Phase 5:
 
-- **Per-command modifiers** (`optional` / `label` / `when`) are only partially
-  general — `optional` is ad-hoc in the tap handler, `when` only on `runFlow`. Phase 3.
-- **`repeat.while`** is missing (`repeat` supports `times` only). Phase 3.
+- **Per-command modifiers** (`optional` / `label` / `when`) and **`repeat.while`**
+  — implemented at the dispatch seam (Phase 3), one shared condition evaluator.
+- **`when` conditions** support `visible` / `notVisible` / `platform` / `true`.
+- **Selector `id` regex** and **whole-string text anchoring** — remaining gaps,
+  native-side, tracked for Phase 6.
 - **`when` conditions** lack `platform:` and `true:` (JS expression). Phase 3.
 - **`id` regex**: ennio matches `id` exactly; Maestro treats it as regex. Phase 1.

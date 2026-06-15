@@ -1,0 +1,11 @@
+# matrix row: selector.text.regex-explicit (status pass)
+# An explicit regex pattern matches an alternation. "Toggles" is on screen;
+# the pattern "(Toggles|Switches)" must match it via the regex branch.
+appId: com.ennio.example
+name: 'conformance — explicit regex text'
+---
+- runFlow:
+    file: _prelude.yaml
+- assertVisible:
+    text: '(Toggles|Switches)'
+    regex: true

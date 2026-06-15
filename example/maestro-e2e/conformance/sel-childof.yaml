@@ -1,0 +1,13 @@
+# matrix row: selector.childOf (status pass)
+# childOf scopes a match under a parent testID and does NOT fall back to a flat
+# find when the parent is absent.
+appId: com.ennio.example
+name: 'conformance — childOf scoping'
+---
+- runFlow:
+    file: _prelude.yaml
+# search-input lives inside the playground-scroll container.
+- assertVisible:
+    id: 'search-input'
+    childOf:
+      id: 'playground-scroll'

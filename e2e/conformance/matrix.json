@@ -234,11 +234,11 @@
       "area": "flow",
       "case": "onFlowStart aborts flow on failure; onFlowComplete runs in finally",
       "maestro": "lifecycle hooks",
-      "ennioCurrent": "parsed; semantics implemented in executor — assert",
+      "ennioCurrent": "onFlowStart aborts on failure; onFlowComplete runs in finally (implemented)",
       "deviceBacked": true,
       "fixture": "example/maestro-e2e/conformance/flow-hooks.yaml",
-      "status": "todo",
-      "targetPhase": 0
+      "status": "pass",
+      "targetPhase": 5
     },
     {
       "id": "flow.env-precedence",

@@ -45,6 +45,14 @@ export interface TuningProfile {
   idMatch: IdMatchMode;
 }
 
+// An explicit ENNIO_DEFAULT_WAIT_MS is an operator override and wins over EITHER
+// profile's natural default — slow CI runners set it (e.g. 25 s) and must get
+// that headroom regardless of profile. DEFAULT_WAIT_MS already bakes
+// "env-or-15000"; detect whether the env was actually set so the maestro
+// profile can fall back to 7 s instead of 15 s when it wasn't.
+const _envWait = parseInt(process.env.ENNIO_DEFAULT_WAIT_MS ?? '', 10);
+const ENV_WAIT_OVERRIDE: number | null = Number.isFinite(_envWait) && _envWait > 0 ? _envWait : null;
+
 // Today's behavior. Budgets reference the live constants (which themselves honor
 // ENNIO_DEFAULT_WAIT_MS / ENNIO_TAP_SETTLE_MS), so this preset == current runtime.
 export const resilientProfile: TuningProfile = {
@@ -59,12 +67,11 @@ export const resilientProfile: TuningProfile = {
 };
 
 // Faithful Maestro defaults. defaultWaitMs is the headline delta (Maestro's
-// fluent assertions default to ~7 s); text/id become regex-by-default. postTap
-// is left at the shared constant for now — Phase 2 step 2 refines it against the
-// device suites rather than guessing a number here.
+// fluent assertions default to ~7 s); text/id become regex-by-default. An
+// explicit ENNIO_DEFAULT_WAIT_MS still wins for slow-CI headroom.
 export const maestroProfile: TuningProfile = {
   name: 'maestro',
-  defaultWaitMs: 7000,
+  defaultWaitMs: ENV_WAIT_OVERRIDE ?? 7000,
   postTapSettleMs: POST_TAP_SETTLE_MS,
   textMatchDefault: 'regex',
   idMatch: 'regex',

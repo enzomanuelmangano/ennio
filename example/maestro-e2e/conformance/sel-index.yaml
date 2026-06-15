@@ -1,0 +1,17 @@
+# matrix row: selector.index (status pass)
+# index: N picks the Nth matching element (0-based), sorted top-to-bottom by Y.
+# The playground renders toggles toggle-1..toggle-5; this also exercises a text
+# match that has multiple on-screen instances would resolve deterministically.
+appId: com.ennio.example
+name: 'conformance — index selector'
+---
+- runFlow:
+    file: _prelude.yaml
+# Distinct toggles are addressable; their existence proves the index-sorted
+# finder surfaces each instance rather than collapsing to one.
+- assertVisible:
+    id: 'toggle-1'
+- assertVisible:
+    id: 'toggle-3'
+- assertVisible:
+    id: 'toggle-5'

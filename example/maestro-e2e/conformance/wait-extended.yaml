@@ -1,0 +1,12 @@
+# matrix row: wait.extendedWaitUntil (status pass)
+# extendedWaitUntil waits for a visible (or notVisible) condition with an
+# explicit timeout. Here the target is already on screen, so it returns fast.
+appId: com.ennio.example
+name: 'conformance — extendedWaitUntil'
+---
+- runFlow:
+    file: _prelude.yaml
+- extendedWaitUntil:
+    visible:
+      id: 'counter-display'
+    timeout: 10000
