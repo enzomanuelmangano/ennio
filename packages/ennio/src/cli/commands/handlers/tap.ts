@@ -84,35 +84,23 @@ export function registerTapHandlers(registry: CommandRegistry): void {
           return;
         }
       }
-      // After typing, the editing-menu popover floats over the screen
-      // and eats the next tap. Resign first responder unless the next
-      // tap is another text input.
-      const tapIsIntoInput = sel.id && /Input$/i.test(sel.id);
-      if (ctx.lastWasTextInput && !tapIsIntoInput) {
-        // The keyboard may still be animating UP from the prior inputText.
-        // Hiding it mid-presentation is a no-op (resignFirstResponder
-        // before becomeFirstResponder settles), AND the retract poll below
-        // would exit immediately on the not-yet-docked frame — then the
-        // keyboard finishes rising and eats this tap (the flaky
-        // custom-server "Done" case). So first wait for it to finish
-        // presenting (docked = keyboard_frame visible), bounded; the common
-        // already-docked path breaks on the first probe (near-zero cost).
+      // After inputText the keyboard may still be animating UP. Let it finish
+      // docking before the tap path decides what to do with it — probing
+      // mid-rise reads a not-yet-docked frame and the keyboard can finish
+      // rising and swallow the tap (the custom-server "Done" flake). The
+      // dismiss DECISION itself is made geometry- and type-aware inside
+      // execTapOn's clearKeyboardOverTarget: it keeps the keyboard up when the
+      // target is another text field (is_text_input_at — by type, not an
+      // `*Input` id heuristic) and only dismisses when the keyboard would
+      // actually swallow the tap. That stops the keyboard being churned
+      // (hidden + re-raised) between every field of a form — the dominant
+      // cost of multi-field flows like checkout.
+      if (ctx.lastWasTextInput) {
         const upDeadline = Date.now() + 700;
         while (Date.now() < upDeadline) {
           const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
           if ((kr?.data as { visible?: boolean } | undefined)?.visible) break;
           await sleep(30);
-        }
-        await ctx.client.call('hide_keyboard').catch(() => undefined);
-        // Wait for the keyboard window to actually retract — wait_commit
-        // tracks the app view-hash, not the separate keyboard window's
-        // dismiss animation, so a tap could fire while it still covers
-        // the target (the custom-server "Done" case).
-        const kbDeadline = Date.now() + 1200;
-        while (Date.now() < kbDeadline) {
-          const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
-          if (!(kr?.data as { visible?: boolean } | undefined)?.visible) break;
-          await sleep(50);
         }
       }
       ctx.lastWasTextInput = false;
@@ -152,13 +140,17 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         }
       }
       if (focusedViaTestId) {
-        // Field is firstResponder — skip the HID tap so the
-        // mid-animation keyboard doesn't intercept the touch.
-        // With --no-animations the in-app render after focus settles in
-        // ~1 frame — 50ms stability window is sufficient vs 200ms.
-        const focusStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 50 : 200;
+        // Field is firstResponder (becomeFirstResponder ran synchronously) —
+        // skip the HID tap so the mid-animation keyboard doesn't intercept the
+        // touch. The next command is ALWAYS an inputText/eraseText (that's the
+        // gate to enter this path), and it carries its own post-edit commit
+        // settle — so we only need a brief confirm that focus committed, NOT a
+        // full 200ms stable tail. Typing into a firstResponder field doesn't
+        // wait on the keyboard's rise animation. This shaves the per-field
+        // focus cost across form-fill flows.
+        const focusStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 30 : 80;
         await ctx.client
-          .call('wait_commit', { maxMs: 1000, stableMs: focusStableMs })
+          .call('wait_commit', { maxMs: 500, stableMs: focusStableMs })
           .catch(() => undefined);
         ctx.lastTapKey = tapKey;
         ctx.lastTapTestID = sel.id;
