@@ -84,18 +84,23 @@ export function registerTapHandlers(registry: CommandRegistry): void {
           return;
         }
       }
-      // After inputText the keyboard may still be animating UP. Let it finish
-      // docking before the tap path decides what to do with it — probing
-      // mid-rise reads a not-yet-docked frame and the keyboard can finish
-      // rising and swallow the tap (the custom-server "Done" flake). The
-      // dismiss DECISION itself is made geometry- and type-aware inside
-      // execTapOn's clearKeyboardOverTarget: it keeps the keyboard up when the
-      // target is another text field (is_text_input_at — by type, not an
-      // `*Input` id heuristic) and only dismisses when the keyboard would
-      // actually swallow the tap. That stops the keyboard being churned
-      // (hidden + re-raised) between every field of a form — the dominant
-      // cost of multi-field flows like checkout.
-      if (ctx.lastWasTextInput) {
+      const nextEditsField =
+        !!nextCmd &&
+        typeof nextCmd === 'object' &&
+        ('inputText' in nextCmd || 'eraseText' in nextCmd || 'clearText' in nextCmd);
+      // After inputText, a tap onto a NON-input target (e.g. a "Done" button)
+      // may need the keyboard dismissed first — and dismissing mid-rise races
+      // the keyboard, which can finish rising and swallow the tap (the custom-
+      // server "Done" flake). So when the next tap is NOT another field edit,
+      // let the keyboard finish docking before execTapOn's clearKeyboardOver-
+      // Target makes its geometry/type-aware hide decision.
+      //
+      // When the next command DOES edit a field, we never hide (the focus_testid
+      // shortcut just moves first responder, keyboard stays) — so skip this wait
+      // entirely. It was costing ~700ms PER FIELD: insert_text doesn't raise the
+      // keyboard, so the poll never saw a visible frame and ran its full budget
+      // on every form field. That was the dominant remaining cost of form flows.
+      if (ctx.lastWasTextInput && !nextEditsField) {
         const upDeadline = Date.now() + 700;
         while (Date.now() < upDeadline) {
           const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
@@ -121,10 +126,7 @@ export function registerTapHandlers(registry: CommandRegistry): void {
       // If next op edits the field AND we have a testID, route the
       // "tap to focus" through focus_testid (calls becomeFirstResponder
       // in-process — deterministic, no race with onPress-driven focus).
-      const nextEditsField =
-        !!nextCmd &&
-        typeof nextCmd === 'object' &&
-        ('inputText' in nextCmd || 'eraseText' in nextCmd || 'clearText' in nextCmd);
+      // (nextEditsField computed above for the keyboard-rise gate.)
       let focusedViaTestId = false;
       if (sel.id && nextEditsField) {
         const r = await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
