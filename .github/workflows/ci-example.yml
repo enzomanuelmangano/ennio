@@ -190,10 +190,6 @@ jobs:
         env:
           ENNIO_UDID: ${{ steps.sim.outputs.udid }}
           ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
-          # ennio's own app suites run under the resilient profile (legacy text
-          # sniff + the slow-CI wait headroom below). Maestro-semantics parity is
-          # exercised separately by ci-conformance under both profiles.
-          ENNIO_PROFILE: resilient
           ENNIO_FAST_FLAG: ${{ inputs.in_process_tap && '--in-process-tap' || '' }}
           ENNIO_NOANIM_FLAG: ${{ inputs.no_animations && '--disable-animations' || '' }}
           ENNIO_REUSE_FLAG: ${{ inputs.disable_reuse_app && '--disable-reuse-app' || '' }}

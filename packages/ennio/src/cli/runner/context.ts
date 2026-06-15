@@ -115,9 +115,9 @@ export interface RunContext {
   /** Flow-level `env:` block + runFlow-passed overrides. Resolved by
    *  `${VAR}` bare interpolation in command args. */
   flowEnv?: Record<string, string>;
-  /** Active tuning profile (maestro | resilient). Owns the behavioral
+  /** Active tuning profile (resilient — the only one). Owns the behavioral
    *  defaults: implicit-wait budget, post-tap settle, and the default
-   *  text/id match mode. Selected once per run from ENNIO_PROFILE. */
+   *  text/id match mode. */
   profile: TuningProfile;
 }
 

@@ -128,8 +128,8 @@ export class EnnioMcpSession {
         lenient: false,
         driver,
         platform: this.platform,
-        // Active tuning profile (maestro default; ENNIO_PROFILE overrides) —
-        // same resolution the flow runner uses.
+        // Active tuning profile (resilient — the only one); same resolution
+        // the flow runner uses.
         profile: resolveProfile(),
         // Synthetic flow path: only used to resolve runFlow subflows,
         // which the MCP surface never issues.

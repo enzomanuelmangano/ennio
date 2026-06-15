@@ -181,7 +181,7 @@ describe('expandFlow', () => {
 // deliberate, visible change, and they enumerate the cases the new matchMode
 // must get right.
 //
-// Maps to matrix.json rows: selector.text.* (see docs/maestro-parity.md).
+// Maps to matrix.json rows: selector.text.*.
 // ---------------------------------------------------------------------------
 describe('isRegexText (current matcher sniff — Phase 1 replaces with matchMode)', () => {
   it('treats plain text as a literal (not regex)', () => {
