@@ -33,6 +33,7 @@
 
 #import "EnnioBootstrap.h"
 #import "EnnioControlSocket.h"
+#import "EnnioInitialURL.h"
 #import "EnnioNoAnimations.h"
 #import "EnnioSettle.h"
 #import "EnnioShowTouches.h"
@@ -218,6 +219,11 @@ static UIWindow *_Nullable resolveKeyWindow(void) {
     // notification (UIWindowScene activation is async); the next access
     // via +keyWindow re-resolves if cached value is nil.
     g_ennioKeyWindow = resolveKeyWindow();
+
+    // Prime a cold deep link as react-navigation's initial URL (no-op unless
+    // ENNIO_INITIAL_URL is set). Must run before the JS container mounts and
+    // pulls getInitialURL — didFinishLaunching is well ahead of that.
+    [EnnioInitialURL installIfEnabled];
 
     if (ennioHookDisabled("ENNIO_DISABLE_SETTLE")) {
         NSLog(@"[Ennio] settle observer DISABLED via env flag");

@@ -182,6 +182,12 @@ export class IosPlatform implements Platform {
         ...process.env,
         SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib,
         SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(udid),
+        // Hand the deep link to the app as its INITIAL url. The dylib makes
+        // RCTLinkingManager.getInitialURL resolve with it, so react-navigation
+        // builds the route's initial state (replacing any state restored from
+        // disk) — the same precedence a real launch URL / `simctl openurl`
+        // has, but with no iOS 26 "Open in?" prompt and no url-event race.
+        SIMCTL_CHILD_ENNIO_INITIAL_URL: url,
       },
     });
     const reopen = new EnnioSocketClient(udid);
@@ -203,9 +209,10 @@ export class IosPlatform implements Platform {
       if (ready) break;
       await sleep(100);
     }
+    // The deep link was already delivered as the initial URL via the launch
+    // env (ENNIO_INITIAL_URL → getInitialURL), so react-navigation routes it
+    // as the container mounts. Just wait for that first paint to settle.
     await waitForFirstPaint(ctx.client);
-    // App up + idle — deliver the deep link in-process (no openurl, no prompt).
-    await ctx.client.call('open_url', { url });
   }
 
   private async waitBootstrapReady(connection: EnnioConnection): Promise<void> {
