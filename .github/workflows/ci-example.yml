@@ -236,27 +236,12 @@ jobs:
           echo "Example suite: Pass=$PASS Fail=$FAIL${FAILED:+ — failed:$FAILED}"
           [ "$FAIL" -eq 0 ]
 
-      # Maestro conformance: the per-row parity fixtures, run under BOTH tuning
-      # profiles on the same sim/app. Only a `pass` matrix row that regresses
-      # fails the suite; `divergent`/`fragile` rows xfail until their phase lands
-      # (see e2e/conformance/run-suite.sh + matrix.json). Reuses the booted sim,
-      # built dylib, and installed example app from the steps above.
-      - name: Run conformance suite (both profiles)
-        env:
-          ENNIO_CLI: packages/ennio/dist/cli.js
-          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
-          ENNIO_PLATFORM: ios
-          ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
-          ENNIO_DEFAULT_WAIT_MS: '25000'
-        run: |
-          set -uo pipefail
-          rc=0
-          for prof in maestro resilient; do
-            echo "==== conformance profile=$prof ===="
-            ENNIO_PROFILE="$prof" SUITE_LOG_DIR="/tmp/ennio-conf-$prof" \
-              bash e2e/conformance/run-suite.sh || rc=1
-          done
-          exit $rc
+      # NOTE: the Maestro conformance suite (e2e/conformance/) is NOT gated in
+      # CI. Its per-row fixtures assert on example-app screens (g-playground,
+      # toggle-1..5) that aren't in the published fixture yet, and several rows
+      # encoded the maestro-parity anchoring we've since dropped (single
+      # resilient profile). The suite stays in the repo to revisit once the
+      # fixture grows those screens; re-add a gated step here then.
 
       - name: Upload logs
         if: always()
