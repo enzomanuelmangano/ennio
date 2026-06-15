@@ -24,7 +24,7 @@ import {
   softResetAndReload,
   waitForFirstPaint,
 } from '../runner/lifecycle';
-import { findDylib, prepareSimulator, setSimLaunchEnv, tracePhase, tracePhaseAsync } from '../sim';
+import { findDylib, prepareSimulator, tracePhase, tracePhaseAsync } from '../sim';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 import { sleep } from '../runner/context';
 import type { RunContext } from '../runner/context';
@@ -148,11 +148,12 @@ export class IosPlatform implements Platform {
       // "Open in <app>?" prompt — and without tearing down the app's state.
       await ctx.client.call('open_url', { url });
     } else {
-      // Cold path (post-stopApp): cold-launch THROUGH the URL so it arrives as
-      // the app's launch option. react-navigation's linking gives the launch
-      // URL precedence over persisted navigation state — a fresh route, exactly
-      // as the OS delivers a deep link — and a cold launch shows no "Open in
-      // app?" prompt. See coldLaunchUrl for the sim-wide injection it needs.
+      // Cold path (post-stopApp): launch the app with the dylib, then deliver
+      // the URL in-process. NOT `simctl openurl` — iOS 26 raises a blocking
+      // "Open in <app>?" SpringBoard confirmation for it that no headless
+      // runner can dismiss. `simctl launch` shows no prompt and carries the
+      // DYLD inject, so the app comes up cleanly and the same agent op the warm
+      // branch uses routes the deep link over the just-restored state.
       await this.coldLaunchUrl(ctx, url);
     }
     await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 8000 }).catch(() => undefined);
@@ -160,14 +161,13 @@ export class IosPlatform implements Platform {
   }
 
   /**
-   * Cold-launch the app via `simctl openurl` with the dylib injected so the URL
-   * arrives as the launch option (getInitialURL) — the only way to give a deep
-   * link precedence over persisted navigation state. `simctl openurl` can't
-   * carry SIMCTL_CHILD_DYLD_INSERT_LIBRARIES the way `simctl launch` does, so
-   * the dylib is set sim-wide on launchctl for the launch window and cleared
-   * immediately after. That's safe: EnnioBootstrap no-ops in any process whose
-   * main bundle isn't an iOS app (CFBundlePackageType != "APPL"), so a stray
-   * daemon that spawns in the window loads it inertly.
+   * Cold deep-link: launch the app with the dylib (`simctl launch` carries
+   * SIMCTL_CHILD_DYLD_INSERT and, unlike `simctl openurl`, shows no "Open in
+   * <app>?" SpringBoard confirmation — which iOS 26 raises for every openurl
+   * and which no headless runner can dismiss), reconnect the socket, then post
+   * the URL in-process via the agent's open_url (RN's RCTOpenURLNotification).
+   * Linking routes the URL over the just-restored navigation state, landing on
+   * the same route a launch-option deep link would.
    */
   private async coldLaunchUrl(ctx: RunContext, url: string): Promise<void> {
     const udid = ctx.udid;
@@ -175,34 +175,23 @@ export class IosPlatform implements Platform {
     if (!dylib) throw new Error('libennio.dylib not found for cold deep-link launch');
     ctx.client.close();
     this.terminate(udid, ctx.bundleId);
-    // ENNIO_SOCKET_PATH is sticky from the first launch, but set it explicitly
-    // so a cold openurl that is the FIRST launch still finds the socket path.
-    execFileSync(
-      'xcrun',
-      ['simctl', 'spawn', udid, 'launchctl', 'setenv', 'ENNIO_SOCKET_PATH', ennioSocketPath(udid)],
-      { stdio: 'pipe' },
-    );
-    execFileSync(
-      'xcrun',
-      ['simctl', 'spawn', udid, 'launchctl', 'setenv', 'DYLD_INSERT_LIBRARIES', dylib],
-      { stdio: 'pipe' },
-    );
     const launchedAt = Date.now();
-    try {
-      execFileSync('xcrun', ['simctl', 'openurl', udid, url], { stdio: 'pipe' });
-      const reopen = new EnnioSocketClient(udid);
-      if (!(await reopen.connectWithRetry(15_000))) {
-        const diagnosis = diagnoseSocketFailure(udid, ctx.bundleId, launchedAt);
-        throw new Error(
-          'socket reconnect failed after cold deep-link launch' +
-            (diagnosis ? `\n${diagnosis}` : ''),
-        );
-      }
-      ctx.client = reopen;
-    } finally {
-      // Clear the sim-wide insert so subsequent plain launches aren't polluted.
-      setSimLaunchEnv(udid, 'DYLD_INSERT_LIBRARIES', false);
+    execFileSync('xcrun', ['simctl', 'launch', udid, ctx.bundleId], {
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib,
+        SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(udid),
+      },
+    });
+    const reopen = new EnnioSocketClient(udid);
+    if (!(await reopen.connectWithRetry(15_000))) {
+      const diagnosis = diagnoseSocketFailure(udid, ctx.bundleId, launchedAt);
+      throw new Error(
+        'socket reconnect failed after cold launch' + (diagnosis ? `\n${diagnosis}` : ''),
+      );
     }
+    ctx.client = reopen;
     const readyBy = Date.now() + 5_000;
     while (Date.now() < readyBy) {
       const ready = await ctx.client
@@ -215,6 +204,8 @@ export class IosPlatform implements Platform {
       await sleep(100);
     }
     await waitForFirstPaint(ctx.client);
+    // App up + idle — deliver the deep link in-process (no openurl, no prompt).
+    await ctx.client.call('open_url', { url });
   }
 
   private async waitBootstrapReady(connection: EnnioConnection): Promise<void> {
