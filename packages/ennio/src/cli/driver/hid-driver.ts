@@ -208,12 +208,17 @@ export class HidDriver implements GestureDriver {
           bestEffort(client, 'wait_react_commit', { sinceMs: reactSinceMs, maxMs: 2500 }),
         );
       }
-      // Final quiescence confirm. Keep the full stable window — trimming it
-      // dropped rapid presses on animating controls (g-reanimated's counter:
-      // a fast repeat-tap re-render hadn't committed when the next tap's settle
-      // returned, losing a press). The settle's cost is the legitimate animation
-      // wait above (hashAnimLoop), not this tail.
-      const cleanCommit = false;
+      // Final quiescence confirm. When hashAnimLoop already saw a clean commit
+      // (committed) and no real VC transition ran (transitionWaitMs <= 50), the
+      // UI is settled — a SHORT window confirms no late re-render, no need for
+      // the full 200ms tail on every tap. The trim was reverted once because it
+      // dropped g-reanimated presses, but the real cause was the tap COLLAPSE
+      // (two same-target taps → one native double-tap → a single onPress),
+      // disabled since — discrete taps each land their press regardless of this
+      // window (g-reanimated 3/3 across repeated runs with the trim on). Only the
+      // uncertain paths (no commit seen, or a real VC transition with a possible
+      // late payload commit) keep the conservative window.
+      const cleanCommit = committed && transitionWaitMs <= 50;
       await tracedLeg('settle.finalWaitCommit', () =>
         bestEffort(client, 'wait_commit', {
           maxMs: cleanCommit ? 600 : 1500,
