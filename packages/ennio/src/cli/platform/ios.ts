@@ -79,16 +79,14 @@ export class IosPlatform implements Platform {
     prepareSimulator(session.udid);
 
     const connection = new EnnioConnection({ udid: session.udid, bundleId: session.bundleId });
-    // Only probe for an existing socket when the app is actually running — a
-    // reused process from a previous flow. On a cold connect (first flow, or
-    // after a stopApp) the app isn't running, so connection.open() can only
-    // ever time out; waiting its full 2s before launching is the dead air felt
-    // before the first action. Skip straight to launch in that case.
     const appAlreadyRunning = isAppRunning(session.udid, session.bundleId);
-    const reusedSocket =
-      appAlreadyRunning && (await tracePhaseAsync('socketOpenFast', () => connection.open(2_000)));
-    if (!reusedSocket) {
-      // App isn't running with the dylib loaded — launch + retry.
+    if (appAlreadyRunning) {
+      // A process reused from a previous flow — attach to its live socket.
+      if (await tracePhaseAsync('socketOpenFast', () => connection.open(2_000))) {
+        return { session, connection };
+      }
+      // Running but the socket didn't answer (stale / dylib not loaded) —
+      // relaunch to get a clean agent.
       tracePhase('terminate', () => session.terminate());
       const launchedAt = Date.now();
       tracePhase('launch', () => session.launch());
@@ -102,7 +100,18 @@ export class IosPlatform implements Platform {
         );
       }
       await tracePhaseAsync('bootstrapReady', () => this.waitBootstrapReady(connection));
+      return { session, connection };
     }
+    // LAZY CONNECT: the app isn't running. A full launch here would be thrown
+    // away — every flow's first command relaunches from scratch (launch.yml's
+    // stopApp + openLink → coldLaunchUrl, or launchApp clearState →
+    // clearStateAndRelaunch), each of which terminates, launches with the
+    // dylib, and reconnects the socket itself. Launching here too means the app
+    // boots TWICE per flow (~2.3s of dead work, the react-nav per-flow tax).
+    // So defer: hand back the unopened connection; the first launch command
+    // opens it. (Valid flows always begin with a launch/openLink; subsequent
+    // flows in a suite find the app already running and take the fast path
+    // above.)
     return { session, connection };
   }
 
