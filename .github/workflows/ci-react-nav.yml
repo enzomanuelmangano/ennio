@@ -1,0 +1,199 @@
+# react-navigation example e2e (iOS sim) — the upstream playground's 38-flow
+# maestro suite driven by ennio against a prebuilt Release fixture.
+#
+# Same model as ci-bsky / ci-example: the suite tests the RUNNER against a
+# real-world third-party app, so the app binary is a stable fixture published
+# as a GitHub release asset (e2e-fixtures-v2,
+# ReactNavigationExample-ios-Release.app.zip — a Release build, Hermes bundle
+# embedded, no Metro) — never rebuilt in CI. The react-navigation repo is
+# cloned at the pinned commit the fixture was built from, for the flows
+# (example/e2e/maestro/*.yml) + launch.yml deep-link harness.
+#
+# Self-contained: the playground needs no backend, no permissions, no photos
+# — every flow deep-links via rne:// and asserts on-screen, so this is
+# ci-bsky minus the mock PDS / postgres / redis / photo-library setup.
+#
+# Security posture (mirrors ci-bsky):
+#   - permissions: contents: read
+#   - actions pinned to full commit SHAs
+#   - checkout with persist-credentials: false
+#   - fixture download SHA-256-verified before unzip/install
+#   - react-navigation cloned at a pinned commit SHA
+#   - no secrets consumed
+#
+# Trigger: manual — gh workflow run ci-react-nav.yml
+name: ci-react-nav
+
+on:
+  workflow_dispatch:
+    inputs:
+      flow_filter:
+        description: 'Run only flows whose name starts with this prefix (empty = all)'
+        type: string
+        default: ''
+  # Every PR that can affect the iOS runner or the react-nav suite. src/** is
+  # the shared cross-platform CLI; ios/** is the dylib/HID. Android-only TS is
+  # carved out (last-match-wins) so an Android-only change won't boot a sim.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/android/**'
+      - '!packages/ennio/src/cli/platform/android.ts'
+      - '!packages/ennio/src/cli/driver/android-driver.ts'
+      - 'packages/ennio/ios/**'
+      - 'e2e/react-nav/**'
+      - '.github/workflows/ci-react-nav.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: react-nav-ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ReactNavigationExample-ios-Release.app.zip from the e2e-fixtures-v2
+  # release. Built from react-navigation@211c1d82 (sim Release, embedded
+  # Hermes bundle). Refresh: rebuild the playground Release for the sim,
+  # re-zip the .app, re-upload, update this SHA + the pinned commit below.
+  RNNAV_APP_ZIP_SHA256: 630996378e6c6226757499317855b0e2ae51d1945398ae455a2f2ee205cdc636
+  RNNAV_APP_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/ReactNavigationExample-ios-Release.app.zip
+  # react-navigation commit the fixture was built from — flows must match.
+  RNNAV_SHA: 211c1d821efc1344a186a1a2da6dfe835e8d418a
+  RNNAV_BUNDLE_ID: org.reactnavigation.playground
+  APP_SCHEME: 'rne://'
+
+jobs:
+  react-nav:
+    name: react-navigation suite (iOS sim, prebuilt fixture)
+    # macos-26 (Xcode 26 + iOS 26 simulator). The fixture is built with the
+    # iOS 26 SDK (DTSDKName=iphonesimulator26.0) and uses iOS-26-only Swift
+    # APIs (setNeedsUpdateProperties, LayoutRegion, DrawOnSymbolEffect), so it
+    # hard-crashes (siriAssetIsNotReady) on the iOS 18 runtime of macos-15.
+    # The fixture's SDK must match the runtime — iOS 26 ⇒ macos-26.
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          for x in Xcode_26.0.1.app Xcode_26.0.app Xcode_26.app; do
+            if [ -d "/Applications/$x" ]; then sudo xcode-select -switch "/Applications/$x"; break; fi
+          done
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      # Boot the sim asynchronously while JS/dylib build — the later wait
+      # pays only the remainder (ci-example boot-perf lesson).
+      - name: Start simulator boot (async)
+        id: boot
+        run: |
+          set -euo pipefail
+          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS-26-[0-9]+' | sort -rV | head -1)
+          test -n "$RUNTIME" || { echo "No iOS 26 runtime on image"; xcrun simctl list runtimes; exit 1; }
+          UDID=$(xcrun simctl create "react-nav-e2e" "iPhone 16 Pro" "$RUNTIME")
+          echo "created $UDID on $RUNTIME"
+          xcrun simctl boot "$UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bun
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      - name: Build dylib + HID helper
+        working-directory: packages/ennio
+        run: |
+          set -euo pipefail
+          bash scripts/build-dylib-local.sh
+          bash scripts/build-hid-helper.sh
+
+      - name: Clone react-navigation (pinned)
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/react-navigation/react-navigation.git /tmp/rnnav
+          git -C /tmp/rnnav checkout "$RNNAV_SHA"
+          # Relax the zero-margin test timeouts upstream ships (a 5000ms wait
+          # for a 5000ms app preload timer, 3500ms for a 3000ms suspend timer)
+          # — a test-only flake, no app behaviour changed. Fails loud if the
+          # pinned flows drift (a signal to refresh the fixture).
+          git -C /tmp/rnnav apply "$GITHUB_WORKSPACE/e2e/react-nav/patches/flow-timeout-margins.patch"
+
+      - name: Cache react-nav app fixture
+        id: app-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/rnnavapp
+          key: react-nav-app-${{ env.RNNAV_APP_ZIP_SHA256 }}
+
+      - name: Download react-nav app fixture (cache miss)
+        if: steps.app-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/rnnav-app.zip "$RNNAV_APP_URL"
+          echo "${RNNAV_APP_ZIP_SHA256}  /tmp/rnnav-app.zip" | shasum -a 256 -c -
+          rm -rf /tmp/rnnavapp && mkdir -p /tmp/rnnavapp
+          unzip -q /tmp/rnnav-app.zip -d /tmp/rnnavapp
+          test -d /tmp/rnnavapp/ReactNavigationExample.app
+
+      - name: Wait for simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          UDID="${{ steps.boot.outputs.udid }}"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl list devices booted
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Install app
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: xcrun simctl install "$UDID" /tmp/rnnavapp/ReactNavigationExample.app
+
+      - name: Run react-nav suite
+        env:
+          ENNIO_PLATFORM: ios
+          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+          ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
+          ENNIO_CLI: ${{ github.workspace }}/packages/ennio/dist/cli.js
+          RNNAV_DIR: /tmp/rnnav
+          APP_ID: ${{ env.RNNAV_BUNDLE_ID }}
+          SUITE_LOG_DIR: /tmp/rnnav-suite-logs
+          # GitHub macOS runners are ~1.5-2x slower than a dev Mac for sim
+          # workloads; give visibility waits more headroom.
+          ENNIO_DEFAULT_WAIT_MS: '35000'
+          FLOW_FILTER: ${{ inputs.flow_filter || '' }}
+        run: bash e2e/react-nav/run-suite.sh
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: react-nav-ios-logs
+          path: |
+            /tmp/rnnav-suite-logs/
+            /tmp/ennio-shots/
+          retention-days: 7
+          if-no-files-found: warn

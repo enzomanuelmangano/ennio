@@ -7,11 +7,15 @@
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand, MaestroSelector } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { DEFAULT_WAIT_MS, POLL_MS, interpolateSelector, sleep } from '../../runner/context';
-import { isVisible, waitUntilNotVisible, waitUntilVisible } from '../../runner/visibility';
+import { DEFAULT_WAIT_MS, interpolateSelector } from '../../runner/context';
+import {
+  waitUntilAnyVisible,
+  waitUntilNotVisible,
+  waitUntilVisible,
+} from '../../runner/visibility';
 
 interface AssertVisibleCmd {
-  assertVisible: MaestroSelector & { timeout?: number };
+  assertVisible: MaestroSelector & { timeout?: number; anyOf?: MaestroSelector[] };
 }
 interface AssertNotVisibleCmd {
   assertNotVisible: MaestroSelector & { timeout?: number };
@@ -41,9 +45,17 @@ export function registerAssertHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & AssertVisibleCmd => has(c, 'assertVisible'),
     async (cmd, { ctx }) => {
-      const sel = normalizeSelector(interpolateSelector(cmd.assertVisible, ctx));
-      const timeout = cmd.assertVisible.timeout ?? DEFAULT_WAIT_MS;
-      await waitUntilVisible(ctx, sel, timeout);
+      const spec = cmd.assertVisible;
+      const timeout = spec.timeout ?? DEFAULT_WAIT_MS;
+      // Maestro `assertVisible: { anyOf: [...] }` — passes when ANY of
+      // the selectors becomes visible. Without this branch the whole
+      // object normalizes to an id/text-less selector that never matches.
+      if (spec.anyOf) {
+        const selectors = interpolateSelector(spec.anyOf, ctx).map(normalizeSelector);
+        await waitUntilAnyVisible(ctx, selectors, timeout);
+        return;
+      }
+      await waitUntilVisible(ctx, normalizeSelector(interpolateSelector(spec, ctx)), timeout);
     },
   );
 
@@ -70,14 +82,7 @@ export function registerAssertHandlers(registry: CommandRegistry): void {
     async (cmd, { ctx }) => {
       const timeout = cmd.assertAnyVisible.timeout ?? DEFAULT_WAIT_MS;
       const selectors = interpolateSelector(cmd.assertAnyVisible.anyOf, ctx).map(normalizeSelector);
-      const deadline = Date.now() + timeout;
-      while (Date.now() < deadline) {
-        for (const s of selectors) {
-          if (await isVisible(ctx, s)) return;
-        }
-        await sleep(POLL_MS);
-      }
-      throw new Error(`assertAnyVisible: none of the ${selectors.length} selectors became visible`);
+      await waitUntilAnyVisible(ctx, selectors, timeout);
     },
   );
 

@@ -37,6 +37,25 @@ void RegisterEnnioSystemHandlers(void) {
         return out;
     });
 
+    // Deliver a deep link IN-PROCESS, the same way RCTLinkingManager does for an
+    // already-running app: post RCTOpenURLNotification. React Native's Linking
+    // module observes it and emits the JS `url` event, which react-navigation's
+    // linking routes to the full path. This bypasses `simctl openurl` entirely —
+    // no foreground SpringBoard "Open in <app>?" confirmation to dismiss, and no
+    // dependency on launch state. The app must already be running with the agent
+    // attached (the caller relaunches+injects first if it was stopped).
+    EnnioControlSocket::registerHandler("open_url", [](const std::string &args) -> std::string {
+        NSDictionary *a = EnnioParseArgs(args);
+        NSString *url = EnnioArgString(a, @"url");
+        if (!url.length) throw std::runtime_error("missing url");
+        EnnioOnMainVoid([&]() {
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"RCTOpenURLNotification"
+                                                                object:nil
+                                                              userInfo:@{ @"url" : url }];
+        });
+        return "{\"ok\":true}";
+    });
+
     EnnioControlSocket::registerHandler("finder_status", [](const std::string &) -> std::string {
         NSString *desc = [EnnioFinderManager attachmentDescription];
         NSUInteger count = [EnnioTestIDIndex count];

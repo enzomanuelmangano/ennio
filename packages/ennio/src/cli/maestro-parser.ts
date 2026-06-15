@@ -126,6 +126,12 @@ export interface RunFlowCommand {
   file?: string;
   when?: MaestroCondition;
   commands?: MaestroCommand[];
+  /** Per-call env passed down to the subflow's `${VAR}` interpolation,
+   *  overriding the subflow's own `env:` defaults. The react-navigation
+   *  e2e suite drives every deep link through `runFlow: { file: launch.yml,
+   *  env: { LINK, TEXT } }`, so without this the link resolves to an empty
+   *  `${LINK}` and the launch lands on the home screen. */
+  env?: Record<string, string>;
 }
 
 export interface EnnioFlowConfig {
@@ -210,8 +216,14 @@ export function parseMaestroString(
   content: string,
   filePath: string = resolve('mcp-inline.yaml'),
 ): MaestroFlow {
-  // Maestro YAML uses --- to separate metadata from commands
-  const documents = (parseYamlAll(content) as unknown[]).map(substituteEnv);
+  // Maestro YAML uses --- to separate metadata from commands. Parse the
+  // documents RAW — parse-time env substitution is applied below to only the
+  // metadata fields that are consumed before a runtime context exists. Command
+  // bodies (and the hook command lists) keep their ${VAR} placeholders so the
+  // runtime pass can resolve them with flowEnv / runFlow.env taking precedence
+  // over process.env. Substituting them here would let a shell env var silently
+  // shadow a per-flow override.
+  const documents = parseYamlAll(content) as unknown[];
 
   let metadata: Record<string, unknown> = {};
   let commands: MaestroCommand[] = [];
@@ -231,10 +243,15 @@ export function parseMaestroString(
   }
 
   return {
-    appId: metadata.appId as string | undefined,
+    // appId selects the bundle at run setup, before any command runs — it must
+    // be a concrete value, so it resolves against process.env at parse time.
+    appId: substituteEnv(metadata.appId) as string | undefined,
     name: metadata.name as string | undefined,
     tags: metadata.tags as string[] | undefined,
-    env: metadata.env as Record<string, string> | undefined,
+    // `env:` defaults may reference the shell env (e.g. BASE: ${HOST}); resolve
+    // those here. Per-flow values still win at runtime because the command
+    // bodies that read them are interpolated against flowEnv first.
+    env: substituteEnv(metadata.env) as Record<string, string> | undefined,
     onFlowStart: metadata.onFlowStart as MaestroCommand[] | undefined,
     onFlowComplete: metadata.onFlowComplete as MaestroCommand[] | undefined,
     commands,
@@ -271,57 +288,6 @@ export function normalizeSelector(selector: MaestroSelector | string): MaestroSe
  */
 export function isRegexText(text: string): boolean {
   return text.startsWith('.*') || text.endsWith('.*') || /[[\]{}()|\\^$+?]/.test(text);
-}
-
-/**
- * Convert Maestro selector to Ennio selector format
- */
-export function toEnnioSelector(selector: MaestroSelector): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  if (selector.id !== undefined) result.id = selector.id;
-
-  // Handle text selector - Maestro semantics: text matches as substring (or regex if it
-  // contains regex metacharacters / explicit .* anchors). Plain text falls back to
-  // 'contains' so e.g. text: "Wireless" matches "Wireless Headphones".
-  // Use TextMatcher shape so client.selectorToJson serializes flat form expected by
-  // the native SelectorParser ({ text, textMatchMode }).
-  if (selector.text !== undefined) {
-    if (isRegexText(selector.text)) {
-      result.text = { pattern: selector.text, mode: 'regex' };
-    } else {
-      result.text = { pattern: selector.text, mode: 'contains' };
-    }
-  }
-
-  if (selector.index !== undefined) result.index = selector.index;
-  if (selector.enabled !== undefined) result.enabled = selector.enabled;
-  if (selector.checked !== undefined) result.checked = selector.checked;
-  if (selector.focused !== undefined) result.focused = selector.focused;
-  if (selector.selected !== undefined) result.selected = selector.selected;
-
-  // Spatial selectors (recursive)
-  if (selector.below) result.below = toEnnioSelector(selector.below);
-  if (selector.above) result.above = toEnnioSelector(selector.above);
-  if (selector.leftOf) result.leftOf = toEnnioSelector(selector.leftOf);
-  if (selector.rightOf) result.rightOf = toEnnioSelector(selector.rightOf);
-
-  // Hierarchical selectors
-  if (selector.containsChild) result.containsChild = toEnnioSelector(selector.containsChild);
-  if (selector.childOf) result.childOf = toEnnioSelector(selector.childOf);
-  if (selector.containsDescendants) {
-    result.containsDescendants = selector.containsDescendants.map(toEnnioSelector);
-  }
-
-  // Dimension selectors
-  if (selector.width !== undefined) result.width = selector.width;
-  if (selector.height !== undefined) result.height = selector.height;
-  if (selector.tolerance !== undefined) result.tolerance = selector.tolerance;
-
-  // Trait selectors
-  if (selector.traits) result.traits = selector.traits;
-
-  return result;
 }
 
 /**

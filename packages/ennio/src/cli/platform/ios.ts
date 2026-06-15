@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 
 import { EnnioConnection } from '../core/ennio-connection';
 import { SimulatorSession } from '../core/simulator-session';
-import { diagnoseSocketFailure } from '../crash-detector';
+import { diagnoseSocketFailure, isAppRunning } from '../crash-detector';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import {
@@ -22,9 +22,11 @@ import {
   dismissPermissionDialogs,
   relaunchAndReconnect as iosRelaunchAndReconnect,
   softResetAndReload,
+  waitForFirstPaint,
 } from '../runner/lifecycle';
-import { prepareSimulator, tracePhase, tracePhaseAsync } from '../sim';
-import { POST_LAUNCH_SETTLE_MS, sleep } from '../runner/context';
+import { findDylib, prepareSimulator, tracePhase, tracePhaseAsync } from '../sim';
+import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
+import { sleep } from '../runner/context';
 import type { RunContext } from '../runner/context';
 
 import type { AxBridge, ConnectOptions, OpenConnection, Platform, SystemBridge } from './types';
@@ -119,8 +121,11 @@ export class IosPlatform implements Platform {
   }
 
   async openUrl(ctx: RunContext, url: string): Promise<void> {
-    execFileSync('xcrun', ['simctl', 'openurl', ctx.udid, url]);
+    // expo-development-client URLs load a JS bundle into the dev client — a
+    // launcher concern, not an in-app deep link — so keep the system openurl
+    // path (the app may not be the running foreground process).
     if (url.includes('expo-development-client')) {
+      execFileSync('xcrun', ['simctl', 'openurl', ctx.udid, url]);
       await ctx.client
         .call('wait_react_commit', { sinceMs: 0, maxMs: 20000 })
         .catch(() => undefined);
@@ -130,8 +135,84 @@ export class IosPlatform implements Platform {
         if (await dismissPermissionDialogs(ctx.udid).catch(() => false)) break;
         await sleep(1000);
       }
+      return;
     }
-    await sleep(POST_LAUNCH_SETTLE_MS);
+    // Two cases, each with the mechanism that matches how iOS itself delivers a
+    // URL. Process truth (launchctl), not the socket flag — right after a
+    // stopApp the socket object reads stale-connected.
+    const alive = isAppRunning(ctx.udid, ctx.bundleId) && ctx.client.isConnected();
+    if (alive) {
+      // App already running (an in-app openLink): deliver the URL IN-PROCESS via
+      // the agent (open_url posts RN's RCTOpenURLNotification), so RN's Linking
+      // routes it without a `simctl openurl` — which would raise a foreground
+      // "Open in <app>?" prompt — and without tearing down the app's state.
+      await ctx.client.call('open_url', { url });
+    } else {
+      // Cold path (post-stopApp): launch the app with the dylib, then deliver
+      // the URL in-process. NOT `simctl openurl` — iOS 26 raises a blocking
+      // "Open in <app>?" SpringBoard confirmation for it that no headless
+      // runner can dismiss. `simctl launch` shows no prompt and carries the
+      // DYLD inject, so the app comes up cleanly and the same agent op the warm
+      // branch uses routes the deep link over the just-restored state.
+      await this.coldLaunchUrl(ctx, url);
+    }
+    await ctx.client.call('wait_react_commit', { sinceMs: 0, maxMs: 8000 }).catch(() => undefined);
+    await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
+  }
+
+  /**
+   * Cold deep-link: launch the app with the dylib (`simctl launch` carries
+   * SIMCTL_CHILD_DYLD_INSERT and, unlike `simctl openurl`, shows no "Open in
+   * <app>?" SpringBoard confirmation — which iOS 26 raises for every openurl
+   * and which no headless runner can dismiss), reconnect the socket, then post
+   * the URL in-process via the agent's open_url (RN's RCTOpenURLNotification).
+   * Linking routes the URL over the just-restored navigation state, landing on
+   * the same route a launch-option deep link would.
+   */
+  private async coldLaunchUrl(ctx: RunContext, url: string): Promise<void> {
+    const udid = ctx.udid;
+    const dylib = ctx.dylibPath ?? findDylib();
+    if (!dylib) throw new Error('libennio.dylib not found for cold deep-link launch');
+    ctx.client.close();
+    this.terminate(udid, ctx.bundleId);
+    const launchedAt = Date.now();
+    execFileSync('xcrun', ['simctl', 'launch', udid, ctx.bundleId], {
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib,
+        SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(udid),
+        // Hand the deep link to the app as its INITIAL url. The dylib makes
+        // RCTLinkingManager.getInitialURL resolve with it, so react-navigation
+        // builds the route's initial state (replacing any state restored from
+        // disk) — the same precedence a real launch URL / `simctl openurl`
+        // has, but with no iOS 26 "Open in?" prompt and no url-event race.
+        SIMCTL_CHILD_ENNIO_INITIAL_URL: url,
+      },
+    });
+    const reopen = new EnnioSocketClient(udid);
+    if (!(await reopen.connectWithRetry(15_000))) {
+      const diagnosis = diagnoseSocketFailure(udid, ctx.bundleId, launchedAt);
+      throw new Error(
+        'socket reconnect failed after cold launch' + (diagnosis ? `\n${diagnosis}` : ''),
+      );
+    }
+    ctx.client = reopen;
+    const readyBy = Date.now() + 5_000;
+    while (Date.now() < readyBy) {
+      const ready = await ctx.client
+        .call('ping')
+        .then(
+          (r) => !!(r.ok && (r.data as { bootstrap?: string } | undefined)?.bootstrap === 'ready'),
+        )
+        .catch(() => false);
+      if (ready) break;
+      await sleep(100);
+    }
+    // The deep link was already delivered as the initial URL via the launch
+    // env (ENNIO_INITIAL_URL → getInitialURL), so react-navigation routes it
+    // as the container mounts. Just wait for that first paint to settle.
+    await waitForFirstPaint(ctx.client);
   }
 
   private async waitBootstrapReady(connection: EnnioConnection): Promise<void> {

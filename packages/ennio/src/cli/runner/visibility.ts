@@ -13,6 +13,23 @@ import { dismissPermissionDialogs } from './lifecycle';
 /// layer / cross-process AX proxies. Used by assertVisible/waitFor
 /// predicates (and their `notVisible` inverses).
 export async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<boolean> {
+  // Narrowing qualifiers (`childOf`, `index`) must use the SAME dedicated
+  // resolvers the tap/find path uses — otherwise visibility silently
+  // ignores them and can false-pass: assertVisible `{ id, index: 5 }`
+  // would pass on index 0, and assertNotVisible the mirror. Route through
+  // the scoped ops and report presence-of-match.
+  if (sel.childOf && sel.childOf.id && sel.id) {
+    const r = await ctx.client
+      .call('find_child_by_testid', { childTestID: sel.id, parentTestID: sel.childOf.id })
+      .catch(() => undefined);
+    return !!(r && r.ok && r.data);
+  }
+  if (sel.id && typeof sel.index === 'number') {
+    const r = await ctx.client
+      .call('find_by_testid_nth', { testID: sel.id, index: sel.index })
+      .catch(() => undefined);
+    return !!(r && r.ok && r.data);
+  }
   if (sel.id) {
     const r = await ctx.client.call('visible', { testID: sel.id });
     if (r.ok && r.data && (r.data as { visible: boolean }).visible) return true;
@@ -147,4 +164,24 @@ export async function waitUntilNotVisible(
     await sleep(POLL_MS);
   }
   throw new Error(`assertNotVisible timeout: ${JSON.stringify(sel)}`);
+}
+
+/// OR-poll: returns once ANY selector is visible. Backs Maestro's
+/// `assertVisible: { anyOf: [...] }` — the parser carries `anyOf`, but
+/// the handler used to normalize the whole object as a single selector,
+/// producing an id/text-less selector that could never match and a 15s
+/// timeout with a misleading reason.
+export async function waitUntilAnyVisible(
+  ctx: RunContext,
+  selectors: MaestroSelector[],
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const sel of selectors) {
+      if (await isVisible(ctx, sel)) return;
+    }
+    await sleep(POLL_MS);
+  }
+  throw new Error(`assertVisible anyOf timeout: ${JSON.stringify(selectors)}`);
 }

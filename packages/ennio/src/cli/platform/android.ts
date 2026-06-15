@@ -19,7 +19,7 @@ import { getActiveConnection } from '../core/active-connections';
 import { EnnioConnection } from '../core/ennio-connection';
 import { createAndroidDriver } from '../driver';
 import type { GestureDriver } from '../driver';
-import { POST_LAUNCH_SETTLE_MS, sleep } from '../runner/context';
+import { sleep } from '../runner/context';
 import type { RunContext } from '../runner/context';
 import type { ConnectTarget } from '../socket-client';
 import {
@@ -306,8 +306,43 @@ export class AndroidPlatform implements Platform {
   }
 
   async openUrl(ctx: RunContext, url: string): Promise<void> {
-    openAndroidUrl(ctx.udid, ctx.bundleId, url);
-    await sleep(POST_LAUNCH_SETTLE_MS);
+    const serial = ctx.udid;
+    // Two distinct cases, because a deep link delivered as the COLD initial
+    // intent and one delivered as onNewIntent to a running app route
+    // differently in react-navigation: the initial URL replays the full path
+    // (including the target tab/sub-route), whereas onNewIntent only routes to
+    // the screen and leaves sub-routes at their defaults. The suite's deep
+    // links always follow a stopApp, so they must go through the cold path to
+    // land on the exact route (e.g. the Contacts tab, not the default tab).
+    const agentAlive = await ctx.client
+      .call('ping')
+      .then(
+        (r) => !!(r.ok && (r.data as { bootstrap?: string } | undefined)?.bootstrap === 'ready'),
+      )
+      .catch(() => false);
+    if (waitForAppPid(serial, ctx.bundleId, 300) && agentAlive) {
+      // App already up with a live agent (an in-app openLink, e.g. auth-flow's
+      // openLink-to-profile). Navigate in place — the agent survives and the
+      // app keeps its state. Tearing it down here would drop to the launcher.
+      openAndroidUrl(serial, ctx.bundleId, url);
+      await ctx.client
+        .call('wait_react_commit', { sinceMs: 0, maxMs: 8000 })
+        .catch(() => undefined);
+      await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
+      return;
+    }
+    // Cold path: the link follows a stopApp, so the process is dead. Launch it
+    // VIA the VIEW intent so the deep link is the initial URL and the full
+    // route is replayed, then attach + reconnect. (The "lands on home" flake
+    // once blamed on this path was actually an empty ${LINK} from the
+    // runFlow.env bug — now that the link interpolates correctly, the cold
+    // launch routes deterministically.)
+    ctx.client.close();
+    const reopen = await this.establishReady(serial, ctx.bundleId, () =>
+      openAndroidUrl(serial, ctx.bundleId, url),
+    );
+    ctx.client = reopen.socket;
+    await this.waitForFirstPaint(reopen);
   }
 
   // ── helpers ────────────────────────────────────────────────────────
@@ -327,24 +362,30 @@ export class AndroidPlatform implements Platform {
    * socket. The retry loop only covers ordinary launch hiccups (the process
    * failing to appear, or a rare attach error), not a probabilistic inject.
    */
-  private async establishReady(serial: string, bundleId: string): Promise<EnnioConnection> {
+  private async establishReady(
+    serial: string,
+    bundleId: string,
+    launch: () => void = () => launchAndroidApp(serial, bundleId),
+  ): Promise<EnnioConnection> {
     let lastErr = '';
-    // Each failed inject is cheap (the socket-bind check below fails in
-    // ~ms-to-4s vs the old ~14s readiness timeout), so we can afford many
-    // tries to ride out the x86 emulator's transient bad patches — windows
-    // (~40s seen) where ptrace silently no-ops because the target VM is
-    // momentarily unresponsive under GC / system_server load. Crucially the
-    // inter-attempt backoff ESCALATES: rapid-fire relaunches add load and
-    // prolong the bad patch, so later attempts space out (up to ~6s) to both
-    // span more wall-clock and let the emulator recover. 12 attempts ×
-    // escalating backoff spans ~90s, comfortably outlasting the observed
-    // patches so the flow recovers in-place instead of needing a suite retry.
-    for (let attempt = 0; attempt < 12; attempt++) {
+    // Retry against a WALL-CLOCK BUDGET, not a fixed attempt count. Each failed
+    // inject is cheap (the socket-bind check below fails in ~ms-to-4s), so we
+    // keep retrying to ride out the x86 emulator's transient "bad patches" —
+    // windows (~40s seen) where ptrace silently no-ops because the target VM is
+    // momentarily unresponsive under GC / system_server load. The budget is the
+    // principled bound: it outlasts the observed patches and self-scales to a
+    // slower runner (where each attempt costs more, so fewer fit) instead of a
+    // hardcoded 12 fitted to one machine. The inter-attempt backoff ESCALATES —
+    // rapid-fire relaunches add load and prolong the patch, so later attempts
+    // space out (up to ~6s) to span more wall-clock and let the emulator recover.
+    const budgetMs = Number(process.env.ENNIO_INJECT_BUDGET_MS) || 90_000;
+    const injectDeadline = Date.now() + budgetMs;
+    for (let attempt = 0; Date.now() < injectDeadline; attempt++) {
       if (attempt > 0) {
         terminateAndroidApp(serial, bundleId);
         await sleep(Math.min(400 + attempt * 600, 6_000));
       }
-      launchAndroidApp(serial, bundleId);
+      launch();
       const pid = waitForAppPid(serial, bundleId, 8_000);
       if (!pid) {
         lastErr = 'app process never started';

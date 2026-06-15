@@ -440,6 +440,68 @@ public final class EnnioAgent {
                 && v.isShown() && v.getAlpha() > 0.01f;
     }
 
+    // Does the view's on-screen rect overlap the device viewport at all? A
+    // pager (material-top-tabs, tab-view) renders its OFF-screen pages with
+    // VISIBLE visibility, just translated outside the window (e.g. x=-1016),
+    // so isShown() alone can't tell the on-screen tab label from an off-screen
+    // page's identical text. find prefers in-viewport matches so a tab tap
+    // lands on the real label, not the hidden page.
+    private static boolean inViewport(View v) {
+        View root = decorView();
+        int w = root != null ? root.getWidth() : 0;
+        int h = root != null ? root.getHeight() : 0;
+        if (w == 0 || h == 0) return true; // unknown bounds — don't penalise
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        return loc[0] + v.getWidth() > 0 && loc[0] < w && loc[1] + v.getHeight() > 0 && loc[1] < h;
+    }
+
+    // The deepest VISIBLE view at a screen point, honouring z-order (later
+    // children draw on top) — where a real touch would land.
+    private static View hitTest(View root, int x, int y) {
+        if (root == null || root.getVisibility() != View.VISIBLE || root.getAlpha() < 0.01f) return null;
+        int[] loc = new int[2];
+        root.getLocationOnScreen(loc);
+        if (x < loc[0] || x >= loc[0] + root.getWidth() || y < loc[1] || y >= loc[1] + root.getHeight()) {
+            return null;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) root;
+            for (int i = g.getChildCount() - 1; i >= 0; i--) {
+                View hit = hitTest(g.getChildAt(i), x, y);
+                if (hit != null) return hit;
+            }
+        }
+        return root;
+    }
+
+    // Is the view EXPOSED at its centre — would a touch there reach it (or its
+    // own subtree) rather than a view on top? react-navigation keeps lower stack
+    // screens MOUNTED behind the foreground one, so a covered screen's duplicate
+    // label has a valid on-screen rect but is hidden under the top screen. find
+    // prefers the exposed match so a tap lands on the visible control, not its
+    // buried twin (auth-flow's two "Sign out": behind Home vs visible Chat).
+    private static boolean isExposedAt(View v) {
+        List<View> roots = rootViews();
+        if (roots.isEmpty()) return true;
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        int cx = loc[0] + v.getWidth() / 2;
+        int cy = loc[1] + v.getHeight() / 2;
+        View hit = null;
+        for (int i = roots.size() - 1; i >= 0 && hit == null; i--) {
+            hit = hitTest(roots.get(i), cx, cy);
+        }
+        if (hit == null) return false;
+        for (View c = hit; c != null; c = (c.getParent() instanceof View) ? (View) c.getParent() : null) {
+            if (c == v) return true;
+        }
+        for (View c = v; c != null; c = (c.getParent() instanceof View) ? (View) c.getParent() : null) {
+            if (c == hit) return true;
+        }
+        return false;
+    }
+
     // The view (or an ancestor) handles taps — used to prefer an actionable
     // match (a button) over a same-text label (a dialog title) in find-by-text.
     private static boolean isTappable(View v) {
@@ -464,9 +526,25 @@ public final class EnnioAgent {
 
     private static View findByTestIdOrNull(String testID, int index) {
         return runOnUi(() -> {
-            ArrayList<View> matches = new ArrayList<>();
-            walkAll(v -> { if (isShown(v) && testID.equals(testIdOf(v))) matches.add(v); });
-            return index < matches.size() ? matches.get(index) : null;
+            // Exposed matches first, then on-screen-but-covered, then
+            // off-screen — tree order within each tier. A pager renders
+            // off-screen pages VISIBLE and react-navigation keeps lower stack
+            // screens mounted behind the top one, so a buried/translated
+            // testID duplicate must not shadow the visible one. Lower tiers
+            // stay as a fallback (the CLI scrolls/reveals them).
+            ArrayList<View> exposed = new ArrayList<>();
+            ArrayList<View> covered = new ArrayList<>();
+            ArrayList<View> offScreen = new ArrayList<>();
+            walkAll(v -> {
+                if (isShown(v) && testID.equals(testIdOf(v))) {
+                    if (!inViewport(v)) offScreen.add(v);
+                    else if (isExposedAt(v)) exposed.add(v);
+                    else covered.add(v);
+                }
+            });
+            exposed.addAll(covered);
+            exposed.addAll(offScreen);
+            return index < exposed.size() ? exposed.get(index) : null;
         });
     }
 
@@ -513,36 +591,63 @@ public final class EnnioAgent {
             // dialog never dismissed. Tracking a clickable candidate separately
             // makes tapOn target the button; assertVisible still resolves via
             // the non-clickable fallback.
-            View[] exact = new View[1];
-            View[] exactClickable = new View[1];
-            View[] contains = new View[1];
-            View[] containsClickable = new View[1];
+            // Score every match and keep the best. Priority (high→low):
+            // on-screen ≫ exact > contains, and clickable breaks ties — so a
+            // visible, clickable, exact label always wins over an off-screen
+            // pager page (the material-top-tabs / tab-view bug) or a
+            // non-clickable dialog title that repeats a button's text.
+            // Explicit lexicographic precedence, NOT an additive score. The
+            // signals rank strictly: exposed ≫ on-screen ≫ exact-over-contains
+            // ≫ tappable — an exposed match always wins over a buried one, etc.
+            // The old sum (exposed 16, viewport 8, exactness 3, tappable 2)
+            // happened to encode exactly this order; packing it into a sum only
+            // works while the weights stay separated, and adding one more signal
+            // can silently invert it. Comparing field-by-field can't.
+            View[] best = new View[1];
+            final int[] bExposed = { -1 }, bViewport = { -1 }, bTappable = { -1 }, bMatch = { -1 };
             walkAll(v -> {
                 if (!isShown(v)) return;
                 String t = textOf(v);
                 if (t == null) return;
-                boolean clk = isTappable(v);
-                if (pat != null) {
-                    if (pat.matcher(t).find()) {
-                        if (contains[0] == null) contains[0] = v;
-                        if (clk && containsClickable[0] == null) containsClickable[0] = v;
-                    }
-                    return;
-                }
+                // Literal match is primary (Maestro treats text as a substring
+                // first); the compiled pattern is only a fallback. This keeps a
+                // selector whose metacharacters are actually literal — e.g.
+                // "Change position (left)", where "(left)" reads as a regex
+                // group but the on-screen text contains real parentheses —
+                // resolving by its literal text, while a genuine pattern like
+                // "users[,]? or feeds" still matches via the regex branch.
                 String lt = t.toLowerCase();
+                int matchScore;
                 if (lt.equals(needle)) {
-                    if (exact[0] == null) exact[0] = v;
-                    if (clk && exactClickable[0] == null) exactClickable[0] = v;
+                    matchScore = 4;
+                } else if (lt.contains(needle)) {
+                    matchScore = 1;
+                } else if (pat != null && pat.matcher(t).find()) {
+                    matchScore = 1;
+                } else {
+                    matchScore = -1;
                 }
-                if (lt.contains(needle)) {
-                    if (contains[0] == null) contains[0] = v;
-                    if (clk && containsClickable[0] == null) containsClickable[0] = v;
+                if (matchScore < 0) return;
+                int exposed = isExposedAt(v) ? 1 : 0;
+                int viewport = inViewport(v) ? 1 : 0;
+                int tappable = isTappable(v) ? 1 : 0;
+                // Order: exposed > viewport > matchScore (exact=4 > contains=1)
+                // > tappable. Matches the old sum's precedence exactly.
+                boolean better = best[0] == null
+                        || exposed > bExposed[0]
+                        || (exposed == bExposed[0] && viewport > bViewport[0])
+                        || (exposed == bExposed[0] && viewport == bViewport[0] && matchScore > bMatch[0])
+                        || (exposed == bExposed[0] && viewport == bViewport[0] && matchScore == bMatch[0]
+                                && tappable > bTappable[0]);
+                if (better) {
+                    best[0] = v;
+                    bExposed[0] = exposed;
+                    bViewport[0] = viewport;
+                    bTappable[0] = tappable;
+                    bMatch[0] = matchScore;
                 }
             });
-            if (exactClickable[0] != null) return exactClickable[0];
-            if (exact[0] != null) return exact[0];
-            if (containsClickable[0] != null) return containsClickable[0];
-            return contains[0];
+            return best[0];
         });
     }
 
@@ -1061,6 +1166,18 @@ public final class EnnioAgent {
             CharSequence t = ((TextView) v).getText();
             if (t != null) feed(h, t.toString());
         }
+        // Visual STATE a tap can flip without moving geometry or text: a
+        // Switch/CheckBox toggling (CompoundButton.isChecked), a segmented
+        // option or list row selecting (isSelected/isActivated), a button
+        // enabling/disabling. Without these in the hash, a toggle tap leaves
+        // the frame-hash unchanged, so the settle/confirm that watches it
+        // never sees the effect — it burns the full wait window and then
+        // spuriously re-taps (which flips the toggle back). Folding the state
+        // in makes such taps register on the first frame they take effect.
+        if (v instanceof android.widget.CompoundButton) {
+            feedInt(h, ((android.widget.CompoundButton) v).isChecked() ? 1 : 0);
+        }
+        feedInt(h, (v.isSelected() ? 1 : 0) | (v.isActivated() ? 2 : 0) | (v.isEnabled() ? 0 : 4));
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) recHash(g.getChildAt(i), h, loc);
@@ -1290,25 +1407,83 @@ public final class EnnioAgent {
         });
     }
 
-    private static JSONObject insertText(String text, String testID) {
-        return runOnUi(() -> {
-            // Target by IDENTITY when a testID is given — never trust "the
-            // focused EditText" alone, which can be a stale field mid focus
-            // hand-off (bsky login custom-server race). Fall back to the
-            // focused field, then any field.
-            View f = null;
-            if (testID != null && !testID.isEmpty())
-                f = findFirst(v -> v instanceof EditText && testID.equals(testIdOf(v)));
-            if (f == null) f = findFirst(v -> v instanceof EditText && v.isFocused());
-            if (f == null) f = findFirst(v -> v instanceof EditText);
-            if (!(f instanceof EditText)) throw new RuntimeException("no EditText focused");
-            if (!f.isFocused()) f.requestFocus();
-            EditText edit = (EditText) f;
+    // Locate the EditText insertText should target: by IDENTITY when a testID
+    // is given (never trust "the focused EditText" alone — it can be a stale
+    // field mid focus hand-off, the bsky login custom-server race), else the
+    // focused field, else any field.
+    private static EditText findInsertTarget(String testID) {
+        View f = null;
+        if (testID != null && !testID.isEmpty())
+            f = findFirst(v -> v instanceof EditText && testID.equals(testIdOf(v)));
+        if (f == null) f = findFirst(v -> v instanceof EditText && v.isFocused());
+        if (f == null) f = findFirst(v -> v instanceof EditText);
+        return f instanceof EditText ? (EditText) f : null;
+    }
+
+    // Commit `text` onto the field at the caret. Enter it through the field's
+    // InputConnection (commitText) — the same path the IME uses — so that on a
+    // CONTROLLED React Native TextInput (value={state}) onChangeText fires and
+    // the controlled value sticks. A bare edit.setText() races onChangeText: if
+    // RN re-renders before the change reaches JS state it resets the field to
+    // the stale value="" and the text vanishes. Fall back to setText only when
+    // the field yields no InputConnection.
+    private static void commitOnto(EditText edit, String text) {
+        if (!edit.isFocused()) edit.requestFocus();
+        edit.setSelection(edit.getText().length());
+        boolean committed = false;
+        try {
+            android.view.inputmethod.EditorInfo ei = new android.view.inputmethod.EditorInfo();
+            android.view.inputmethod.InputConnection ic = edit.onCreateInputConnection(ei);
+            if (ic != null) committed = ic.commitText(text, 1);
+        } catch (Throwable ignored) {
+            committed = false;
+        }
+        if (!committed) {
             CharSequence cur = edit.getText();
             edit.setText((cur == null ? "" : cur.toString()) + text);
             edit.setSelection(edit.getText().length());
-            return new JSONObject().put("ok", true);
+        }
+    }
+
+    private static JSONObject insertText(String text, String testID) throws Exception {
+        runOnUi(() -> {
+            EditText edit = findInsertTarget(testID);
+            if (edit == null) throw new RuntimeException("no EditText focused");
+            commitOnto(edit, text);
+            return Boolean.TRUE;
         });
+        // VERIFY the text actually stuck. commitText routes through onChangeText
+        // → JS state → an RN re-render that re-applies value={state}; on a slow
+        // runner that round-trip can lose the edit (the field re-renders from
+        // stale value="" before JS catches up) and the text silently vanishes —
+        // returning ok would then leave the next step asserting on input that
+        // isn't there (react-nav stack-prevent-remove: no dirty state ⇒ no
+        // "discard?" dialog). Poll the field across UI-thread cycles (so RN can
+        // re-render between checks) and re-commit if it reverted, until the text
+        // is present or the budget elapses. Empty `text` has nothing to verify.
+        if (text == null || text.isEmpty()) return new JSONObject().put("ok", true);
+        long deadline = System.currentTimeMillis() + 2500;
+        while (System.currentTimeMillis() < deadline) {
+            Boolean present = runOnUi(() -> {
+                EditText edit = findInsertTarget(testID);
+                if (edit == null) return Boolean.FALSE;
+                CharSequence cur = edit.getText();
+                return cur != null && cur.toString().contains(text);
+            });
+            if (Boolean.TRUE.equals(present)) return new JSONObject().put("ok", true);
+            // Field lost the edit (or hasn't applied it yet) — re-commit and let
+            // the UI thread turn over before re-checking.
+            runOnUi(() -> {
+                EditText edit = findInsertTarget(testID);
+                if (edit != null && (edit.getText() == null || !edit.getText().toString().contains(text)))
+                    commitOnto(edit, text);
+                return Boolean.TRUE;
+            });
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+        }
+        // Best effort: report ok so a field that legitimately transforms the
+        // text (masking, normalisation) doesn't hard-fail the step.
+        return new JSONObject().put("ok", true);
     }
 
     // The CLI sends USB-HID usage codes (the iOS dylib's convention).

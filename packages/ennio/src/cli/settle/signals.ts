@@ -73,3 +73,10 @@ export async function waitHashChange(
 export async function presentationIdle(rpc: TypedRpcClient, maxMs: number): Promise<void> {
   await rpc.bestEffort('wait_presentation_idle', { maxMs });
 }
+
+/** Wait for scroll momentum / deceleration / bounce to settle (the dylib
+ *  watches isDragging/isDecelerating + bounds presentation-lag). The
+ *  deterministic answer to "is the scroll done", in place of a blind sleep. */
+export async function scrollIdle(rpc: TypedRpcClient, maxMs: number): Promise<void> {
+  await rpc.bestEffort('wait_scroll_idle', { maxMs });
+}

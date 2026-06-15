@@ -204,26 +204,26 @@ jobs:
           mkdir -p /tmp/ennio-logs
           FLAGS="$ENNIO_FAST_FLAG $ENNIO_NOANIM_FLAG $ENNIO_REUSE_FLAG"
           echo "mode:${FLAGS:- hid}"
-          PASS=0; FAIL=0; FAILED=""
+          PASS=0; FAIL=0; FAILED=""; CONSEC=0
           for f in example/maestro-e2e/*.yaml; do
             base=$(basename "$f")
             [[ "$base" == _* ]] && continue
             [[ "$base" == 00-* ]] && continue
+            # STRICT: one attempt, no retry. A flow that needs a retry is a
+            # real flake to fix at the source — the suite fails outright.
             if node packages/ennio/dist/cli.js test "$f" --verbose $FLAGS > "/tmp/ennio-logs/$base.log" 2>&1; then
               echo "PASS  $base"
-              PASS=$((PASS+1))
+              PASS=$((PASS+1)); CONSEC=0
             else
-              # Retry once — absorbs transient runner slowness without
-              # masking real regressions (a real bug fails twice).
-              echo "RETRY $base"
-              if node packages/ennio/dist/cli.js test "$f" --verbose $FLAGS > "/tmp/ennio-logs/$base.retry.log" 2>&1; then
-                echo "PASS  $base (retry)"
-                PASS=$((PASS+1))
-              else
-                echo "FAIL  $base"
-                tail -25 "/tmp/ennio-logs/$base.retry.log"
-                FAIL=$((FAIL+1))
-                FAILED="$FAILED $base"
+              echo "FAIL  $base"
+              tail -25 "/tmp/ennio-logs/$base.log"
+              FAIL=$((FAIL+1))
+              FAILED="$FAILED $base"
+              CONSEC=$((CONSEC+1))
+              # Fail-fast: 2 consecutive failures = systemic break, abort.
+              if [ "$CONSEC" -ge 2 ]; then
+                echo "ABORT: $CONSEC consecutive failures — bailing out"
+                break
               fi
             fi
           done

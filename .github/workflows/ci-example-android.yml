@@ -190,28 +190,28 @@ jobs:
           export ENNIO_ANDROID_INJECTOR=/tmp/ennio-android/ennio_ptrace
           NO_ANIM='${ENNIO_NO_ANIM_FLAG}'
           mkdir -p /tmp/ennio-logs
-          PASS=0; FAIL=0; FAILED=""
+          PASS=0; FAIL=0; FAILED=""; CONSEC=0
           for f in example/maestro-e2e/*.yaml; do
             base=\$(basename "\$f")
             case "\$base" in _*|00-*) continue;; esac
-            ok=0
-            for attempt in 1 2; do
-              adb logcat -c 2>/dev/null || true
-              if node packages/ennio/dist/cli.js test "\$f" --verbose \$NO_ANIM \
-                  > "/tmp/ennio-logs/\$base.\$attempt.log" 2>&1; then
-                ok=1; break
-              fi
-              echo "RETRY \$base (attempt \$attempt failed)"
+            adb logcat -c 2>/dev/null || true
+            # STRICT: one attempt, no retry. A flow that needs a retry is a real
+            # flake to fix at the source — the suite fails outright.
+            if node packages/ennio/dist/cli.js test "\$f" --verbose \$NO_ANIM \
+                > "/tmp/ennio-logs/\$base.log" 2>&1; then
+              echo "PASS  \$base"; PASS=\$((PASS+1)); CONSEC=0
+            else
+              echo "FAIL  \$base"; tail -30 "/tmp/ennio-logs/\$base.log"
               # Agent-side truth for an injection/readiness failure: did the
               # agent inject, bind its socket, or crash?
               adb logcat -d -s Ennio:V EnnioInject:V AndroidRuntime:E ActivityManager:W \
-                2>/dev/null | tail -150 > "/tmp/ennio-logs/\$base.\$attempt.logcat.txt" || true
-            done
-            if [ "\$ok" -eq 1 ]; then
-              echo "PASS  \$base"; PASS=\$((PASS+1))
-            else
-              echo "FAIL  \$base"; tail -30 "/tmp/ennio-logs/\$base.2.log"
-              FAIL=\$((FAIL+1)); FAILED="\$FAILED \$base"
+                2>/dev/null | tail -150 > "/tmp/ennio-logs/\$base.logcat.txt" || true
+              FAIL=\$((FAIL+1)); FAILED="\$FAILED \$base"; CONSEC=\$((CONSEC+1))
+              # Fail-fast: 2 consecutive failures = systemic break, abort.
+              if [ "\$CONSEC" -ge 2 ]; then
+                echo "ABORT: \$CONSEC consecutive failures — bailing out"
+                break
+              fi
             fi
           done
           echo ""

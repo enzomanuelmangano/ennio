@@ -801,6 +801,12 @@ export async function execTapOn(
       }
       if (!stillExposed) break;
       if (registered && !isLateRecogniserHost) break;
+      // A deterministic in-process tap already delivered onPress; the
+      // absence of a hash change means the handler had no immediate visible
+      // effect (e.g. a button that only starts a timer), not a missed tap.
+      // Re-firing here would double-invoke onPress. (HID/Fast can truly
+      // miss, so they still retap.)
+      if (ctx.driver.deterministicTaps) break;
       const c = { x: re.x + re.w / 2, y: re.y + re.h / 2 };
       await timedAsync(ctx, 'tap.selfHealRetap', () =>
         isTextOnlyTap
@@ -816,11 +822,13 @@ export async function execTapOn(
     // is the bulk of every successful tap's remaining cost. tap_tab and
     // the cropper-payload settle below still run (they're conditional
     // and cheap / load-bearing for their specific cases).
-    if (!registered) {
+    if (!registered && !ctx.driver.deterministicTaps) {
       // Last-resort: if the entire retap loop above never moved the
       // hash AND the target is still in the same place, the gesture
       // recogniser likely never armed (RN onPress wired late after a
       // remount, RNGH Pressable still in its initial layout pass).
+      // Skipped for a deterministic in-process driver: the MotionEvent
+      // already fired onPress, so activate_* would be a second invocation.
       // Invoke the accessibility activation handler directly — bypasses
       // the gesture chain entirely. UIView's
       // _accessibilityHandleUserTouchActivate is what VoiceOver fires

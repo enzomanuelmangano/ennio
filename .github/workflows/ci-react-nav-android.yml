@@ -1,0 +1,221 @@
+# react-navigation example e2e (Android emulator) — the upstream playground's
+# 38-flow maestro suite driven by ennio against a prebuilt Release APK.
+#
+# Same model as ci-example-android: the suite tests the RUNNER, so the app is a
+# PREBUILT fixture — a universal, unmodified release APK (Hermes bundle
+# embedded, non-debuggable so ennio drives it via ptrace) downloaded from the
+# e2e-fixtures release. CI never builds it. The react-navigation repo is cloned
+# at the pinned commit the fixture was built from, for the flows + launch.yml
+# deep-link harness.
+#
+# ptrace + a rootable AOSP emulator: ennio's "any app" injection needs
+# ptrace_scope=0, which `adb root` on the AOSP image provides. arch x86_64 so
+# the emulator runs KVM-accelerated on GitHub's Linux runners (the fixture APK
+# is universal — carries x86_64 libs).
+#
+# Security posture mirrors ci-example-android:
+#   - permissions: contents: read; actions pinned to commit SHAs
+#   - checkout persist-credentials: false; no secrets
+#   - fixture download SHA-256-verified; react-navigation cloned at a pinned SHA
+#
+# Trigger: manual — gh workflow run ci-react-nav-android.yml
+name: ci-react-nav-android
+
+on:
+  workflow_dispatch:
+    inputs:
+      no_animations:
+        description: 'Run with --disable-animations (suppress app animations for speed)'
+        type: boolean
+        default: false
+      flow_filter:
+        description: 'Run only flows whose name starts with this prefix (empty = all)'
+        type: string
+        default: ''
+  # Every PR that can affect the Android runner or the react-nav suite. src/**
+  # is the shared CLI; android/** + android-inject/** are the agent + injector.
+  # iOS-only native (ios/**) isn't listed, so it never boots an emulator.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/platform/ios.ts'
+      - '!packages/ennio/src/cli/sim.ts'
+      - 'packages/ennio/android/**'
+      - 'packages/ennio/android-inject/**'
+      - 'e2e/react-nav/**'
+      - '.github/workflows/ci-react-nav-android.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: react-nav-android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ENNIO_ABI: x86_64
+  ANDROID_API: '34'
+  NDK_VERSION: '27.1.12297006'
+  BUILD_TOOLS: '35.0.0'
+  # Prebuilt UNIVERSAL release APK (all ABIs → runs on the x86_64 emulator),
+  # non-debuggable so ennio drives it via ptrace. e2e-fixtures-v2 asset, built
+  # from react-navigation@211c1d82. Refresh: rebuild the playground release APK,
+  # re-upload, update this SHA + the pinned commit below.
+  RNNAV_APK_SHA256: a0c886a1d23309410f7a584397ccc2c7b333a7c7cf72a1a1d312d3bc6ecddbc3
+  RNNAV_APK_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/ReactNavigationExample-android-release.apk
+  # react-navigation commit the fixture was built from — flows must match.
+  RNNAV_SHA: 211c1d821efc1344a186a1a2da6dfe835e8d418a
+  RNNAV_BUNDLE_ID: org.reactnavigation.playground
+
+jobs:
+  gate:
+    name: Fast checks gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run format:check
+
+  react-nav-android:
+    name: react-navigation suite (Android emulator, ptrace inject)
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK (+ NDK, build-tools, platform)
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-${{ env.ANDROID_API }}
+            build-tools;${{ env.BUILD_TOOLS }}
+            ndk;${{ env.NDK_VERSION }}
+
+      - name: Cache bun
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      - name: Build agent .so + ptrace injector (x86_64)
+        run: ENNIO_ABI=x86_64 bash packages/ennio/android-inject/scripts/build-android.sh
+
+      - name: Clone react-navigation (pinned)
+        run: |
+          set -eu
+          git clone --filter=blob:none https://github.com/react-navigation/react-navigation.git /tmp/rnnav
+          git -C /tmp/rnnav checkout "$RNNAV_SHA"
+          # Relax the zero-margin test timeouts upstream ships (see ci-react-nav).
+          git -C /tmp/rnnav apply "$GITHUB_WORKSPACE/e2e/react-nav/patches/flow-timeout-margins.patch"
+
+      - name: Cache react-nav APK fixture
+        id: apk-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/rnnavapk
+          key: react-nav-apk-${{ env.RNNAV_APK_SHA256 }}
+
+      - name: Download react-nav APK fixture (cache miss)
+        if: steps.apk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -eu
+          mkdir -p /tmp/rnnavapk
+          curl -fsSL --retry 3 -o /tmp/rnnavapk/app-release.apk "$RNNAV_APK_URL"
+          echo "${RNNAV_APK_SHA256}  /tmp/rnnavapk/app-release.apk" | sha256sum -c -
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # emulator-runner runs `script` line-by-line via /bin/sh (no var
+      # persistence), so the whole suite lives in one bash script it invokes.
+      - name: Prepare suite script
+        env:
+          ENNIO_NO_ANIM_FLAG: ${{ inputs.no_animations && '--disable-animations' || '' }}
+          FLOW_FILTER: ${{ inputs.flow_filter || '' }}
+        run: |
+          cat > /tmp/run-suite-wrap.sh <<EOF
+          #!/usr/bin/env bash
+          set -u
+          adb wait-for-device
+          adb root || true
+          adb wait-for-device
+          sleep 3
+          adb install -r -g /tmp/rnnavapk/app-release.apk
+          export ENNIO_PLATFORM=android
+          export ENNIO_UDID="\$(adb get-serialno)"
+          export ENNIO_ANDROID_AGENT=/tmp/ennio-android/libennio.so
+          export ENNIO_ANDROID_INJECTOR=/tmp/ennio-android/ennio_ptrace
+          export ENNIO_CLI="$GITHUB_WORKSPACE/packages/ennio/dist/cli.js"
+          export RNNAV_DIR=/tmp/rnnav
+          export APP_ID="$RNNAV_BUNDLE_ID"
+          export APP_SCHEME='rne://'
+          export SUITE_LOG_DIR=/tmp/ennio-logs
+          export FLOW_FILTER='${FLOW_FILTER}'
+          export ENNIO_NO_ANIM_FLAG='${ENNIO_NO_ANIM_FLAG}'
+          bash "$GITHUB_WORKSPACE/e2e/react-nav/run-suite.sh"
+          EOF
+          chmod +x /tmp/run-suite-wrap.sh
+
+      - name: Run react-nav suite (boot emulator + drive)
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+        with:
+          api-level: ${{ env.ANDROID_API }}
+          arch: x86_64
+          target: default # AOSP image → adb root works (ptrace needs it)
+          profile: pixel_3a
+          ram-size: 4096M
+          heap-size: 576M
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          disable-animations: true
+          script: bash /tmp/run-suite-wrap.sh
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: react-nav-android-logs
+          path: |
+            /tmp/ennio-logs/
+            /tmp/ennio-shots/
+          retention-days: 7
+          if-no-files-found: warn

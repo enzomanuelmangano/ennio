@@ -5,7 +5,6 @@ import { join } from 'node:path';
 
 import {
   normalizeSelector,
-  toEnnioSelector,
   parseMaestroFile,
   expandFlow,
   resolveSubflowPath,
@@ -29,55 +28,6 @@ describe('normalizeSelector', () => {
 
   it('passes an id selector through unchanged', () => {
     expect(normalizeSelector({ id: 'email-input' })).toEqual({ id: 'email-input' });
-  });
-});
-
-describe('toEnnioSelector — text match mode', () => {
-  it('uses contains mode for plain text', () => {
-    expect(toEnnioSelector({ text: 'Wireless' })).toEqual({
-      text: { pattern: 'Wireless', mode: 'contains' },
-    });
-  });
-
-  it('uses regex mode when text contains metacharacters', () => {
-    for (const pattern of ['Step [0-9]', 'a|b', 'foo+', '^Start', 'end$', '(grp)']) {
-      const out = toEnnioSelector({ text: pattern });
-      expect((out.text as { mode: string }).mode).toBe('regex');
-    }
-  });
-
-  it('uses regex mode for leading/trailing .* anchors', () => {
-    expect((toEnnioSelector({ text: '.*Headphones' }).text as { mode: string }).mode).toBe('regex');
-    expect((toEnnioSelector({ text: 'Wireless.*' }).text as { mode: string }).mode).toBe('regex');
-  });
-
-  it('passes id through', () => {
-    expect(toEnnioSelector({ id: 'cart' }).id).toBe('cart');
-  });
-});
-
-describe('toEnnioSelector — spatial / hierarchical recursion', () => {
-  it('recursively converts a rightOf selector', () => {
-    const out = toEnnioSelector({ text: 'Step 2', rightOf: { id: 'step-1' } });
-    expect(out.rightOf).toEqual({ id: 'step-1' });
-    expect((out.text as { mode: string }).mode).toBe('contains');
-  });
-
-  it('maps containsDescendants over each child selector', () => {
-    const out = toEnnioSelector({ id: 'row', containsDescendants: [{ label: 'X' }, { id: 'y' }] });
-    // NB: containsDescendants is NOT normalized — label is not folded here.
-    expect(out.containsDescendants).toEqual([{}, { id: 'y' }]);
-  });
-
-  it('forwards state + dimension selectors', () => {
-    const out = toEnnioSelector({
-      id: 'a',
-      enabled: true,
-      checked: false,
-      width: 10,
-      tolerance: 2,
-    });
-    expect(out).toMatchObject({ id: 'a', enabled: true, checked: false, width: 10, tolerance: 2 });
   });
 });
 
@@ -142,6 +92,41 @@ describe('parseMaestroFile', () => {
     const flow = parseMaestroFile(p);
     expect(flow.onFlowStart).toEqual(['launchApp']);
     expect(flow.commands).toEqual([{ tapOn: 'A' }]);
+  });
+
+  // The single interpolation boundary: parse-time substitution resolves only
+  // metadata that is consumed BEFORE a runtime context exists (appId). Command
+  // bodies must keep their ${VAR} placeholders so the runtime pass — where
+  // flowEnv / runFlow.env take precedence over process.env — can resolve them.
+  // Pre-resolving a command-body var at parse time (the old behaviour) made
+  // process.env silently shadow a runFlow.env override.
+  describe('interpolation boundary', () => {
+    it('resolves ${VAR} in the metadata appId at parse time', () => {
+      process.env.ENNIO_TEST_APPID = 'org.example.app';
+      const p = write('appid.yaml', ['appId: ${ENNIO_TEST_APPID}', '---', '- back', ''].join('\n'));
+      expect(parseMaestroFile(p).appId).toBe('org.example.app');
+      delete process.env.ENNIO_TEST_APPID;
+    });
+
+    it('does NOT pre-resolve a command-body ${VAR} even when it exists in process.env', () => {
+      process.env.LINK = 'from-process';
+      const p = write('cmdvar.yaml', ['appId: com.x', '---', '- openLink: ${LINK}', ''].join('\n'));
+      const flow = parseMaestroFile(p);
+      // Placeholder survives parse → runtime flowEnv can still override it.
+      expect(flow.commands[0]).toEqual({ openLink: '${LINK}' });
+      delete process.env.LINK;
+    });
+
+    it('does NOT pre-resolve a ${VAR} inside a selector at parse time', () => {
+      process.env.TEXT = 'from-process';
+      const p = write(
+        'selvar.yaml',
+        ['appId: com.x', '---', '- assertVisible:', '    text: ${TEXT}', ''].join('\n'),
+      );
+      const flow = parseMaestroFile(p);
+      expect(flow.commands[0]).toEqual({ assertVisible: { text: '${TEXT}' } });
+      delete process.env.TEXT;
+    });
   });
 });
 

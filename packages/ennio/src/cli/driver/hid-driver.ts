@@ -58,6 +58,9 @@ async function bestEffort(
 export class HidDriver implements GestureDriver {
   readonly name = 'hid' as const;
   readonly collapsesRepeatTaps = true;
+  // An out-of-process HID tap can land off the hit-box (integer rounding,
+  // a late-armed recogniser) — the self-heal retap is the recovery.
+  readonly deterministicTaps = false;
   readonly stabilityGateGapMs = 10;
 
   async tap(udid: string, x: number, y: number, opts?: TapOptions): Promise<void> {

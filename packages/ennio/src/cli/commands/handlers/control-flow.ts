@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { normalizeSelector, parseMaestroFile } from '../../maestro-parser';
-import type { RunContext } from '../../runner/context';
+import { interpolate, type RunContext } from '../../runner/context';
 import { describeCommand, runMaestroScript } from '../../runner/index';
 import { isVisible } from '../../runner/visibility';
 
@@ -24,6 +24,7 @@ interface RunFlowCmd {
         when?: { visible?: unknown; notVisible?: unknown; platform?: string };
         commands?: MaestroCommand[];
         file?: string;
+        env?: Record<string, string>;
       };
 }
 interface RunScriptCmd {
@@ -97,12 +98,26 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
         for (const c of sub.commands) await dispatch(c);
         return;
       }
-      // File form — parse + run, restore flowPath after.
+      // File form — parse + run, restore flowPath and flowEnv after.
       if (sub.file) {
-        const subPath = resolve(dirname(ctx.flowPath), sub.file);
+        const subPath = resolve(dirname(ctx.flowPath), interpolate(sub.file, ctx));
         const subFlow = parseMaestroFile(subPath);
         const prevPath = ctx.flowPath;
+        const prevEnv = ctx.flowEnv;
+        // Per-call `runFlow.env` values may reference the PARENT's vars
+        // (e.g. env: { LINK: '${SECTION}/detail' }); resolve them against the
+        // parent context before they become the child's flowEnv.
+        const callEnv = Object.fromEntries(
+          Object.entries(sub.env ?? {}).map(([k, v]) => [k, interpolate(String(v), ctx)]),
+        );
         ctx.flowPath = subPath;
+        // The subflow's `${VAR}` interpolation resolves against flowEnv first
+        // (context.ts). Layer it lowest→highest: the parent's env, then the
+        // subflow's own `env:` defaults, then the per-call `runFlow.env`
+        // overrides — so `runFlow: { file: launch.yml, env: { LINK } }` makes
+        // `${LINK}` resolve inside launch.yml instead of falling back to an
+        // empty process.env value.
+        ctx.flowEnv = { ...prevEnv, ...subFlow.env, ...callEnv };
         const trace = !!process.env.ENNIO_PHASE_TRACE;
         try {
           for (let i = 0; i < subFlow.commands.length; i++) {
@@ -116,6 +131,7 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
           }
         } finally {
           ctx.flowPath = prevPath;
+          ctx.flowEnv = prevEnv;
         }
       }
     },

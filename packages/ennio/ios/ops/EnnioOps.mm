@@ -129,6 +129,22 @@ static UIScrollView *_Nullable findEnclosingScrollView(UIView *view) {
     return nil;
 }
 
+// Find the enclosing scroll view that actually scrolls in the swipe's AXIS.
+// A horizontal page-swipe over (say) a Contacts list must drive the PAGER, not
+// the inner vertical list — but the innermost scroll view is the list. Walk up
+// and pick the first scroll view scrollable on the requested axis (content
+// exceeds the frame there, or it pages on that axis).
+static UIScrollView *_Nullable findScrollViewForAxis(UIView *view, BOOL horizontal) {
+    for (UIView *v = view; v; v = v.superview) {
+        if (![v isKindOfClass:UIScrollView.class]) continue;
+        UIScrollView *sv = (UIScrollView *)v;
+        BOOL scrollsH = sv.contentSize.width > sv.frame.size.width + 1.0;
+        BOOL scrollsV = sv.contentSize.height > sv.frame.size.height + 1.0;
+        if ((horizontal && scrollsH) || (!horizontal && scrollsV)) return sv;
+    }
+    return nil;
+}
+
 // ─── EnnioOps ───────────────────────────────────────────────────────
 
 @implementation EnnioOps
@@ -689,6 +705,47 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
     return NO;
 }
 
++ (UIView *)firstEditableTextInput {
+    // Walk every window + presented-VC chain (sheets host content
+    // detached from the window subtree, same as EnnioFindKeyInputResponder)
+    // and collect on-screen editable text inputs. "Editable" is identity,
+    // not class: conforms to UIKeyInput AND canBecomeFirstResponder — that
+    // accepts RCTUITextField / UITextView / UISearchBarTextField and
+    // rejects disabled fields, without enumerating subclasses. Return the
+    // topmost (smallest window-Y) so a screen with several inputs focuses
+    // the first the user would, deterministically.
+    __block UIView *best = nil;
+    __block double bestY = 0;
+    void (^scan)(UIView *) = nil;
+    __block __weak void (^weakScan)(UIView *);
+    weakScan = scan = ^(UIView *v) {
+        if (v.hidden || v.alpha < 0.01) return;
+        if ([v conformsToProtocol:@protocol(UIKeyInput)] &&
+            [v canBecomeFirstResponder] && v.userInteractionEnabled &&
+            [EnnioFinder isOnScreen:v]) {
+            EnnioRect r = [EnnioFinder windowRectFor:v];
+            if (r.w > 0 && r.h > 0 && (!best || r.y < bestY)) {
+                best = v;
+                bestY = r.y;
+            }
+        }
+        for (UIView *sub in v.subviews) weakScan(sub);
+    };
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            scan(w);
+            UIViewController *vc = w.rootViewController;
+            while (vc) {
+                UIView *vcView = vc.viewIfLoaded;
+                if (vcView && !vcView.superview) scan(vcView);
+                vc = vc.presentedViewController;
+            }
+        }
+    }
+    return best;
+}
+
 + (BOOL)insertText:(NSString *)text {
     UIResponder *first = EnnioFindKeyInputResponder();
     if (!first) {
@@ -702,6 +759,12 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
 
 // ─── Swipe at points ────────────────────────────────────────────────
 
+// Sub-pixel equality: a setContentOffset to within half a point of the
+// current offset moves nothing the user would see.
+static inline BOOL offsetsEqual(CGPoint a, CGPoint b) {
+    return fabs(a.x - b.x) < 0.5 && fabs(a.y - b.y) < 0.5;
+}
+
 + (BOOL)swipeFromX:(double)x1 y:(double)y1 toX:(double)x2 y:(double)y2 durationMs:(double)durationMs {
     UIWindow *win = [EnnioBootstrap keyWindow];
     if (!win) return NO;
@@ -710,16 +773,45 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
     // setContentOffset. No UITouch synthesis tax.
     CGPoint startInWin = CGPointMake(x1, y1);
     UIView *hit = [win hitTest:startInWin withEvent:nil];
-    UIScrollView *sv = hit ? findEnclosingScrollView(hit) : nil;
-    // Pagers need a REAL gesture: a paging scroll view's page state is
-    // driven by drag/momentum delegate events (RN pagers advance on
-    // onMomentumScrollEnd), which setContentOffset:animated:NO never
-    // emits — the offset moves but the JS page index stays stale (bsky
-    // onboarding: swipe LEFT "advanced" the carousel visually while the
-    // pager still reported page 1, so "Complete onboarding" never
-    // mounted). Decline so the CLI falls back to a real HID drag, whose
-    // velocity-driven page snap is the semantics the pager expects.
-    if (sv && sv.isPagingEnabled) sv = nil;
+    // Pick the scroll view that scrolls in the swipe's axis — a horizontal page
+    // swipe must drive the PAGER, not an inner vertical list it happens to start
+    // over.
+    BOOL horizontalSwipe = fabs(x1 - x2) >= fabs(y1 - y2);
+    UIScrollView *sv = hit ? findScrollViewForAxis(hit, horizontalSwipe) : nil;
+    // Paging scroll view (an RN pager / material-top-tabs / UIPageViewController
+    // scroll-style): advance EXACTLY ONE page in the swipe direction, with
+    // animated:YES. A momentum HID drag is the wrong primitive here — the page
+    // delta depends on fling velocity (too slow advances zero pages, too fast
+    // skips one), so NO fixed gesture distance is deterministic. One page-width
+    // setContentOffset with animated:YES drives scrollViewDidEndScrollingAnimation,
+    // which paging scroll views commit their page index on — unlike animated:NO,
+    // which moves the offset but leaves the page stale (the old reason this
+    // declined to HID).
+    if (sv && sv.isPagingEnabled) {
+        CGFloat pageW = sv.frame.size.width;
+        CGFloat pageH = sv.frame.size.height;
+        CGFloat ddx = x1 - x2;
+        CGFloat ddy = y1 - y2;
+        CGPoint offset = sv.contentOffset;
+        if (fabs(ddx) >= fabs(ddy)) offset.x += (ddx > 0 ? pageW : -pageW);
+        else offset.y += (ddy > 0 ? pageH : -pageH);
+        CGSize content = sv.contentSize;
+        CGSize frame = sv.frame.size;
+        UIEdgeInsets ins = sv.adjustedContentInset;
+        offset.x = MAX(-ins.left, MIN(offset.x, MAX(0, content.width - frame.width + ins.right)));
+        offset.y = MAX(-ins.top, MIN(offset.y, MAX(0, content.height - frame.height + ins.bottom)));
+        // The clamped target collapses to the CURRENT offset when the picked
+        // scroll view can't advance in the swipe's direction — it's at the
+        // edge already, or findScrollViewForAxis landed on the wrong view (an
+        // inner vertical list under a horizontal carousel that isn't itself a
+        // UIScrollView). Reporting YES there is the lie the CLI used to trust:
+        // it returns having "handled" the swipe while nothing moved (bsky
+        // onboarding's feed carousel stuck on dot 1/3). Report NO so the CLI
+        // falls back to a real HID gesture that can drive the actual pager.
+        if (offsetsEqual(offset, sv.contentOffset)) return NO;
+        [sv setContentOffset:offset animated:YES];
+        return YES;
+    }
     if (sv) {
         CGFloat dx = x1 - x2;
         CGFloat dy = y1 - y2;
@@ -733,6 +825,8 @@ static UIResponder *EnnioFindKeyInputResponder(void) {
         CGFloat maxY = MAX(0, content.height - frame.height + ins.bottom);
         offset.x = MAX(-ins.left, MIN(offset.x, maxX));
         offset.y = MAX(-ins.top, MIN(offset.y, maxY));
+        // Same edge/wrong-view guard as the paging path above.
+        if (offsetsEqual(offset, sv.contentOffset)) return NO;
         [sv setContentOffset:offset animated:NO];
         return YES;
     }

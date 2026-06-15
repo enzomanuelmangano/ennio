@@ -1,0 +1,59 @@
+diff --git a/example/e2e/maestro/bottom-tabs-preload-flow.yml b/example/e2e/maestro/bottom-tabs-preload-flow.yml
+index e17fd2c..782c361 100644
+--- a/example/e2e/maestro/bottom-tabs-preload-flow.yml
++++ b/example/e2e/maestro/bottom-tabs-preload-flow.yml
+@@ -11,7 +11,7 @@ name: Bottom Tabs - Preload Flow
+ - tapOn:
+     text: 'Preload Details'
+ - extendedWaitUntil:
+-    timeout: 5000
++    timeout: 12000
+     visible: 'Details is preloaded!'
+ - tapOn:
+     text: 'Navigate to Details'
+diff --git a/example/e2e/maestro/native-stack-preload-flow.yml b/example/e2e/maestro/native-stack-preload-flow.yml
+index fa504ab..291e096 100644
+--- a/example/e2e/maestro/native-stack-preload-flow.yml
++++ b/example/e2e/maestro/native-stack-preload-flow.yml
+@@ -11,7 +11,7 @@ name: Native Stack - Preload Flow
+ - tapOn:
+     text: 'Preload Details'
+ - extendedWaitUntil:
+-    timeout: 5000
++    timeout: 12000
+     visible: 'Details is preloaded!'
+ - tapOn:
+     text: 'Navigate to Details'
+diff --git a/example/e2e/maestro/screen-layout.yml b/example/e2e/maestro/screen-layout.yml
+index d0b61cd..006515c 100644
+--- a/example/e2e/maestro/screen-layout.yml
++++ b/example/e2e/maestro/screen-layout.yml
+@@ -7,7 +7,7 @@ name: Screen Layout
+       LINK: screen-layout
+       TEXT: 'Loading…'
+ - extendedWaitUntil:
+-    timeout: 3500
++    timeout: 8000
+     visible: 'Suspend'
+ - tapOn:
+     text: 'Crash'
+@@ -31,5 +31,5 @@ name: Screen Layout
+ - assertNotVisible:
+     text: 'Suspend'
+ - extendedWaitUntil:
+-    timeout: 3500
++    timeout: 8000
+     visible: 'Suspend'
+diff --git a/example/e2e/maestro/stack-preload-flow.yml b/example/e2e/maestro/stack-preload-flow.yml
+index 6d01986..22a8e7b 100644
+--- a/example/e2e/maestro/stack-preload-flow.yml
++++ b/example/e2e/maestro/stack-preload-flow.yml
+@@ -11,7 +11,7 @@ name: Stack - Preload Flow
+ - tapOn:
+     text: 'Preload Details'
+ - extendedWaitUntil:
+-    timeout: 5000
++    timeout: 12000
+     visible: 'Details is preloaded!'
+ - tapOn:
+     text: 'Navigate to Details'

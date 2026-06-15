@@ -66,6 +66,7 @@ export const decoders: OpDecoders = {
   find_by_text: decRect,
   find_ax_by_text: decRect,
   find_child_by_testid: decRect,
+  find_text_input: decRect,
   find_tap_target_by_testid: shape({ x: 'num', y: 'num', w: 'num', h: 'num', kind: 'str?' }),
   wait_find_by_testid: decRect,
   wait_find_by_text: decRect,
@@ -83,6 +84,7 @@ export const decoders: OpDecoders = {
   wait_react_commit: shape({ ok: 'bool', elapsedMs: 'num?' }),
   wait_hash_change: shape({ ok: 'bool', elapsedMs: 'num?' }),
   wait_presentation_idle: shape({ ok: 'bool', elapsedMs: 'num?' }),
+  wait_scroll_idle: shape({ ok: 'bool', elapsedMs: 'num?' }),
   // interaction
   activate_testid: shape({ ok: 'bool' }),
   activate_by_text: shape({ ok: 'bool' }),
@@ -93,6 +95,8 @@ export const decoders: OpDecoders = {
   scroll_to: shape({ scrolled: 'bool' }),
   tap_tab: shape({ tapped: 'bool' }),
   back: shape({ popped: 'bool' }),
+  open_url: shape({ ok: 'bool' }),
+  swipe_points: shape({ ok: 'bool' }),
   // alerts
   alert_present: shape({ present: 'bool' }),
   alert_text: shape({ text: 'str' }),

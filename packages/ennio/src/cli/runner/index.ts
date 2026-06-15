@@ -15,7 +15,7 @@ import { createContext, runInContext } from 'node:vm';
 import type { MaestroCommand } from '../maestro-parser';
 
 import type { RunContext, RunResult } from './context';
-import { recordPhase } from './context';
+import { interpolate, recordPhase } from './context';
 
 // Re-export for legacy importers.
 export type { RunContext, RunResult };
@@ -92,8 +92,13 @@ export async function runMaestroScript(
   ctx: RunContext,
   script: { file: string; env?: Record<string, string> },
 ): Promise<void> {
-  const scriptPath = resolve(dirname(ctx.flowPath), script.file);
+  const scriptPath = resolve(dirname(ctx.flowPath), interpolate(script.file, ctx));
   const src = readFileSync(scriptPath, 'utf-8');
+  // Script env values may carry ${VAR}; resolve them against the run context
+  // (flowEnv first) the same way the parse pass used to.
+  const scriptEnv = Object.fromEntries(
+    Object.entries(script.env ?? {}).map(([k, v]) => [k, interpolate(String(v), ctx)]),
+  );
   const sandbox = {
     output: ctx.outputs,
     http: {
@@ -108,7 +113,7 @@ export async function runMaestroScript(
     },
     json: (s: string) => JSON.parse(s),
     console: { log: (...a: unknown[]) => process.stderr.write(`[script] ${a.join(' ')}\n`) },
-    ...(script.env ?? {}),
+    ...scriptEnv,
   };
   const vmCtx = createContext(sandbox);
   runInContext(src, vmCtx, { filename: scriptPath, timeout: 30_000 });

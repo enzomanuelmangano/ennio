@@ -93,6 +93,14 @@ NS_ASSUME_NONNULL_BEGIN
 /// metadata into the app — Bluesky's e2eProxyHeaderInput etc.).
 + (BOOL)focusByTestID:(NSString *)testID;
 
+/// The topmost on-screen editable text input — a view conforming to
+/// UIKeyInput that can become first responder. Returned so the CLI can
+/// REAL-tap an `autoFocus` field that never received focus (autoFocus is
+/// flaky when it fires mid-push-transition): no testID and no
+/// cross-process AX needed, just the field's window rect to tap. nil
+/// when no editable input is on screen.
++ (nullable UIView *)firstEditableTextInput;
+
 /// Programmatically activate the view bearing `testID` — equivalent
 /// to a VoiceOver double-tap. For Pressables, fires the onPress
 /// action via accessibilityActivate. Used as a fallback when HID
