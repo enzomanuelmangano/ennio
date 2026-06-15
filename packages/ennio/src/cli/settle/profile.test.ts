@@ -9,10 +9,9 @@ import {
   PROFILES,
 } from './profile';
 
-// Phase 2 step 1: profiles exist and are tested, but the active default is still
-// `resilient` (byte-identical to today). These tests lock that invariant so the
-// step-2 default flip is a deliberate, visible change — and pin the maestro
-// preset's documented deltas.
+// Phase 2: the shipped default profile is `maestro`; `resilient` is opt-in via
+// ENNIO_PROFILE. These tests lock the default and pin each preset's values so a
+// future change to either is deliberate and visible.
 
 describe('tuning profiles', () => {
   describe('resilientProfile == current runtime (byte-identical anchor)', () => {
@@ -38,21 +37,21 @@ describe('tuning profiles', () => {
     });
   });
 
-  describe('resolveProfileName — step-1 default is resilient', () => {
-    it('falls back to resilient for unset / unknown values', () => {
-      expect(resolveProfileName(undefined)).toBe('resilient');
-      expect(resolveProfileName('')).toBe('resilient');
-      expect(resolveProfileName('nonsense')).toBe('resilient');
+  describe('resolveProfileName — default is maestro, resilient is opt-in', () => {
+    it('falls back to maestro for unset / unknown values', () => {
+      expect(resolveProfileName(undefined)).toBe('maestro');
+      expect(resolveProfileName('')).toBe('maestro');
+      expect(resolveProfileName('nonsense')).toBe('maestro');
     });
 
-    it('selects an explicitly named profile', () => {
+    it('selects resilient only when explicitly named', () => {
       expect(resolveProfileName('maestro')).toBe('maestro');
       expect(resolveProfileName('resilient')).toBe('resilient');
     });
 
     it('resolveProfile returns the matching preset object', () => {
-      expect(resolveProfile('maestro')).toBe(PROFILES.maestro);
-      expect(resolveProfile(undefined)).toBe(PROFILES.resilient);
+      expect(resolveProfile('resilient')).toBe(PROFILES.resilient);
+      expect(resolveProfile(undefined)).toBe(PROFILES.maestro);
     });
   });
 });

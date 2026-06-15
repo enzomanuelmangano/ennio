@@ -296,10 +296,11 @@ export function normalizeSelector(selector: MaestroSelector | string): MaestroSe
  *
  * This is the legacy metacharacter SNIFF. It is fragile by construction: it
  * cannot tell "the user meant a pattern" from "the user typed a $" — see the
- * misfire cases in maestro-parser.test.ts. It survives only as the transitional
- * default inside `textMatchMode()`; explicit `regex:`/`literal:` selector fields
- * now override it, and Phase 2 replaces the default with a per-profile choice
- * (regex-by-default under the `maestro` profile), after which this is deleted.
+ * misfire cases in maestro-parser.test.ts. It is NO LONGER the default: the
+ * `maestro` profile matches text as regex-by-default and never calls this. It
+ * survives as the implementation of the `sniff` mode, selected only by the
+ * `resilient` migration profile so existing ennio flows that relied on
+ * auto-regex keep working. Removed once `resilient` is retired.
  */
 export function isRegexText(text: string): boolean {
   return text.startsWith('.*') || text.endsWith('.*') || /[[\]{}()|\\^$+?]/.test(text);
@@ -312,16 +313,27 @@ export type TextMatchMode = 'literal' | 'regex';
  * finder/visibility layers never re-decide it per call. Precedence:
  *   1. explicit `literal: true`  -> literal   (escape hatch, wins ties)
  *   2. explicit `regex: true`    -> regex     (escape hatch)
- *   3. otherwise                 -> transitional default (the legacy sniff)
+ *   3. otherwise                 -> the active profile's `defaultMode`
  *
- * Step 3 is byte-identical to the old scattered `isRegexText(sel.text)` calls,
- * so existing flows are unaffected. Phase 2 swaps step 3 for the active tuning
- * profile's default (the `maestro` profile makes it regex-by-default,
- * whole-string anchored, per Maestro semantics) and deletes `isRegexText`.
+ * `defaultMode` comes from the run's TuningProfile (`ctx.profile.textMatchDefault`):
+ * `regex` (Maestro), `literal`, or `sniff` (resilient migration — the legacy
+ * isRegexText heuristic). Defaults to `sniff` when omitted (device-free callers /
+ * tests) so the parser-level contract is unchanged. Taken as a plain literal, not
+ * the TuningProfile type, to keep the parser below the profile module in the
+ * import graph.
+ *
+ * NOTE: whole-string anchoring under `regex` mode (Maestro anchors the full
+ * string) is applied in the native finder and lands in Phase 6; today the
+ * `regex` path is a partial match.
  */
-export function textMatchMode(sel: Pick<MaestroSelector, 'text' | 'regex' | 'literal'>): TextMatchMode {
+export function textMatchMode(
+  sel: Pick<MaestroSelector, 'text' | 'regex' | 'literal'>,
+  defaultMode: 'sniff' | 'literal' | 'regex' = 'sniff',
+): TextMatchMode {
   if (sel.literal) return 'literal';
   if (sel.regex) return 'regex';
+  if (defaultMode === 'regex') return 'regex';
+  if (defaultMode === 'literal') return 'literal';
   return sel.text && isRegexText(sel.text) ? 'regex' : 'literal';
 }
 

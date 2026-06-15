@@ -7,11 +7,12 @@
 //                   iOS-26 simulator, the legacy text-match sniff). What ennio's
 //                   own react-nav / bsky e2e suites run under.
 //
-// PHASE 2 STEP 1 (this commit) is byte-identical: the presets are defined and
-// tested, but nothing consumes them as the default yet and the active default
-// stays `resilient`. STEP 2 (under device e2e validation) threads the active
-// profile onto RunContext, points DEFAULT_WAIT_MS / POST_TAP_SETTLE_MS /
-// textMatchMode at it, flips the default to `maestro`, and deletes isRegexText.
+// The active profile is threaded onto RunContext (core/flow-executor) and read
+// by the assert/wait handlers (defaultWaitMs) and the finder/visibility layers
+// (textMatchDefault). The shipped default is `maestro`; ennio's own e2e suites
+// opt into `resilient` via ENNIO_PROFILE. id-as-regex (maestroProfile.idMatch)
+// is carried here but consumed in Phase 6 when the native finder gains regex id
+// matching; today id stays an exact compare.
 //
 // `resilientProfile` references the LIVE constants (runner/context.ts) so it can
 // never silently drift from current behavior — if a constant changes, the
@@ -77,12 +78,15 @@ export const PROFILES: Record<ProfileName, TuningProfile> = {
 /**
  * Resolve the active profile NAME from `ENNIO_PROFILE` (or an explicit arg).
  *
- * STEP 1 INVARIANT: an unset / unrecognized value resolves to `resilient`, so
- * the shipped default is byte-identical to today. Step 2 flips this fallback to
- * `maestro` once the device suites validate the new defaults.
+ * The shipped default is `maestro` (faithful Maestro semantics). `resilient` is
+ * opt-in via `ENNIO_PROFILE=resilient` — ennio's own react-nav / bsky e2e suites
+ * set it for the slow iOS-26 simulator. Any unset / unrecognized value resolves
+ * to `maestro`.
  */
-export function resolveProfileName(raw: string | undefined = process.env.ENNIO_PROFILE): ProfileName {
-  return raw === 'maestro' ? 'maestro' : 'resilient';
+export function resolveProfileName(
+  raw: string | undefined = process.env.ENNIO_PROFILE,
+): ProfileName {
+  return raw === 'resilient' ? 'resilient' : 'maestro';
 }
 
 /** Resolve the active TuningProfile. */

@@ -19,6 +19,7 @@ import type { DeviceSession, Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { RunContext } from '../runner/context';
 import { describeCommand } from '../runner/index';
+import { resolveProfile } from '../settle/profile';
 
 import { CommandRegistry } from './command-registry';
 import type { EnnioConnection } from './ennio-connection';
@@ -93,6 +94,7 @@ export class FlowExecutor {
       flowPath: flow.filePath,
       outputs: {},
       flowEnv: { ...(flow.env ?? {}) },
+      profile: resolveProfile(),
     };
 
     this.reporter.flowStart(flow);
