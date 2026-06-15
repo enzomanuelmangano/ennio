@@ -9,6 +9,7 @@ import {
   expandFlow,
   resolveSubflowPath,
   isRegexText,
+  textMatchMode,
 } from './maestro-parser';
 
 describe('normalizeSelector', () => {
@@ -215,5 +216,42 @@ describe('isRegexText (current matcher sniff — Phase 1 replaces with matchMode
 
   it('MISFIRES: a literal label with a trailing question mark is wrongly flagged regex', () => {
     expect(isRegexText('Delete account?')).toBe(true); // <- bug: should be literal
+  });
+});
+
+// ---------------------------------------------------------------------------
+// textMatchMode: the single resolver the finder/visibility layers use. Phase 1
+// routes every text match through this so the mode is decided ONCE, and adds
+// explicit `regex:`/`literal:` escape hatches over the legacy sniff.
+//
+// Maps to matrix.json rows: selector.text.* and the Phase-1 escape hatch.
+// ---------------------------------------------------------------------------
+describe('textMatchMode', () => {
+  it('honors an explicit literal escape hatch even for metachar content', () => {
+    // The misfire cases above become correct once the author opts in.
+    expect(textMatchMode({ text: 'Price: $5 (USD)', literal: true })).toBe('literal');
+    expect(textMatchMode({ text: 'Change position (left)', literal: true })).toBe('literal');
+  });
+
+  it('honors an explicit regex escape hatch for plain text', () => {
+    expect(textMatchMode({ text: 'Settings', regex: true })).toBe('regex');
+  });
+
+  it('literal wins when both flags are set (conservative tie-break)', () => {
+    expect(textMatchMode({ text: 'x', regex: true, literal: true })).toBe('literal');
+  });
+
+  it('transitional default is byte-identical to the legacy sniff', () => {
+    // No explicit flag => same decision the scattered isRegexText() calls made,
+    // so existing flows are unaffected until Phase 2 flips the profile default.
+    for (const t of ['Sign In', 'Home', '3', '.*Settings.*', 'users[,]? or feeds', 'Price: $5']) {
+      const expected = isRegexText(t) ? 'regex' : 'literal';
+      expect(textMatchMode({ text: t })).toBe(expected);
+    }
+  });
+
+  it('defaults to literal for an empty/absent text', () => {
+    expect(textMatchMode({})).toBe('literal');
+    expect(textMatchMode({ text: '' })).toBe('literal');
   });
 });

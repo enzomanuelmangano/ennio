@@ -24,10 +24,10 @@ run under both tuning profiles × both platforms.
 
 ennio ships two profiles (see `packages/ennio/src/cli/settle/profile.ts`, Phase 2):
 
-| Profile | Intent | `assertVisible` default wait | Post-tap settle |
-| --- | --- | --- | --- |
-| `maestro` (default) | Faithful Maestro drop-in | 7000 ms | Maestro-equivalent |
-| `resilient` (opt-in) | Empirically tuned for slow iOS-26 sim / CI | 15000 ms | 800 ms |
+| Profile              | Intent                                     | `assertVisible` default wait | Post-tap settle    |
+| -------------------- | ------------------------------------------ | ---------------------------- | ------------------ |
+| `maestro` (default)  | Faithful Maestro drop-in                   | 7000 ms                      | Maestro-equivalent |
+| `resilient` (opt-in) | Empirically tuned for slow iOS-26 sim / CI | 15000 ms                     | 800 ms             |
 
 Select with `--profile <name>` or `ENNIO_PROFILE=<name>`. ennio's own e2e suites
 (react-nav, bsky) run under `resilient`; the conformance suite runs under both.
@@ -36,7 +36,7 @@ Select with `--profile <name>` or `ENNIO_PROFILE=<name>`. ennio's own e2e suites
 
 The largest divergence. Maestro's `text` and `id` are **whole-string regex by
 default**. ennio today does literal case-insensitive substring `contains` with a
-regex *fallback*, gated by `isRegexText()` — a sniff that inspects the string for
+regex _fallback_, gated by `isRegexText()` — a sniff that inspects the string for
 metacharacters. The sniff is unfixable in principle: `"Price: $5"`,
 `"users[,]? or feeds"`, and `"Item (new)"` all carry metacharacters as literal
 content, and no heuristic distinguishes "the user meant a pattern" from "the user
@@ -52,10 +52,10 @@ true` are explicit escape hatches; otherwise the profile default decides
 Intentional, documented differences from Maestro. Anything not listed here that
 differs is a bug. (Filled in as phases land — Phase 5 finalizes.)
 
-| Row | Difference | Why it's intentional |
-| --- | --- | --- |
-| `wait.assertVisible.default-timeout` | `resilient` profile waits 15 s vs Maestro 7 s | RN bundle execute + UIKit layout + RNGH gesture acceptance on the iOS-26 simulator takes 4–7 s; the `maestro` profile still ships 7 s for parity. |
-| `selector.text.regex-by-default-anchor` | `resilient` profile keeps substring matching during migration | Deprecation window so existing ennio flows that rely on substring don't break overnight; the `maestro` profile anchors per spec. |
+| Row                                     | Difference                                                    | Why it's intentional                                                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wait.assertVisible.default-timeout`    | `resilient` profile waits 15 s vs Maestro 7 s                 | RN bundle execute + UIKit layout + RNGH gesture acceptance on the iOS-26 simulator takes 4–7 s; the `maestro` profile still ships 7 s for parity. |
+| `selector.text.regex-by-default-anchor` | `resilient` profile keeps substring matching during migration | Deprecation window so existing ennio flows that rely on substring don't break overnight; the `maestro` profile anchors per spec.                  |
 
 _(More rows added as Phases 1–6 land; each `divergent` matrix row that survives gets
 an entry here with its justification.)_

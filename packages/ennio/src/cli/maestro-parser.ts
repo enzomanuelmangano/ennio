@@ -51,6 +51,16 @@ export interface MaestroSelector {
   /** Maestro: per-step settle budget hint. Accepted; ennio's settle is
    *  signal-driven, so this only caps, never extends. */
   waitToSettleTimeoutMs?: number;
+  /**
+   * Explicit text match-mode escape hatches (ennio extension, Phase 1).
+   * `regex: true` forces the `text` selector to be a pattern; `literal: true`
+   * forces a literal substring even when the string carries metacharacters
+   * (e.g. "Price: $5 (USD)"). When neither is set the mode is resolved by
+   * `textMatchMode()` — see there for the transitional default. Mutually
+   * exclusive; `literal` wins if both are set (the more conservative choice).
+   */
+  regex?: boolean;
+  literal?: boolean;
 }
 
 export interface MaestroCondition {
@@ -283,11 +293,36 @@ export function normalizeSelector(selector: MaestroSelector | string): MaestroSe
 /**
  * A Maestro text selector is a regex (not a literal substring) when it carries
  * regex metacharacters or explicit `.*` anchors — e.g. "users[,]? or feeds".
- * Used both to tag the native iOS selector and to flag Android find_* calls so
- * the in-app agent applies Pattern matching instead of a literal contains.
+ *
+ * This is the legacy metacharacter SNIFF. It is fragile by construction: it
+ * cannot tell "the user meant a pattern" from "the user typed a $" — see the
+ * misfire cases in maestro-parser.test.ts. It survives only as the transitional
+ * default inside `textMatchMode()`; explicit `regex:`/`literal:` selector fields
+ * now override it, and Phase 2 replaces the default with a per-profile choice
+ * (regex-by-default under the `maestro` profile), after which this is deleted.
  */
 export function isRegexText(text: string): boolean {
   return text.startsWith('.*') || text.endsWith('.*') || /[[\]{}()|\\^$+?]/.test(text);
+}
+
+export type TextMatchMode = 'literal' | 'regex';
+
+/**
+ * Resolve how a selector's `text` should be matched, in ONE place, so the
+ * finder/visibility layers never re-decide it per call. Precedence:
+ *   1. explicit `literal: true`  -> literal   (escape hatch, wins ties)
+ *   2. explicit `regex: true`    -> regex     (escape hatch)
+ *   3. otherwise                 -> transitional default (the legacy sniff)
+ *
+ * Step 3 is byte-identical to the old scattered `isRegexText(sel.text)` calls,
+ * so existing flows are unaffected. Phase 2 swaps step 3 for the active tuning
+ * profile's default (the `maestro` profile makes it regex-by-default,
+ * whole-string anchored, per Maestro semantics) and deletes `isRegexText`.
+ */
+export function textMatchMode(sel: Pick<MaestroSelector, 'text' | 'regex' | 'literal'>): TextMatchMode {
+  if (sel.literal) return 'literal';
+  if (sel.regex) return 'regex';
+  return sel.text && isRegexText(sel.text) ? 'regex' : 'literal';
 }
 
 /**

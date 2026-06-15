@@ -11,6 +11,7 @@ screen, whose stable testIDs (`counter-display`, `counter-inc-btn`, `toggle-1..5
 `../11-grammar-selectors.yaml`.
 
 Convention:
+
 - A fixture for a `status: pass` row must pass today (regression gate).
 - A fixture for a `divergent` / `fragile` row encodes the **target** Maestro
   behavior; it xfails until its `targetPhase` lands, then the row flips to `pass`.

@@ -30,7 +30,18 @@
       "deviceBacked": true,
       "fixture": "example/maestro-e2e/conformance/sel-text-literal-metachars.yaml",
       "status": "fragile",
-      "note": "The unfixable sniff. Phase 1 replaces it with explicit matchMode (literal escape hatch) so literal-with-metachars is honest.",
+      "note": "Phase 1 added an explicit `literal: true` escape hatch (textMatchMode) so this is now author-fixable; the unannotated default still sniffs until Phase 2 flips it per-profile.",
+      "targetPhase": 2
+    },
+    {
+      "id": "selector.text.literal-escape-hatch",
+      "area": "selector",
+      "case": "literal: true forces a literal substring even for metachar content",
+      "maestro": "n/a (ennio extension); the Maestro-faithful path is to escape the regex, this is the ergonomic equivalent",
+      "ennioCurrent": "textMatchMode honors explicit literal:/regex: over the sniff (Phase 1)",
+      "deviceBacked": false,
+      "fixture": "parser-test:textMatchMode",
+      "status": "pass",
       "targetPhase": 1
     },
     {

@@ -25,8 +25,14 @@ export interface RpcOps {
   // ---- discovery / geometry -------------------------------------------
   find_by_testid: { args: { testID: string }; result: Rect };
   find_by_testid_nth: { args: { testID: string; index: number }; result: Rect };
-  find_by_text: { args: { text: string; relaxed?: boolean }; result: Rect };
-  find_ax_by_text: { args: { text: string }; result: Rect };
+  // `regex` selects pattern vs literal-substring matching in the native
+  // finder (iOS g_textSelectorIsRegex, Android Pattern vs contains). It was
+  // sent by every call site but undeclared here — the seam where iOS/Android
+  // matcher divergence hid. Typed now; the CLI derives it once via
+  // textMatchMode(). Phase 6 renames the wire field to `matchMode` when the
+  // native finders are rebuilt to share one regex semantics.
+  find_by_text: { args: { text: string; relaxed?: boolean; regex?: boolean }; result: Rect };
+  find_ax_by_text: { args: { text: string; regex?: boolean }; result: Rect };
   find_child_by_testid: { args: { childTestID: string; parentTestID: string }; result: Rect };
   find_text_input: { args: Record<string, never>; result: Rect };
   find_tap_target_by_testid: {
@@ -34,7 +40,7 @@ export interface RpcOps {
     result: Rect & { kind: 'self' | 'descendant' };
   };
   wait_find_by_testid: { args: { testID: string; maxMs?: number }; result: Rect };
-  wait_find_by_text: { args: { text: string; maxMs?: number }; result: Rect };
+  wait_find_by_text: { args: { text: string; maxMs?: number; regex?: boolean }; result: Rect };
   get_text: { args: { testID?: string; text?: string }; result: { text: string } };
 
   // ---- visibility / exposure ------------------------------------------
