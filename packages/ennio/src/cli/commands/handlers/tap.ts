@@ -88,24 +88,32 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         !!nextCmd &&
         typeof nextCmd === 'object' &&
         ('inputText' in nextCmd || 'eraseText' in nextCmd || 'clearText' in nextCmd);
-      // After inputText, a tap onto a NON-input target (e.g. a "Done" button)
-      // may need the keyboard dismissed first — and dismissing mid-rise races
-      // the keyboard, which can finish rising and swallow the tap (the custom-
-      // server "Done" flake). So when the next tap is NOT another field edit,
-      // let the keyboard finish docking before execTapOn's clearKeyboardOver-
-      // Target makes its geometry/type-aware hide decision.
+      // After inputText, a tap onto a NON-input target (a "Continue"/"Done"
+      // button) must DISMISS the keyboard first: RN's keyboardShouldPersistTaps
+      // makes the first tap on a non-input view only close the keyboard, so the
+      // button's onPress never fires and the step stalls until a retry (the
+      // checkout next-btn / custom-server "Done" cases). Wait for the keyboard
+      // to finish docking — probing mid-rise reads a not-yet-docked frame and
+      // the tap fires through a still-covering keyboard — then hide it.
       //
-      // When the next command DOES edit a field, we never hide (the focus_testid
-      // shortcut just moves first responder, keyboard stays) — so skip this wait
-      // entirely. It was costing ~700ms PER FIELD: insert_text doesn't raise the
-      // keyboard, so the poll never saw a visible frame and ran its full budget
-      // on every form field. That was the dominant remaining cost of form flows.
+      // Gate on !nextEditsField: when the NEXT command edits a field, the tap is
+      // just moving focus to another input (focus_testid keeps the keyboard up),
+      // so skip the dismiss entirely. That stops the keyboard being churned
+      // (hidden + re-raised) between every field of a form — the dominant cost of
+      // multi-field flows — while still dismissing before a real button tap.
       if (ctx.lastWasTextInput && !nextEditsField) {
         const upDeadline = Date.now() + 700;
         while (Date.now() < upDeadline) {
           const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
           if ((kr?.data as { visible?: boolean } | undefined)?.visible) break;
           await sleep(30);
+        }
+        await ctx.client.call('hide_keyboard').catch(() => undefined);
+        const kbDeadline = Date.now() + 1200;
+        while (Date.now() < kbDeadline) {
+          const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
+          if (!(kr?.data as { visible?: boolean } | undefined)?.visible) break;
+          await sleep(50);
         }
       }
       ctx.lastWasTextInput = false;

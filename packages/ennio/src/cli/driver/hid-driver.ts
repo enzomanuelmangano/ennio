@@ -200,13 +200,12 @@ export class HidDriver implements GestureDriver {
           bestEffort(client, 'wait_react_commit', { sinceMs: reactSinceMs, maxMs: 2500 }),
         );
       }
-      // Final quiescence confirm. When hashAnimLoop already detected a clean
-      // commit (hash changed + animation stopped, and the react commit was
-      // awaited for a field edit), the UI is settled — a SHORT stable window
-      // just confirms no late re-render, no need for the full 200ms tail. Only
-      // the uncertain paths (no commit detected, or a real VC transition that
-      // can deliver a late payload commit) keep the conservative window.
-      const cleanCommit = committed && transitionWaitMs <= 50;
+      // Final quiescence confirm. Keep the full stable window — trimming it
+      // dropped rapid presses on animating controls (g-reanimated's counter:
+      // a fast repeat-tap re-render hadn't committed when the next tap's settle
+      // returned, losing a press). The settle's cost is the legitimate animation
+      // wait above (hashAnimLoop), not this tail.
+      const cleanCommit = false;
       await tracedLeg('settle.finalWaitCommit', () =>
         bestEffort(client, 'wait_commit', {
           maxMs: cleanCommit ? 600 : 1500,
