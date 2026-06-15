@@ -1,14 +1,8 @@
 {
   "$schema": "./matrix.schema.json",
   "description": "Maestro conformance matrix for ennio. Each row pins one command/selector/modifier behavior against documented Maestro semantics. `status` is the CURRENT ennio behavior; `targetPhase` is the plan phase that converges it. Device-free rows are asserted by maestro-parser.test.ts; deviceBacked rows by e2e/conformance/run-suite.sh. Source of truth: docs/maestro-parity.md.",
-  "profilesUnderTest": [
-    "maestro",
-    "resilient"
-  ],
-  "platformsUnderTest": [
-    "ios",
-    "android"
-  ],
+  "profilesUnderTest": ["maestro", "resilient"],
+  "platformsUnderTest": ["ios", "android"],
   "statusLegend": {
     "pass": "ennio matches documented Maestro behavior",
     "divergent": "ennio intentionally or unintentionally differs (see note)",
