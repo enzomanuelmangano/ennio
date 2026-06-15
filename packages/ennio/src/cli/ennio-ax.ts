@@ -147,6 +147,25 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 // first time the capability is actually consulted and comes back empty,
 // so the eventual failure log carries its real cause.
 let warnedBlind = false;
+
+// Short-TTL "blind" gate. A cross-process dump that comes back empty (no
+// Simulator.app window → macOS AX tree empty) still cost ~1s to walk and
+// was always going to return nothing. In headless CI every text-selector
+// tap pays that ~1s for an AX correction that can't happen. Once a dump
+// PROVES AX is unavailable, mark blind for a short window and skip the
+// dump (axTree returns null fast) during it. Crucially this is a TTL, not
+// a permanent latch: after BLIND_TTL_MS we re-probe, so a Simulator window
+// opened mid-run recovers within a few seconds. Callers already treat a
+// null tree as "no cross-process match", so skipping is safe.
+const BLIND_TTL_MS = 4000;
+let blindUntil = 0;
+function markBlind(): void {
+  blindUntil = Date.now() + BLIND_TTL_MS;
+}
+export function axKnownBlind(): boolean {
+  return blindUntil !== 0 && Date.now() < blindUntil;
+}
+
 function warnBlindOnce(reason: string): void {
   if (warnedBlind) return;
   warnedBlind = true;
@@ -179,9 +198,14 @@ export async function axTree(udid: string, maxAgeMs = 0): Promise<AxTree | null>
     const hit = dumpCache.get(udid);
     if (hit && hit.gen === actuationGen() && Date.now() - hit.at <= maxAgeMs) return hit.tree;
   }
+  // Recently proven blind (empty dump / helper missing / dump error) — skip
+  // the ~1s cross-process walk that would only come back empty again. Re-probes
+  // automatically once BLIND_TTL_MS elapses (no permanent latch).
+  if (axKnownBlind()) return null;
   const helper = findHelper();
   if (!helper) {
     warnBlindOnce('ennioax helper binary not found');
+    markBlind();
     return null;
   }
   let h = axHelpers.get(udid);
@@ -199,10 +223,12 @@ export async function axTree(udid: string, maxAgeMs = 0): Promise<AxTree | null>
     if (data.error) {
       trace(`ax: ${data.error}`);
       warnBlindOnce(data.error);
+      markBlind();
       return null;
     }
     if (!data.elements?.length) {
       warnBlindOnce('Simulator window not visible or Accessibility trust missing');
+      markBlind();
       dumpCache.set(udid, { at: Date.now(), gen: genAtDump, tree: data });
       return data;
     }
