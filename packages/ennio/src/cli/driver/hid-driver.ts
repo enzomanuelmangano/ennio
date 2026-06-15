@@ -233,7 +233,15 @@ export class HidDriver implements GestureDriver {
   }
 
   async settleAfterSwipe(client: EnnioSocketClient, _outcome?: SwipeOutcome): Promise<void> {
-    if (SWIPE_SETTLE_PAUSE_MS > 0) await sleep(SWIPE_SETTLE_PAUSE_MS);
+    // Wait for scroll MOMENTUM to actually stop on the dylib's deterministic
+    // scroll-idle signal, not a blind fixed pause — returns the instant the
+    // list quiesces (smooth, no fixed jank) instead of always burning 500ms.
+    // The env override stays as an escape hatch but defaults to the signal.
+    if (SWIPE_SETTLE_PAUSE_MS > 0 && process.env.ENNIO_SWIPE_SETTLE_MS !== undefined) {
+      await sleep(SWIPE_SETTLE_PAUSE_MS);
+    } else {
+      await bestEffort(client, 'wait_scroll_idle', { maxMs: 1000 });
+    }
     await bestEffort(client, 'wait_commit', {
       maxMs: SWIPE_SETTLE_MAX_MS,
       stableMs: SWIPE_SETTLE_STABLE_MS,
@@ -252,12 +260,17 @@ export class HidDriver implements GestureDriver {
   }
 
   async settleScrollFound(client: EnnioSocketClient, _noMomentum?: boolean): Promise<void> {
-    await sleep(600);
+    // Target is in view — let residual scroll momentum stop on the
+    // deterministic scroll-idle signal (returns immediately when the list is
+    // already still, e.g. a nudge with no fling) instead of a blind 600ms, then
+    // confirm the commit. The follow-up tap carries its own settle + exposure
+    // self-heal, so this only needs the list to stop moving.
+    await bestEffort(client, 'wait_scroll_idle', { maxMs: 1200 });
     await bestEffort(client, 'wait_commit', { maxMs: 2000, stableMs: 300 });
   }
 
   async settleAfterNudge(client: EnnioSocketClient, _outcome?: SwipeOutcome): Promise<void> {
-    await sleep(500);
+    await bestEffort(client, 'wait_scroll_idle', { maxMs: 1000 });
     await bestEffort(client, 'wait_commit', { maxMs: 1500, stableMs: 200 });
   }
 
