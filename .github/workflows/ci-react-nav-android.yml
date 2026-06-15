@@ -140,6 +140,8 @@ jobs:
           set -eu
           git clone --filter=blob:none https://github.com/react-navigation/react-navigation.git /tmp/rnnav
           git -C /tmp/rnnav checkout "$RNNAV_SHA"
+          # Relax the zero-margin test timeouts upstream ships (see ci-react-nav).
+          git -C /tmp/rnnav apply "$GITHUB_WORKSPACE/e2e/react-nav/patches/flow-timeout-margins.patch"
 
       - name: Cache react-nav APK fixture
         id: apk-cache

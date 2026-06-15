@@ -133,6 +133,11 @@ jobs:
           set -euo pipefail
           git clone --filter=blob:none https://github.com/react-navigation/react-navigation.git /tmp/rnnav
           git -C /tmp/rnnav checkout "$RNNAV_SHA"
+          # Relax the zero-margin test timeouts upstream ships (a 5000ms wait
+          # for a 5000ms app preload timer, 3500ms for a 3000ms suspend timer)
+          # — a test-only flake, no app behaviour changed. Fails loud if the
+          # pinned flows drift (a signal to refresh the fixture).
+          git -C /tmp/rnnav apply "$GITHUB_WORKSPACE/e2e/react-nav/patches/flow-timeout-margins.patch"
 
       - name: Cache react-nav app fixture
         id: app-cache
