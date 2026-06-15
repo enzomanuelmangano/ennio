@@ -115,6 +115,23 @@ export function registerTapHandlers(registry: CommandRegistry): void {
           if (!(kr?.data as { visible?: boolean } | undefined)?.visible) break;
           await sleep(50);
         }
+        // The keyboard is gone, but on a KeyboardAvoidingView / auto-scrolling
+        // form the content reflows AFTER dismissal — the button we're about to
+        // tap slides to a new Y over the dismiss animation. Tapping now resolves
+        // a mid-flight rect and misses (the g-keyboard / checkout next-btn
+        // stall: the tap "succeeds" on empty space, onPress never fires, the
+        // assert then burns its full wait before a re-fire recovers). Wait for
+        // the reflow ANIMATION to actually end — frame-hash stability alone can
+        // read quiet between spring frames — then a brief commit, so execTapOn
+        // below resolves the button's final position.
+        const reflowDeadline = Date.now() + 800;
+        while (Date.now() < reflowDeadline) {
+          const r = await ctx.client.call('animations_active').catch(() => undefined);
+          const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
+          if (!active) break;
+          await sleep(20);
+        }
+        await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 120 }).catch(() => undefined);
       }
       ctx.lastWasTextInput = false;
       if (!isRepeatTap) {

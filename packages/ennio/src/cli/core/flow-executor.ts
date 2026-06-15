@@ -17,6 +17,7 @@ import type { GestureDriver } from '../driver';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
 import { extractModifiers } from '../maestro-parser';
 import { evaluateCondition } from '../runner/conditions';
+import { captureHash } from '../runner/find';
 import type { DeviceSession, Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { RunContext } from '../runner/context';
@@ -109,6 +110,49 @@ export class FlowExecutor {
         this.registry.dispatch(normalizeBareString(c), buildDctx(undefined)),
     });
 
+    // A visibility assert right after a tap, with a fast recovery for the
+    // "eaten tap": the tap actuated but its onPress never fired (keyboard
+    // reflow moved the button, a gesture-handler button missed, a press
+    // dropped). Probe the target with a SHORT budget; if it appears, done (the
+    // common path, no penalty). If it misses AND the screen hasn't changed
+    // since the tap settled, the tap was eaten — re-fire it once, then assert
+    // the full budget. If the screen IS changing, it's a legit slow transition:
+    // assert the full budget WITHOUT re-firing (re-firing a tap that worked
+    // would double-act — over-count a counter, double-navigate). Caps the
+    // eaten-tap stall at ~1.5s instead of the full assert timeout the outer
+    // catch's re-fire used to pay, with the frame-quiet gate keeping
+    // non-idempotent taps safe.
+    const dispatchAssertAfterTap = async (
+      cmd: MaestroCommand,
+      nextCmd: MaestroCommand | undefined,
+      lastTapCmd: MaestroCommand,
+      stepIdx: number,
+    ): Promise<void> => {
+      const probe = withProbeTimeout(cmd, EATEN_TAP_PROBE_MS);
+      if (!probe) {
+        await this.registry.dispatch(cmd, buildDctx(nextCmd));
+        return;
+      }
+      const preHash = await captureHash(ctx).catch(() => '');
+      try {
+        await this.registry.dispatch(probe, buildDctx(nextCmd));
+        return; // target appeared within the probe — fast path
+      } catch (e) {
+        if (!FIND_MISS_RE.test(e instanceof Error ? e.message : String(e))) throw e;
+      }
+      const postHash = await captureHash(ctx).catch(() => '');
+      const quiet = preHash !== '' && postHash === preHash;
+      if (quiet) {
+        this.reporter.stepRetry?.(
+          stepIdx + 1,
+          `re-firing previous tap (${describeCommand(lastTapCmd)})`,
+        );
+        await this.registry.dispatch(lastTapCmd, buildDctx(cmd));
+        await sleep(150);
+      }
+      await this.registry.dispatch(cmd, buildDctx(nextCmd));
+    };
+
     // onFlowStart hook — failures abort the flow before the main loop.
     if (flow.onFlowStart) {
       for (const rawHookCmd of flow.onFlowStart) {
@@ -159,7 +203,11 @@ export class FlowExecutor {
       this.reporter.stepStart?.(i + 1, cmd);
 
       try {
-        await this.registry.dispatch(cmd, buildDctx(nextCmd));
+        if (lastTapCmd && cmdIsVisibilityAssert(cmd)) {
+          await dispatchAssertAfterTap(cmd, nextCmd, lastTapCmd, i);
+        } else {
+          await this.registry.dispatch(cmd, buildDctx(nextCmd));
+        }
 
         // Handle collapsed double-tap: runCommand can mark the next
         // command consumed (two same-target taps → one doubleTap).
@@ -304,6 +352,32 @@ function cmdIsFindable(cmd: MaestroCommand): boolean {
     cmd !== null &&
     ('tapOn' in cmd || 'assertVisible' in cmd || 'waitFor' in cmd)
   );
+}
+
+// A find-miss error from a visibility wait — the signal the previous tap may
+// not have landed. Kept identical to the string the outer catch matches.
+const FIND_MISS_RE = /element not found|assertVisible\/waitFor timeout/i;
+
+// Short budget for the eaten-tap probe (see dispatchAssertAfterTap). A real
+// onPress lands its target well inside this; overrun means the tap was likely
+// eaten or the screen is mid-transition. Tunable for slow runners.
+const EATEN_TAP_PROBE_MS = Number(process.env.ENNIO_EATEN_PROBE_MS) || 1200;
+
+function cmdIsVisibilityAssert(cmd: MaestroCommand): boolean {
+  return typeof cmd === 'object' && cmd !== null && ('assertVisible' in cmd || 'waitFor' in cmd);
+}
+
+// Clone an assertVisible/waitFor with its wait clamped to `ms` for the fast
+// probe. Bare-string specs (no object to carry a timeout) return null — those
+// fall back to a normal full-budget dispatch.
+function withProbeTimeout(cmd: MaestroCommand, ms: number): MaestroCommand | null {
+  const key = 'assertVisible' in (cmd as object) ? 'assertVisible' : 'waitFor';
+  const spec = (cmd as Record<string, unknown>)[key];
+  if (typeof spec !== 'object' || spec === null) return null;
+  const cur = (spec as { timeout?: number }).timeout;
+  return {
+    [key]: { ...(spec as object), timeout: cur ? Math.min(cur, ms) : ms },
+  } as unknown as MaestroCommand;
 }
 
 function sleep(ms: number): Promise<void> {
