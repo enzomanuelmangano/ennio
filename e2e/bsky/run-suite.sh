@@ -14,9 +14,6 @@
 #   ENNIO_CLI         path to ennio dist/cli.js
 set -u
 
-# ennio's own e2e run under the resilient profile (15 s waits + legacy text
-# sniff) for the slow iOS-26 simulator. Conformance runs under both profiles.
-export ENNIO_PROFILE="${ENNIO_PROFILE:-resilient}"
 cd "$BLUESKY_DIR"
 LOGD=${SUITE_LOG_DIR:-/tmp/bsky-e2e-logs}
 rm -rf "$LOGD"; mkdir -p "$LOGD"
