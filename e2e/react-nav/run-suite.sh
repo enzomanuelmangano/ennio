@@ -1,17 +1,24 @@
 #!/bin/bash
 # react-navigation example e2e suite through ennio.
 #
-# Drives the upstream react-navigation playground's 38-flow maestro suite
+# Drives the upstream react-navigation playground's maestro suite
 # (example/e2e/maestro/*.yml) against a PREBUILT release fixture — the same
 # binary on every run, downloaded from the e2e-fixtures release, never built
 # in CI. The flows live in the cloned react-navigation repo (pinned commit);
-# each carries a deep-link target in its `LINK:`/`TEXT:` runFlow env that
-# launch.yml turns into an `openLink ${APP_SCHEME}${LINK}` + wait-for `${TEXT}`.
+# each `runFlow`s the shared launch.yml, which `stopApp`s then deep-links via
+# `openLink ${APP_SCHEME}${LINK}` and waits for `${TEXT}` — LINK/TEXT come
+# from each flow's own `runFlow.env` block (per-flow scoped, not process env).
 #
-# A fresh CLI process per flow (the app is force-stopped between flows so each
-# starts from the deep-link cold path, matching how the suite runs locally).
-# STRICT: one attempt per flow, no retry — a flow that needs a second try is a
-# real flake to fix at the source.
+# SINGLE-DAEMON model: ONE ennio process drives the WHOLE suite, not a fresh
+# node per flow. launch.yml's per-flow stopApp + cold deep-link keeps every
+# flow's state isolated regardless, so what the one-process model drops is the
+# pure per-flow overhead — node/CLI cold-start, the redundant shell-level
+# force-stop, the connect probe (~4.5s/flow measured on iOS 18.2). This is how
+# `maestro test <dir>` and on-device runners drive the same suite, and is why
+# they outrun a node-per-flow loop.
+#
+# STRICT: --fail-fast — one attempt per flow, abort on the first failure. A
+# flow that needs a second try is a real flake to fix at the source.
 #
 # Required env:
 #   ENNIO_CLI        path to ennio dist/cli.js
@@ -27,14 +34,6 @@ FLOWS_DIR="$RNNAV_DIR/example/e2e/maestro"
 LOGD=${SUITE_LOG_DIR:-/tmp/rnnav-e2e-logs}
 rm -rf "$LOGD"; mkdir -p "$LOGD"
 
-# Per-flow hard cap, portable: GNU `timeout` ships on the Linux (Android)
-# runner; macOS (iOS runner) has it only as `gtimeout` with coreutils, and may
-# have neither — fall back to running unguarded (each ennio step is already
-# bounded by its own wait budget, and the CI job has a timeout-minutes cap).
-if command -v timeout >/dev/null 2>&1; then TIMEOUT="timeout 180"
-elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT="gtimeout 180"
-else TIMEOUT=""; fi
-
 if [ "$ENNIO_PLATFORM" = "android" ]; then
   PLATFORM_FLAG="--android"
   stop_app() { adb -s "$ENNIO_UDID" shell am force-stop "$APP_ID" >/dev/null 2>&1; }
@@ -45,38 +44,35 @@ else
   shot() { xcrun simctl io "$ENNIO_UDID" screenshot "$1" >/dev/null 2>&1 || true; }
 fi
 
-run_flow() { # $1 = flow file, $2 = LINK, $3 = TEXT, $4 = log path
-  LINK="$2" TEXT="$3" $TIMEOUT node "$ENNIO_CLI" test "$1" $PLATFORM_FLAG ${ENNIO_NO_ANIM_FLAG:-} > "$4" 2>&1
-}
-
-PASS=0; FAIL=0; FAILED=""; CONSEC=0
-echo "=== react-nav suite ($ENNIO_PLATFORM) $(date +%T) ==="
-SUITE_T0=$(date +%s)
+# The flow list the one daemon runs: every *.yml in the maestro dir, in sorted
+# order. launch.yml lives one level up (example/e2e/) so the glob never picks
+# it up. FLOW_FILTER keeps only flows whose basename starts with the prefix
+# (iterate on a subset without paying for the whole suite).
+FILES=()
 for fp in "$FLOWS_DIR"/*.yml; do
   f=$(basename "$fp" .yml)
-  # Optional prefix filter (FLOW_FILTER=stack) for iterating on a subset.
   if [ -n "${FLOW_FILTER:-}" ]; then case "$f" in ${FLOW_FILTER}*) ;; *) continue;; esac; fi
-  L=$(grep -m1 'LINK:' "$fp" | sed -E "s/.*LINK:[[:space:]]*//;s/[\"']//g;s/[[:space:]]*$//")
-  T=$(grep -m1 'TEXT:' "$fp" | sed -E "s/.*TEXT:[[:space:]]*//;s/[\"']//g;s/[[:space:]]*$//")
-  stop_app
-  # STRICT: one attempt, no retry. A flow that needs a second try is a real
-  # flake to fix at the source, not to paper over — the suite fails outright.
-  if run_flow "$fp" "$L" "$T" "$LOGD/$f.log"; then
-    echo "PASS  $f  $(grep -o 'total .*' "$LOGD/$f.log" | head -1)"
-    PASS=$((PASS+1)); CONSEC=0
-  else
-    shot "$LOGD/$f.fail.png"
-    echo "FAIL  $f"; FAIL=$((FAIL+1)); FAILED="$FAILED $f"; CONSEC=$((CONSEC+1))
-    # Fail-fast: 2 consecutive failures means the run is systemically broken
-    # (app not launching, injection dead) — abort instead of burning the whole
-    # suite's wall-clock to report the inevitable.
-    if [ "$CONSEC" -ge 2 ]; then
-      echo "ABORT: $CONSEC consecutive failures — bailing out"
-      break
-    fi
-  fi
+  FILES+=("$fp")
 done
+if [ "${#FILES[@]}" -eq 0 ]; then
+  echo "=== react-nav suite ($ENNIO_PLATFORM): no flows matched FLOW_FILTER='${FLOW_FILTER:-}' ==="
+  exit 1
+fi
+
+echo "=== react-nav suite ($ENNIO_PLATFORM, single-daemon) ${#FILES[@]} flows $(date +%T) ==="
+# Clean slate so the first flow's launch.yml cold-launch is deterministic
+# (the remaining flows each stopApp themselves inside launch.yml).
+stop_app
+SUITE_T0=$(date +%s)
+# One process, all flows. The runner reports per-flow pass/fail + a suite
+# summary; --fail-fast stops at the first failing flow (a single failure fails
+# CI anyway, so don't burn the rest of the wall-clock).
+node "$ENNIO_CLI" test "${FILES[@]}" $PLATFORM_FLAG --fail-fast ${ENNIO_NO_ANIM_FLAG:-} 2>&1 | tee "$LOGD/suite.log"
+RC=${PIPESTATUS[0]}
 SUITE_T1=$(date +%s)
+# On failure, grab the screen — element-not-found failures produce no in-app
+# shot and the screen is the fastest "app wedged vs wrong element" signal.
+[ "$RC" -ne 0 ] && shot "$LOGD/suite.fail.png"
 echo ""
-echo "=== SUITE(react-nav/$ENNIO_PLATFORM): Pass=$PASS Fail=$FAIL wall=$((SUITE_T1-SUITE_T0))s — failed:${FAILED:- none} ==="
-[ "$FAIL" -eq 0 ]
+echo "=== SUITE(react-nav/$ENNIO_PLATFORM): rc=$RC wall=$((SUITE_T1-SUITE_T0))s ==="
+exit $RC
