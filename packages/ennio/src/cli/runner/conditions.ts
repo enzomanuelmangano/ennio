@@ -38,7 +38,15 @@ export async function evaluateCondition(ctx: RunContext, cond: MaestroCondition)
   if (cond.true != null) {
     const expr = stripExpressionWrapper(interpolate(String(cond.true), ctx));
     try {
-      const vmCtx = createContext({ output: ctx.outputs });
+      // Expose Maestro's expression globals so platform/text guards evaluate:
+      // `${maestro.platform == 'android'}` (react-nav's prevent-remove flows),
+      // `${maestro.copiedText}`, plus `output.*` from runScript. Without
+      // `maestro` in scope the reference throws and the guard reads false,
+      // silently skipping the guarded commands.
+      const vmCtx = createContext({
+        output: ctx.outputs,
+        maestro: { platform: ctx.platform.name, copiedText: ctx.copiedText ?? '' },
+      });
       if (!runInContext(expr, vmCtx, { timeout: 5000 })) return false;
     } catch {
       return false;
