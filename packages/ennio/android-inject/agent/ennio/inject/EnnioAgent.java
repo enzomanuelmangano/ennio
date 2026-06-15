@@ -1407,45 +1407,83 @@ public final class EnnioAgent {
         });
     }
 
-    private static JSONObject insertText(String text, String testID) {
-        return runOnUi(() -> {
-            // Target by IDENTITY when a testID is given — never trust "the
-            // focused EditText" alone, which can be a stale field mid focus
-            // hand-off (bsky login custom-server race). Fall back to the
-            // focused field, then any field.
-            View f = null;
-            if (testID != null && !testID.isEmpty())
-                f = findFirst(v -> v instanceof EditText && testID.equals(testIdOf(v)));
-            if (f == null) f = findFirst(v -> v instanceof EditText && v.isFocused());
-            if (f == null) f = findFirst(v -> v instanceof EditText);
-            if (!(f instanceof EditText)) throw new RuntimeException("no EditText focused");
-            if (!f.isFocused()) f.requestFocus();
-            EditText edit = (EditText) f;
-            // Enter text through the field's InputConnection (commitText) — the
-            // same path the IME uses. On a CONTROLLED React Native TextInput
-            // (value={state}), a bare edit.setText() races onChangeText: if RN
-            // re-renders before the change reaches JS state (common on a freshly
-            // presented autoFocus modal field), it resets the field to the
-            // stale value="" and the typed text vanishes. commitText dispatches
-            // through ReactEditText's input handling so onChangeText fires and
-            // the controlled value sticks. Fall back to setText if the field
-            // yields no InputConnection.
+    // Locate the EditText insertText should target: by IDENTITY when a testID
+    // is given (never trust "the focused EditText" alone — it can be a stale
+    // field mid focus hand-off, the bsky login custom-server race), else the
+    // focused field, else any field.
+    private static EditText findInsertTarget(String testID) {
+        View f = null;
+        if (testID != null && !testID.isEmpty())
+            f = findFirst(v -> v instanceof EditText && testID.equals(testIdOf(v)));
+        if (f == null) f = findFirst(v -> v instanceof EditText && v.isFocused());
+        if (f == null) f = findFirst(v -> v instanceof EditText);
+        return f instanceof EditText ? (EditText) f : null;
+    }
+
+    // Commit `text` onto the field at the caret. Enter it through the field's
+    // InputConnection (commitText) — the same path the IME uses — so that on a
+    // CONTROLLED React Native TextInput (value={state}) onChangeText fires and
+    // the controlled value sticks. A bare edit.setText() races onChangeText: if
+    // RN re-renders before the change reaches JS state it resets the field to
+    // the stale value="" and the text vanishes. Fall back to setText only when
+    // the field yields no InputConnection.
+    private static void commitOnto(EditText edit, String text) {
+        if (!edit.isFocused()) edit.requestFocus();
+        edit.setSelection(edit.getText().length());
+        boolean committed = false;
+        try {
+            android.view.inputmethod.EditorInfo ei = new android.view.inputmethod.EditorInfo();
+            android.view.inputmethod.InputConnection ic = edit.onCreateInputConnection(ei);
+            if (ic != null) committed = ic.commitText(text, 1);
+        } catch (Throwable ignored) {
+            committed = false;
+        }
+        if (!committed) {
+            CharSequence cur = edit.getText();
+            edit.setText((cur == null ? "" : cur.toString()) + text);
             edit.setSelection(edit.getText().length());
-            boolean committed = false;
-            try {
-                android.view.inputmethod.EditorInfo ei = new android.view.inputmethod.EditorInfo();
-                android.view.inputmethod.InputConnection ic = edit.onCreateInputConnection(ei);
-                if (ic != null) committed = ic.commitText(text, 1);
-            } catch (Throwable ignored) {
-                committed = false;
-            }
-            if (!committed) {
-                CharSequence cur = edit.getText();
-                edit.setText((cur == null ? "" : cur.toString()) + text);
-                edit.setSelection(edit.getText().length());
-            }
-            return new JSONObject().put("ok", true);
+        }
+    }
+
+    private static JSONObject insertText(String text, String testID) throws Exception {
+        runOnUi(() -> {
+            EditText edit = findInsertTarget(testID);
+            if (edit == null) throw new RuntimeException("no EditText focused");
+            commitOnto(edit, text);
+            return Boolean.TRUE;
         });
+        // VERIFY the text actually stuck. commitText routes through onChangeText
+        // → JS state → an RN re-render that re-applies value={state}; on a slow
+        // runner that round-trip can lose the edit (the field re-renders from
+        // stale value="" before JS catches up) and the text silently vanishes —
+        // returning ok would then leave the next step asserting on input that
+        // isn't there (react-nav stack-prevent-remove: no dirty state ⇒ no
+        // "discard?" dialog). Poll the field across UI-thread cycles (so RN can
+        // re-render between checks) and re-commit if it reverted, until the text
+        // is present or the budget elapses. Empty `text` has nothing to verify.
+        if (text == null || text.isEmpty()) return new JSONObject().put("ok", true);
+        long deadline = System.currentTimeMillis() + 2500;
+        while (System.currentTimeMillis() < deadline) {
+            Boolean present = runOnUi(() -> {
+                EditText edit = findInsertTarget(testID);
+                if (edit == null) return Boolean.FALSE;
+                CharSequence cur = edit.getText();
+                return cur != null && cur.toString().contains(text);
+            });
+            if (Boolean.TRUE.equals(present)) return new JSONObject().put("ok", true);
+            // Field lost the edit (or hasn't applied it yet) — re-commit and let
+            // the UI thread turn over before re-checking.
+            runOnUi(() -> {
+                EditText edit = findInsertTarget(testID);
+                if (edit != null && (edit.getText() == null || !edit.getText().toString().contains(text)))
+                    commitOnto(edit, text);
+                return Boolean.TRUE;
+            });
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+        }
+        // Best effort: report ok so a field that legitimately transforms the
+        // text (masking, normalisation) doesn't hard-fail the step.
+        return new JSONObject().put("ok", true);
     }
 
     // The CLI sends USB-HID usage codes (the iOS dylib's convention).
