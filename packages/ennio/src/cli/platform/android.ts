@@ -429,38 +429,67 @@ export class AndroidPlatform implements Platform {
         endAttempt({ outcome: 'dlopen-fail' });
         continue;
       }
-      // The agent's constructor (find VM → wait for Application → bind
-      // LocalServerSocket) runs after dlopen. Wait for the bind, but bail the
-      // instant the injected process DIES (crash / pid replaced) — a real
-      // failure with its own signal — instead of burning the window on a
-      // corpse. If it stays alive but never binds in the window, the ctor
-      // wedged on this cold start: relaunch into a fresh process (the
-      // load-bearing retry — keep it). A live process is the only thing worth
-      // waiting on; a dead one is relaunched immediately.
+      // Two-phase wait, gated on what the agent itself signals — so a DEAD
+      // inject is re-rolled fast while a LIVE-but-slow one is given time to bind
+      // (the old fixed 4s did neither: it relaunched healthy slow bootstraps AND
+      // burned 4s on dead injects).
+      //
+      //   Phase 1 — did the constructor run? The agent binds @ennio_up_<pid>
+      //     synchronously inside the dlopen, so it appears within ~ms of inject
+      //     returning. Absent after CTOR_WAIT_MS while the pid is alive ⇒ the
+      //     ptrace dlopen no-op'd (constructor never executed) ⇒ relaunch now.
+      //   Phase 2 — ctor ran, the agent is bootstrapping (VM → Application →
+      //     bind). Wait BOOTSTRAP_WAIT_MS for the real @ennio bind. The agent
+      //     waits for the Application event too, so a slow cold start binds here
+      //     instead of being relaunched.
+      //   Anytime — the injected pid vanishing is a real failure ⇒ relaunch now.
+      const CTOR_WAIT_MS = 3_000;
+      const BOOTSTRAP_WAIT_MS = 15_000;
       let bound = false;
-      let pidDied = false;
+      let ctorRan = false;
+      let outcome = '';
       const bindStart = Date.now();
-      const bindDeadline = bindStart + 4_000;
-      while (Date.now() < bindDeadline) {
+      const deadline = bindStart + CTOR_WAIT_MS + BOOTSTRAP_WAIT_MS;
+      while (Date.now() < deadline) {
         if (abstractSocketBound(serial, `ennio_${pid}`)) {
           bound = true;
           break;
         }
         if (appPidNow(serial, bundleId) !== pid) {
-          pidDied = true;
+          outcome = 'pid-died';
           lastErr = `injected process ${pid} died before @ennio bound (crash / pid replaced)`;
           break;
+        }
+        if (!ctorRan) {
+          if (abstractSocketBound(serial, `ennio_up_${pid}`)) {
+            ctorRan = true;
+            diag('inject', 'ctor-ran', { attempt, pid, ms: Date.now() - bindStart });
+          } else if (Date.now() - bindStart >= CTOR_WAIT_MS) {
+            outcome = 'ctor-noop';
+            lastErr = `dlopen ok but agent ctor never ran (@ennio_up_${pid} absent)`;
+            break;
+          }
         }
         await sleep(200);
       }
       if (!bound) {
+        if (!outcome) outcome = ctorRan ? 'bootstrap-wedged' : 'ctor-noop';
         if (!lastErr)
-          lastErr = 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
-        diag('inject', 'no-bind', { attempt, pid, pidDied, waitedMs: Date.now() - bindStart });
-        endAttempt({ outcome: pidDied ? 'pid-died' : 'no-bind' });
+          lastErr =
+            outcome === 'bootstrap-wedged'
+              ? `agent ctor ran but @ennio never bound within bootstrap budget (pid=${pid})`
+              : 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
+        diag('inject', 'no-bind', {
+          attempt,
+          pid,
+          ctorRan,
+          outcome,
+          waitedMs: Date.now() - bindStart,
+        });
+        endAttempt({ outcome });
         continue;
       }
-      diag('inject', 'bound', { attempt, pid, bindMs: Date.now() - bindStart });
+      diag('inject', 'bound', { attempt, pid, bindMs: Date.now() - bindStart, ctorRan });
       const target = this.refreshForward(serial, pid);
       const port = target.kind === 'tcp' ? target.port : -1;
       const conn = new EnnioConnection({ udid: serial, target });
