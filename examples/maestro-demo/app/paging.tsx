@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import { NativeSyntheticEvent, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,7 +8,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 // iOS it wraps a native UIPageViewController — the archetype this screen exists
 // to exercise. Swiping LEFT advances to the next page; only the active page's
 // text is mounted/visible, so flows can assertVisible "Page 2", "Page 3", etc.
-type PageSelectedEvent = NativeSyntheticEvent<{ position: number }>;
 
 const PAGES = [
   { label: 'Page 1', color: '#ef5350' },
@@ -20,15 +19,18 @@ const PAGES = [
 export default function PagingScreen() {
   const [page, setPage] = useState(0);
 
-  const onPageSelected = (e: PageSelectedEvent) => {
-    setPage(e.nativeEvent.position);
-  };
-
   return (
     <SafeAreaView style={styles.flex} edges={['bottom']}>
       <Stack.Screen options={{ title: 'Paging Test' }} />
 
-      <PagerView style={styles.pager} initialPage={0} onPageSelected={onPageSelected}>
+      <PagerView
+        style={styles.pager}
+        initialPage={0}
+        // Inline so the event type is inferred from PagerView's prop
+        // (DirectEventHandler) — a hand-written NativeSyntheticEvent alias
+        // doesn't match its Readonly<{position}> payload on all platforms.
+        onPageSelected={(e) => setPage(e.nativeEvent.position)}
+      >
         {PAGES.map((p, index) => (
           <View
             key={p.label}
