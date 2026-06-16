@@ -189,28 +189,22 @@ jint attach(JavaVM *vm, const char *how) {
         weAttached = true;
     }
 
-    // Wait for the Application to be constructed. We may attach as early as the
-    // zygote fork (the CLI injects the moment `pidof` returns a pid, which is
-    // well before ActivityThread.handleBindApplication runs), so
-    // currentApplication() is null at first and turns non-null on an EVENT —
-    // the app building its Application. On a loaded cold start (pm clear → full
-    // restart under a software GPU) that can take several seconds.
-    //
-    // So wait for that event rather than guessing a duration. A fixed cap here
-    // used to make the agent self-abort while the app was still coming up,
-    // leaving no socket bound; the host then relaunched + re-injected, which
-    // added load and pushed the next cold start even later — a feedback loop
-    // that burned the whole inject budget. There is no arbitrary timeout: this
-    // thread lives INSIDE the target, so the process's own lifetime is the
-    // bound. If the app lives, the Application is guaranteed to arrive; if it
-    // dies, the runtime tears this thread down with it. (Host side stops
-    // waiting the instant the pid goes away — see platform/android.ts.)
+    // We attach AFTER the app is running, so currentApplication() is normally
+    // non-null immediately. Keep a short BOUNDED poll only to cover an attach
+    // that lands a few ms before Application.onCreate returns — deterministic,
+    // not the old open-ended wait-for-runtime.
     jobject app = nullptr;
-    while (!app) {
+    for (int i = 0; i < 100 && !app; i++) {
         app = currentApplication(env);
         if (!app) usleep(50 * 1000);
     }
-    jint rc = startAgent(env, app) ? JNI_OK : JNI_ERR;
+    jint rc = JNI_OK;
+    if (!app) {
+        LOGE("currentApplication never became non-null");
+        rc = JNI_ERR;
+    } else if (!startAgent(env, app)) {
+        rc = JNI_ERR;
+    }
 
     // The agent spawns its own (attached) threads for the socket server; this
     // attach thread is done. Detach only if WE attached it.

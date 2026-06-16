@@ -151,19 +151,6 @@ export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string
   return null;
 }
 
-/** One-shot pid lookup, no polling. Returns the app's current pid or null.
- *  Used to detect the real-failure signal during an inject wait — the process
- *  we dlopen'd into dying (crash) or being replaced by a new pid — so the
- *  host can relaunch on that EVENT instead of on a guessed bind timeout. */
-export function appPidNow(serial: string, pkg: string): string | null {
-  try {
-    const pid = adb(serial, ['shell', 'pidof', pkg]).trim().split(/\s+/)[0];
-    return pid && /^\d+$/.test(pid) ? pid : null;
-  } catch {
-    return null;
-  }
-}
-
 /** The device's primary ABI (e.g. arm64-v8a, x86_64) — selects the matching
  *  prebuilt agent .so. */
 export function getDeviceAbi(serial: string): string {
