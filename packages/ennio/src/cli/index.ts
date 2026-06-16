@@ -23,6 +23,7 @@ import { runScreenshotCommand } from './commands/screenshot';
 import { runDoctorCommand } from './commands/doctor';
 import { runImproviseCommand } from './commands/improvise';
 import { runCleanCommand } from './commands/clean';
+import { runDiagCommand } from './commands/diag';
 import { runMcpCommand } from './commands/mcp';
 import { printCrashReport } from './crash-reporter';
 import { currentVersion, printUpdateNotice } from './update-check';
@@ -86,6 +87,8 @@ async function main() {
       return runImproviseCommand(positional, flags);
     case 'clean':
       return runCleanCommand(positional, flags);
+    case 'diag':
+      return runDiagCommand(positional, flags);
     case 'test':
     case 'run':
       return runTestCommand(positional, flags);

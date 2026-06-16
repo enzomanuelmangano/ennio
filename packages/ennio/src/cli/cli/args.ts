@@ -71,6 +71,9 @@ export type Flags = {
    *  running the rest. Strict CI mode — a single failure fails the suite, so
    *  there's no point burning the remaining wall-clock. */
   failFast?: boolean;
+  /** --fail-on-regression: `ennio diag compare` exits non-zero when a metric
+   *  regressed vs the baseline. Default off (compare is informational). */
+  failOnRegression?: boolean;
 };
 
 export type ParsedArgs = {
@@ -108,6 +111,7 @@ const BOOL_FLAGS = new Set([
   'disable-touches',
   'record',
   'fail-fast',
+  'fail-on-regression',
 ]);
 // kebab-case CLI names → camelCase Flags keys.
 const FLAG_KEY_ALIASES: Record<string, string> = {
@@ -120,6 +124,7 @@ const FLAG_KEY_ALIASES: Record<string, string> = {
   'show-touches': 'showTouches',
   'disable-touches': 'disableTouches',
   'fail-fast': 'failFast',
+  'fail-on-regression': 'failOnRegression',
 };
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -188,6 +193,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     'smoke',
     'improvise',
     'clean',
+    'diag',
   ]);
   let command: string | null = null;
   if (positional.length > 0 && KNOWN.has(positional[0])) {

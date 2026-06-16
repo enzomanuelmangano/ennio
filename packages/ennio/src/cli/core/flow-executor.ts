@@ -12,6 +12,7 @@
 
 import { registerAllHandlers } from '../commands/handlers';
 import { diagnoseSocketFailure } from '../crash-detector';
+import { diag } from '../diag';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
@@ -102,6 +103,7 @@ export class FlowExecutor {
 
     this.reporter.flowStart(flow);
     const flowStart = Date.now();
+    diag('flow', 'start', { name: flow.name ?? flow.filePath, file: flow.filePath });
 
     const buildDctx = (nextCmd: MaestroCommand | undefined) => ({
       ctx,
@@ -303,6 +305,16 @@ export class FlowExecutor {
           failure,
           stepTimings,
         };
+        diag('flow', 'end', {
+          name: flow.name ?? flow.filePath,
+          passed: false,
+          stepsRun: result.stepsRun,
+          stepsPassed,
+          durationMs: result.durationMs,
+          failStep: failure?.step,
+          failCommand: failure?.command,
+          failReason: failure?.reason,
+        });
         this.reporter.flowEnd(result);
         return result;
       }
@@ -317,6 +329,13 @@ export class FlowExecutor {
       durationMs: Date.now() - flowStart,
       stepTimings,
     };
+    diag('flow', 'end', {
+      name: flow.name ?? flow.filePath,
+      passed: true,
+      stepsRun: result.stepsRun,
+      stepsPassed,
+      durationMs: result.durationMs,
+    });
     this.reporter.flowEnd(result);
     return result;
   }

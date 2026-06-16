@@ -19,12 +19,16 @@ const ABSTRACT_SOCKET_NAME = 'ennio';
 function adb(
   serial: string | undefined,
   args: string[],
-  opts: { encoding?: 'utf-8' } = {},
+  opts: { encoding?: 'utf-8'; timeoutMs?: number } = {},
 ): string {
   const full = serial ? ['-s', serial, ...args] : args;
   return execFileSync('adb', full, {
     encoding: opts.encoding ?? 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
+    // A bounded wait for blocking commands (e.g. `am start -W`) so a wedged
+    // launch can't hang the whole CLI; on timeout execFileSync throws and the
+    // caller decides what to do.
+    ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
   }) as string;
 }
 
@@ -104,26 +108,47 @@ export function enableShowTouches(serial: string): void {
   }
 }
 
-/** Launch the app's default launcher activity. monkey is the most robust
- *  cross-app way to start the LAUNCHER intent without knowing the
- *  activity class name. */
+/** Launch the app's default launcher activity and WAIT for it to be displayed.
+ *
+ *  `am start -W` blocks until the launch settles (Application constructed, first
+ *  Activity displayed, process quiescent). This is the deterministic core of the
+ *  inject path: we inject into a SETTLED process, not the zygote-fork instant
+ *  `pidof` first sees. Injecting at fork was the root of the Android flake — the
+ *  agent then raced the app's cold start (Application not yet built → no bind)
+ *  AND ptrace had to attach to a process still churning through dex2oat/GC,
+ *  which silently no-op'd. Wait for the display event first and both disappear:
+ *  currentApplication() is immediately non-null and the target is calm, so the
+ *  bind is first-try deterministic (no retry loop relied upon).
+ *
+ *  Bounded so a genuinely broken launch can't hang the CLI; on timeout we
+ *  proceed anyway (the inject path's own readiness checks still cover the rare
+ *  slow-display case). monkey is the no-component fallback. */
 export function launchAndroidApp(serial: string, pkg: string): void {
   // Prefer explicit component (faster, no monkey noise); fall back to monkey.
   try {
-    adb(serial, [
-      'shell',
-      'am',
-      'start',
-      '-n',
-      `${pkg}/.MainActivity`,
-      '-a',
-      'android.intent.action.MAIN',
-    ]);
+    adb(
+      serial,
+      [
+        'shell',
+        'am',
+        'start',
+        '-W',
+        '-n',
+        `${pkg}/.MainActivity`,
+        '-a',
+        'android.intent.action.MAIN',
+      ],
+      { timeoutMs: 45_000 },
+    );
     return;
   } catch {
-    /* component name may differ — fall back */
+    /* component name may differ, or -W timed out — fall through */
   }
-  adb(serial, ['shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1']);
+  try {
+    adb(serial, ['shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1']);
+  } catch {
+    /* best effort — the inject path waits for the pid + readiness regardless */
+  }
 }
 
 /** Block the calling (synchronous) path for `ms` without busy-spinning the
@@ -336,7 +361,16 @@ export function installApk(serial: string, apkPath: string): void {
   adb(serial, ['install', '-r', '-g', apkPath]);
 }
 
-/** Open a deep link via the VIEW intent. */
+/** Open a deep link via the VIEW intent.
+ *
+ *  NOTE: deliberately NOT using `am start -W` here. -W is the right tool for the
+ *  plain launcher path (launchAndroidApp) where we just need a settled process
+ *  before injecting. The deep-link COLD path is more delicate — react-navigation
+ *  routes the initial-URL vs onNewIntent differently, and -W's "wait for the
+ *  first display" can return on the launcher/home frame BEFORE the JS deep-link
+ *  routing runs, masking a mis-route. Keep the deep-link delivery as the bare
+ *  VIEW intent the routing logic was tuned against; the inject path's own
+ *  readiness checks cover the settle. */
 export function openAndroidUrl(serial: string, pkg: string, url: string): void {
   adb(serial, ['shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url, pkg]);
 }

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { diagnoseSocketFailure, throttledAliveProbe } from '../crash-detector';
+import { diag } from '../diag';
 import { dismissSystemSheet } from '../ennio-ax';
 import { warmActuator } from '../hid';
 import { findDylib, getAppContainer, setSimLaunchEnv, terminateApp } from '../sim';
@@ -100,6 +101,10 @@ export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void
  * the relaunch path — only faster when reload is available.
  */
 export async function softResetAndReload(ctx: RunContext): Promise<void> {
+  const t0 = Date.now();
+  diag('lifecycle', 'softReset:start', { platform: 'ios', bundleId: ctx.bundleId });
+  const done = (extra: Record<string, unknown> = {}) =>
+    diag('lifecycle', 'softReset:done', { durMs: Date.now() - t0, ...extra });
   const pre = await ctx.client.call('react_commit_ts').catch(() => undefined);
   const since = Number((pre?.data as { ts?: number } | undefined)?.ts ?? 0);
   // Wipe the sandbox first (in-process — it's the app's own container),
@@ -109,6 +114,7 @@ export async function softResetAndReload(ctx: RunContext): Promise<void> {
   const ok = !!(r && r.ok && (r.data as { ok?: boolean } | undefined)?.ok);
   if (!ok) {
     // No reload symbol — fall back to the real relaunch.
+    done({ fellBackToRelaunch: true });
     await clearStateAndRelaunch(ctx);
     return;
   }
@@ -119,6 +125,7 @@ export async function softResetAndReload(ctx: RunContext): Promise<void> {
     .call('wait_react_commit', { sinceMs: since, maxMs: 8000 })
     .catch(() => undefined);
   await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
+  done({ reloaded: true });
 }
 
 /// Re-launch the app with DYLD inject and re-open the control socket.
@@ -128,6 +135,8 @@ export async function relaunchAndReconnect(
   ctx: RunContext,
   launchArgs: string[] = [],
 ): Promise<void> {
+  const t0 = Date.now();
+  diag('lifecycle', 'relaunch:start', { platform: 'ios', bundleId: ctx.bundleId });
   ctx.client.close();
   // Make sure the previous process is fully gone before we launch
   // again — simctl launch can otherwise attach to the still-shutting
@@ -195,12 +204,15 @@ export async function relaunchAndReconnect(
   }
   void warmActuator(ctx.udid);
   await waitForFirstPaint(reopen);
+  diag('lifecycle', 'relaunch:done', { platform: 'ios', durMs: Date.now() - t0 });
 }
 
 export async function clearStateAndRelaunch(
   ctx: RunContext,
   launchArgs: string[] = [],
 ): Promise<void> {
+  const t0 = Date.now();
+  diag('lifecycle', 'clearState', { platform: 'ios', bundleId: ctx.bundleId });
   // App reset. Default fast path: wipe the data container in place and
   // relaunch the SAME install — no uninstall/reinstall. The reinstall
   // (copy .app → uninstall → install, with two 1s settles) cost ~8-10s
@@ -404,4 +416,9 @@ export async function clearStateAndRelaunch(
   // top of this return, which both under-waits a slow boot and
   // over-waits a fast one.
   await waitForFirstPaint(reopen);
+  diag('lifecycle', 'clearState:done', {
+    platform: 'ios',
+    durMs: Date.now() - t0,
+    mode: fullReinstall ? 'reinstall' : 'wipe',
+  });
 }
