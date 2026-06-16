@@ -14,10 +14,11 @@ import { registerAllHandlers } from '../commands/handlers';
 import { diagnoseSocketFailure } from '../crash-detector';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
-import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
-import { extractModifiers } from '../maestro-parser';
+import type { MaestroCommand, MaestroFlow, MaestroSelector } from '../maestro-parser';
+import { extractModifiers, normalizeSelector } from '../maestro-parser';
 import { evaluateCondition } from '../runner/conditions';
 import { captureHash } from '../runner/find';
+import { isVisible } from '../runner/visibility';
 import type { DeviceSession, Platform } from '../platform';
 import { selectPlatform } from '../platform';
 import type { RunContext } from '../runner/context';
@@ -141,17 +142,34 @@ export class FlowExecutor {
       } catch (e) {
         if (!FIND_MISS_RE.test(e instanceof Error ? e.message : String(e))) throw e;
       }
-      // MISS path only — sample the frame hash twice ~120ms apart to decide
-      // whether the screen is STILL (eaten tap) or ANIMATING (slow nav). The
-      // common fast path above never pays for either round-trip; this is the
-      // sole place hashes are captured.
+      // MISS path only — the common fast path above pays NO round-trips; this
+      // is the sole place hashes are captured. Decide whether the tap was
+      // EATEN (re-fire) or merely SLOW (wait) from TWO independent signals:
+      //
+      //   1. Frame STILL — sample the hash twice ~120ms apart. h1===h2 means
+      //      scroll/nav momentum has stopped. We sample AFTER the probe (not
+      //      before it) on purpose: a before-probe sample catches the residual
+      //      fling from a preceding scrollUntilVisible and misreads an eaten
+      //      tap as "animating" — the bug that let an eaten tap-after-scroll
+      //      slip through on slow runners (g-bottomsheet).
+      //   2. Target STILL PRESENT — a tap that took effect makes its own
+      //      target disappear (navigated away, sheet opened, row dismissed).
+      //      So the thing we tapped still sitting on screen proves the tap did
+      //      nothing. A point/coordinate tap has no findable target, so this
+      //      signal abstains (true) and we fall back to the frame-still gate.
+      //
+      // Re-fire only when BOTH hold: a frozen screen AND the tapped target
+      // still there. That recovers the eaten tap-after-scroll (momentum gone,
+      // target still listed) without ever double-acting a tap that already
+      // worked (its target is gone → we skip the re-fire), which a still-only
+      // gate would do on an instant navigation whose destination renders slow.
       const h1 = await captureHash(ctx).catch(() => '');
       await sleep(120);
       const h2 = await captureHash(ctx).catch(() => '');
       const still = h1 !== '' && h1 === h2;
-      if (still) {
-        // Screen is frozen on the same frame → the tap was eaten. Re-fire it
-        // once, then run the full-budget assert.
+      const tapTarget = tapSelectorOf(lastTapCmd);
+      const targetStillThere = tapTarget ? await isVisible(ctx, tapTarget).catch(() => false) : true;
+      if (still && targetStillThere) {
         this.reporter.stepRetry?.(
           stepIdx + 1,
           `re-firing previous tap (${describeCommand(lastTapCmd)})`,
@@ -159,9 +177,8 @@ export class FlowExecutor {
         await this.registry.dispatch(lastTapCmd, buildDctx(cmd));
         await sleep(150);
       }
-      // If the hashes differ the screen is animating (slow nav) — just run the
-      // full-budget assert WITHOUT re-firing, so a tap that already worked
-      // doesn't double-act.
+      // Otherwise the tap either worked (target gone) or is mid-transition
+      // (screen animating) — run the full-budget assert WITHOUT re-firing.
       await this.registry.dispatch(cmd, buildDctx(nextCmd));
     };
 
@@ -377,6 +394,17 @@ const EATEN_TAP_PROBE_MS = Number(process.env.ENNIO_EATEN_PROBE_MS) || 1200;
 
 function cmdIsVisibilityAssert(cmd: MaestroCommand): boolean {
   return typeof cmd === 'object' && cmd !== null && ('assertVisible' in cmd || 'waitFor' in cmd);
+}
+
+// The findable selector of a tapOn, for the eaten-tap "is the target still
+// there?" check. Returns null when the tap has no locatable target — a pure
+// point/coordinate tap (nothing to re-find) or a malformed command — so the
+// caller falls back to the frame-still gate alone.
+function tapSelectorOf(cmd: MaestroCommand): MaestroSelector | null {
+  if (typeof cmd !== 'object' || cmd === null || !('tapOn' in cmd)) return null;
+  const sel = normalizeSelector((cmd as { tapOn: MaestroSelector | string }).tapOn);
+  if (!sel.id && !sel.text) return null;
+  return sel;
 }
 
 // Clone an assertVisible/waitFor with its wait clamped to `ms` for the fast
