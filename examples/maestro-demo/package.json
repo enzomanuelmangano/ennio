@@ -1,0 +1,43 @@
+{
+  "name": "ennio-maestro-demo",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "test:e2e": "npx ennio test maestro-e2e/",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~55.0.10",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "^55.0.19",
+    "expo-constants": "~55.0.15",
+    "expo-linking": "~55.0.14",
+    "expo-location": "~55.1.10",
+    "expo-network": "~55.0.14",
+    "expo-notifications": "~55.0.23",
+    "expo-router": "^55.0.13",
+    "expo-sensors": "~55.0.15",
+    "expo-status-bar": "~55.0.5",
+    "react": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-gesture-handler": "~2.30.0",
+    "react-native-pager-view": "8.0.0",
+    "react-native-reanimated": "4.2.1",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.23.0",
+    "react-native-webview": "13.16.0",
+    "react-native-worklets": "0.7.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@expo/fingerprint": "^0.16.7",
+    "@types/react": "~19.2.10",
+    "expo-color-space-plugin": "^0.1.0",
+    "typescript": "~5.9.2"
+  }
+}
