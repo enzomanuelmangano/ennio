@@ -1,5 +1,5 @@
 appId: com.ennio.maestrodemo
-name: 'commands/copyTextFrom — copy an element''s text into ${maestro.copiedText}'
+name: "commands/copyTextFrom — copy an element's text into ${maestro.copiedText}"
 tags:
   - passing
 ---
