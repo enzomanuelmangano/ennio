@@ -361,20 +361,18 @@ export function installApk(serial: string, apkPath: string): void {
   adb(serial, ['install', '-r', '-g', apkPath]);
 }
 
-/** Open a deep link via the VIEW intent. */
+/** Open a deep link via the VIEW intent.
+ *
+ *  NOTE: deliberately NOT using `am start -W` here. -W is the right tool for the
+ *  plain launcher path (launchAndroidApp) where we just need a settled process
+ *  before injecting. The deep-link COLD path is more delicate — react-navigation
+ *  routes the initial-URL vs onNewIntent differently, and -W's "wait for the
+ *  first display" can return on the launcher/home frame BEFORE the JS deep-link
+ *  routing runs, masking a mis-route. Keep the deep-link delivery as the bare
+ *  VIEW intent the routing logic was tuned against; the inject path's own
+ *  readiness checks cover the settle. */
 export function openAndroidUrl(serial: string, pkg: string, url: string): void {
-  // -W: wait for the deep-link launch to settle before we return — the cold
-  // deep-link path injects right after, so (as in launchAndroidApp) we want a
-  // settled process, not a fork-instant one. Bounded; proceed on timeout.
-  try {
-    adb(
-      serial,
-      ['shell', 'am', 'start', '-W', '-a', 'android.intent.action.VIEW', '-d', url, pkg],
-      { timeoutMs: 45_000 },
-    );
-  } catch {
-    adb(serial, ['shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url, pkg]);
-  }
+  adb(serial, ['shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url, pkg]);
 }
 
 /** Inject a system BACK key — the real OS back path. Needed to pop a
