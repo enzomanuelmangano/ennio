@@ -219,33 +219,33 @@ jobs:
           mkdir -p /tmp/ennio-diag
           NO_ANIM='${ENNIO_NO_ANIM_FLAG}'
           mkdir -p /tmp/ennio-logs
-          PASS=0; FAIL=0; FAILED=""; CONSEC=0
+          # SINGLE-DAEMON: one CLI process drives ALL flows — pay the node spawn
+          # + cold connect ONCE instead of per flow (~17% faster: 610s → ~509s
+          # local). Now that \`am start -W\` makes every clearState relaunch bind
+          # first-try, the per-flow re-inject is deterministic, so single-daemon
+          # is purely a speed win with no stability cost. --fail-fast aborts at
+          # the first failing flow (any failure fails CI anyway). The single
+          # process appends all flows' diag to the one ENNIO_DIAG_FILE.
+          FILES=()
           for f in example/maestro-e2e/*.yaml; do
             base=\$(basename "\$f")
             case "\$base" in _*|00-*) continue;; esac
-            adb logcat -c 2>/dev/null || true
-            # STRICT: one attempt, no retry. A flow that needs a retry is a real
-            # flake to fix at the source — the suite fails outright.
-            if node packages/ennio/dist/cli.js test "\$f" --verbose \$NO_ANIM \
-                > "/tmp/ennio-logs/\$base.log" 2>&1; then
-              echo "PASS  \$base"; PASS=\$((PASS+1)); CONSEC=0
-            else
-              echo "FAIL  \$base"; tail -30 "/tmp/ennio-logs/\$base.log"
-              # Agent-side truth for an injection/readiness failure: did the
-              # agent inject, bind its socket, or crash?
-              adb logcat -d -s Ennio:V EnnioInject:V AndroidRuntime:E ActivityManager:W \
-                2>/dev/null | tail -150 > "/tmp/ennio-logs/\$base.logcat.txt" || true
-              FAIL=\$((FAIL+1)); FAILED="\$FAILED \$base"; CONSEC=\$((CONSEC+1))
-              # Fail-fast: 2 consecutive failures = systemic break, abort.
-              if [ "\$CONSEC" -ge 2 ]; then
-                echo "ABORT: \$CONSEC consecutive failures — bailing out"
-                break
-              fi
-            fi
+            FILES+=("\$f")
           done
-          echo ""
-          echo "Example suite (Android): Pass=\$PASS Fail=\$FAIL\${FAILED:+ — failed:\$FAILED}"
-          [ "\$FAIL" -eq 0 ]
+          echo "Example suite (Android, single-daemon): \${#FILES[@]} flows"
+          if node packages/ennio/dist/cli.js test "\${FILES[@]}" --verbose \$NO_ANIM --fail-fast \
+              > /tmp/ennio-logs/suite.log 2>&1; then
+            tail -40 /tmp/ennio-logs/suite.log
+            echo "Example suite (Android): all \${#FILES[@]} flows passed"
+          else
+            tail -80 /tmp/ennio-logs/suite.log
+            # Agent-side truth for an injection/readiness failure: did the agent
+            # inject, bind its socket, or crash?
+            adb logcat -d -s Ennio:V EnnioInject:V AndroidRuntime:E ActivityManager:W \
+              2>/dev/null | tail -200 > /tmp/ennio-logs/suite.logcat.txt || true
+            echo "Example suite (Android): FAILED"
+            exit 1
+          fi
           EOF
           chmod +x /tmp/run-suite.sh
 
