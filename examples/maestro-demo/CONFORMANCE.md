@@ -29,16 +29,16 @@ ennio passes every `passing` flow on **both** iOS and Android (35
 outcome-matched + 1 known divergence). Running the identical flows through
 Maestro diverges on 9 of them:
 
-| flow | ennio | Maestro | why they differ |
-|------|:-----:|:-------:|-----------------|
-| assertVisible, assertNotVisible, assertTrue, inputText, eraseText, pressKey, hideKeyboard, longPressOn, copyTextFrom, openLink, repeat, retry, runScript, evalScript, takeScreenshot, tapOn, scrollUntilVisible | ✅ | ✅ | agree |
-| **scroll** | ✅ | ⛔ parse error | `scroll: {direction: DOWN}` — `direction` is an ennio extension; Maestro's `scroll` takes no args |
-| **swipe** | ✅ | ❌ | `tapOn {id: Container 2}` — ennio matches an accessibility **label** as `id`; Maestro's `id` is strictly `accessibilityIdentifier` → not found |
-| **assertVisible-relative** | ✅ | ❌ | `containsChild` over nested testIDs — ennio's RN-native finder sees the nesting; Maestro's XCTest a11y tree does not |
-| **paging** | ✅ | ❌ | `assertVisible {id: page-indicator, text: 'Page 1 of 4'}` — ennio's combined id+text selector is looser than Maestro's |
-| **back** | ✅ | ❌ | ennio's in-process nav-pop returns to `home-screen`; Maestro's hardware back doesn't pop the expo-router stack the same way |
-| **launchApp** | ✅ | ❌ | persist-then-relaunch: ennio's app-**reuse** keeps the Input screen mounted so `potato` is still visible; Maestro cold-relaunches to Home, where it isn't |
-| **extendedWaitUntil**, **waitForAnimationToEnd** | ✅ | ❌ | the countdown hits `0.0s` momentarily; ennio's polling catches it, Maestro's single-shot assert after the wait misses it |
+| flow                                                                                                                                                                                                            | ennio |    Maestro     | why they differ                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---: | :------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| assertVisible, assertNotVisible, assertTrue, inputText, eraseText, pressKey, hideKeyboard, longPressOn, copyTextFrom, openLink, repeat, retry, runScript, evalScript, takeScreenshot, tapOn, scrollUntilVisible |  ✅   |       ✅       | agree                                                                                                                                                     |
+| **scroll**                                                                                                                                                                                                      |  ✅   | ⛔ parse error | `scroll: {direction: DOWN}` — `direction` is an ennio extension; Maestro's `scroll` takes no args                                                         |
+| **swipe**                                                                                                                                                                                                       |  ✅   |       ❌       | `tapOn {id: Container 2}` — ennio matches an accessibility **label** as `id`; Maestro's `id` is strictly `accessibilityIdentifier` → not found            |
+| **assertVisible-relative**                                                                                                                                                                                      |  ✅   |       ❌       | `containsChild` over nested testIDs — ennio's RN-native finder sees the nesting; Maestro's XCTest a11y tree does not                                      |
+| **paging**                                                                                                                                                                                                      |  ✅   |       ❌       | `assertVisible {id: page-indicator, text: 'Page 1 of 4'}` — ennio's combined id+text selector is looser than Maestro's                                    |
+| **back**                                                                                                                                                                                                        |  ✅   |       ❌       | ennio's in-process nav-pop returns to `home-screen`; Maestro's hardware back doesn't pop the expo-router stack the same way                               |
+| **launchApp**                                                                                                                                                                                                   |  ✅   |       ❌       | persist-then-relaunch: ennio's app-**reuse** keeps the Input screen mounted so `potato` is still visible; Maestro cold-relaunches to Home, where it isn't |
+| **extendedWaitUntil**, **waitForAnimationToEnd**                                                                                                                                                                |  ✅   |       ❌       | the countdown hits `0.0s` momentarily; ennio's polling catches it, Maestro's single-shot assert after the wait misses it                                  |
 
 `fail_*` negatives fail in both. `fail_launchApp` passes in ennio (it
 reuses the running app and ignores the bogus appId) and fails in Maestro —
@@ -47,7 +47,7 @@ tracked as a known ennio divergence.
 ## What the divergences mean
 
 The flows were authored and validated against ennio, so ennio is green by
-construction. The value is in *where Maestro disagrees* — four distinct
+construction. The value is in _where Maestro disagrees_ — four distinct
 classes, not one:
 
 1. **Grammar is a superset.** `scroll: direction`, `assertVisible: timeout`
@@ -62,7 +62,7 @@ classes, not one:
 3. **Statefulness differs.** ennio's app-reuse optimization keeps the
    previous screen mounted across a no-clearState `launchApp`; Maestro
    cold-relaunches. ennio's behavior is faster but can mask a real
-   relaunch (the `launchApp` persistence flow passes for the *wrong*
+   relaunch (the `launchApp` persistence flow passes for the _wrong_
    reason — the screen was never torn down).
 4. **Polling tolerance differs.** ennio waits on transient states
    (`extendedWaitUntil`, animation end) that Maestro's single-shot asserts
