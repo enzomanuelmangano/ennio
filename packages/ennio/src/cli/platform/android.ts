@@ -24,6 +24,7 @@ import type { RunContext } from '../runner/context';
 import type { ConnectTarget } from '../socket-client';
 import {
   abstractSocketBound,
+  appPidNow,
   clearAppData,
   enableRoot,
   enableShowTouches,
@@ -413,6 +414,14 @@ export class AndroidPlatform implements Platform {
       // socket). Confirm the abstract socket actually bound before spending the
       // readiness budget; if it never binds (~4s), relaunch and re-inject right
       // away instead of burning ~14s on a doomed readiness poll.
+      // The agent's constructor (find VM → wait for Application → bind
+      // LocalServerSocket) runs after dlopen. Wait for the bind, but bail the
+      // instant the injected process DIES (crash / pid replaced) — a real
+      // failure with its own signal — instead of burning the window on a
+      // corpse. If it stays alive but never binds in the window, the ctor
+      // wedged on this cold start: relaunch into a fresh process (the
+      // load-bearing retry — keep it). A live process is the only thing worth
+      // waiting on; a dead one is relaunched immediately.
       let bound = false;
       const bindDeadline = Date.now() + 4_000;
       while (Date.now() < bindDeadline) {
@@ -420,30 +429,42 @@ export class AndroidPlatform implements Platform {
           bound = true;
           break;
         }
+        if (appPidNow(serial, bundleId) !== pid) {
+          lastErr = `injected process ${pid} died before @ennio bound (crash / pid replaced)`;
+          break;
+        }
         await sleep(200);
       }
       if (!bound) {
-        lastErr = 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
+        if (!lastErr)
+          lastErr = 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
         continue;
       }
       const target = this.refreshForward(serial, pid);
       const port = target.kind === 'tcp' ? target.port : -1;
       const conn = new EnnioConnection({ udid: serial, target });
-      // Generous on the readiness wait: a KVM emulator on a loaded CI runner
-      // can take >6 s from process-start to the first resumed Activity (when
-      // the agent flips `ready`). The socket binds quickly (open succeeds),
-      // but a tight ready-poll declared "@ennio never became ready" and forced
-      // a relaunch — sometimes burning all attempts. Wider windows + an extra
-      // attempt make a hot-path relaunch reliable under CI load.
       const openOk = await conn.open(12_000);
-      if (openOk && (await this.isAgentReady(conn, 12_000))) {
+      // The socket is bound and open — the agent is LIVE. It flips `ready` only
+      // when its first Activity resumes, an event that ALWAYS arrives for a
+      // launching app but whose timing rides the (slow, under swiftshader/CI
+      // load) first frame. The old code required `ready` inside a fixed 12 s or
+      // RELAUNCHED — tearing down a perfectly bound agent and cold-restarting
+      // the app, which made the next first frame slower still: a feedback loop
+      // that exhausted the budget even though every attempt had bound (observed
+      // on CI: agent bound in ~5 ms, the suite still failed "never became
+      // ready"). So never relaunch a live agent — wait for the resume EVENT on
+      // THIS connection, bailing only if the agent actually dies. Bounded by
+      // the outer inject budget; no fixed ready timeout.
+      if (
+        openOk &&
+        (await this.awaitReadyWhileAlive(conn, serial, bundleId, pid, injectDeadline))
+      ) {
         return conn;
       }
       // Diagnostics. The CLI forwards to localabstract:ennio_<pid>; the agent
       // logs the pid it actually bound (@ennio_<myPid>). pid + port + open let
       // us tell a forward/pid mismatch (open=false → nothing listening on that
-      // name) from a bound-but-not-ready agent (open=true). The ping fields
-      // distinguish a stuck ready flag from an un-resumed app.
+      // name) from a bound-but-dead agent (open=true).
       let diag = '';
       try {
         const p = await conn.socket.call('ping');
@@ -453,7 +474,7 @@ export class AndroidPlatform implements Platform {
         diag = ' pingThrew';
       }
       conn.close();
-      lastErr = `agent attached but @ennio never became ready (pid=${pid} port=${port} open=${openOk}${diag})`;
+      lastErr = `agent attached but died before ready (pid=${pid} port=${port} open=${openOk}${diag})`;
     }
     throw new Error(
       `EnnioAgent never came up for ${bundleId}: ${lastErr}. ` +
@@ -487,6 +508,58 @@ export class AndroidPlatform implements Platform {
         if (timer) clearTimeout(timer);
       });
       if (ready) return true;
+      await sleep(150);
+    }
+    return false;
+  }
+
+  /**
+   * Wait for a BOUND, OPEN agent to report ready (its first Activity resumed)
+   * WITHOUT ever relaunching it. The resume is a guaranteed event for a
+   * launching app, so the only reason to give up on a bound agent is it
+   * actually dying — never a slow first frame. Returns true on ready; false if
+   * the process is gone or the agent goes unresponsive for several probes (a
+   * genuine wedge → the caller relaunches). The pid is the deciding signal: a
+   * live pid that just hasn't drawn yet keeps us waiting; a vanished pid bails
+   * immediately. Bounded by `deadline` (the inject budget) as a final backstop.
+   */
+  private async awaitReadyWhileAlive(
+    conn: EnnioConnection,
+    serial: string,
+    bundleId: string,
+    pid: string,
+    deadline: number,
+  ): Promise<boolean> {
+    let consecutiveSilent = 0;
+    while (Date.now() < deadline) {
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<'silent'>((res) => {
+        timer = setTimeout(() => res('silent'), 1500);
+      });
+      const state = await Promise.race([
+        conn.socket
+          .call('ping')
+          .then((r) =>
+            r.ok && (r.data as { bootstrap?: string })?.bootstrap === 'ready'
+              ? ('ready' as const)
+              : ('pending' as const),
+          )
+          .catch(() => 'silent' as const),
+        timeout,
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+      if (state === 'ready') return true;
+      if (state === 'pending') {
+        // Alive and answering, just not resumed yet — wait for the event.
+        consecutiveSilent = 0;
+      } else {
+        // No answer: a transient close on a live agent, or a dead process. The
+        // pid decides — gone → relaunch now; alive but mute for several probes
+        // (~1.2s) → wedged, let the caller relaunch.
+        if (appPidNow(serial, bundleId) !== pid) return false;
+        if (++consecutiveSilent >= 8) return false;
+      }
       await sleep(150);
     }
     return false;
