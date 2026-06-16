@@ -168,7 +168,9 @@ export class FlowExecutor {
       const h2 = await captureHash(ctx).catch(() => '');
       const still = h1 !== '' && h1 === h2;
       const tapTarget = tapSelectorOf(lastTapCmd);
-      const targetStillThere = tapTarget ? await isVisible(ctx, tapTarget).catch(() => false) : true;
+      const targetStillThere = tapTarget
+        ? await isVisible(ctx, tapTarget).catch(() => false)
+        : true;
       if (still && targetStillThere) {
         this.reporter.stepRetry?.(
           stepIdx + 1,
