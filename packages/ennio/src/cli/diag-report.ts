@@ -43,7 +43,14 @@ export interface Metrics {
     durationMs: Percentiles;
     failures: { name: string; step?: number; command?: string; reason?: string }[];
   };
-  lifecycle: { clearState: number };
+  // App-reset lifecycle. The key signal on iOS (which has no inject retry
+  // loop): how long clearState / relaunch / soft-reset take, and how often.
+  lifecycle: {
+    clearState: number;
+    clearStateMs: Percentiles;
+    relaunchMs: Percentiles;
+    softResetMs: Percentiles;
+  };
   totalEvents: number;
 }
 
@@ -173,6 +180,9 @@ export function aggregate(events: DiagEvent[]): Metrics {
     lifecycle: {
       clearState: events.filter((e) => e.component === 'lifecycle' && e.event === 'clearState')
         .length,
+      clearStateMs: pct(lifecycleDurations(events, 'clearState:done')),
+      relaunchMs: pct(lifecycleDurations(events, 'relaunch:done')),
+      softResetMs: pct(lifecycleDurations(events, 'softReset:done')),
     },
     totalEvents: events.length,
   };
@@ -180,6 +190,13 @@ export function aggregate(events: DiagEvent[]): Metrics {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function lifecycleDurations(events: DiagEvent[], event: string): number[] {
+  return events
+    .filter((e) => e.component === 'lifecycle' && e.event === event)
+    .map((e) => num(e.durMs))
+    .filter((v): v is number => v !== undefined);
 }
 
 /** Human-readable single-run report. */
@@ -212,7 +229,11 @@ export function formatReport(m: Metrics): string {
     }
   }
   L.push('');
-  L.push(`── lifecycle ──  clearState=${m.lifecycle.clearState}`);
+  L.push('── lifecycle (app reset) ──');
+  L.push(`clearState count=${m.lifecycle.clearState}`);
+  L.push(`clearState ms: ${fmtPct(m.lifecycle.clearStateMs)}`);
+  L.push(`relaunch ms:   ${fmtPct(m.lifecycle.relaunchMs)}`);
+  L.push(`softReset ms:  ${fmtPct(m.lifecycle.softResetMs)}`);
   return L.join('\n');
 }
 
@@ -302,6 +323,22 @@ export function compare(base: Metrics, cur: Metrics): Regression[] {
     higherIsWorse: true,
     absMin: 2000,
     relMin: 0.25,
+  });
+  // App-reset cost (the dominant per-flow lifecycle signal, esp. on iOS).
+  judge(
+    'lifecycle.clearStateMs.p95',
+    base.lifecycle.clearStateMs.p95,
+    cur.lifecycle.clearStateMs.p95,
+    {
+      higherIsWorse: true,
+      absMin: 1500,
+      relMin: 0.3,
+    },
+  );
+  judge('lifecycle.relaunchMs.p95', base.lifecycle.relaunchMs.p95, cur.lifecycle.relaunchMs.p95, {
+    higherIsWorse: true,
+    absMin: 1500,
+    relMin: 0.3,
   });
   return out;
 }

@@ -57,6 +57,22 @@ on:
       - 'example/maestro-e2e/**'
       - 'e2e/conformance/**'
       - '.github/workflows/ci-example.yml'
+  # Run on merge to main to PUBLISH the diag baseline every PR diffs against.
+  push:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/android/**'
+      - '!packages/ennio/src/cli/platform/android.ts'
+      - '!packages/ennio/src/cli/driver/android-driver.ts'
+      - 'packages/ennio/ios/**'
+      - 'packages/ennio/cpp/**'
+      - 'packages/ennio/native-hid/**'
+      - 'packages/ennio/native-ax/**'
+      - 'packages/ennio/native-shim/**'
+      - 'example/maestro-e2e/**'
+      - 'e2e/conformance/**'
+      - '.github/workflows/ci-example.yml'
 
 permissions:
   contents: read
@@ -200,9 +216,14 @@ jobs:
           # Per-phase timing ([phase] lines in the per-flow logs) — costs
           # nothing, makes runner slowness diagnosable from artifacts.
           ENNIO_PHASE_TRACE: '1'
+          # Over-instrument CI by default: structured diag JSONL (connect/reset
+          # lifecycle, flow timings) uploaded as an artifact and diffed vs the
+          # main baseline.
+          ENNIO_DIAG: '1'
+          ENNIO_DIAG_FILE: /tmp/ennio-diag/run.jsonl
         run: |
           set -uo pipefail
-          mkdir -p /tmp/ennio-logs
+          mkdir -p /tmp/ennio-logs /tmp/ennio-diag
           FLAGS="$ENNIO_FAST_FLAG $ENNIO_NOANIM_FLAG $ENNIO_REUSE_FLAG"
           echo "mode:${FLAGS:- hid}"
           # SINGLE DAEMON: one ennio process drives ALL flows (same model as the
@@ -235,6 +256,48 @@ jobs:
       # resilient profile). The suite stays in the repo to revisit once the
       # fixture grows those screens; re-add a gated step here then.
 
+      # ── diagnostics: aggregate, baseline, compare ─────────────────────────
+      - name: Diag report
+        if: always()
+        run: |
+          set -u
+          F=/tmp/ennio-diag/run.jsonl
+          if [ -f "$F" ]; then
+            node packages/ennio/dist/cli.js diag report "$F" || true
+            node packages/ennio/dist/cli.js diag report "$F" --reporter=json \
+              > /tmp/ennio-diag/metrics.json || true
+          else
+            echo "no diag file at $F"
+          fi
+
+      - name: Restore main diag baseline
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/ennio-diag-baseline
+          key: ennio-diag-baseline-ios-none
+          restore-keys: |
+            ennio-diag-baseline-ios-
+
+      - name: Compare vs main baseline
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          set -u
+          BASE=/tmp/ennio-diag-baseline/metrics.json
+          CUR=/tmp/ennio-diag/run.jsonl
+          if [ -f "$BASE" ] && [ -f "$CUR" ]; then
+            node packages/ennio/dist/cli.js diag compare "$BASE" "$CUR" || true
+          else
+            echo "no main baseline yet (or no run) — skipping compare"
+          fi
+
+      - name: Save main diag baseline
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/ennio-diag
+          key: ennio-diag-baseline-ios-${{ github.sha }}
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -245,5 +308,6 @@ jobs:
             /tmp/ennio-conf-maestro/
             /tmp/ennio-conf-resilient/
             /tmp/ennio-shots/
+            /tmp/ennio-diag/
           retention-days: 7
           if-no-files-found: warn

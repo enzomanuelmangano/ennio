@@ -281,7 +281,8 @@ export class AndroidPlatform implements Platform {
 
   async clearStateAndRelaunch(ctx: RunContext, _launchArgs: string[] = []): Promise<void> {
     const serial = ctx.udid;
-    diag('lifecycle', 'clearState', { bundleId: ctx.bundleId });
+    const t0 = Date.now();
+    diag('lifecycle', 'clearState', { platform: 'android', bundleId: ctx.bundleId });
     ctx.client.close();
     // pm clear wipes app data AND force-stops the process — the Android
     // analogue of the iOS data-container wipe. (No re-grant here: it's the
@@ -289,6 +290,7 @@ export class AndroidPlatform implements Platform {
     // apps that need them are granted once in connect().)
     clearAppData(serial, ctx.bundleId);
     await this.relaunchInto(ctx, serial);
+    diag('lifecycle', 'clearState:done', { platform: 'android', durMs: Date.now() - t0 });
   }
 
   // No in-process JS reload on a release bundle, so the reuse-app fast path
