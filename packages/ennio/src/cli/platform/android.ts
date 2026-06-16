@@ -24,6 +24,7 @@ import type { RunContext } from '../runner/context';
 import type { ConnectTarget } from '../socket-client';
 import {
   abstractSocketBound,
+  appPidNow,
   clearAppData,
   enableRoot,
   enableShowTouches,
@@ -406,24 +407,39 @@ export class AndroidPlatform implements Platform {
         lastErr = `inject failed: ${e instanceof Error ? e.message : String(e)}`;
         continue;
       }
-      // dlopen success ≠ a live agent. The agent's constructor (JVM attach +
-      // LocalServerSocket bind) runs AFTER dlopen and silently no-ops on an
-      // unstable cold-start process — the dominant CI flake surfaced as
-      // "open=true pingThrew" (adb's local forward accepts, but no device-side
-      // socket). Confirm the abstract socket actually bound before spending the
-      // readiness budget; if it never binds (~4s), relaunch and re-inject right
-      // away instead of burning ~14s on a doomed readiness poll.
+      // dlopen success ≠ a live agent: the agent's constructor (find VM → wait
+      // for Application → bind LocalServerSocket) runs AFTER dlopen. That bind
+      // happens on an EVENT — the app's Application being constructed — not on
+      // a fixed schedule, and on a loaded cold start (pm clear → full restart
+      // under swiftshader) the Application can take several seconds to appear.
+      //
+      // So wait for the bind EVENT, not a guessed duration. The previous fixed
+      // ~4s cap relaunched a still-bootstrapping agent; the relaunch added
+      // system_server/GC load that prolonged the NEXT cold start, so the cap
+      // expired again — a feedback loop that burned the whole inject budget on
+      // doomed retries (observed: launchApp hanging ~1.7 min, then failing).
+      //
+      // The only reasons @ennio won't bind are real failures, each with its own
+      // signal: the process we injected into crashed, or the pid we saw at
+      // zygote-fork was replaced. Poll for either the bind or the process going
+      // away, and relaunch only on that death signal. The outer inject budget
+      // (injectDeadline) remains the sole time cap — no per-attempt bind
+      // timeout. (Paired with the agent waiting indefinitely for the
+      // Application instead of self-aborting; see ennio_inject.cpp.)
       let bound = false;
-      const bindDeadline = Date.now() + 4_000;
-      while (Date.now() < bindDeadline) {
+      while (Date.now() < injectDeadline) {
         if (abstractSocketBound(serial, `ennio_${pid}`)) {
           bound = true;
+          break;
+        }
+        if (appPidNow(serial, bundleId) !== pid) {
+          lastErr = `injected process ${pid} died before @ennio bound (crash / pid replaced)`;
           break;
         }
         await sleep(200);
       }
       if (!bound) {
-        lastErr = 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
+        if (!lastErr) lastErr = 'inject budget exhausted before @ennio socket bound';
         continue;
       }
       const target = this.refreshForward(serial, pid);
