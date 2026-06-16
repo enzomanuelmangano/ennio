@@ -19,12 +19,16 @@ const ABSTRACT_SOCKET_NAME = 'ennio';
 function adb(
   serial: string | undefined,
   args: string[],
-  opts: { encoding?: 'utf-8' } = {},
+  opts: { encoding?: 'utf-8'; timeoutMs?: number } = {},
 ): string {
   const full = serial ? ['-s', serial, ...args] : args;
   return execFileSync('adb', full, {
     encoding: opts.encoding ?? 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
+    // A bounded wait for blocking commands (e.g. `am start -W`) so a wedged
+    // launch can't hang the whole CLI; on timeout execFileSync throws and the
+    // caller decides what to do.
+    ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
   }) as string;
 }
 
@@ -104,26 +108,47 @@ export function enableShowTouches(serial: string): void {
   }
 }
 
-/** Launch the app's default launcher activity. monkey is the most robust
- *  cross-app way to start the LAUNCHER intent without knowing the
- *  activity class name. */
+/** Launch the app's default launcher activity and WAIT for it to be displayed.
+ *
+ *  `am start -W` blocks until the launch settles (Application constructed, first
+ *  Activity displayed, process quiescent). This is the deterministic core of the
+ *  inject path: we inject into a SETTLED process, not the zygote-fork instant
+ *  `pidof` first sees. Injecting at fork was the root of the Android flake — the
+ *  agent then raced the app's cold start (Application not yet built → no bind)
+ *  AND ptrace had to attach to a process still churning through dex2oat/GC,
+ *  which silently no-op'd. Wait for the display event first and both disappear:
+ *  currentApplication() is immediately non-null and the target is calm, so the
+ *  bind is first-try deterministic (no retry loop relied upon).
+ *
+ *  Bounded so a genuinely broken launch can't hang the CLI; on timeout we
+ *  proceed anyway (the inject path's own readiness checks still cover the rare
+ *  slow-display case). monkey is the no-component fallback. */
 export function launchAndroidApp(serial: string, pkg: string): void {
   // Prefer explicit component (faster, no monkey noise); fall back to monkey.
   try {
-    adb(serial, [
-      'shell',
-      'am',
-      'start',
-      '-n',
-      `${pkg}/.MainActivity`,
-      '-a',
-      'android.intent.action.MAIN',
-    ]);
+    adb(
+      serial,
+      [
+        'shell',
+        'am',
+        'start',
+        '-W',
+        '-n',
+        `${pkg}/.MainActivity`,
+        '-a',
+        'android.intent.action.MAIN',
+      ],
+      { timeoutMs: 45_000 },
+    );
     return;
   } catch {
-    /* component name may differ — fall back */
+    /* component name may differ, or -W timed out — fall through */
   }
-  adb(serial, ['shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1']);
+  try {
+    adb(serial, ['shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1']);
+  } catch {
+    /* best effort — the inject path waits for the pid + readiness regardless */
+  }
 }
 
 /** Block the calling (synchronous) path for `ms` without busy-spinning the
@@ -338,7 +363,18 @@ export function installApk(serial: string, apkPath: string): void {
 
 /** Open a deep link via the VIEW intent. */
 export function openAndroidUrl(serial: string, pkg: string, url: string): void {
-  adb(serial, ['shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url, pkg]);
+  // -W: wait for the deep-link launch to settle before we return — the cold
+  // deep-link path injects right after, so (as in launchAndroidApp) we want a
+  // settled process, not a fork-instant one. Bounded; proceed on timeout.
+  try {
+    adb(
+      serial,
+      ['shell', 'am', 'start', '-W', '-a', 'android.intent.action.VIEW', '-d', url, pkg],
+      { timeoutMs: 45_000 },
+    );
+  } catch {
+    adb(serial, ['shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url, pkg]);
+  }
 }
 
 /** Inject a system BACK key — the real OS back path. Needed to pop a
