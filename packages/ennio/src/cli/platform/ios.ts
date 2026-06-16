@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { EnnioConnection } from '../core/ennio-connection';
 import { SimulatorSession } from '../core/simulator-session';
 import { diagnoseSocketFailure, isAppRunning } from '../crash-detector';
+import { diag } from '../diag';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import {
@@ -83,8 +84,10 @@ export class IosPlatform implements Platform {
     if (appAlreadyRunning) {
       // A process reused from a previous flow — attach to its live socket.
       if (await tracePhaseAsync('socketOpenFast', () => connection.open(2_000))) {
+        diag('inject', 'reuse-existing', { platform: 'ios' });
         return { session, connection };
       }
+      diag('inject', 'reuse-failed', { platform: 'ios' });
       // Running but the socket didn't answer (stale / dylib not loaded) —
       // relaunch to get a clean agent.
       tracePhase('terminate', () => session.terminate());
@@ -100,6 +103,7 @@ export class IosPlatform implements Platform {
         );
       }
       await tracePhaseAsync('bootstrapReady', () => this.waitBootstrapReady(connection));
+      diag('inject', 'relaunch-stale', { platform: 'ios' });
       return { session, connection };
     }
     // LAZY CONNECT: the app isn't running. A full launch here would be thrown

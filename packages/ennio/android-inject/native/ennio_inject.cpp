@@ -31,7 +31,10 @@
 #include <android/log.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -45,11 +48,52 @@
 // behaviour lives in the dex, which iterates fast.)
 #define ENNIO_DEX_OVERRIDE "/data/local/tmp/ennio-agent.dex"
 
+// Pathological backstop for the currentApplication() wait: 600 × 50ms = 30s.
+// NOT a tuning knob — a normal cold start resolves in well under a second, and
+// the host gives up on a wedged bootstrap far sooner (its bootstrap-wait). This
+// only stops a truly orphaned thread from spinning forever if the process
+// somehow outlives the host.
+#define ENNIO_APP_WAIT_TICKS 600
+
 #define LOG_TAG "EnnioInject"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace {
+
+// Early "the constructor ran" beacon. Bound in the loader's constructor —
+// which dlopen runs SYNCHRONOUSLY before it returns — so by the time the ptrace
+// injector prints "OK dlopen", this abstract socket exists IFF the agent code
+// actually started executing in the target. It needs no VM, no JNI, no
+// Application: it's pure POSIX, so it can't be delayed by the cold-start work
+// that the real @ennio_<pid> bind waits on.
+//
+// The host uses it to split the dominant "dlopen ok but @ennio never bound"
+// failure into two very different cases:
+//   * up-marker ABSENT  → the constructor never ran (a ptrace/loader no-op):
+//                         the inject is dead, relaunch immediately.
+//   * up-marker PRESENT  → the agent is alive and bootstrapping (waiting for
+//                         the VM / Application): do NOT relaunch, give it the
+//                         bootstrap budget to bind for real.
+// Conflating these is what made the retry loop both too eager (relaunching a
+// healthy-but-slow bootstrap) and too slow (re-rolling a dead inject after a
+// fixed wait). Leaks the fd intentionally (process lifetime).
+void bind_up_marker() {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return;
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    // Abstract namespace: leading NUL, name follows.
+    int n = snprintf(addr.sun_path + 1, sizeof(addr.sun_path) - 2, "ennio_up_%d", getpid());
+    socklen_t len = static_cast<socklen_t>(offsetof(struct sockaddr_un, sun_path) + 1 + n);
+    if (bind(fd, reinterpret_cast<struct sockaddr *>(&addr), len) != 0) {
+        close(fd);
+        return;
+    }
+    listen(fd, 1); // makes it show in /proc/net/unix consistently
+    LOGI("up-marker bound @ennio_up_%d", getpid());
+}
 
 // Clear any pending JNI exception; returns true if one was pending.
 bool clearException(JNIEnv *env) {
@@ -189,21 +233,31 @@ jint attach(JavaVM *vm, const char *how) {
         weAttached = true;
     }
 
-    // We attach AFTER the app is running, so currentApplication() is normally
-    // non-null immediately. Keep a short BOUNDED poll only to cover an attach
-    // that lands a few ms before Application.onCreate returns — deterministic,
-    // not the old open-ended wait-for-runtime.
+    // Wait for the Application to be constructed. The ptrace injector fires the
+    // instant `pidof` returns — that's the zygote fork, well before
+    // ActivityThread.handleBindApplication runs — so currentApplication() is
+    // null at first and turns non-null on an EVENT. On a loaded CI emulator that
+    // can take several seconds. The OLD 5s cap made the agent SELF-ABORT mid
+    // cold-start, leaving no socket bound; that is the bulk of the "dlopen ok
+    // but @ennio never bound" failures. Wait for the event instead: this thread
+    // runs INSIDE the target, so the process's own lifetime bounds it (a dead
+    // app reaps this thread). The cap below is only a pathological backstop, set
+    // well ABOVE the host's bootstrap-wait so the host always relaunches a truly
+    // wedged process first — it never cuts off a normal (even slow) cold start.
     jobject app = nullptr;
-    for (int i = 0; i < 100 && !app; i++) {
+    for (int i = 0; i < ENNIO_APP_WAIT_TICKS && !app; i++) {
         app = currentApplication(env);
-        if (!app) usleep(50 * 1000);
+        if (app) break;
+        if (i == 20) LOGI("still waiting for currentApplication (cold start) pid=%d", getpid());
+        usleep(50 * 1000);
     }
     jint rc = JNI_OK;
     if (!app) {
-        LOGE("currentApplication never became non-null");
+        LOGE("currentApplication never became non-null pid=%d", getpid());
         rc = JNI_ERR;
-    } else if (!startAgent(env, app)) {
-        rc = JNI_ERR;
+    } else {
+        LOGI("currentApplication ready pid=%d", getpid());
+        if (!startAgent(env, app)) rc = JNI_ERR;
     }
 
     // The agent spawns its own (attached) threads for the socket server; this
@@ -254,6 +308,7 @@ void *bootstrapThread(void *) {
 // this with the live VM. Used for a DEBUGGABLE target.
 extern "C" JNIEXPORT jint JNICALL
 Agent_OnAttach(JavaVM *vm, char * /*options*/, void * /*reserved*/) {
+    bind_up_marker(); // "agent code reached this process" beacon
     return attach(vm, "OnAttach");
 }
 
@@ -268,6 +323,10 @@ Agent_OnLoad(JavaVM *vm, char * /*options*/, void * /*reserved*/) {
 // is refused). Spawns a thread that finds the running VM and starts the agent —
 // the g_started guard makes this idempotent with Agent_OnAttach.
 __attribute__((constructor)) static void ennio_ctor() {
+    // Bind the beacon SYNCHRONOUSLY here (dlopen runs the ctor before it
+    // returns), so the host can tell "the ptrace dlopen actually ran our code"
+    // from "dlopen reported OK but nothing executed" the moment inject returns.
+    bind_up_marker();
     pthread_t t;
     if (pthread_create(&t, nullptr, bootstrapThread, nullptr) == 0) {
         pthread_detach(t);

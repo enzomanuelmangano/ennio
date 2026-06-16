@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs';
 
 import { getActiveConnection } from '../core/active-connections';
 import { EnnioConnection } from '../core/ennio-connection';
+import { diag, diagSpan } from '../diag';
 import { createAndroidDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import { sleep } from '../runner/context';
@@ -267,9 +268,11 @@ export class AndroidPlatform implements Platform {
         target: this.refreshForward(serial, runningPid),
       });
       if ((await existing.open(2_000)) && (await this.isAgentReady(existing, 3_000))) {
+        diag('inject', 'reuse-existing', { pid: runningPid });
         return { session, connection: existing };
       }
       existing.close();
+      diag('inject', 'reuse-failed', { pid: runningPid });
     }
     grantAllPermissions(serial, opts.bundleId);
     const connection = await this.establishReady(serial, opts.bundleId);
@@ -278,6 +281,8 @@ export class AndroidPlatform implements Platform {
 
   async clearStateAndRelaunch(ctx: RunContext, _launchArgs: string[] = []): Promise<void> {
     const serial = ctx.udid;
+    const t0 = Date.now();
+    diag('lifecycle', 'clearState', { platform: 'android', bundleId: ctx.bundleId });
     ctx.client.close();
     // pm clear wipes app data AND force-stops the process — the Android
     // analogue of the iOS data-container wipe. (No re-grant here: it's the
@@ -285,6 +290,7 @@ export class AndroidPlatform implements Platform {
     // apps that need them are granted once in connect().)
     clearAppData(serial, ctx.bundleId);
     await this.relaunchInto(ctx, serial);
+    diag('lifecycle', 'clearState:done', { platform: 'android', durMs: Date.now() - t0 });
   }
 
   // No in-process JS reload on a release bundle, so the reuse-app fast path
@@ -381,69 +387,114 @@ export class AndroidPlatform implements Platform {
     // space out (up to ~6s) to span more wall-clock and let the emulator recover.
     const budgetMs = Number(process.env.ENNIO_INJECT_BUDGET_MS) || 90_000;
     const injectDeadline = Date.now() + budgetMs;
+    const mode = this.injectMode.get(serial) ?? 'attach';
+    diag('inject', 'establish:start', { serial, bundleId, mode, budgetMs });
     for (let attempt = 0; Date.now() < injectDeadline; attempt++) {
+      const endAttempt = diagSpan('inject', 'attempt', {
+        attempt,
+        mode,
+        budgetLeftMs: injectDeadline - Date.now(),
+      });
       if (attempt > 0) {
+        const backoffMs = Math.min(400 + attempt * 600, 6_000);
+        diag('inject', 'relaunch', { attempt, backoffMs, prevErr: lastErr });
         terminateAndroidApp(serial, bundleId);
-        await sleep(Math.min(400 + attempt * 600, 6_000));
+        await sleep(backoffMs);
       }
       launch();
       const pid = waitForAppPid(serial, bundleId, 8_000);
       if (!pid) {
         lastErr = 'app process never started';
+        diag('inject', 'no-pid', { attempt });
+        endAttempt({ outcome: 'no-pid' });
         continue;
       }
+      diag('inject', 'pid', { attempt, pid });
       try {
         // Inject the agent into the freshly-started process. Both paths stage
         // the .so into the app's code_cache (wiped by pm clear, so re-staged
         // every launch); the agent's bounded wait covers the brief window
         // before Application.onCreate.
         const tmpSo = this.ensureAgentPushed(serial);
-        if (this.injectMode.get(serial) === 'ptrace') {
+        const injectStart = Date.now();
+        if (mode === 'ptrace') {
           ptraceInjectAgent(serial, bundleId, pid, tmpSo, this.pushedInjector.get(serial)!);
         } else {
           stageAndAttachAgent(serial, bundleId, pid, tmpSo);
         }
+        diag('inject', 'dlopen-ok', { attempt, pid, durMs: Date.now() - injectStart });
       } catch (e) {
         lastErr = `inject failed: ${e instanceof Error ? e.message : String(e)}`;
+        diag('inject', 'dlopen-fail', { attempt, pid, err: lastErr });
+        endAttempt({ outcome: 'dlopen-fail' });
         continue;
       }
-      // dlopen success ≠ a live agent. The agent's constructor (JVM attach +
-      // LocalServerSocket bind) runs AFTER dlopen and silently no-ops on an
-      // unstable cold-start process — the dominant CI flake surfaced as
-      // "open=true pingThrew" (adb's local forward accepts, but no device-side
-      // socket). Confirm the abstract socket actually bound before spending the
-      // readiness budget; if it never binds (~4s), relaunch and re-inject right
-      // away instead of burning ~14s on a doomed readiness poll.
-      // The agent's constructor (find VM → wait for Application → bind
-      // LocalServerSocket) runs after dlopen. Wait for the bind, but bail the
-      // instant the injected process DIES (crash / pid replaced) — a real
-      // failure with its own signal — instead of burning the window on a
-      // corpse. If it stays alive but never binds in the window, the ctor
-      // wedged on this cold start: relaunch into a fresh process (the
-      // load-bearing retry — keep it). A live process is the only thing worth
-      // waiting on; a dead one is relaunched immediately.
+      // Two-phase wait, gated on what the agent itself signals — so a DEAD
+      // inject is re-rolled fast while a LIVE-but-slow one is given time to bind
+      // (the old fixed 4s did neither: it relaunched healthy slow bootstraps AND
+      // burned 4s on dead injects).
+      //
+      //   Phase 1 — did the constructor run? The agent binds @ennio_up_<pid>
+      //     synchronously inside the dlopen, so it appears within ~ms of inject
+      //     returning. Absent after CTOR_WAIT_MS while the pid is alive ⇒ the
+      //     ptrace dlopen no-op'd (constructor never executed) ⇒ relaunch now.
+      //   Phase 2 — ctor ran, the agent is bootstrapping (VM → Application →
+      //     bind). Wait BOOTSTRAP_WAIT_MS for the real @ennio bind. The agent
+      //     waits for the Application event too, so a slow cold start binds here
+      //     instead of being relaunched.
+      //   Anytime — the injected pid vanishing is a real failure ⇒ relaunch now.
+      const CTOR_WAIT_MS = 3_000;
+      const BOOTSTRAP_WAIT_MS = 15_000;
       let bound = false;
-      const bindDeadline = Date.now() + 4_000;
-      while (Date.now() < bindDeadline) {
+      let ctorRan = false;
+      let outcome = '';
+      const bindStart = Date.now();
+      const deadline = bindStart + CTOR_WAIT_MS + BOOTSTRAP_WAIT_MS;
+      while (Date.now() < deadline) {
         if (abstractSocketBound(serial, `ennio_${pid}`)) {
           bound = true;
           break;
         }
         if (appPidNow(serial, bundleId) !== pid) {
+          outcome = 'pid-died';
           lastErr = `injected process ${pid} died before @ennio bound (crash / pid replaced)`;
           break;
+        }
+        if (!ctorRan) {
+          if (abstractSocketBound(serial, `ennio_up_${pid}`)) {
+            ctorRan = true;
+            diag('inject', 'ctor-ran', { attempt, pid, ms: Date.now() - bindStart });
+          } else if (Date.now() - bindStart >= CTOR_WAIT_MS) {
+            outcome = 'ctor-noop';
+            lastErr = `dlopen ok but agent ctor never ran (@ennio_up_${pid} absent)`;
+            break;
+          }
         }
         await sleep(200);
       }
       if (!bound) {
+        if (!outcome) outcome = ctorRan ? 'bootstrap-wedged' : 'ctor-noop';
         if (!lastErr)
-          lastErr = 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
+          lastErr =
+            outcome === 'bootstrap-wedged'
+              ? `agent ctor ran but @ennio never bound within bootstrap budget (pid=${pid})`
+              : 'agent dlopen ok but @ennio socket never bound (silent inject no-op)';
+        diag('inject', 'no-bind', {
+          attempt,
+          pid,
+          ctorRan,
+          outcome,
+          waitedMs: Date.now() - bindStart,
+        });
+        endAttempt({ outcome });
         continue;
       }
+      diag('inject', 'bound', { attempt, pid, bindMs: Date.now() - bindStart, ctorRan });
       const target = this.refreshForward(serial, pid);
       const port = target.kind === 'tcp' ? target.port : -1;
       const conn = new EnnioConnection({ udid: serial, target });
       const openOk = await conn.open(12_000);
+      diag('inject', 'open', { attempt, pid, port, openOk });
       // The socket is bound and open — the agent is LIVE. It flips `ready` only
       // when its first Activity resumes, an event that ALWAYS arrives for a
       // launching app but whose timing rides the (slow, under swiftshader/CI
@@ -459,23 +510,33 @@ export class AndroidPlatform implements Platform {
         openOk &&
         (await this.awaitReadyWhileAlive(conn, serial, bundleId, pid, injectDeadline))
       ) {
+        diag('inject', 'ready', {
+          attempt,
+          pid,
+          port,
+          totalMs: budgetMs - (injectDeadline - Date.now()),
+        });
+        endAttempt({ outcome: 'ready', pid, port });
         return conn;
       }
       // Diagnostics. The CLI forwards to localabstract:ennio_<pid>; the agent
       // logs the pid it actually bound (@ennio_<myPid>). pid + port + open let
       // us tell a forward/pid mismatch (open=false → nothing listening on that
       // name) from a bound-but-dead agent (open=true).
-      let diag = '';
+      let bootstrapState = '';
       try {
         const p = await conn.socket.call('ping');
         const d = p?.data as { bootstrap?: string } | undefined;
-        diag = ` bootstrap=${d?.bootstrap ?? '?'}`;
+        bootstrapState = d?.bootstrap ?? '?';
       } catch {
-        diag = ' pingThrew';
+        bootstrapState = 'pingThrew';
       }
       conn.close();
-      lastErr = `agent attached but died before ready (pid=${pid} port=${port} open=${openOk}${diag})`;
+      lastErr = `agent attached but died before ready (pid=${pid} port=${port} open=${openOk} bootstrap=${bootstrapState})`;
+      diag('inject', 'not-ready', { attempt, pid, port, openOk, bootstrap: bootstrapState });
+      endAttempt({ outcome: 'not-ready' });
     }
+    diag('inject', 'establish:fail', { lastErr });
     throw new Error(
       `EnnioAgent never came up for ${bundleId}: ${lastErr}. ` +
         'The app must be debuggable (a debuggable build, or any app on a ' +
@@ -557,11 +618,18 @@ export class AndroidPlatform implements Platform {
         // No answer: a transient close on a live agent, or a dead process. The
         // pid decides — gone → relaunch now; alive but mute for several probes
         // (~1.2s) → wedged, let the caller relaunch.
-        if (appPidNow(serial, bundleId) !== pid) return false;
-        if (++consecutiveSilent >= 8) return false;
+        if (appPidNow(serial, bundleId) !== pid) {
+          diag('inject', 'ready-wait:pid-gone', { pid });
+          return false;
+        }
+        if (++consecutiveSilent >= 8) {
+          diag('inject', 'ready-wait:wedged', { pid });
+          return false;
+        }
       }
       await sleep(150);
     }
+    diag('inject', 'ready-wait:budget', { pid });
     return false;
   }
 
