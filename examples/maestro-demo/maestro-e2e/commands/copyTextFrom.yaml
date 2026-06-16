@@ -5,10 +5,17 @@ tags:
 ---
 - launchApp:
     clearState: true
-- tapOn:
-    id: fabAddIcon
-- assertVisible:
-    id: counterValue
+# Gate on the counter actually reaching 1 — the first tap on a freshly
+# soft-reset screen is occasionally eaten (onPress doesn't fire); retry
+# re-fires it until the increment lands, so copiedText is deterministically '1'.
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: fabAddIcon
+      - assertVisible:
+          id: counterValue
+          text: '1'
 - copyTextFrom:
     id: counterValue
 - assertTrue: "${maestro.copiedText} == '1'"

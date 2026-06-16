@@ -5,5 +5,5 @@ tags:
 ---
 - launchApp:
     clearState: true
-- evalScript: "${output.n = 41 + 1}"
-- assertTrue: "output.n === 42"
+- evalScript: '${output.n = 41 + 1}'
+- assertTrue: 'output.n === 42'

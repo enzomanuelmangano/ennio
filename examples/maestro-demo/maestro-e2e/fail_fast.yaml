@@ -5,4 +5,4 @@ tags:
 ---
 - launchApp:
     clearState: true
-- assertTrue: "false"
+- assertTrue: 'false'

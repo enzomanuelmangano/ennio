@@ -5,4 +5,4 @@ tags:
 ---
 - launchApp:
     clearState: true
-- assertTrue: "1 + 1 === 2"
+- assertTrue: '1 + 1 === 2'
