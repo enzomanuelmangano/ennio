@@ -12,11 +12,7 @@ export default function OrientationScreen() {
     <View style={styles.flex}>
       <Stack.Screen options={{ title: 'Orientation Test' }} />
       <View style={styles.center}>
-        <Text
-          testID="orientationLabel"
-          accessibilityLabel="orientationLabel"
-          style={styles.label}
-        >
+        <Text testID="orientationLabel" accessibilityLabel="orientationLabel" style={styles.label}>
           {orientation}
         </Text>
       </View>

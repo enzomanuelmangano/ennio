@@ -1,0 +1,8 @@
+appId: com.ennio.maestrodemo
+name: 'subflows/navigate-home — go back and confirm Home'
+tags:
+  - passing
+---
+- back
+- assertVisible:
+    id: home-screen

@@ -1,11 +1,6 @@
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import {
-  NativeSyntheticEvent,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { NativeSyntheticEvent, StyleSheet, Text, View } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -33,11 +28,7 @@ export default function PagingScreen() {
     <SafeAreaView style={styles.flex} edges={['bottom']}>
       <Stack.Screen options={{ title: 'Paging Test' }} />
 
-      <PagerView
-        style={styles.pager}
-        initialPage={0}
-        onPageSelected={onPageSelected}
-      >
+      <PagerView style={styles.pager} initialPage={0} onPageSelected={onPageSelected}>
         {PAGES.map((p, index) => (
           <View
             key={p.label}
@@ -55,10 +46,7 @@ export default function PagingScreen() {
           {PAGES.map((p, index) => (
             <View
               key={p.label}
-              style={[
-                styles.dot,
-                index === page ? styles.dotActive : styles.dotInactive,
-              ]}
+              style={[styles.dot, index === page ? styles.dotActive : styles.dotInactive]}
             />
           ))}
         </View>

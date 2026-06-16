@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/extendedWaitUntil — wait for animation countdown to finish'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Animation Test'
+- tapOn: 'Animate (4s)'
+- extendedWaitUntil:
+    visible:
+      text: '0.0s'
+    timeout: 8000

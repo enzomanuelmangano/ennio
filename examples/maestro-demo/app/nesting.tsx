@@ -15,23 +15,11 @@ export default function NestingScreen() {
       <Text style={styles.bottomSide}>bottom side</Text>
 
       <View style={styles.center}>
-        <View
-          testID="level-0"
-          accessibilityLabel="level-0"
-          style={styles.level0}
-        >
+        <View testID="level-0" accessibilityLabel="level-0" style={styles.level0}>
           <Text style={styles.label}>Container at level 0</Text>
-          <View
-            testID="level-1"
-            accessibilityLabel="level-1"
-            style={styles.level1}
-          >
+          <View testID="level-1" accessibilityLabel="level-1" style={styles.level1}>
             <Text style={styles.label}>Container at level 1</Text>
-            <View
-              testID="level-2"
-              accessibilityLabel="level-2"
-              style={styles.level2}
-            >
+            <View testID="level-2" accessibilityLabel="level-2" style={styles.level2}>
               <Text style={styles.label}>Container at level 2</Text>
             </View>
           </View>

@@ -9,11 +9,7 @@ export default function CroppedScreenshotScreen() {
     <View style={styles.flex}>
       <Stack.Screen options={{ title: 'Cropped Screenshot Test' }} />
       <View style={styles.center}>
-        <View
-          testID="testContainer"
-          accessibilityLabel="testContainer"
-          style={styles.container}
-        >
+        <View testID="testContainer" accessibilityLabel="testContainer" style={styles.container}>
           <View style={styles.red} />
           <View style={styles.blue} />
         </View>

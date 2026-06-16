@@ -32,11 +32,7 @@ export default function NotificationsScreen() {
     <SafeAreaView style={styles.flex} edges={['bottom']}>
       <Stack.Screen options={{ title: 'Notifications Permission' }} />
       <View style={styles.content}>
-        <Text
-          style={styles.status}
-          testID="permissionStatus"
-          accessibilityLabel="permissionStatus"
-        >
+        <Text style={styles.status} testID="permissionStatus" accessibilityLabel="permissionStatus">
           {`Status: ${status}`}
         </Text>
         <Pressable

@@ -73,7 +73,7 @@ export default function SensorsScreen() {
 
     const check = async (
       sensor: { isAvailableAsync: () => Promise<boolean> },
-      set: (status: Availability) => void
+      set: (status: Availability) => void,
     ) => {
       try {
         const ok = await sensor.isAvailableAsync();
@@ -127,10 +127,7 @@ export default function SensorsScreen() {
   return (
     <SafeAreaView style={styles.flex} edges={['bottom']}>
       <Stack.Screen options={{ title: 'Sensors' }} />
-      <ScrollView
-        testID="sensors-scroll"
-        contentContainerStyle={styles.content}
-      >
+      <ScrollView testID="sensors-scroll" contentContainerStyle={styles.content}>
         <Text style={styles.sectionHeader}>Motion Sensors</Text>
 
         <View testID="card-accelerometer" style={styles.card}>

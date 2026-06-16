@@ -1,0 +1,11 @@
+# Maestro-demo conformance suite — ennio driven against the maestro-demo
+# app, mirroring the structure of Maestro's own e2e/demo_app/.maestro.
+#
+# Outcome discipline (borrowed from upstream): every flow is labelled
+# `passing` or `failing` via its tags. The run-suite harness asserts the
+# outcome — a `failing` flow that passes (or vice-versa) is a regression,
+# not a green run. Flows named fail_* are intentional failures.
+flows:
+  - '*'
+  - 'commands/*'
+  - 'issues/*'

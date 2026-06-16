@@ -1,13 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack } from 'expo-router';
 import { useEffect, useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const STORAGE_KEY = 'input_screen_text';
@@ -50,11 +44,7 @@ export default function InputScreen() {
           value={text}
           onChangeText={setText}
         />
-        <Pressable
-          style={styles.button}
-          accessibilityLabel="Save"
-          onPress={onSave}
-        >
+        <Pressable style={styles.button} accessibilityLabel="Save" onPress={onSave}>
           <Text style={styles.buttonText}>Save</Text>
         </Pressable>
       </View>

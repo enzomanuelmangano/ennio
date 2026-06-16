@@ -66,20 +66,14 @@ export default function AnimationScreen() {
         </Pressable>
 
         {seconds !== null && (
-          <Text
-            style={styles.timer}
-            testID="timer"
-            accessibilityLabel="Timer"
-          >
+          <Text style={styles.timer} testID="timer" accessibilityLabel="Timer">
             {`${seconds.toFixed(1)}s`}
           </Text>
         )}
 
         <Text style={styles.moons}>
           {animating
-            ? MOON_PHASES.map(
-                (_, i) => MOON_PHASES[(i + phaseIndex) % MOON_PHASES.length],
-              ).join('')
+            ? MOON_PHASES.map((_, i) => MOON_PHASES[(i + phaseIndex) % MOON_PHASES.length]).join('')
             : MOON_PHASES.join('')}
         </Text>
       </View>

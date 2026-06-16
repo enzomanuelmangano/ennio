@@ -1,0 +1,7 @@
+appId: com.ennio.maestrodemo
+name: 'fail_launchApp — launching an uninstalled app id fails'
+tags:
+  - failing
+---
+- launchApp:
+    appId: 'com.does.not.exist'

@@ -1,0 +1,23 @@
+appId: com.ennio.maestrodemo
+name: 'commands/swipe — drag across containers on Gesture Tester'
+# Squares turn green on touch-down (onPressIn), so a swipe STARTING on a
+# square flips it. Coords match gestures.tsx centers: C0 (50%,15%),
+# C1 (15%,50%). C2 sits inside the bottom safe-area inset where a raw
+# percentage is unreliable, so it's tapped by label. Two swipes prove the
+# command drives real touches; All green confirms the result.
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Gesture Tester'
+- swipe:
+    start: '50%,15%'
+    end: '50%,45%'
+- swipe:
+    start: '15%,50%'
+    end: '45%,50%'
+- tapOn:
+    id: 'Container 2'
+- tapOn: 'End here!'
+- assertVisible: 'All green'

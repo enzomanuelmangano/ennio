@@ -1,0 +1,16 @@
+appId: com.ennio.maestrodemo
+name: 'fill_form — login with valid credentials'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Form Test'
+- tapOn: 'Email'
+- inputText: 'correct@mobile.dev'
+- tapOn: 'Password'
+- inputText: 'maestro'
+- tapOn:
+    text: 'Login'
+    index: 1
+- assertVisible: 'Credentials are correct'

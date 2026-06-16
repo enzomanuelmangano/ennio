@@ -1,12 +1,6 @@
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Mirrors Maestro demo_app's login form. Flows tap the "Login" button by index
@@ -47,16 +41,10 @@ export default function FormScreen() {
           value={password}
           onChangeText={setPassword}
         />
-        <Pressable
-          style={styles.button}
-          accessibilityLabel="Login"
-          onPress={onLogin}
-        >
+        <Pressable style={styles.button} accessibilityLabel="Login" onPress={onLogin}>
           <Text style={styles.buttonText}>Login</Text>
         </Pressable>
-        {result !== null && (
-          <Text style={styles.result}>{result}</Text>
-        )}
+        {result !== null && <Text style={styles.result}>{result}</Text>}
       </View>
     </SafeAreaView>
   );

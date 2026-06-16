@@ -1,0 +1,19 @@
+appId: com.ennio.maestrodemo
+name: 'commands/runFlow — inline subflow and conditional subflow'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- runFlow:
+    commands:
+      - tapOn:
+          id: fabAddIcon
+- assertVisible: '1'
+- runFlow:
+    when:
+      visible:
+        id: home-screen
+    commands:
+      - assertVisible:
+          id: home-screen

@@ -1,0 +1,11 @@
+appId: com.ennio.maestrodemo
+name: 'commands/doubleTapOn — double tap box on Gesture Tester'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Gesture Tester'
+- doubleTapOn:
+    id: double-tap
+- assertVisible: 'Double tapped!'

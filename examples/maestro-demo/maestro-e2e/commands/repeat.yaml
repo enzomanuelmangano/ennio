@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/repeat — tap FAB three times then assert counter is 3'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- repeat:
+    times: 3
+    commands:
+      - tapOn:
+          id: fabAddIcon
+- assertVisible: '3'

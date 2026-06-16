@@ -25,9 +25,7 @@ export default function PatientCareScreen() {
 
         <View style={styles.row}>
           <Text style={styles.check}>✓</Text>
-          <Text style={styles.rowText}>
-            Keep your number private with a customizable caller ID
-          </Text>
+          <Text style={styles.rowText}>Keep your number private with a customizable caller ID</Text>
         </View>
         <View style={styles.row}>
           <Text style={styles.check}>✓</Text>

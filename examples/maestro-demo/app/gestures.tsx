@@ -9,11 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 // "End here!" was tapped, "All green" appears.
 export default function GesturesScreen() {
   const router = useRouter();
-  const [greens, setGreens] = useState<[boolean, boolean, boolean]>([
-    false,
-    false,
-    false,
-  ]);
+  const [greens, setGreens] = useState<[boolean, boolean, boolean]>([false, false, false]);
   const [finished, setFinished] = useState(false);
   const [doubleTapped, setDoubleTapped] = useState(false);
   const [longPressed, setLongPressed] = useState(false);

@@ -36,11 +36,7 @@ export default function WebViewDevtoolsScreen() {
   return (
     <SafeAreaView style={styles.flex} edges={['bottom']}>
       <Stack.Screen options={{ title: 'WebView Devtools Test' }} />
-      <WebView
-        testID="devtools-webview"
-        style={styles.flex}
-        source={{ html: HTML }}
-      />
+      <WebView testID="devtools-webview" style={styles.flex} source={{ html: HTML }} />
     </SafeAreaView>
   );
 }

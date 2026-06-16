@@ -1,12 +1,6 @@
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Each entry mirrors a button on Maestro's demo_app home grid. The `label`
@@ -58,9 +52,7 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.counterRow}>
-          <Text style={styles.counterLabel}>
-            You have pushed the button this many times
-          </Text>
+          <Text style={styles.counterLabel}>You have pushed the button this many times</Text>
           <Text testID="counterValue" style={styles.counterValue}>
             {counter}
           </Text>

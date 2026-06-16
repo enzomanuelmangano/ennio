@@ -1,13 +1,6 @@
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 // Mirrors Maestro demo_app's defects screen: overlapping/occluding elements
 // that stress element disambiguation. A placeholder image box has text laid
@@ -63,9 +56,7 @@ export default function DefectsScreen() {
         ))}
       </View>
 
-      {tapped !== null && (
-        <Text style={styles.result}>{`Tapped ${tapped}`}</Text>
-      )}
+      {tapped !== null && <Text style={styles.result}>{`Tapped ${tapped}`}</Text>}
     </View>
   );
 }

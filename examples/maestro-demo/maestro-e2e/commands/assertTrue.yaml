@@ -1,0 +1,8 @@
+appId: com.ennio.maestrodemo
+name: 'commands/assertTrue — plain boolean expression'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- assertTrue: "1 + 1 === 2"

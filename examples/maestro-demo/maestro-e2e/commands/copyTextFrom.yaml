@@ -1,0 +1,14 @@
+appId: com.ennio.maestrodemo
+name: 'commands/copyTextFrom — copy counterValue then assert via maestro.copiedText'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: fabAddIcon
+- assertVisible:
+    id: counterValue
+- copyTextFrom:
+    id: counterValue
+- assertTrue: "${maestro.copiedText} == '1'"

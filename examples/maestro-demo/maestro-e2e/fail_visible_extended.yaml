@@ -1,0 +1,11 @@
+appId: com.ennio.maestrodemo
+name: 'fail_visible_extended — extendedWaitUntil never finds the id'
+tags:
+  - failing
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: 'non-existent-id'
+    timeout: 1500
