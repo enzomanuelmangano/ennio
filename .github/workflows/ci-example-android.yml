@@ -48,7 +48,7 @@ on:
       - 'packages/ennio/android/**'
       - 'packages/ennio/android-inject/**'
       - 'packages/ennio/cpp/**'
-      - 'example/maestro-e2e/**'
+      - 'examples/showcase/maestro-e2e/**'
       - '.github/workflows/ci-example-android.yml'
   # Run on merge to main to PUBLISH the diag baseline every PR diffs against.
   # Same path filter as PRs so it only re-baselines when something that can
@@ -63,7 +63,7 @@ on:
       - 'packages/ennio/android/**'
       - 'packages/ennio/android-inject/**'
       - 'packages/ennio/cpp/**'
-      - 'example/maestro-e2e/**'
+      - 'examples/showcase/maestro-e2e/**'
       - '.github/workflows/ci-example-android.yml'
 
 permissions:
@@ -220,7 +220,7 @@ jobs:
           NO_ANIM='${ENNIO_NO_ANIM_FLAG}'
           mkdir -p /tmp/ennio-logs
           PASS=0; FAIL=0; FAILED=""; CONSEC=0
-          for f in example/maestro-e2e/*.yaml; do
+          for f in examples/showcase/maestro-e2e/*.yaml; do
             base=\$(basename "\$f")
             case "\$base" in _*|00-*) continue;; esac
             adb logcat -c 2>/dev/null || true

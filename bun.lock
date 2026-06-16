@@ -23,7 +23,7 @@
         "typescript-eslint": "^8.20.0",
       },
     },
-    "example": {
+    "examples/showcase": {
       "name": "ennio-example",
       "version": "0.1.0",
       "dependencies": {
@@ -72,7 +72,7 @@
     },
     "packages/ennio": {
       "name": "@reactiive/ennio",
-      "version": "0.0.8",
+      "version": "0.1.2",
       "bin": {
         "ennio": "./dist/cli.js",
       },
@@ -1017,7 +1017,7 @@
 
     "encodeurl": ["encodeurl@2.0.0", "", {}, "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg=="],
 
-    "ennio-example": ["ennio-example@workspace:example"],
+    "ennio-example": ["ennio-example@workspace:examples/showcase"],
 
     "env-editor": ["env-editor@0.4.2", "", {}, "sha512-ObFo8v4rQJAE59M69QzwloxPZtd33TpYEIjtKD1rrFDcM1Gd7IkDxEBU+HriziN6HSHQnBJi8Dmy+JWkav5HKA=="],
 

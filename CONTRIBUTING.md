@@ -27,7 +27,7 @@ packages/
       ennio-hid.ts    enniohid host-helper client (CoreSimulator Indigo)
       maestro-parser  YAML → AST
       runner/         Executes the AST (commands + lifecycle + tap)
-example/              Sample RN app + maestro-e2e/ regression suite
+examples/showcase/              Sample RN app + maestro-e2e/ regression suite
 ```
 
 A read-only architectural overview lives in the root `README.md`
@@ -57,7 +57,7 @@ A read-only architectural overview lives in the root `README.md`
    real Debug build):
 
    ```bash
-   cd example
+   cd examples/showcase
    bunx expo prebuild --clean
    bunx pod-install
    bunx expo run:ios
@@ -65,7 +65,7 @@ A read-only architectural overview lives in the root `README.md`
 
 4. **Run the regression bench** in another terminal:
    ```bash
-   cd example
+   cd examples/showcase
    bunx ennio test maestro-e2e/
    ```
    Expected: `36 passed, 0 failed`. If this isn't green on `main`
@@ -88,7 +88,7 @@ locally means failing in CI.
 **Always re-run the bench after a code change**:
 
 ```bash
-cd example
+cd examples/showcase
 bunx ennio test maestro-e2e/
 ```
 
@@ -111,7 +111,7 @@ fails:
    to accept the new key.
 2. Add a handler in `MaestroExecutor.executeCommand` in
    `maestro-runner.ts` (the giant switch around line 800).
-3. Add a yaml regression in `example/maestro-e2e/` that exercises it.
+3. Add a yaml regression in `examples/showcase/maestro-e2e/` that exercises it.
 4. Run the bench. Must stay at 36/36 (or 37/37 if you added a new
    yaml).
 5. Update the "Maestro grammar coverage" section of the root README if
@@ -127,7 +127,7 @@ Selectors travel through the bridge as JSON (`packages/ennio/cpp/SelectorParser.
    the Nitro spec) and the C++ `SelectorCriteria` struct.
 2. Extend `SelectorParser` to read the field.
 3. Extend `ElementMatcher::matches` to apply it.
-4. Add yaml regressions in `example/maestro-e2e/11-grammar-selectors.yaml`.
+4. Add yaml regressions in `examples/showcase/maestro-e2e/11-grammar-selectors.yaml`.
 
 ### Native side
 
@@ -137,10 +137,10 @@ The native code compiles inside the consumer app's pod (`EnnioCore`),
 1. Edit `cpp/*` or `ios/*`.
 2. From the example app's iOS dir:
    ```bash
-   cd example/ios
+   cd examples/showcase/ios
    pod install
    ```
-3. Rebuild via Xcode or `cd example && bunx expo run:ios`.
+3. Rebuild via Xcode or `cd examples/showcase && bunx expo run:ios`.
 
 Pure-CLI changes (TypeScript / Python) don't require an app rebuild —
 the CLI launches as a Node process.
