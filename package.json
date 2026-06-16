@@ -43,5 +43,8 @@
   "patchedDependencies": {
     "pressto@0.6.1": "patches/pressto@0.6.1.patch",
     "@react-native-menu/menu@1.2.2": "patches/@react-native-menu%2Fmenu@1.2.2.patch"
+  },
+  "overrides": {
+    "@types/react": "19.2.14"
   }
 }
