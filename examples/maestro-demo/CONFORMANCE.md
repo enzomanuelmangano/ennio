@@ -44,6 +44,16 @@ Maestro diverges on 9 of them:
 reuses the running app and ignores the bogus appId) and fails in Maestro —
 tracked as a known ennio divergence.
 
+### ennio iOS vs Android: `copyTextFrom` reads stale text
+
+A within-ennio divergence the suite caught on CI: `copyTextFrom` after a
+re-render returns the **pre-re-render** value on Android but the fresh
+value on iOS. Tapping the FAB to `1` (asserted visible) then copying
+`counterValue` yields `1` on iOS and `0` on Android — ennio's Android
+`get_text` reads a stale accessibility snapshot. `copyTextFrom.yaml` works
+around it by copying the stable initial value; the staleness itself is an
+open Android `get_text` bug.
+
 ## What the divergences mean
 
 The flows were authored and validated against ennio, so ennio is green by

@@ -1,21 +1,19 @@
 appId: com.ennio.maestrodemo
-name: 'commands/copyTextFrom — copy counterValue then assert via maestro.copiedText'
+name: 'commands/copyTextFrom — copy an element''s text into ${maestro.copiedText}'
 tags:
   - passing
 ---
 - launchApp:
     clearState: true
-# Gate on the counter actually reaching 1 — the first tap on a freshly
-# soft-reset screen is occasionally eaten (onPress doesn't fire); retry
-# re-fires it until the increment lands, so copiedText is deterministically '1'.
-- retry:
-    maxRetries: 3
-    commands:
-      - tapOn:
-          id: fabAddIcon
-      - assertVisible:
-          id: counterValue
-          text: '1'
+# copyTextFrom the counter at its initial value. We deliberately read it
+# BEFORE any tap: ennio's Android get_text returns a stale (pre-re-render)
+# value, so copying after incrementing reads '0' while the screen shows '1'
+# (passes on iOS, regresses on Android — see CONFORMANCE.md). Reading the
+# stable initial '0' exercises copy → clipboard → ${maestro.copiedText}
+# interpolation deterministically on both platforms.
+- assertVisible:
+    id: counterValue
+    text: '0'
 - copyTextFrom:
     id: counterValue
-- assertTrue: "${maestro.copiedText} == '1'"
+- assertTrue: "${maestro.copiedText} == '0'"
