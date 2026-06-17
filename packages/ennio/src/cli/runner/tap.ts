@@ -26,6 +26,12 @@ import { chainHasAsyncPayloadHost, SUBMIT_DISMISS_TESTID_PATTERN } from './capab
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, captureReactTs, parsePoint, resolveRect } from './find';
 
+// A find slower than this means the app's main thread is starved (the
+// in-process finder polls there). Normal finds are ~16ms, so this only
+// trips under genuine load — where the per-tap coord cross-check +
+// off-viewport probe each cost seconds and are skipped. Env-tunable.
+const MAIN_THREAD_SLOW_MS = Number(process.env.ENNIO_MAIN_THREAD_SLOW_MS) || 1500;
+
 interface KeyboardFrame {
   visible: boolean;
   x: number;
@@ -227,7 +233,20 @@ export async function execTapOn(
       }
     }
   }
+  const findStart = Date.now();
   let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
+  // The find's own latency is a free main-thread-load probe. The dylib's
+  // finder polls on the app's MAIN thread; when that thread is CPU-starved
+  // (busy launch/render frame, a loaded CI runner) the find burns seconds
+  // to locate an element that's already on screen. Every OTHER per-tap
+  // in-process round-trip (the ambiguity probe, AX coord cross-check, the
+  // off-viewport window_size probe) is just as starved — each adds ~seconds.
+  // When the find was slow, we're degraded: take the lean path and skip the
+  // belt-and-suspenders refinements (they each cost ~3s under load and the
+  // element is already located on-screen). When the find was fast the main
+  // thread is healthy and those checks are ~free, so run them unchanged —
+  // no behaviour change off the degraded path.
+  const mainThreadSlow = Date.now() - findStart > MAIN_THREAD_SLOW_MS;
   if (!rect) {
     // A cross-process system sheet (Photo Library, tracking, a
     // SpringBoard confirmation) may be floating over the app and hiding
@@ -267,14 +286,17 @@ export async function execTapOn(
   // topmost instance — but the cross-process AX surfaces only one of
   // them, so a coord cross-check would mis-correct to the wrong row.
   // Skip the AX override entirely for ambiguous testIDs.
+  // Also skip the whole cross-check (two more main-thread round-trips) when
+  // the main thread is slow — under starvation it costs ~3s while the
+  // already-located rect is good enough to tap.
   let ambiguousId = false;
-  if (sel.id && !sel.childOf) {
+  if (sel.id && !sel.childOf && !mainThreadSlow) {
     const nth = await timedAsync(ctx, 'tap.ambiguityProbe', () =>
       ctx.client.call('find_by_testid_nth', { testID: sel.id, index: 1 }).catch(() => undefined),
     );
     ambiguousId = !!(nth && nth.ok && nth.data);
   }
-  if ((sel.id || sel.text) && !sel.childOf && !ambiguousId) {
+  if ((sel.id || sel.text) && !sel.childOf && !ambiguousId && !mainThreadSlow) {
     const axEl = await timedAsync(ctx, 'tap.axCrossResolve', () =>
       ctx.platform.ax.resolve(ctx.udid, { id: sel.id, text: sel.text }),
     );
@@ -310,8 +332,10 @@ export async function execTapOn(
   // visible at that pixel and the user's onPress never fires.
   // Drive the enclosing UIScrollView directly via scroll_to — its
   // scrollRectToVisible: is deterministic and ignores gesture
-  // velocity entirely.
-  if (sel.id) {
+  // velocity entirely. Skipped when the main thread is slow: window_size is
+  // another starved round-trip, and an off-viewport carousel target is far
+  // rarer than a plain on-screen button being tapped under load.
+  if (sel.id && !mainThreadSlow) {
     const sz = await ctx.client.call('window_size').catch(() => undefined);
     const wd = (sz?.data as { w?: number; h?: number }) ?? {};
     const winW = wd.w ?? 402;
