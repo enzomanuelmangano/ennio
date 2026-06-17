@@ -31,6 +31,11 @@ UDID="${ENNIO_UDID:?ENNIO_UDID required (ios udid or android serial)}"
 PLATFORM_FLAG=""
 [[ "$PLATFORM" == "android" ]] && PLATFORM_FLAG="--android"
 
+# Hard per-flow timeout (seconds). A healthy flow finishes in <30s; 240s
+# means it's wedged. Env-tunable. Bounds total suite time so one hang can't
+# run the CI job to its 60-min ceiling.
+PER_FLOW_TIMEOUT="${ENNIO_FLOW_TIMEOUT:-240}"
+
 # Flows whose declared `failing` outcome ennio currently does NOT honour.
 # Reported as KNOWN-XPASS, not a hard failure. Remove an entry once fixed.
 #   fail_launchApp: launchApp reuses the running instrumented app and
@@ -77,12 +82,30 @@ for file in "${files[@]}"; do
 
   terminate_app
   log="$LOG_DIR/${name}.log"
-  # </dev/null: keep the CLI from draining the while-loop's stdin (the
-  # Android backend reads stdin and would otherwise swallow the flow list).
-  if ENNIO_UDID="$UDID" node "$CLI" test $PLATFORM_FLAG "$file" >"$log" 2>&1 </dev/null; then
-    got="PASS"
+  # Per-flow hard timeout. A wedged flow (emulator stall, ptrace re-attach
+  # hang, ennio reconnect spin) would otherwise block until the JOB timeout
+  # — a single hang took a CI android run to 1h. Kill it instead so it fails
+  # FAST (counts as that flow failing) and the suite stays bounded. Portable
+  # (macOS iOS runners have no GNU `timeout`): background + deadline-poll.
+  # </dev/null: keep the CLI from draining the loop's stdin (the Android
+  # backend reads stdin and would otherwise swallow the flow list).
+  ENNIO_UDID="$UDID" node "$CLI" test $PLATFORM_FLAG "$file" >"$log" 2>&1 </dev/null &
+  pid=$!
+  deadline=$(( $(date +%s) + PER_FLOW_TIMEOUT ))
+  got=""
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      kill -9 "$pid" 2>/dev/null
+      echo "[run-suite] TIMEOUT: killed after ${PER_FLOW_TIMEOUT}s (flow hung)" >>"$log"
+      got="FAIL"
+      break
+    fi
+    sleep 2
+  done
+  if [ -z "$got" ]; then
+    if wait "$pid"; then got="PASS"; else got="FAIL"; fi
   else
-    got="FAIL"
+    wait "$pid" 2>/dev/null || true
   fi
 
   if [[ "$got" == "$want" ]]; then
