@@ -187,7 +187,10 @@ flow_seconds() {
 }
 
 # run_with_retries <runner-fn> <flow> <want PASS|FAIL> <logbase> <rec.mp4> <kind>
-#   echoes "OUTCOME ATTEMPTS SECONDS"  (OUTCOME = PASS|FAIL; SECONDS of deciding attempt)
+#   echoes "OUTCOME ATTEMPTS SECONDS"
+#     SECONDS = the deciding (final) attempt's self-reported flow time.
+#   Retries are NOT summed into the time — a flake costs an attempt (shown as
+#   ×N) but never inflates the reported speed; the number is one clean run.
 run_with_retries() {
   local fn="$1" file="$2" want="$3" logbase="$4" rec="$5" kind="$6"
   local got="FAIL" attempt=0
@@ -217,6 +220,7 @@ echo "| --- | :---: | :---: | :---: | :---: |" >>"$REPORT_MD"
 
 json_rows=()
 agree=0; diverge=0; total=0
+both_pass=0; sum_e_dec=0; sum_m_dec=0
 start=$(date +%s)
 
 for file in "${files[@]}"; do
@@ -248,12 +252,21 @@ for file in "${files[@]}"; do
     if [[ "$e_out" == "$m_out" ]]; then agreed="yes"; agree=$((agree+1)); else agreed="NO"; diverge=$((diverge+1)); fi
   fi
 
+  # Accumulate the speed total ONLY over flows where both runners PASS — the
+  # comparable happy-path set ("both working"). Deciding-attempt seconds only;
+  # retries are never summed in.
+  if [[ "$e_out" == "PASS" && "$m_out" == "PASS" && "$e_sec" != "-" && "$m_sec" != "-" ]]; then
+    both_pass=$((both_pass + 1))
+    read -r sum_e_dec sum_m_dec < <(awk "BEGIN{printf \"%s %s\", $sum_e_dec+$e_sec, $sum_m_dec+$m_sec}")
+  fi
+
   efmt="$e_out"; [[ "$e_att" -gt 1 ]] && efmt="$e_out (×$e_att)"; efmt="$efmt · ${e_sec}s"
   mfmt="$m_out"; [[ "$m_att" -gt 1 ]] && mfmt="$m_out (×$m_att)"; mfmt="$mfmt · ${m_sec}s"
   amark="$agreed"; [[ "$agreed" == "yes" ]] && amark="✅"; [[ "$agreed" == "NO" ]] && amark="⚠️"
   echo "| \`$rel\` | $want | $efmt | $mfmt | $amark |" >>"$REPORT_MD"
   printf '  %-44s declared=%-4s ennio=%-14s maestro=%-14s %s\n' "$rel" "$want" "$efmt" "$mfmt" "$agreed"
 
+  # *_seconds = deciding (final) attempt only; retries are never summed in.
   esec_j="${e_sec/-/null}"; msec_j="${m_sec/-/null}"
   json_rows+=("{\"flow\":\"$rel\",\"declared\":\"$want\",\"ennio\":\"$e_out\",\"ennio_attempts\":$e_att,\"ennio_seconds\":${esec_j:-null},\"maestro\":\"$m_out\",\"maestro_attempts\":$m_att,\"maestro_seconds\":${msec_j:-null},\"agree\":\"$agreed\"}")
 done
@@ -262,8 +275,18 @@ dur=$(($(date +%s) - start))
 {
   echo
   echo "**$total flows · ${dur}s · ennio↔maestro agree: $agree · diverge: $diverge**"
+  if [[ "$RUN_ENNIO" == "1" && "$RUN_MAESTRO" == "1" && "$both_pass" -gt 0 ]]; then
+    xdec="$(awk "BEGIN{printf \"%.1f\", $sum_m_dec/$sum_e_dec}")"
+    edec="$(awk "BEGIN{printf \"%.0f\", $sum_e_dec}")"; mdec="$(awk "BEGIN{printf \"%.0f\", $sum_m_dec}")"
+    echo
+    echo "Total flow time across the $both_pass flows where **both runners pass** (deciding attempt; retries excluded):"
+    echo
+    echo "| ennio | Maestro | Maestro ÷ ennio |"
+    echo "| :---: | :---: | :---: |"
+    echo "| ${edec}s | ${mdec}s | ${xdec}× |"
+  fi
   echo
-  echo "_Maestro divergences are expected (see CONFORMANCE.md): grammar superset, looser ennio selectors, app-reuse statefulness, polling tolerance. This report is non-gating._"
+  echo "_Per-flow seconds = deciding (final) attempt only; retries (×N) are never counted toward time. Maestro divergences are expected (see CONFORMANCE.md): grammar superset, looser ennio selectors, app-reuse statefulness, polling tolerance. This report is non-gating._"
 } >>"$REPORT_MD"
 
 {
