@@ -1,0 +1,296 @@
+# Maestro-demo DIFFERENTIAL conformance — ennio vs Maestro, side by side, recorded.
+#
+# The maestro-e2e/ flows are Maestro-syntax YAML, so the SAME suite runs
+# through BOTH ennio and real Maestro against the same prebuilt app fixture on
+# the same device. This workflow runs every flow through both runners on iOS
+# (simulator) and Android (rootable AOSP emulator), records a video of each
+# run, and publishes a comparison matrix (declared vs ennio vs maestro) to the
+# job summary plus the recordings + reports as artifacts.
+#
+# NON-GATING by design. run-suite.sh (ci-maestro-demo*.yml) is the gating
+# signal that asserts ennio's declared outcomes; THIS workflow is the
+# differential report. Maestro is EXPECTED to diverge on the flows tracked in
+# examples/maestro-demo/CONFORMANCE.md (grammar superset, looser ennio
+# selectors, app-reuse statefulness, polling tolerance), so a divergence here
+# is data, not a failure — every step that can diverge is tolerant and the
+# job is green as long as it produced a report.
+#
+# Retries: compare-suite.sh gives each runner up to MAX_ATTEMPTS (3) tries per
+# flow, stopping early once an attempt matches the flow's declared outcome.
+#
+# Cost: $0 — public repo, standard GitHub-hosted runners.
+# Security posture mirrors ci-maestro-demo*: contents: read, actions pinned to
+# SHAs, checkout persist-credentials: false, fixtures SHA-256-verified, no secrets.
+#
+# Triggers: workflow_dispatch + pull_request touching the suite / this workflow.
+name: ci-maestro-demo-compare
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_attempts:
+        description: 'Retries per runner per flow'
+        default: '3'
+        required: false
+  pull_request:
+    branches: [main]
+    paths:
+      - 'examples/maestro-demo/**'
+      - 'packages/ennio/src/**'
+      - '.github/workflows/ci-maestro-demo-compare.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maestro-demo-compare-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MAX_ATTEMPTS: ${{ github.event.inputs.max_attempts || '3' }}
+  # Same pinned fixtures as ci-maestro-demo*.yml (e2e-fixtures-v2).
+  MAESTRO_DEMO_APP_ZIP_SHA256: e6eace85f1d43a23b9f176f71d633d970277a9ea46106fa86f40af687e577575
+  MAESTRO_DEMO_APP_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/MaestroDemo-app.zip
+  MAESTRO_DEMO_APK_SHA256: e2eb00ea5ec8c9bcc3614eed217dcec75dc2db45c2b41e79ed379383692a0f68
+  MAESTRO_DEMO_APK_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/MaestroDemo-android.apk
+
+jobs:
+  # ───────────────────────── iOS ─────────────────────────
+  compare-ios:
+    name: Compare ennio↔Maestro (iOS sim)
+    runs-on: macos-15
+    # Differential = 2 runners × 37 flows × up to 3 retries, and Maestro
+    # re-attaches its iOS driver per flow (~25-30s) on the ~2× slower macOS
+    # runner. The diverging flows that burn all 3 retries push a full pass
+    # past 60 min (the gating run-suite.sh, ennio-only, fits in 45). 120 gives
+    # headroom without masking a genuine hang (per-flow timeout still bounds that).
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      - name: Boot simulator (early)
+        run: xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+
+      - name: Cache bun
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      - name: Build dylib + HID helper
+        working-directory: packages/ennio
+        run: |
+          set -euo pipefail
+          bash scripts/build-dylib-local.sh
+          bash scripts/build-hid-helper.sh
+
+      - name: Install Maestro
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Cache maestro-demo app fixture
+        id: app-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/mdemo-app
+          key: maestro-demo-app-${{ env.MAESTRO_DEMO_APP_ZIP_SHA256 }}
+
+      - name: Download maestro-demo app fixture (cache miss)
+        if: steps.app-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/MaestroDemo-app.zip "$MAESTRO_DEMO_APP_URL"
+          echo "${MAESTRO_DEMO_APP_ZIP_SHA256}  /tmp/MaestroDemo-app.zip" | shasum -a 256 -c -
+          unzip -q /tmp/MaestroDemo-app.zip -d /tmp/mdemo-app
+          test -d /tmp/mdemo-app/MaestroDemo.app
+
+      - name: Wait for simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            if xcrun simctl bootstatus booted -b 2>/dev/null; then break; fi
+            sleep 5
+          done
+          UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
+          test -n "$UDID" || { echo "No sim booted"; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          (xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility >/dev/null 2>&1 || true) &
+
+      - name: Install maestro-demo app
+        run: xcrun simctl install "${{ steps.sim.outputs.udid }}" /tmp/mdemo-app/MaestroDemo.app
+
+      - name: Run differential comparison (ennio + Maestro, recorded)
+        env:
+          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+          ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
+          ENNIO_DEFAULT_WAIT_MS: '25000'
+        run: |
+          set -uo pipefail
+          ENNIO_UDID="${{ steps.sim.outputs.udid }}" MAX_ATTEMPTS="$MAX_ATTEMPTS" \
+            examples/maestro-demo/compare-suite.sh ios
+
+      - name: Publish comparison to job summary
+        if: always()
+        run: cat /tmp/mdemo-compare/ios/compare.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload comparison report + recordings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: maestro-demo-compare-ios
+          path: |
+            /tmp/mdemo-compare/ios/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ─────────────────────── Android ───────────────────────
+  compare-android:
+    name: Compare ennio↔Maestro (Android emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      ENNIO_ABI: x86_64
+      ANDROID_API: '34'
+      NDK_VERSION: '27.1.12297006'
+      BUILD_TOOLS: '35.0.0'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK (+ NDK, build-tools, platform)
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-${{ env.ANDROID_API }}
+            build-tools;${{ env.BUILD_TOOLS }}
+            ndk;${{ env.NDK_VERSION }}
+
+      - name: Cache bun
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      - name: Build agent .so + ptrace injector (x86_64)
+        run: ENNIO_ABI=x86_64 bash packages/ennio/android-inject/scripts/build-android.sh
+
+      - name: Install Maestro
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Cache maestro-demo APK fixture
+        id: apk-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/mdemo-apk
+          key: maestro-demo-apk-${{ env.MAESTRO_DEMO_APK_SHA256 }}
+
+      - name: Download maestro-demo APK fixture (cache miss)
+        if: steps.apk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -eu
+          mkdir -p /tmp/mdemo-apk
+          curl -fsSL --retry 3 -o /tmp/mdemo-apk/app-release.apk "$MAESTRO_DEMO_APK_URL"
+          echo "${MAESTRO_DEMO_APK_SHA256}  /tmp/mdemo-apk/app-release.apk" | sha256sum -c -
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Prepare suite script
+        run: |
+          cat > /tmp/run-compare-ci.sh <<EOF
+          #!/usr/bin/env bash
+          set -u
+          adb wait-for-device
+          adb root || true
+          adb wait-for-device
+          boot_deadline=\$((SECONDS + 120))
+          until [ "\$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r')" = "1" ]; do
+            [ "\$SECONDS" -ge "\$boot_deadline" ] && { echo "boot_completed never set"; break; }
+            sleep 1
+          done
+          adb install -r -g /tmp/mdemo-apk/app-release.apk
+          export ENNIO_PLATFORM=android
+          export ENNIO_ANDROID_AGENT=/tmp/ennio-android/libennio.so
+          export ENNIO_ANDROID_INJECTOR=/tmp/ennio-android/ennio_ptrace
+          SERIAL=\$(adb get-serialno)
+          export ENNIO_UDID="\$SERIAL"
+          export MAX_ATTEMPTS="${MAX_ATTEMPTS}"
+          # Differential harness: runs each flow through ennio AND maestro with
+          # retries, records video per run, writes /tmp/mdemo-compare/android/.
+          examples/maestro-demo/compare-suite.sh android
+          EOF
+          chmod +x /tmp/run-compare-ci.sh
+
+      - name: Run differential comparison (boot emulator + drive)
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+        with:
+          api-level: ${{ env.ANDROID_API }}
+          arch: x86_64
+          target: default # AOSP image → adb root works (ptrace needs it)
+          profile: pixel_3a
+          ram-size: 4096M
+          heap-size: 576M
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          disable-animations: true
+          script: bash /tmp/run-compare-ci.sh
+
+      - name: Publish comparison to job summary
+        if: always()
+        run: cat /tmp/mdemo-compare/android/compare.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload comparison report + recordings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: maestro-demo-compare-android
+          path: |
+            /tmp/mdemo-compare/android/
+          retention-days: 7
+          if-no-files-found: warn
