@@ -88,44 +88,25 @@ export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void
 }
 
 /**
- * Suite-level fast reset (--reuse-app): wipe the app's data sandbox and
- * reload the JS bundle IN PLACE — fresh data + fresh React tree — without
- * a process relaunch. The native dylib + its Unix socket survive a JS
- * reload, so the same client keeps working. This is what makes a suite
- * pay the ~6s app boot ONCE instead of per flow: on a Hermes build the
- * reload re-runs precompiled bytecode against the already-loaded native
- * stack in ~1-2s.
+ * clearState reset — a full process RELAUNCH, renderer-agnostic.
  *
- * Falls back to a full clearState relaunch when the app lacks RN's reload
- * symbol (older / fully bridgeless RN), so behaviour is never worse than
- * the relaunch path — only faster when reload is available.
+ * Previously this did an in-place JS reload (clear_state + reload_rn via
+ * RCTTriggerReloadCommandListeners) to skip the process boot. That reload
+ * tears down + rebuilds the React runtime, which heap-corrupts New
+ * Architecture (bridgeless) apps at startup — an intermittent crash that
+ * only struck the reuse path. The reload was also the one RN-specific
+ * concession in an otherwise renderer-agnostic tool. There is no
+ * renderer-agnostic, crash-safe way to reset in-process JS state (that
+ * inherently requires talking to the runtime), so clearState now always
+ * relaunches — same reset model as Maestro, safe on Paper/Fabric/
+ * bridgeless/SwiftUI/native alike.
+ *
+ * Reuse still applies where there is NO reset: a `launchApp` WITHOUT
+ * clearState keeps the running process (no relaunch). Only clearState pays
+ * the relaunch.
  */
 export async function softResetAndReload(ctx: RunContext): Promise<void> {
-  const t0 = Date.now();
-  diag('lifecycle', 'softReset:start', { platform: 'ios', bundleId: ctx.bundleId });
-  const done = (extra: Record<string, unknown> = {}) =>
-    diag('lifecycle', 'softReset:done', { durMs: Date.now() - t0, ...extra });
-  const pre = await ctx.client.call('react_commit_ts').catch(() => undefined);
-  const since = Number((pre?.data as { ts?: number } | undefined)?.ts ?? 0);
-  // Wipe the sandbox first (in-process — it's the app's own container),
-  // then reload so the new JS boots against empty storage.
-  await ctx.client.call('clear_state').catch(() => undefined);
-  const r = await ctx.client.call('reload_rn').catch(() => undefined);
-  const ok = !!(r && r.ok && (r.data as { ok?: boolean } | undefined)?.ok);
-  if (!ok) {
-    // No reload symbol — fall back to the real relaunch.
-    done({ fellBackToRelaunch: true });
-    await clearStateAndRelaunch(ctx);
-    return;
-  }
-  // The reload tears down and rebuilds the React root; wait for the
-  // bundle's first commit after our pre-reload timestamp, then a short
-  // stability check for the initial layout.
-  await ctx.client
-    .call('wait_react_commit', { sinceMs: since, maxMs: 8000 })
-    .catch(() => undefined);
-  await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
-  done({ reloaded: true });
+  await clearStateAndRelaunch(ctx);
 }
 
 /// Re-launch the app with DYLD inject and re-open the control socket.
