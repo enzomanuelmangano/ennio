@@ -171,10 +171,25 @@ run_maestro() {
   return 1
 }
 
-# run_with_retries <runner-fn> <flow> <want PASS|FAIL> <logbase> <rec.mp4>
-#   echoes "OUTCOME ATTEMPTS"  (OUTCOME = PASS|FAIL)
+# flow_seconds <kind> <logbase> <attempt> -> each runner's self-reported flow
+# time for the deciding attempt ("-" if absent). ennio prints "total X.Xs
+# across N steps"; Maestro's JUnit testcase carries time="N".
+flow_seconds() {
+  local kind="$1" logbase="$2" att="$3" s="-"
+  if [[ "$kind" == "ennio" ]]; then
+    s=$(grep -oE 'total [0-9.]+s across' "${logbase}.attempt${att}.log" 2>/dev/null \
+      | grep -oE '[0-9.]+' | head -1)
+  else
+    s=$(grep -oE '<testcase[^>]*\stime="[0-9.]+"' "${logbase}.attempt${att}.junit.xml" 2>/dev/null \
+      | grep -oE 'time="[0-9.]+"' | grep -oE '[0-9.]+' | head -1)
+  fi
+  echo "${s:--}"
+}
+
+# run_with_retries <runner-fn> <flow> <want PASS|FAIL> <logbase> <rec.mp4> <kind>
+#   echoes "OUTCOME ATTEMPTS SECONDS"  (OUTCOME = PASS|FAIL; SECONDS of deciding attempt)
 run_with_retries() {
-  local fn="$1" file="$2" want="$3" logbase="$4" rec="$5"
+  local fn="$1" file="$2" want="$3" logbase="$4" rec="$5" kind="$6"
   local got="FAIL" attempt=0
   start_record "$rec"
   while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
@@ -184,7 +199,7 @@ run_with_retries() {
     [[ "$got" == "$want" ]] && break
   done
   stop_record
-  echo "$got $attempt"
+  echo "$got $attempt $(flow_seconds "$kind" "$logbase" "$attempt")"
 }
 
 # ---- main loop --------------------------------------------------------------
@@ -198,6 +213,7 @@ echo "Device: \`$UDID\`  ·  app: \`$APP_ID\`  ·  retries: $MAX_ATTEMPTS  ·  r
 echo >>"$REPORT_MD"
 echo "| flow | declared | ennio | maestro | agree |" >>"$REPORT_MD"
 echo "| --- | :---: | :---: | :---: | :---: |" >>"$REPORT_MD"
+# cells are 'outcome [×retries] · seconds' (seconds = deciding attempt).
 
 json_rows=()
 agree=0; diverge=0; total=0
@@ -215,14 +231,14 @@ for file in "${files[@]}"; do
   slug="${rel//\//__}"; slug="${slug%.yaml}"
   total=$((total + 1))
 
-  e_out="-"; e_att="0"; m_out="-"; m_att="0"
+  e_out="-"; e_att="0"; e_sec="-"; m_out="-"; m_att="0"; m_sec="-"
   if [[ "$RUN_ENNIO" == "1" ]]; then
-    read -r e_out e_att < <(run_with_retries run_ennio "$file" "$want" \
-      "$LOG_DIR/${slug}.ennio" "$REC_DIR/${slug}.ennio.mp4")
+    read -r e_out e_att e_sec < <(run_with_retries run_ennio "$file" "$want" \
+      "$LOG_DIR/${slug}.ennio" "$REC_DIR/${slug}.ennio.mp4" ennio)
   fi
   if [[ "$RUN_MAESTRO" == "1" ]]; then
-    read -r m_out m_att < <(run_with_retries run_maestro "$file" "$want" \
-      "$LOG_DIR/${slug}.maestro" "$REC_DIR/${slug}.maestro.mp4")
+    read -r m_out m_att m_sec < <(run_with_retries run_maestro "$file" "$want" \
+      "$LOG_DIR/${slug}.maestro" "$REC_DIR/${slug}.maestro.mp4" maestro)
   fi
 
   # "agree" = ennio and maestro produced the same outcome (the differential
@@ -232,13 +248,14 @@ for file in "${files[@]}"; do
     if [[ "$e_out" == "$m_out" ]]; then agreed="yes"; agree=$((agree+1)); else agreed="NO"; diverge=$((diverge+1)); fi
   fi
 
-  efmt="$e_out"; [[ "$e_att" -gt 1 ]] && efmt="$e_out (×$e_att)"
-  mfmt="$m_out"; [[ "$m_att" -gt 1 ]] && mfmt="$m_out (×$m_att)"
+  efmt="$e_out"; [[ "$e_att" -gt 1 ]] && efmt="$e_out (×$e_att)"; efmt="$efmt · ${e_sec}s"
+  mfmt="$m_out"; [[ "$m_att" -gt 1 ]] && mfmt="$m_out (×$m_att)"; mfmt="$mfmt · ${m_sec}s"
   amark="$agreed"; [[ "$agreed" == "yes" ]] && amark="✅"; [[ "$agreed" == "NO" ]] && amark="⚠️"
   echo "| \`$rel\` | $want | $efmt | $mfmt | $amark |" >>"$REPORT_MD"
-  printf '  %-44s declared=%-4s ennio=%-12s maestro=%-12s %s\n' "$rel" "$want" "$efmt" "$mfmt" "$agreed"
+  printf '  %-44s declared=%-4s ennio=%-14s maestro=%-14s %s\n' "$rel" "$want" "$efmt" "$mfmt" "$agreed"
 
-  json_rows+=("{\"flow\":\"$rel\",\"declared\":\"$want\",\"ennio\":\"$e_out\",\"ennio_attempts\":$e_att,\"maestro\":\"$m_out\",\"maestro_attempts\":$m_att,\"agree\":\"$agreed\"}")
+  esec_j="${e_sec/-/null}"; msec_j="${m_sec/-/null}"
+  json_rows+=("{\"flow\":\"$rel\",\"declared\":\"$want\",\"ennio\":\"$e_out\",\"ennio_attempts\":$e_att,\"ennio_seconds\":${esec_j:-null},\"maestro\":\"$m_out\",\"maestro_attempts\":$m_att,\"maestro_seconds\":${msec_j:-null},\"agree\":\"$agreed\"}")
 done
 
 dur=$(($(date +%s) - start))
