@@ -1,0 +1,12 @@
+appId: com.ennio.maestrodemo
+name: 'commands/inputText — type into the multiline input'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Input/Keyboard'
+- tapOn:
+    id: textInput
+- inputText: 'hello world'
+- assertVisible: 'hello world'

@@ -1,0 +1,9 @@
+appId: com.ennio.maestrodemo
+name: 'commands/evalScript — inline JS sets output then assert'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- evalScript: '${output.n = 41 + 1}'
+- assertTrue: 'output.n === 42'

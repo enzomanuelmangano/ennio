@@ -1,0 +1,10 @@
+appId: com.ennio.maestrodemo
+name: 'fail_visible — assertVisible on a non-existent id times out'
+tags:
+  - failing
+---
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: 'non-existent-id'
+    timeout: 2000

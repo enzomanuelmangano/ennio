@@ -1,0 +1,8 @@
+appId: com.ennio.maestrodemo
+name: 'fail_fast — assertTrue false fails immediately'
+tags:
+  - failing
+---
+- launchApp:
+    clearState: true
+- assertTrue: 'false'

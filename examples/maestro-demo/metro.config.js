@@ -2,7 +2,8 @@ const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
 
 const projectRoot = __dirname;
-const workspaceRoot = path.resolve(projectRoot, '..');
+// Repo root is two levels up: examples/maestro-demo → examples → <root>
+const workspaceRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
@@ -16,7 +17,7 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// Force resolution of packages from workspace node_modules
+// Force resolution of singletons from workspace node_modules
 config.resolver.extraNodeModules = {
   'react-native': path.resolve(workspaceRoot, 'node_modules/react-native'),
   react: path.resolve(workspaceRoot, 'node_modules/react'),

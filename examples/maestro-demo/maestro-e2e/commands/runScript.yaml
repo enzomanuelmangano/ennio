@@ -1,0 +1,10 @@
+appId: com.ennio.maestrodemo
+name: 'commands/runScript — run JS file then assert output state'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- runScript:
+    file: '../scripts/setOutput.js'
+- assertTrue: "output.result === 'qwerty'"

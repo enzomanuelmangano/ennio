@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/pressKey — backspace removes the last character'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Input/Keyboard'
+- tapOn:
+    id: textInput
+- inputText: 'abc'
+- pressKey: backspace
+- assertVisible: 'ab'

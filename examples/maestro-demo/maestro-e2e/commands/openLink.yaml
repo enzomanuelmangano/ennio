@@ -1,0 +1,12 @@
+appId: com.ennio.maestrodemo
+name: 'commands/openLink — leave app via https URL then relaunch'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- openLink: 'https://example.com'
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: home-screen

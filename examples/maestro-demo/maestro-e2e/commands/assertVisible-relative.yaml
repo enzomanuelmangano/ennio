@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/assertVisible-relative — containsChild on nested containers'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Nesting Test'
+- assertVisible:
+    id: level-0
+    containsChild:
+      id: level-1
+- assertVisible: 'Container at level 2'

@@ -1,0 +1,14 @@
+appId: com.ennio.maestrodemo
+name: 'issues/1619 — id and text matchers resolve to distinct nodes'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'issue 1619 repro'
+- assertVisible:
+    id: first
+- assertVisible:
+    id: second
+- assertVisible: 'First'
+- assertVisible: 'Second'

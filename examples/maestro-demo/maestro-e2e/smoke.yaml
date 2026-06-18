@@ -1,0 +1,11 @@
+appId: com.ennio.maestrodemo
+name: Cold-start smoke
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: home-screen
+- assertVisible: 'Form Test'
+- assertVisible: 'Paging Test'

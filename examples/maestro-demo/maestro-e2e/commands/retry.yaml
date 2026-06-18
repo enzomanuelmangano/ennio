@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/retry — retry a tap-and-assert block'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: fabAddIcon
+      - assertVisible: '1'

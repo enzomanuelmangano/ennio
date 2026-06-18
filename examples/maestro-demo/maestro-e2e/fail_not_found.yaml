@@ -1,0 +1,9 @@
+appId: com.ennio.maestrodemo
+name: 'fail_not_found — tapOn a non-existent id fails'
+tags:
+  - failing
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: 'non-existent-id'

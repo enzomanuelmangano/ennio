@@ -1,0 +1,18 @@
+appId: com.ennio.maestrodemo
+name: 'commands/launchApp — relaunch preserves state, clearState wipes it'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Input/Keyboard'
+- tapOn:
+    id: textInput
+- inputText: 'potato'
+- tapOn: 'Save'
+- launchApp
+- assertVisible: 'potato'
+- launchApp:
+    clearState: true
+- tapOn: 'Input/Keyboard'
+- assertNotVisible: 'potato'

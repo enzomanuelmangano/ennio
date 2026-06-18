@@ -1,7 +1,7 @@
 #!/bin/bash
 # Maestro conformance suite through ennio.
 #
-# Drives the per-row fixtures under example/maestro-e2e/conformance/ that pin
+# Drives the per-row fixtures under examples/showcase/maestro-e2e/conformance/ that pin
 # ennio's command/selector/modifier behavior to documented Maestro semantics.
 # Each fixture is a self-contained flow that PASSES when ennio behaves correctly
 # (the expectation is encoded inside the flow via assertVisible/assertNotVisible),
@@ -26,7 +26,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 MATRIX="$HERE/matrix.json"
-FIXDIR="$REPO/example/maestro-e2e/conformance"
+FIXDIR="$REPO/examples/showcase/maestro-e2e/conformance"
 LOGD=${SUITE_LOG_DIR:-/tmp/ennio-conformance-logs}
 rm -rf "$LOGD"; mkdir -p "$LOGD"
 

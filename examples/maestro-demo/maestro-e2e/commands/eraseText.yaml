@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/eraseText — erase trailing characters from input'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Input/Keyboard'
+- tapOn:
+    id: textInput
+- inputText: 'testing'
+- eraseText: 3
+- assertVisible: 'test'

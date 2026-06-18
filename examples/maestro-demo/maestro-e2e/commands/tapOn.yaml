@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/tapOn — tap id then navigate via grid button'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: fabAddIcon
+- assertVisible:
+    id: home-screen
+- tapOn: 'Form Test'
+- assertVisible: 'Login'

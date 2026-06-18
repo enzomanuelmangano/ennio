@@ -1,0 +1,14 @@
+appId: com.ennio.maestrodemo
+name: 'commands/scrollUntilVisible — scroll list until item-20 appears'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Scrollable List'
+- scrollUntilVisible:
+    element:
+      id: item-20
+    direction: DOWN
+    timeout: 20000
+- assertVisible: 'Item 20'

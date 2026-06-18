@@ -1,0 +1,18 @@
+appId: com.ennio.maestrodemo
+name: 'commands/scroll — scroll the list down to the last item'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Scrollable List'
+- assertVisible: 'Item 1'
+- scroll:
+    direction: DOWN
+- scroll:
+    direction: DOWN
+- scroll:
+    direction: DOWN
+- scroll:
+    direction: DOWN
+- assertVisible: 'Item 20'

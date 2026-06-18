@@ -17,7 +17,7 @@
       "maestro": "regex match of the whole string; plain text with no metachars matches literally",
       "ennioCurrent": "literal case-insensitive substring contains (find_by_text), regex fallback off",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-text-literal-plain.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-text-literal-plain.yaml",
       "status": "pass",
       "targetPhase": 1
     },
@@ -28,7 +28,7 @@
       "maestro": "treated as a regex; the literal would need escaping. Documented behavior: regex.",
       "ennioCurrent": "isRegexText() sniff sees $ ( ) and switches to regex => \"$5\" anchors end-of-string, \"(USD)\" is a group => MISMATCH against literal on-screen text",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-text-literal-metachars.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-text-literal-metachars.yaml",
       "status": "fragile",
       "note": "Phase 1 added an explicit `literal: true` escape hatch (textMatchMode) so this is now author-fixable; the unannotated default still sniffs until Phase 2 flips it per-profile.",
       "targetPhase": 2
@@ -51,7 +51,7 @@
       "maestro": "regex by default; matches both",
       "ennioCurrent": "isRegexText() sees [,]? => regex branch => matches",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-text-regex-explicit.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-text-regex-explicit.yaml",
       "status": "pass",
       "targetPhase": 1
     },
@@ -62,7 +62,7 @@
       "maestro": "whole-string regex => \"Done\" matches only \"Done\", not \"Done editing\"",
       "ennioCurrent": "maestro profile anchors the pattern whole-string (textMatchArgs ^(?:…)$); resilient keeps legacy substring",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-text-anchor.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-text-anchor.yaml",
       "status": "pass",
       "note": "Closed under maestro (Phase 6, CLI-side anchoring over the existing native regex path). Resilient keeps substring for the migration window.",
       "targetPhase": 6,
@@ -78,7 +78,7 @@
       "maestro": "id treated as regex",
       "ennioCurrent": "id is exact-match (isEqualToString) on accessibilityIdentifier — NOT regex",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-id-regex.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-id-regex.yaml",
       "status": "divergent",
       "note": "Remaining native gap. id is matched by an exact hash lookup in the testID index on BOTH platforms; regex-id needs a coordinated EnnioFinder.mm + EnnioAgent.java change and a rebuild of both binaries to keep iOS/Android parity. Deferred — an iOS-only change would itself create a new cross-platform divergence.",
       "targetPhase": 7
@@ -90,7 +90,7 @@
       "maestro": "0-based index among matches",
       "ennioCurrent": "find_by_testid_nth, sorted top-to-bottom by window Y",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-index.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-index.yaml",
       "status": "pass",
       "targetPhase": 0
     },
@@ -101,7 +101,7 @@
       "maestro": "hierarchical scoping",
       "ennioCurrent": "find_child_by_testid; returns null if parent missing (no flat fallback)",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-childof.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-childof.yaml",
       "status": "pass",
       "targetPhase": 0
     },
@@ -112,7 +112,7 @@
       "maestro": "position-relative matching combined with AND logic",
       "ennioCurrent": "parsed into MaestroSelector; runner support varies — assert coverage",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-relational.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-relational.yaml",
       "status": "todo",
       "targetPhase": 0
     },
@@ -123,7 +123,7 @@
       "maestro": "trait + dimension matchers",
       "ennioCurrent": "fields exist on MaestroSelector; runner coverage unverified",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/sel-traits.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/sel-traits.yaml",
       "status": "todo",
       "targetPhase": 0
     },
@@ -134,7 +134,7 @@
       "maestro": "applies to every command",
       "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/mod-optional.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/mod-optional.yaml",
       "status": "pass",
       "targetPhase": 3
     },
@@ -156,7 +156,7 @@
       "maestro": "conditional execution on any command",
       "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/mod-when-visible.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/mod-when-visible.yaml",
       "status": "pass",
       "targetPhase": 3
     },
@@ -178,7 +178,7 @@
       "maestro": "loop N times",
       "ennioCurrent": "supported",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/ctl-repeat-times.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/ctl-repeat-times.yaml",
       "status": "pass",
       "targetPhase": 0
     },
@@ -189,7 +189,7 @@
       "maestro": "loop while condition holds, optionally combined with times",
       "ennioCurrent": "implemented at the dispatch seam (Phase 3): extractModifiers + shared evaluateCondition",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/ctl-repeat-while.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/ctl-repeat-while.yaml",
       "status": "pass",
       "targetPhase": 3
     },
@@ -200,7 +200,7 @@
       "maestro": "retry the block on failure",
       "ennioCurrent": "supported (default maxRetries 3)",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/ctl-retry.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/ctl-retry.yaml",
       "status": "pass",
       "targetPhase": 0
     },
@@ -223,7 +223,7 @@
       "maestro": "no default timeout; user must specify",
       "ennioCurrent": "supported",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/wait-extended.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/wait-extended.yaml",
       "status": "pass",
       "targetPhase": 0
     },
@@ -234,7 +234,7 @@
       "maestro": "lifecycle hooks",
       "ennioCurrent": "onFlowStart aborts on failure; onFlowComplete runs in finally (implemented)",
       "deviceBacked": true,
-      "fixture": "example/maestro-e2e/conformance/flow-hooks.yaml",
+      "fixture": "examples/showcase/maestro-e2e/conformance/flow-hooks.yaml",
       "status": "pass",
       "targetPhase": 5
     },

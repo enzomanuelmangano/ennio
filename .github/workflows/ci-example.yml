@@ -54,7 +54,7 @@ on:
       - 'packages/ennio/native-hid/**'
       - 'packages/ennio/native-ax/**'
       - 'packages/ennio/native-shim/**'
-      - 'example/maestro-e2e/**'
+      - 'examples/showcase/maestro-e2e/**'
       - 'e2e/conformance/**'
       - '.github/workflows/ci-example.yml'
   # Run on merge to main to PUBLISH the diag baseline every PR diffs against.
@@ -70,7 +70,7 @@ on:
       - 'packages/ennio/native-hid/**'
       - 'packages/ennio/native-ax/**'
       - 'packages/ennio/native-shim/**'
-      - 'example/maestro-e2e/**'
+      - 'examples/showcase/maestro-e2e/**'
       - 'e2e/conformance/**'
       - '.github/workflows/ci-example.yml'
 
@@ -236,7 +236,7 @@ jobs:
           # `mapfile`. The runner streams the full per-step output live
           # (verbose); --fail-fast stops at the first failing flow.
           FILES=()
-          for f in example/maestro-e2e/*.yaml; do
+          for f in examples/showcase/maestro-e2e/*.yaml; do
             base=$(basename "$f")
             case "$base" in _*|00-*) continue;; esac
             FILES+=("$f")

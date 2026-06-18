@@ -12,9 +12,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, sep } from 'node:path';
 
 const PHASE_TRACE = process.env.ENNIO_PHASE_TRACE === '1';
 
@@ -308,9 +309,61 @@ export function findDylib(): string | null {
   for (const p of candidates) {
     if (!existsSync(p)) continue;
     verifyDylibIntegrity(p);
+    warnIfPrebuiltStale(p);
     return p;
   }
   return null;
+}
+
+/**
+ * Dev-only staleness guard. In a repo checkout the dylib SOURCE lives next
+ * to the prebuilt (<pkg>/ios). If any source file is newer than the
+ * prebuilt binary, the binary is stale — injecting it can crash an app in
+ * ways the source no longer would (a stale prebuilt heap-corrupted the
+ * maestro-demo app at Expo module registration). Warn so the dev rebuilds
+ * (scripts/build-dylib-local.sh) or regenerates the prebuilt. Silent in a
+ * shipped npm install, where ios/ source isn't present.
+ */
+function warnIfPrebuiltStale(dylibPath: string): void {
+  if (!dylibPath.includes(`${sep}prebuilt${sep}`)) return; // only the shipped prebuilt
+  const iosDir = resolve(dirname(dylibPath), '..', 'ios');
+  if (!existsSync(iosDir)) return; // not a checkout — nothing to compare
+  let dylibMtime: number;
+  try {
+    dylibMtime = statSync(dylibPath).mtimeMs;
+  } catch {
+    return;
+  }
+  let newestSrc = 0;
+  const stack = [iosDir];
+  while (stack.length) {
+    const d = stack.pop()!;
+    let ents: Dirent[];
+    try {
+      ents = readdirSync(d, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of ents) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) stack.push(full);
+      else if (/\.(mm|m|cpp|h|hpp)$/.test(e.name)) {
+        try {
+          newestSrc = Math.max(newestSrc, statSync(full).mtimeMs);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+  if (newestSrc > dylibMtime) {
+    process.stderr.write(
+      '\x1b[33m[ennio] warning: prebuilt libennio.dylib is older than the ios/ source.\n' +
+        '        The shipped binary may be stale (a stale dylib can crash the target\n' +
+        '        app on inject). Rebuild:  bash packages/ennio/scripts/build-dylib-local.sh\n' +
+        '        (the CLI auto-prefers /tmp/ennio-build/libennio.dylib once built).\x1b[0m\n',
+    );
+  }
 }
 
 /**

@@ -91,4 +91,52 @@ describe('findCrashReport', () => {
     const r = findCrashReport('com.liverum.client', Date.now() - 60_000, dir);
     expect(r!.ennioLoaded).toBe(false);
   });
+
+  // A real stale-dylib crash: SIGABRT whose faulting (JS) thread aborts in
+  // the allocator/os_log while Expo registers native modules at startup —
+  // libennio loaded but not on a faulting frame.
+  function startupAbortBody(): string {
+    return JSON.stringify({
+      procName: 'MaestroDemo',
+      bundleInfo: { CFBundleIdentifier: 'com.ennio.maestrodemo' },
+      exception: { type: 'EXC_CRASH', signal: 'SIGABRT' },
+      faultingThread: 0,
+      threads: [
+        {
+          frames: [
+            { imageIndex: 0, symbol: 'abort' },
+            { imageIndex: 0, symbol: 'nanov2_guard_corruption_detected' },
+            { imageIndex: 1, symbol: '_os_log_impl' },
+            { imageIndex: 2, symbol: 'ModuleRegistry.register(holder:)' },
+            { imageIndex: 2, symbol: 'AppContext.registerNativeModules()' },
+          ],
+        },
+      ],
+      usedImages: [
+        { name: 'libsystem_malloc.dylib' },
+        { name: 'libsystem_trace.dylib' },
+        { name: 'MaestroDemo' },
+        { name: 'libennio.dylib', path: '/private/tmp/x/libennio.dylib' },
+      ],
+    });
+  }
+
+  it('flags startupAbort for a stale-dylib SIGABRT during module registration', () => {
+    writeFileSync(
+      join(dir, 'MaestroDemo-2026-06-17-000357.ips'),
+      `${HEADER}\n${startupAbortBody()}`,
+    );
+    const r = findCrashReport('com.ennio.maestrodemo', Date.now() - 60_000, dir);
+    expect(r).not.toBeNull();
+    expect(r!.exception).toBe('EXC_CRASH (SIGABRT)');
+    expect(r!.startupAbort).toBe(true);
+    expect(r!.ennioLoaded).toBe(true);
+    expect(r!.jsFatal).toBe(false);
+  });
+
+  it('does not flag startupAbort for an ordinary SIGSEGV', () => {
+    writeFileSync(join(dir, 'Liverum-2026-06-04-211802.ips'), `${HEADER}\n${ipsBody()}`);
+    const r = findCrashReport('com.liverum.client', Date.now() - 60_000, dir);
+    expect(r!.startupAbort).toBe(false);
+  });
 });

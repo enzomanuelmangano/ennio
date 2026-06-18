@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/assertVisible — text and id matchers on Home'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: home-screen
+- assertVisible: 'Form Test'
+- assertVisible: 'Input/Keyboard'
+- assertVisible: 'Scrollable List'
+- assertVisible: 'Gesture Tester'

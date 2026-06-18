@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Maestro Demo",
+    "slug": "ennio-maestro-demo",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "maestrodemo",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ennio.maestrodemo",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Demo location archetype screen.",
+        "NSMotionUsageDescription": "Demo motion-sensors archetype screen."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.ennio.maestrodemo",
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-color-space-plugin",
+        {
+          "colorSpace": "displayP3"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

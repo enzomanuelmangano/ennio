@@ -6,6 +6,9 @@
 // is a small focused function; the registry binds them to matcher
 // predicates on the MaestroCommand shape.
 
+import { mkdirSync } from 'node:fs';
+import { dirname, isAbsolute, resolve } from 'node:path';
+
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 
@@ -79,6 +82,11 @@ export function registerSystemHandlers(registry: CommandRegistry): void {
       typeof cmd.takeScreenshot === 'string' ? cmd.takeScreenshot : cmd.takeScreenshot.path;
     // Maestro lets you omit the extension; the platform writers expect one.
     if (!/\.(png|jpe?g)$/i.test(path)) path += '.png';
+    // Maestro creates intermediate dirs; the platform writers (simctl /
+    // adb pull) just open the file and ENOENT on a missing parent. Mirror
+    // Maestro so `path: screenshots/home` works without a pre-made dir.
+    const abs = isAbsolute(path) ? path : resolve(process.cwd(), path);
+    mkdirSync(dirname(abs), { recursive: true });
     ctx.platform.system.screenshot(ctx.udid, path);
   });
 

@@ -1,0 +1,12 @@
+appId: com.ennio.maestrodemo
+name: 'commands/back — return to Home from the Form screen'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Form Test'
+- assertVisible: 'Login'
+- back
+- assertVisible:
+    id: home-screen

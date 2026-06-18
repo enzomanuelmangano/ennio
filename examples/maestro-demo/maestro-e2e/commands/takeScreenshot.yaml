@@ -1,0 +1,11 @@
+appId: com.ennio.maestrodemo
+name: 'commands/takeScreenshot — capture Home then assert it is visible'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- takeScreenshot:
+    path: 'screenshots/home'
+- assertVisible:
+    id: home-screen

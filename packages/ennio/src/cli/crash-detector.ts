@@ -36,6 +36,11 @@ export interface CrashReport {
   /** The crash is React Native's fatal-JS-exception abort
    *  (RCTExceptionsManager reportFatal) — an app bug, not injection. */
   jsFatal: boolean;
+  /** SIGABRT whose faulting thread is a heap/allocator/os_log corruption
+   *  abort during process startup (native-module registration, runtime
+   *  init). With libennio loaded this is the signature of a stale /
+   *  ABI-incompatible injected dylib rather than an app bug. */
+  startupAbort: boolean;
   crashedAtMs: number;
 }
 
@@ -91,6 +96,31 @@ function framesOf(body: IpsBody, max = 6): string[] {
     if (out.length >= max) break;
   }
   return out;
+}
+
+// A heap/allocator/os_log abort on the faulting thread, during startup
+// (native-module registration / runtime init). We scan the WHOLE faulting
+// thread (not just the top 6 reported frames) by image name + symbol — the
+// corruption is detected deep in libsystem_malloc/_trace but the trigger
+// is whatever native code logged or allocated while the heap was already
+// corrupt (e.g. Expo's ModuleRegistry.register → os_log).
+function isStartupAbort(body: IpsBody, exception: string): boolean {
+  if (!/SIGABRT|EXC_CRASH/i.test(exception)) return false;
+  const thread = body.threads?.[body.faultingThread ?? 0];
+  const images = body.usedImages ?? [];
+  let allocOrLog = false;
+  let startupCtx = false;
+  for (const f of thread?.frames ?? []) {
+    const image = f.imageIndex != null ? (images[f.imageIndex]?.name ?? '') : '';
+    const hay = `${image} ${f.symbol ?? ''}`;
+    if (/abort|malloc|nanov2|guard_corruption|os_log|os_trace|libsystem_trace/i.test(hay))
+      allocOrLog = true;
+    if (/registerNativeModules|ModuleRegistry|RCTHost|didInitializeRuntime|_start/i.test(hay))
+      startupCtx = true;
+  }
+  // Either signal alone is weak; require an allocator/log abort AND a
+  // startup-context frame to avoid flagging ordinary runtime SIGABRTs.
+  return allocOrLog && startupCtx;
 }
 
 /**
@@ -157,10 +187,37 @@ export function findCrashReport(
       faultingFrames: framesOf(body),
       ennioLoaded,
       jsFatal,
+      startupAbort: isStartupAbort(body, exception),
       crashedAtMs: c.mtime,
     };
   }
   return null;
+}
+
+/** Block the calling thread for `ms` without a child process. */
+function syncSleep(ms: number): void {
+  const sab = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(sab, 0, 0, ms);
+}
+
+/**
+ * Crash reports are written asynchronously — when the socket drops we
+ * usually beat the .ips to disk. Poll for a matching report for up to
+ * `timeoutMs` so the diagnosis is the real post-mortem, not the useless
+ * "no crash report found yet". Returns as soon as one appears.
+ */
+export function waitForCrashReport(
+  bundleId: string,
+  sinceMs: number,
+  timeoutMs = 6_000,
+): CrashReport | null {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const r = findCrashReport(bundleId, sinceMs);
+    if (r) return r;
+    if (Date.now() >= deadline) return null;
+    syncSleep(500);
+  }
 }
 
 /**
@@ -199,13 +256,39 @@ export function diagnoseSocketFailure(
   context: 'flow' | 'improvise' = 'flow',
 ): string {
   const alive = isAppRunning(udid, bundleId);
-  const report = findCrashReport(bundleId, sinceMs);
+  // This only runs at TERMINAL failure (after the retry ladder), so it's
+  // worth a few seconds to catch the async .ips. Poll even when the app
+  // looks alive: a stale-dylib crash relaunch-loops, so a liveness probe
+  // can read "alive" between a crash and its respawn while a report for the
+  // dead instance is already on disk.
+  let report = waitForCrashReport(bundleId, sinceMs, alive ? 4_000 : 6_000);
+  // macOS throttles duplicate crash reports: a repeat of an identical
+  // signature (e.g. the same stale-dylib abort on every launch) writes no
+  // new .ips. When the app is dead with no fresh report, fall back to the
+  // most recent same-bundle report — if it's the startup-abort signature
+  // it's almost certainly this crash, deduped.
+  let deduped = false;
+  if (!alive && !report) {
+    const recent = findCrashReport(bundleId, Date.now() - 10 * 60_000);
+    if (recent?.startupAbort) {
+      report = recent;
+      deduped = true;
+    }
+  }
   if (alive && !report) return '';
 
   const lines: string[] = [];
   if (report) {
-    const secs = Math.max(0, Math.round((report.crashedAtMs - sinceMs) / 1000));
-    lines.push(`the app crashed (${report.exception}) ~${secs}s after launch.`);
+    if (deduped) {
+      lines.push(
+        'the app process is gone and macOS wrote no new crash report (it ' +
+          'throttles repeats of an identical crash). The most recent matching ' +
+          'report is almost certainly this same crash:',
+      );
+    } else {
+      const secs = Math.max(0, Math.round((report.crashedAtMs - sinceMs) / 1000));
+      lines.push(`the app crashed (${report.exception}) ~${secs}s after launch.`);
+    }
     lines.push(`crash report: ${report.path}`);
     if (report.faultingFrames.length) {
       lines.push('faulting thread:');
@@ -218,6 +301,23 @@ export function diagnoseSocketFailure(
       lines.push(
         "the app's JavaScript threw a fatal exception (RCTFatalException) — " +
           'an app bug, not an ennio issue. Check the JS bundle the app is loading.',
+      );
+    } else if (report.startupAbort && report.ennioLoaded) {
+      // SIGABRT in the allocator/os_log during startup, libennio loaded but
+      // NOT on the faulting frame: the classic stale / ABI-incompatible
+      // injected-dylib signature (e.g. heap corruption surfacing in Expo's
+      // native-module registration). Name it and point at the fix.
+      lines.push(
+        'this is a startup abort (heap/os_log corruption during native-module ' +
+          'registration) with libennio loaded — the signature of a STALE or ' +
+          "ABI-incompatible injected dylib, not an app bug (the app runs fine when it isn't injected).",
+      );
+      lines.push(
+        '  → rebuild the dylib from source:  bash packages/ennio/scripts/build-dylib-local.sh',
+      );
+      lines.push(
+        '    (the CLI auto-prefers /tmp/ennio-build/libennio.dylib), or update the ' +
+          'prebuilt, then retry. --safe-mode disables in-app hooks as a fallback.',
       );
     } else if (ennioInFrames) {
       lines.push(

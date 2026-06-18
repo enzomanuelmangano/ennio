@@ -83,7 +83,7 @@
     "clean": "rm -rf lib dist",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node dist/cli.js test ../../example/maestro-e2e",
+    "test:e2e": "node dist/cli.js test ../../examples/showcase/maestro-e2e",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
     "lint": "eslint . --max-warnings=0",
     "prepublishOnly": "npm run clean && npm run build"

@@ -1,0 +1,13 @@
+appId: com.ennio.maestrodemo
+name: 'commands/hideKeyboard — dismiss keyboard on the Input screen'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Input/Keyboard'
+- tapOn:
+    id: textInput
+- inputText: 'x'
+- hideKeyboard
+- assertVisible: 'Input & Navigation'

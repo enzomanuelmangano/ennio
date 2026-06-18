@@ -31,15 +31,15 @@ export default [
   ...expoConfig,
   prettierConfig,
   {
-    files: ['example/**/*.{ts,tsx}'],
+    files: ['examples/**/*.{ts,tsx}'],
     plugins: { refined },
     rules: refined.configs.recommended.rules,
   },
   {
     // Gauntlet intentionally exercises every touchable variant; disable
-    // the avoid-touchable-opacity rule there. example/src/App.tsx is the
+    // the avoid-touchable-opacity rule there. showcase/src/App.tsx is the
     // legacy non-router demo and isn't part of the live app surface.
-    files: ['example/app/gauntlet/**/*.{ts,tsx}', 'example/src/**/*.{ts,tsx}'],
+    files: ['examples/**/app/gauntlet/**/*.{ts,tsx}', 'examples/**/src/**/*.{ts,tsx}'],
     rules: { 'refined/avoid-touchable-opacity': 'off' },
   },
   {

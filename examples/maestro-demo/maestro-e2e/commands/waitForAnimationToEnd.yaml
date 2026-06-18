@@ -1,0 +1,12 @@
+appId: com.ennio.maestrodemo
+name: 'commands/waitForAnimationToEnd — settle animation then assert end state'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Animation Test'
+- tapOn: 'Animate (4s)'
+- waitForAnimationToEnd:
+    timeout: 6000
+- assertVisible: '0.0s'

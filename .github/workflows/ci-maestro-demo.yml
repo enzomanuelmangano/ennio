@@ -1,0 +1,207 @@
+# Maestro-demo conformance — outcome-asserting suite against a prebuilt fixture.
+#
+# The suite tests the RUNNER, not the app, so the app binary is a stable
+# fixture published as a GitHub release asset (e2e-fixtures-v2) instead
+# of a per-run xcodebuild — same pattern as ci-example. The harness
+# (examples/maestro-demo/run-suite.sh) runs every flow and ASSERTS its
+# declared outcome (passing flows must pass, failing flows must fail),
+# exiting non-zero on any regression except tracked KNOWN_XPASS.
+#
+# Cost: $0 — public repo, standard GitHub-hosted runner.
+#
+# Security posture (mirrors ci-example):
+#   - permissions: contents: read
+#   - actions pinned to full commit SHAs
+#   - checkout with persist-credentials: false
+#   - fixture download SHA-256-verified against a pinned hash before
+#     anything is unzipped or installed
+#   - no secrets consumed
+#
+# Triggers: pull_request (paths-filtered) + manual dispatch —
+#   gh workflow run ci-maestro-demo.yml
+name: ci-maestro-demo
+
+on:
+  # The harness (run-suite.sh) hard-codes its per-flow CLI invocation and
+  # doesn't take runner flags, so manual dispatch carries no inputs.
+  workflow_dispatch:
+  # Every PR that can affect the iOS runner or the maestro-demo suite.
+  #
+  # src/** is the shared cross-platform CLI (runner, settle, rpc, driver
+  # core) — a change there genuinely affects iOS, so it triggers here.
+  # The Android-only TS below is carved out with negations (last-match-
+  # wins, per file): a PR touching ONLY Android-specific TS won't boot a
+  # macOS sim. android/** native isn't listed at all, so it never does.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/ennio/src/**'
+      - '!packages/ennio/src/cli/android/**'
+      - '!packages/ennio/src/cli/platform/android.ts'
+      - '!packages/ennio/src/cli/driver/android-driver.ts'
+      - 'packages/ennio/ios/**'
+      - 'packages/ennio/cpp/**'
+      - 'packages/ennio/native-hid/**'
+      - 'packages/ennio/native-ax/**'
+      - 'packages/ennio/native-shim/**'
+      - 'examples/maestro-demo/**'
+      - '.github/workflows/ci-maestro-demo.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maestro-demo-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # SHA-256 of MaestroDemo-app.zip from the e2e-fixtures-v2 release.
+  # Refresh procedure documented in that release's notes.
+  MAESTRO_DEMO_APP_ZIP_SHA256: e6eace85f1d43a23b9f176f71d633d970277a9ea46106fa86f40af687e577575
+  MAESTRO_DEMO_APP_URL: https://github.com/enzomanuelmangano/ennio/releases/download/e2e-fixtures-v2/MaestroDemo-app.zip
+
+jobs:
+  # Cheap pre-flight on a Linux runner: don't boot a simulator/emulator
+  # for a PR that can't even lint, typecheck, format, or build. The
+  # expensive job below only starts once this passes.
+  gate:
+    name: Fast checks gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run format:check
+      - run: bun run build
+
+  maestro-demo:
+    name: Maestro-demo conformance (iOS sim, prebuilt fixture)
+    needs: gate
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_26.0.app
+
+      # Boot the sim NOW (the command blocks ~60s) so it spends the next
+      # ~4-5 min of JS/dylib setup settling — SpringBoard, launchd_sim,
+      # CoreSimulator services. The later "Wait for simulator" step then
+      # confirms in seconds. Do NOT background this: a backgrounded boot
+      # is killed at step end, the Wait step's `bootstatus -b` then boots
+      # the device itself, and the suite starts against a just-booted,
+      # unsettled sim — measured: the first `simctl terminate` blocked
+      # 7.5 minutes.
+      - name: Boot simulator (early)
+        run: xcrun simctl boot "iPhone 17 Pro" || xcrun simctl boot "iPhone 16 Pro" || true
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.2.19
+
+      - name: Cache bun
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Build ennio CLI
+        working-directory: packages/ennio
+        run: bun run build
+
+      - name: Build dylib + HID helper
+        working-directory: packages/ennio
+        run: |
+          set -euo pipefail
+          bash scripts/build-dylib-local.sh
+          bash scripts/build-hid-helper.sh
+
+      - name: Cache maestro-demo app fixture
+        id: app-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/mdemo-app
+          key: maestro-demo-app-${{ env.MAESTRO_DEMO_APP_ZIP_SHA256 }}
+
+      - name: Download maestro-demo app fixture (cache miss)
+        if: steps.app-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/MaestroDemo-app.zip "$MAESTRO_DEMO_APP_URL"
+          echo "${MAESTRO_DEMO_APP_ZIP_SHA256}  /tmp/MaestroDemo-app.zip" | shasum -a 256 -c -
+          unzip -q /tmp/MaestroDemo-app.zip -d /tmp/mdemo-app
+          test -d /tmp/mdemo-app/MaestroDemo.app
+
+      - name: Wait for simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          # The boot was kicked off in the background minutes ago; by now
+          # it's usually done. Bounded poll covers the race where it
+          # hasn't registered as booting yet (bootstatus would error out).
+          for i in $(seq 1 24); do
+            if xcrun simctl bootstatus booted -b 2>/dev/null; then break; fi
+            sleep 5
+          done
+          UDID=$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')
+          test -n "$UDID" || { echo "No sim booted"; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          # Pre-warm CoreSimulator's spawn/cfprefsd path in the background:
+          # the FIRST `simctl spawn` after boot pays a ~60-90s service
+          # warm-up on these runners (measured via ENNIO_PHASE_TRACE —
+          # enableAccessibility 77s). Poking it now, overlapped with the
+          # app install below, moves that cost off the first flow.
+          (xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility >/dev/null 2>&1 || true) &
+
+      - name: Install maestro-demo app
+        run: xcrun simctl install "${{ steps.sim.outputs.udid }}" /tmp/mdemo-app/MaestroDemo.app
+
+      - name: Run maestro-demo conformance suite
+        env:
+          ENNIO_UDID: ${{ steps.sim.outputs.udid }}
+          # REQUIRED: the shipped prebuilt dylib is stale and crashes this app,
+          # so CI builds it from source above and points the run at it.
+          ENNIO_DYLIB_PATH: /tmp/ennio-build/libennio.dylib
+          # GitHub Actions macos runners are ~1.5-2× slower than a dev Mac
+          # for simulator workloads. Give assertVisible / waitFor more headroom
+          # so slow dark-mode re-renders and logout navigations don't timeout.
+          ENNIO_DEFAULT_WAIT_MS: '25000'
+          # Per-phase timing ([phase] lines in the per-flow logs) — costs
+          # nothing, makes runner slowness diagnosable from artifacts.
+          ENNIO_PHASE_TRACE: '1'
+        run: |
+          set -uo pipefail
+          # Outcome-asserting harness: run-suite.sh runs every flow and
+          # asserts its declared outcome (passing flows must pass, failing
+          # flows must fail), exiting non-zero on any regression except
+          # tracked KNOWN_XPASS. Per-flow logs land in /tmp/mdemo-suite-log.
+          ENNIO_UDID="${{ steps.sim.outputs.udid }}" examples/maestro-demo/run-suite.sh ios
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: maestro-demo-logs
+          path: |
+            /tmp/mdemo-suite-log/
+          retention-days: 7
+          if-no-files-found: warn

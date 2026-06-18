@@ -10,7 +10,7 @@
 // Usage:
 //   node scripts/flake-baseline.mjs [--dir <e2e-dir>] [--runs N] [--out <file>]
 //
-// Defaults: --dir ../../example/maestro-e2e  --runs 5  --out reports/flake-baseline.json
+// Defaults: --dir ../../examples/showcase/maestro-e2e  --runs 5  --out reports/flake-baseline.json
 //
 // Requires a booted iOS sim (same prerequisites as `ennio test`).
 // Env passthrough: ENNIO_UDID, ENNIO_DYLIB_PATH.
@@ -25,7 +25,7 @@ const pkgRoot = resolve(__dirname, '..');
 
 function parseArgs(argv) {
   const a = {
-    dir: resolve(pkgRoot, '../../example/maestro-e2e'),
+    dir: resolve(pkgRoot, '../../examples/showcase/maestro-e2e'),
     runs: 5,
     out: resolve(pkgRoot, 'reports/flake-baseline.json'),
   };

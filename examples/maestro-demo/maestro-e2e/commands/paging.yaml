@@ -1,0 +1,35 @@
+appId: com.ennio.maestrodemo
+name: 'commands/paging — advance a native UIPageViewController'
+# The archetype missing from the showcase app. react-native-pager-view
+# is a native UIPageViewController on iOS; ennio's in-process paging-swipe
+# shortcut (setContentOffset:animated:) desyncs it and can report a false
+# PASS while the page never turns. Each assertVisible after a swipe is the
+# positive, optimization-independent confirmation that catches that.
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'Paging Test'
+- assertVisible: 'Page 1'
+- assertVisible:
+    id: page-indicator
+    text: 'Page 1 of 4'
+
+- swipe:
+    direction: LEFT
+- assertVisible: 'Page 2'
+- assertVisible:
+    id: page-indicator
+    text: 'Page 2 of 4'
+
+- swipe:
+    direction: LEFT
+- assertVisible: 'Page 3'
+
+- swipe:
+    direction: LEFT
+- assertVisible: 'Page 4'
+- assertVisible:
+    id: page-indicator
+    text: 'Page 4 of 4'

@@ -1,0 +1,11 @@
+appId: com.ennio.maestrodemo
+name: 'commands/assertNotVisible — bogus text and pre-login state'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- assertNotVisible: 'kwyjibo'
+- tapOn: 'Form Test'
+- assertVisible: 'Login'
+- assertNotVisible: 'Credentials are correct'

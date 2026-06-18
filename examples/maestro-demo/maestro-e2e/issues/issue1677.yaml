@@ -1,0 +1,17 @@
+appId: com.ennio.maestrodemo
+name: 'issues/1677 — tapping parent forwards to nested child counter'
+tags:
+  - passing
+---
+- launchApp:
+    clearState: true
+- tapOn: 'issue 1677 repro'
+- assertVisible: 'tap count: 0'
+- tapOn:
+    id: parent_ident
+- assertVisible: 'tap count: 1'
+- tapOn:
+    id: parent_ident
+    containsDescendants:
+      - id: child_ident
+- assertVisible: 'tap count: 2'

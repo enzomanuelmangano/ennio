@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run every Maestro YAML in example/maestro-e2e/ and tally pass/fail.
+# Run every Maestro YAML in examples/showcase/maestro-e2e/ and tally pass/fail.
 #
 # Skips the meta-aggregator (00-full-suite.yaml) and any file that's
 # explicitly a subflow (leading underscore or under subflows/).
@@ -11,7 +11,7 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 CLI="$REPO/packages/ennio/dist/cli.js"
-FLOW_DIR="$REPO/example/maestro-e2e"
+FLOW_DIR="$REPO/examples/showcase/maestro-e2e"
 LOG_DIR="/tmp/ennio-suite-log"
 mkdir -p "$LOG_DIR"
 rm -f "$LOG_DIR"/*.log
