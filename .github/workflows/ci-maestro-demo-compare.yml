@@ -59,7 +59,12 @@ jobs:
   compare-ios:
     name: Compare ennio↔Maestro (iOS sim)
     runs-on: macos-15
-    timeout-minutes: 60
+    # Differential = 2 runners × 37 flows × up to 3 retries, and Maestro
+    # re-attaches its iOS driver per flow (~25-30s) on the ~2× slower macOS
+    # runner. The diverging flows that burn all 3 retries push a full pass
+    # past 60 min (the gating run-suite.sh, ennio-only, fits in 45). 120 gives
+    # headroom without masking a genuine hang (per-flow timeout still bounds that).
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
