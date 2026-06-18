@@ -131,18 +131,23 @@ run_ennio() {
 }
 # run_maestro <flow> <logfile>
 #
-# Maestro's exit code is UNRELIABLE for this suite: every flow whose `name:`
-# contains a '/' (all commands/*) crashes Maestro's post-run AI-report writer
-# (HtmlAITestSuiteReporter → FileNotFoundException on a path derived from the
-# slashed name) AFTER the flow has already passed or failed — a non-zero exit
-# that has nothing to do with the flow outcome. So we derive the outcome from
-# Maestro's own per-step stdout instead, which is what it actually observed:
-#   "<step>... FAILED" / "Element not found" / "Assertion is false" -> FAIL
-#   otherwise, if any "<step>... COMPLETED" ran               -> PASS
-#   neither (never got going / hard timeout)                  -> FAIL
+# Maestro's EXIT CODE and STDOUT are both unreliable for this suite:
+#   - Exit code: every flow whose `name:` contains '/' (all commands/*) crashes
+#     Maestro's post-run AI-report writer (HtmlAITestSuiteReporter →
+#     FileNotFoundException on a path derived from the slashed name) AFTER the
+#     flow already passed/failed — a non-zero exit unrelated to the outcome.
+#   - Stdout: container steps (nested `runFlow`, conditional `when:`) print
+#     "Run flow... RUNNING" and never a clean "... COMPLETED", so scraping
+#     stdout false-FAILs a flow that actually passed.
+# The authoritative signal is Maestro's own JUnit report (--format JUNIT),
+# which records the real per-flow result AND is written before the AI-report
+# crash. We parse the testcase status from it.
 run_maestro() {
   local file="$1" log="$2"
-  maestro --device "$UDID" test "$file" >"$log" 2>&1 </dev/null &
+  local xml="${log%.log}.junit.xml"
+  rm -f "$xml"
+  maestro --device "$UDID" test --no-ansi --format JUNIT --output "$xml" "$file" \
+    >"$log" 2>&1 </dev/null &
   local pid=$! deadline=$(( $(date +%s) + PER_FLOW_TIMEOUT ))
   while kill -0 "$pid" 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
@@ -154,9 +159,13 @@ run_maestro() {
     sleep 2
   done
   wait "$pid" 2>/dev/null || true
-  if grep -qE '(\.\.\. FAILED|Element not found|Assertion is false|did not (pass|complete))' "$log"; then
-    return 1
-  elif grep -qE '\.\.\. COMPLETED' "$log"; then
+  # JUnit testcase carries status="SUCCESS|FAILED|ERROR". A flow that never ran
+  # produces no testcase -> treated as FAIL.
+  [[ -f "$xml" ]] || return 1
+  if grep -qE 'status="(FAILED|ERROR)"' "$xml"; then return 1; fi
+  if grep -qE 'status="SUCCESS"' "$xml"; then return 0; fi
+  # Fallback: a testsuite with zero failures/errors and >=1 test.
+  if grep -qE 'failures="0"[^>]*errors="0"' "$xml" && grep -qE 'tests="[1-9]' "$xml"; then
     return 0
   fi
   return 1
