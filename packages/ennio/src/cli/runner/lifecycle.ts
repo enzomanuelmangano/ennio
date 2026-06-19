@@ -15,7 +15,7 @@ import { diagnoseSocketFailure, throttledAliveProbe } from '../crash-detector';
 import { diag } from '../diag';
 import { dismissSystemSheet } from '../ennio-ax';
 import { warmActuator } from '../hid';
-import { findDylib, getAppContainer, setSimLaunchEnv, terminateApp } from '../sim';
+import { findDylib, setSimLaunchEnv, terminateApp } from '../sim';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 
 import { RunContext, sleep } from './context';
@@ -149,11 +149,12 @@ export async function relaunchAndReconnect(
   const t0 = Date.now();
   diag('lifecycle', 'relaunch:start', { platform: 'ios', bundleId: ctx.bundleId });
   ctx.client.close();
-  // Make sure the previous process is fully gone before we launch
-  // again — simctl launch can otherwise attach to the still-shutting
-  // -down PID and lose the dylib.
+  // Terminate the previous process; the launch below passes
+  // --terminate-running-process, which atomically kills a still-shutting
+  // -down PID before spawning (so the new process keeps the dylib). No
+  // blind settle needed — clearStateAndRelaunch uses the same
+  // terminate→launch sequence with no sleep and is crash-safe.
   terminateApp(ctx.udid, ctx.bundleId);
-  await sleep(300);
   if (!ctx.dylibPath) {
     const auto = findDylib();
     if (!auto) {
@@ -388,7 +389,6 @@ export async function clearStateAndRelaunch(
   }
   ctx.client = reopen;
   recordLaunchArgs(ctx.udid, ctx.bundleId, launchArgs);
-  getAppContainer(ctx.udid, ctx.bundleId);
   // Pre-spawn the HID helper in the background — it arms while the app
   // finishes booting, so the first real gesture doesn't pay the ~700ms
   // spawn (observed as a slow first nav tap).
