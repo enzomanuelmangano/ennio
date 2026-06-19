@@ -21,6 +21,36 @@ import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 import { RunContext, sleep } from './context';
 
 /**
+ * Set the simulator's sticky launchctl env ONCE per device.
+ *
+ * ENNIO_SOCKET_PATH / ENNIO_NO_ANIMATIONS / ENNIO_SHOW_TOUCHES are sim-wide
+ * launchctl vars that survive every relaunch, and their values are constant
+ * for a CLI process — yet each `simctl spawn launchctl setenv` costs
+ * ~300-400ms. Re-setting all three on every clearState relaunch was ~1s of
+ * pure redundant simctl overhead per flow (the bulk of the relaunch's
+ * "preLaunch" phase). Setting them once per udid is the biggest agnostic
+ * win on the relaunch path — no RN, no internals, identical behavior.
+ */
+const simEnvReady = new Set<string>();
+// Data-container path is stable for an install — cache it so the fast wipe
+// path skips a ~300-400ms `simctl get_app_container` per relaunch. Keyed by
+// udid:bundleId; invalidated on full reinstall (which changes the install dir).
+const dataContainerCache = new Map<string, string>();
+function ensureSimLaunchEnv(udid: string): void {
+  if (simEnvReady.has(udid)) return;
+  execFileSync(
+    'xcrun',
+    ['simctl', 'spawn', udid, 'launchctl', 'setenv', 'ENNIO_SOCKET_PATH', ennioSocketPath(udid)],
+    { stdio: 'pipe' },
+  );
+  // Sticky env; set OR clear so a prior run can't leak it. Source of truth:
+  // the CLI's process env (constant for this process).
+  setSimLaunchEnv(udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
+  setSimLaunchEnv(udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
+  simEnvReady.add(udid);
+}
+
+/**
  * System permission sheets (Photo Library, notifications, tracking,
  * location) and SpringBoard confirmations render in a SEPARATE process,
  * so neither the in-app dylib nor the in-house host HID can introspect
@@ -133,26 +163,8 @@ export async function relaunchAndReconnect(
     }
     ctx.dylibPath = auto;
   }
-  // Set ENNIO_SOCKET_PATH on the simulator launchctl env (SIMCTL_CHILD_*
-  // only forwards DYLD_* and a few known prefixes; arbitrary names are
-  // dropped). Per-UDID path, sim-wide scope, not a secret.
-  execFileSync(
-    'xcrun',
-    [
-      'simctl',
-      'spawn',
-      ctx.udid,
-      'launchctl',
-      'setenv',
-      'ENNIO_SOCKET_PATH',
-      ennioSocketPath(ctx.udid),
-    ],
-    { stdio: 'pipe' },
-  );
-  // Propagate --no-animations (sticky launchctl env; set OR clear so a
-  // prior run can't leak it). Source of truth: the CLI's process env.
-  setSimLaunchEnv(ctx.udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
-  setSimLaunchEnv(ctx.udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
+  // Sim launchctl env — set once per device (sticky). See ensureSimLaunchEnv.
+  ensureSimLaunchEnv(ctx.udid);
   const launchedAt = Date.now();
   execFileSync(
     'xcrun',
@@ -211,49 +223,55 @@ export async function clearStateAndRelaunch(
     /* ok */
   }
 
-  // Grab the installed .app bundle path BEFORE any teardown.
-  let appBundle: string | null = null;
-  try {
-    appBundle = execFileSync(
-      'xcrun',
-      ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'app'],
-      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-    ).trim();
-  } catch {
-    /* app not installed */
-  }
+  const csKey = `${ctx.udid}:${ctx.bundleId}`;
 
   // Terminate via simctl (app may not be running — terminateApp swallows that).
   terminateApp(ctx.udid, ctx.bundleId);
 
-  if (fullReinstall && appBundle) {
-    const tmp = mkdtempSync(join(tmpdir(), 'ennio-cs-'));
-    const copy = join(tmp, 'App.app');
-    cpSync(appBundle, copy, { recursive: true });
-
-    // Uninstall via simctl for an OS-level reset (Keychain, UserDefaults,
-    // caches, group containers).
-    execFileSync('xcrun', ['simctl', 'uninstall', ctx.udid, ctx.bundleId], { stdio: 'pipe' });
-    await sleep(1000);
-
-    // Reinstall via simctl.
-    execFileSync('xcrun', ['simctl', 'install', ctx.udid, copy], { stdio: 'pipe' });
-    await sleep(1000);
-  } else if (appBundle) {
-    // Fast path: wipe the data sandbox in place. The app is terminated,
-    // so the container is quiescent; iOS recreates Library/Caches,
-    // Library/Preferences, etc. on the next launch. Wipe the CONTENTS of
-    // Documents / Library / tmp rather than the dirs themselves so the
-    // container's own permissions/structure stay intact.
-    let dataContainer: string | null = null;
+  if (fullReinstall) {
+    // Full OS-level reset (Keychain, group containers, …). Needs the .app
+    // bundle to copy + reinstall; the install dir changes, so drop the
+    // cached data-container path.
+    dataContainerCache.delete(csKey);
+    let appBundle: string | null = null;
     try {
-      dataContainer = execFileSync(
+      appBundle = execFileSync(
         'xcrun',
-        ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'data'],
+        ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'app'],
         { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
       ).trim();
     } catch {
-      /* no data container yet — nothing to wipe */
+      /* app not installed */
+    }
+    if (appBundle) {
+      const tmp = mkdtempSync(join(tmpdir(), 'ennio-cs-'));
+      const copy = join(tmp, 'App.app');
+      cpSync(appBundle, copy, { recursive: true });
+      execFileSync('xcrun', ['simctl', 'uninstall', ctx.udid, ctx.bundleId], { stdio: 'pipe' });
+      await sleep(1000);
+      execFileSync('xcrun', ['simctl', 'install', ctx.udid, copy], { stdio: 'pipe' });
+      await sleep(1000);
+    }
+  } else {
+    // Fast path: wipe the data sandbox in place. The app is terminated, so
+    // the container is quiescent; iOS recreates Library/Caches etc. on the
+    // next launch. Wipe the CONTENTS of Documents / Library / tmp (not the
+    // dirs) so the container's own permissions/structure stay intact. The
+    // container path is stable for an install → cache it (skips a
+    // get_app_container simctl call per relaunch); no separate .app lookup
+    // needed on this path.
+    let dataContainer = dataContainerCache.get(csKey) ?? null;
+    if (!dataContainer) {
+      try {
+        dataContainer = execFileSync(
+          'xcrun',
+          ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'data'],
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+        ).trim();
+        if (dataContainer) dataContainerCache.set(csKey, dataContainer);
+      } catch {
+        /* no data container yet — nothing to wipe */
+      }
     }
     if (dataContainer) {
       for (const sub of ['Documents', 'Library', 'tmp']) {
@@ -348,26 +366,9 @@ export async function clearStateAndRelaunch(
     }
     ctx.dylibPath = auto;
   }
-  // Set ENNIO_SOCKET_PATH on the simulator launchctl env (SIMCTL_CHILD_*
-  // only forwards DYLD_* and a few known prefixes; arbitrary names are
-  // dropped). Per-UDID path, sim-wide scope, not a secret.
-  execFileSync(
-    'xcrun',
-    [
-      'simctl',
-      'spawn',
-      ctx.udid,
-      'launchctl',
-      'setenv',
-      'ENNIO_SOCKET_PATH',
-      ennioSocketPath(ctx.udid),
-    ],
-    { stdio: 'pipe' },
-  );
-  // Propagate --no-animations (sticky launchctl env; set OR clear so a
-  // prior run can't leak it). Source of truth: the CLI's process env.
-  setSimLaunchEnv(ctx.udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
-  setSimLaunchEnv(ctx.udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
+  // Sim launchctl env — set once per device (sticky; ~1s of simctl saved
+  // per relaunch). See ensureSimLaunchEnv.
+  ensureSimLaunchEnv(ctx.udid);
   const launchedAt = Date.now();
   execFileSync(
     'xcrun',
