@@ -15,7 +15,7 @@ import { createContext, runInContext } from 'node:vm';
 import type { MaestroCommand } from '../maestro-parser';
 
 import type { RunContext, RunResult } from './context';
-import { interpolate, recordPhase } from './context';
+import { createJsScope, interpolate, recordPhase, syncJsScope } from './context';
 
 // Re-export for legacy importers.
 export type { RunContext, RunResult };
@@ -100,7 +100,7 @@ export async function runMaestroScript(
     Object.entries(script.env ?? {}).map(([k, v]) => [k, interpolate(String(v), ctx)]),
   );
   const sandbox = {
-    output: ctx.outputs,
+    ...createJsScope(ctx, scriptEnv),
     http: {
       get: (url: string, opts?: { headers?: Record<string, string>; body?: string }) =>
         maestroHttpSync('GET', url, opts),
@@ -113,8 +113,8 @@ export async function runMaestroScript(
     },
     json: (s: string) => JSON.parse(s),
     console: { log: (...a: unknown[]) => process.stderr.write(`[script] ${a.join(' ')}\n`) },
-    ...scriptEnv,
   };
   const vmCtx = createContext(sandbox);
   runInContext(src, vmCtx, { filename: scriptPath, timeout: 30_000 });
+  syncJsScope(ctx, sandbox);
 }

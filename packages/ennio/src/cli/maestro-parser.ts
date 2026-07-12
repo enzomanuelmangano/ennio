@@ -154,7 +154,7 @@ export type MaestroCommand =
   | { retry: { maxRetries?: number; commands: MaestroCommand[] } }
   | { assertTrue: string }
   | { evalScript: string }
-  | { runScript: { file: string; env?: Record<string, string> } }
+  | { runScript: string | { file: string; env?: Record<string, string> } }
   | { setLocation: { latitude: number; longitude: number } | string }
   | { setPermissions: Record<string, 'allow' | 'deny' | 'unset'> }
   | { setAirplaneMode: 'enabled' | 'disabled' | true | false }

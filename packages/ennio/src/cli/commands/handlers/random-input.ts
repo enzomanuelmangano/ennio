@@ -2,12 +2,10 @@
 // contained, and route through `dispatch` for inputText so we don't
 // duplicate typing logic.
 
-import { createContext, runInContext } from 'node:vm';
-
 import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
-import { interpolate, interpolateSelector } from '../../runner/context';
+import { evaluateJsExpression, interpolateSelector } from '../../runner/context';
 
 interface InputRandomTextCmd {
   inputRandomText: true | { length?: number };
@@ -49,10 +47,6 @@ function randString(len: number, alphabet: string): string {
   let out = '';
   for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
   return out;
-}
-
-function stripExpressionWrapper(s: string): string {
-  return s.startsWith('${') && s.endsWith('}') ? s.slice(2, -1) : s;
 }
 
 export function registerRandomInputHandlers(registry: CommandRegistry): void {
@@ -128,18 +122,15 @@ export function registerRandomInputHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & EvalScriptCmd => has(c, 'evalScript'),
     async (cmd, { ctx }) => {
-      const expr = stripExpressionWrapper(interpolate(String(cmd.evalScript), ctx));
-      const vmCtx = createContext({ output: ctx.outputs });
-      runInContext(expr, vmCtx, { timeout: 5000 });
+      evaluateJsExpression(String(cmd.evalScript), ctx);
     },
   );
 
   registry.register(
     (c): c is MaestroCommand & AssertTrueCmd => has(c, 'assertTrue'),
     async (cmd, { ctx }) => {
-      const expr = stripExpressionWrapper(interpolate(String(cmd.assertTrue), ctx));
-      const vmCtx = createContext({ output: ctx.outputs });
-      const result = runInContext(expr, vmCtx, { timeout: 5000 });
+      const expr = String(cmd.assertTrue);
+      const result = evaluateJsExpression(expr, ctx);
       if (!result) throw new Error(`assertTrue failed: ${expr}`);
     },
   );

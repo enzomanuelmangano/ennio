@@ -1,10 +1,17 @@
 appId: com.ennio.maestrodemo
-name: 'commands/runScript — run JS file then assert output state'
+name: 'commands/runScript — shared env, output, and subflow scope'
 tags:
   - passing
+env:
+  SCRIPT_VALUE: flow-env-value
 ---
 - launchApp:
     clearState: true
-- runScript:
-    file: '../scripts/setOutput.js'
+- runScript: '../scripts/setOutput.js'
 - assertTrue: "output.result === 'qwerty'"
+- assertTrue: "output.flowValue === 'flow-env-value'"
+- runFlow:
+    file: '../subflows/script-env.yaml'
+    env:
+      EXPECTED_SCRIPT_VALUE: ${SCRIPT_VALUE}
+- assertTrue: "output.subflowValue === 'flow-env-value'"
