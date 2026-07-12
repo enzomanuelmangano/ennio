@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { interpolate, interpolateSelector } from './context';
+import { createJsScope, evaluateJsExpression, interpolate, interpolateSelector } from './context';
 import type { RunContext } from './context';
 
 // interpolate/interpolateSelector only touch flowEnv, outputs, and copiedText.
@@ -14,7 +14,7 @@ describe('interpolate — Maestro variable precedence', () => {
   const saved = { ...process.env };
   afterEach(() => {
     // Restore any env keys the tests poked at.
-    for (const k of ['LINK', 'TEXT', 'TOKEN']) delete process.env[k];
+    for (const k of ['LINK', 'TEXT', 'TOKEN', 'MAESTRO_TOKEN', 'SECRET']) delete process.env[k];
     Object.assign(process.env, saved);
   });
 
@@ -32,15 +32,21 @@ describe('interpolate — Maestro variable precedence', () => {
     expect(interpolate('${TOKEN}', stubCtx({ flowEnv: {} }))).toBe('shell-token');
   });
 
-  it('leaves an unresolved bare ${VAR} as a literal (never empty, never regex bait)', () => {
-    expect(interpolate('a-${MISSING}-b', stubCtx())).toBe('a-${MISSING}-b');
+  it('throws at the command containing an unresolved expression', () => {
+    expect(() => interpolate('a-${MISSING}-b', stubCtx())).toThrow(
+      'failed to evaluate interpolation `${MISSING}`',
+    );
   });
 
-  it('${env.X} reads process.env regardless of flowEnv', () => {
-    process.env.TOKEN = 'shell-token';
-    expect(interpolate('${env.TOKEN}', stubCtx({ flowEnv: { TOKEN: 'flow-token' } }))).toBe(
-      'shell-token',
+  it('exposes only MAESTRO_-prefixed process variables through the JS env global', () => {
+    process.env.MAESTRO_TOKEN = 'maestro-token';
+    process.env.SECRET = 'must-not-leak';
+    expect(interpolate('${env.MAESTRO_TOKEN}', stubCtx())).toBe('maestro-token');
+    expect(interpolate('${env.SECRET}', stubCtx())).toBe('');
+    expect(createJsScope(stubCtx()).env).toEqual(
+      expect.objectContaining({ MAESTRO_TOKEN: 'maestro-token' }),
     );
+    expect(createJsScope(stubCtx()).env).not.toHaveProperty('SECRET');
   });
 
   it('${env.X} missing resolves to empty string', () => {
@@ -54,6 +60,19 @@ describe('interpolate — Maestro variable precedence', () => {
 
   it('${maestro.copiedText} reads the last copyTextFrom', () => {
     expect(interpolate('${maestro.copiedText}', stubCtx({ copiedText: 'hello' }))).toBe('hello');
+  });
+
+  it('evaluates JavaScript expressions and keeps nullish output empty', () => {
+    const ctx = stubCtx({ flowEnv: { PREFIX: 'item' }, outputs: { id: 42, gone: null } });
+    expect(interpolate('${PREFIX + "-" + output.id}', ctx)).toBe('item-42');
+    expect(interpolate('[${output.gone}]', ctx)).toBe('[]');
+  });
+
+  it('persists evalScript assignments in the shared flow scope', () => {
+    const ctx = stubCtx({ flowEnv: { counter: 0 } });
+    expect(evaluateJsExpression('${counter += 1}', ctx)).toBe(1);
+    expect(evaluateJsExpression('counter += 1', ctx)).toBe(2);
+    expect(ctx.flowEnv?.counter).toBe(2);
   });
 });
 

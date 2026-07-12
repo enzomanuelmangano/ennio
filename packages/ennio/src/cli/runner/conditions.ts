@@ -6,19 +6,11 @@
 //   platform             — runtime backend matches (iOS | Android)
 //   true                 — a JS expression evaluates truthy
 
-import { createContext, runInContext } from 'node:vm';
-
 import type { MaestroCondition } from '../maestro-parser';
 import { normalizeSelector } from '../maestro-parser';
 
-import { interpolate, type RunContext } from './context';
+import { evaluateJsExpression, type RunContext } from './context';
 import { isVisible } from './visibility';
-
-/** Strip a `${ ... }` wrapper so the inner JS is evaluated (mirrors evalScript). */
-function stripExpressionWrapper(s: string): string {
-  const m = s.match(/^\$\{([\s\S]*)\}$/);
-  return m ? m[1] : s;
-}
 
 /**
  * Evaluate a Maestro condition. Returns true when every present key holds.
@@ -36,18 +28,8 @@ export async function evaluateCondition(ctx: RunContext, cond: MaestroCondition)
     if (await isVisible(ctx, normalizeSelector(cond.notVisible))) return false;
   }
   if (cond.true != null) {
-    const expr = stripExpressionWrapper(interpolate(String(cond.true), ctx));
     try {
-      // Expose Maestro's expression globals so platform/text guards evaluate:
-      // `${maestro.platform == 'android'}` (react-nav's prevent-remove flows),
-      // `${maestro.copiedText}`, plus `output.*` from runScript. Without
-      // `maestro` in scope the reference throws and the guard reads false,
-      // silently skipping the guarded commands.
-      const vmCtx = createContext({
-        output: ctx.outputs,
-        maestro: { platform: ctx.platform.name, copiedText: ctx.copiedText ?? '' },
-      });
-      if (!runInContext(expr, vmCtx, { timeout: 5000 })) return false;
+      if (!evaluateJsExpression(String(cond.true), ctx)) return false;
     } catch {
       return false;
     }

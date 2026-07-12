@@ -1,0 +1,7 @@
+appId: com.ennio.maestrodemo
+name: 'subflows/script-env — assert runFlow env passthrough'
+tags:
+  - passing
+---
+- assertTrue: "EXPECTED_SCRIPT_VALUE === 'flow-env-value'"
+- evalScript: ${output.subflowValue = EXPECTED_SCRIPT_VALUE}

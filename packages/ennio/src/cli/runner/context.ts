@@ -6,6 +6,8 @@
 // the next step's pre/post-tap settle path uses to disambiguate
 // transitions from no-ops. Everything here is pure data — no I/O.
 
+import { createContext, runInContext } from 'node:vm';
+
 import type { GestureDriver } from '../driver/types';
 import type { Platform } from '../platform/types';
 import type { TuningProfile } from '../settle/profile';
@@ -112,9 +114,9 @@ export interface RunContext {
   /** Last text captured by copyTextFrom. Exposed to flows as the
    *  Maestro magic var `${maestro.copiedText}`. */
   copiedText?: string;
-  /** Flow-level `env:` block + runFlow-passed overrides. Resolved by
-   *  `${VAR}` bare interpolation in command args. */
-  flowEnv?: Record<string, string>;
+  /** Flow-level `env:` block, runFlow-passed overrides, and globals
+   *  assigned by evalScript/runScript. Scoped across subflows. */
+  flowEnv?: Record<string, unknown>;
   /** Active tuning profile (resilient — the only one). Owns the behavioral
    *  defaults: implicit-wait budget, post-tap settle, and the default
    *  text/id match mode. */
@@ -139,27 +141,96 @@ export interface Rect {
 // Helpers
 // =====================================================================
 
-/// Replace Maestro-style placeholders:
-///   ${output.X}           → ctx.outputs.X (runScript results)
-///   ${env.X}              → process.env.X
-///   ${maestro.copiedText} → ctx.copiedText (last copyTextFrom)
-///   ${VAR}                → flow env block / runFlow-passed var, else
-///                           process.env.VAR (bare Maestro constant)
+const EXPRESSION = /\$\{([^}]+)\}/g;
+const BARE_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+const JS_SCOPE_RESERVED_KEYS = new Set(['output', 'env', 'maestro', 'http', 'json', 'console']);
+
+function maestroProcessEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[0].startsWith('MAESTRO_') && entry[1] != null,
+    ),
+  );
+}
+
+/** Build the shared Maestro JavaScript scope used by interpolation,
+ * evalScript, assertTrue, conditions, and runScript. Per-command values
+ * override flow globals, while reserved host globals cannot be shadowed. */
+export function createJsScope(
+  ctx: RunContext,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    ...(ctx.flowEnv ?? {}),
+    ...extra,
+    output: ctx.outputs,
+    env: maestroProcessEnv(),
+    maestro: {
+      platform: ctx.platform?.name ?? '',
+      copiedText: ctx.copiedText ?? '',
+    },
+  };
+}
+
+/** Persist user-defined globals created or changed by a script without
+ * copying host-provided namespaces back into the flow environment. */
+export function syncJsScope(ctx: RunContext, scope: Record<string, unknown>): void {
+  const flowEnv = (ctx.flowEnv ??= {});
+  for (const [key, value] of Object.entries(scope)) {
+    if (!JS_SCOPE_RESERVED_KEYS.has(key)) flowEnv[key] = value;
+  }
+}
+
+export function stripExpressionWrapper(value: string): string {
+  const match = value.match(/^\s*\$\{([\s\S]*)\}\s*$/);
+  return match ? match[1] : value;
+}
+
+/** Evaluate a raw Maestro JavaScript body. Unlike scalar interpolation,
+ * this never preprocesses nested `${...}` text, so assignments execute
+ * exactly once when their command is dispatched. */
+export function evaluateJsExpression(expression: string, ctx: RunContext): unknown {
+  const scope = createJsScope(ctx);
+  try {
+    return runInContext(stripExpressionWrapper(expression), createContext(scope), {
+      timeout: 5000,
+    });
+  } finally {
+    syncJsScope(ctx, scope);
+  }
+}
+
+/// Lazily replace Maestro-style `${...}` placeholders when a leaf handler
+/// consumes a scalar. JavaScript expressions share the same scope as
+/// evalScript/assertTrue/runScript. Nullish results preserve Maestro's
+/// historical empty-string behavior; evaluation failures surface at the
+/// command that contains the typo instead of leaking a literal placeholder.
 export function interpolate(str: string, ctx: RunContext): string {
   if (typeof str !== 'string') return str;
-  return str
-    .replace(/\$\{maestro\.copiedText\}/g, () => ctx.copiedText ?? '')
-    .replace(/\$\{(output|env)\.([A-Za-z0-9_]+)\}/g, (_, scope, key) => {
-      if (scope === 'output') {
-        const v = ctx.outputs[key];
-        return v == null ? '' : String(v);
-      }
-      return process.env[key] ?? '';
-    })
-    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, name: string) => {
-      const v = ctx.flowEnv?.[name] ?? process.env[name];
-      return v !== undefined ? String(v) : match;
-    });
+  EXPRESSION.lastIndex = 0;
+  return str.replace(EXPRESSION, (_match, rawExpression: string) => {
+    const expression = rawExpression.trim();
+
+    // Preserve the existing CLI/shell fallback for a simple `${VAR}` without
+    // adding the entire process environment to the JavaScript sandbox.
+    if (
+      BARE_IDENTIFIER.test(expression) &&
+      !Object.prototype.hasOwnProperty.call(ctx.flowEnv ?? {}, expression)
+    ) {
+      // Dynamic lookup is intentional: the identifier comes from the flow.
+      // eslint-disable-next-line expo/no-dynamic-env-var
+      const shellValue = process.env[expression];
+      if (shellValue !== undefined) return shellValue;
+    }
+
+    try {
+      const result = evaluateJsExpression(expression, ctx);
+      return result == null ? '' : String(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`failed to evaluate interpolation \`${'${'}${expression}}\`: ${reason}`);
+    }
+  });
 }
 
 /// Interpolate every string field of a selector-like object against

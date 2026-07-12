@@ -94,9 +94,20 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
       // `when:` predicate — skip the subflow if not satisfied. Same evaluator
       // as per-command `when` and `repeat.while`, so semantics never diverge.
       if (sub.when && !(await evaluateCondition(ctx, sub.when))) return;
+      // Resolve call-site values against the parent before entering the child
+      // scope. This stays lazy: nested commands are untouched until dispatch.
+      const callEnv = Object.fromEntries(
+        Object.entries(sub.env ?? {}).map(([key, value]) => [key, interpolate(String(value), ctx)]),
+      );
       // Inline commands form.
       if (sub.commands && Array.isArray(sub.commands)) {
-        for (const c of sub.commands) await dispatch(c);
+        const prevEnv = ctx.flowEnv;
+        ctx.flowEnv = { ...prevEnv, ...callEnv };
+        try {
+          for (const c of sub.commands) await dispatch(c);
+        } finally {
+          ctx.flowEnv = prevEnv;
+        }
         return;
       }
       // File form — parse + run, restore flowPath and flowEnv after.
@@ -105,11 +116,13 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
         const subFlow = parseMaestroFile(subPath);
         const prevPath = ctx.flowPath;
         const prevEnv = ctx.flowEnv;
-        // Per-call `runFlow.env` values may reference the PARENT's vars
-        // (e.g. env: { LINK: '${SECTION}/detail' }); resolve them against the
-        // parent context before they become the child's flowEnv.
-        const callEnv = Object.fromEntries(
-          Object.entries(sub.env ?? {}).map(([k, v]) => [k, interpolate(String(v), ctx)]),
+        // A subflow's own defaults may also reference parent values. Resolve
+        // those before swapping ctx.flowEnv so they cannot self-reference.
+        const subFlowEnv = Object.fromEntries(
+          Object.entries(subFlow.env ?? {}).map(([key, value]) => [
+            key,
+            interpolate(String(value), ctx),
+          ]),
         );
         ctx.flowPath = subPath;
         // The subflow's `${VAR}` interpolation resolves against flowEnv first
@@ -118,7 +131,7 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
         // overrides — so `runFlow: { file: launch.yml, env: { LINK } }` makes
         // `${LINK}` resolve inside launch.yml instead of falling back to an
         // empty process.env value.
-        ctx.flowEnv = { ...prevEnv, ...subFlow.env, ...callEnv };
+        ctx.flowEnv = { ...prevEnv, ...subFlowEnv, ...callEnv };
         const trace = !!process.env.ENNIO_PHASE_TRACE;
         try {
           for (let i = 0; i < subFlow.commands.length; i++) {
@@ -143,6 +156,7 @@ export function registerControlFlowHandlers(registry: CommandRegistry): void {
     async (cmd, { ctx }) => {
       // Maestro shorthand: `runScript: file.js` == `{ file: file.js }`.
       const script = typeof cmd.runScript === 'string' ? { file: cmd.runScript } : cmd.runScript;
+      if (!script.file) throw new Error('runScript: missing file path');
       await runMaestroScript(ctx as RunContext, script);
     },
   );
