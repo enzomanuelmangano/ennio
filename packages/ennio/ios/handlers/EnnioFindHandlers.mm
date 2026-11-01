@@ -34,6 +34,7 @@ void RegisterEnnioFindHandlers(void) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = EnnioArgString(a, @"testID");
         NSString *text = EnnioArgString(a, @"text");
+        BOOL regex = [a[@"regex"] boolValue];
         if (!testID.length && !text.length) throw std::runtime_error("missing selector");
         BOOL exposed = NO;
         BOOL found = NO;
@@ -42,7 +43,7 @@ void RegisterEnnioFindHandlers(void) {
         EnnioOnMainVoid([&]() {
             UIView *target = testID.length
                 ? [EnnioFinder findViewByTestID:testID]
-                : [EnnioFinder findViewByText:text];
+                : [EnnioFinder findViewByText:text relaxed:NO regex:regex];
             if (!target || ![EnnioFinder isOnScreen:target]) return;
             found = YES;
             // enabled: NO when the target (or a near ancestor — the
@@ -337,12 +338,13 @@ void RegisterEnnioFindHandlers(void) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = EnnioArgString(a, @"testID");
         NSString *text = EnnioArgString(a, @"text");
+        BOOL regex = [a[@"regex"] boolValue];
         if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
         BOOL behind = NO;
         EnnioOnMainVoid([&]() {
             UIView *v = nil;
             if (testID.length) v = [EnnioFinder findViewByTestID:testID];
-            if (!v && text.length) v = [EnnioFinder findViewByText:text];
+            if (!v && text.length) v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
             if (v) behind = [EnnioFinder isBehindTopmostPresentation:v];
         });
         return std::string("{\"behind\":") + (behind ? "true" : "false") + "}";
@@ -360,12 +362,13 @@ void RegisterEnnioFindHandlers(void) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = EnnioArgString(a, @"testID");
         NSString *text = EnnioArgString(a, @"text");
+        BOOL regex = [a[@"regex"] boolValue];
         if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
         BOOL transitioning = NO;
         EnnioOnMainVoid([&]() {
             UIView *v = nil;
             if (testID.length) v = [EnnioFinder findViewByTestID:testID];
-            if (!v && text.length) v = [EnnioFinder findViewByText:text];
+            if (!v && text.length) v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
             if (v) transitioning = [EnnioFinder isViewTransitioning:v];
         });
         return std::string("{\"transitioning\":") + (transitioning ? "true" : "false") + "}";

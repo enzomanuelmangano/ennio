@@ -20,7 +20,7 @@
 
 import type { TapIntent } from '../driver/types';
 import { bumpActuationGen, getScreenSize } from '../hid';
-import { MaestroSelector } from '../maestro-parser';
+import { MaestroSelector, textMatchArgs } from '../maestro-parser';
 import { chainHasAsyncPayloadHost, SUBMIT_DISMISS_TESTID_PATTERN } from './capabilities';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
@@ -496,10 +496,14 @@ export async function execTapOn(
   // VISUAL position differs from its layout frame). Either way the
   // tap would land on the wrong layer; wait for hit-test to confirm
   // exposure.
-  const exposureSel: { testID?: string; text?: string } | null = sel.id
+  // Text in the selector's own match mode: a Maestro selector is a regex
+  // ("Back|Indietro", "Settings.*"); looked up literally it was never
+  // found, never "exposed", and every such tap waited out the full exposure
+  // timeout (~850ms) before firing.
+  const exposureSel: { testID?: string; text?: string; regex?: boolean } | null = sel.id
     ? { testID: sel.id }
     : sel.text
-      ? { text: sel.text }
+      ? textMatchArgs(sel, ctx.profile.textMatchDefault)
       : null;
   // When the exposure wait expires without the target ever becoming
   // exposed, the point is covered by another layer (tab bar, overlay).
