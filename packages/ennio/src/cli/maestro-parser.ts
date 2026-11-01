@@ -109,6 +109,20 @@ export function extractModifiers(cmd: MaestroCommand): {
       command[k] = v;
     }
   }
+  // Maestro also takes `optional` and `label` INSIDE the command's own
+  // arguments (`- extendedWaitUntil: { visible: X, optional: true }`). Lift
+  // them so every command honours them, not only the handlers that read
+  // them. `when` stays: inside runFlow it is runFlow's own argument. tapOn
+  // keeps its selector-level optional: the tap handler owns that one.
+  const verbs = Object.keys(command);
+  const args = verbs.length === 1 && verbs[0] !== 'tapOn' ? command[verbs[0]] : undefined;
+  if (args && typeof args === 'object' && !Array.isArray(args)) {
+    const a = args as Record<string, unknown>;
+    if (typeof a.optional === 'boolean' && modifiers.optional === undefined) {
+      modifiers.optional = a.optional;
+    }
+    if (typeof a.label === 'string' && modifiers.label === undefined) modifiers.label = a.label;
+  }
   return { command: command as MaestroCommand, modifiers };
 }
 

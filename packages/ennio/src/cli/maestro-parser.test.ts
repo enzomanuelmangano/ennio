@@ -339,4 +339,19 @@ describe('extractModifiers', () => {
     expect(command).toEqual({ tapOn: { id: 'X', optional: true } });
     expect(modifiers).toEqual({});
   });
+
+  it('lifts optional/label nested in other commands (Maestro accepts both spellings)', () => {
+    const cmd = {
+      extendedWaitUntil: { visible: 'Not Now', timeout: 4000, optional: true, label: 'sheet' },
+    } as unknown as MaestroCommand;
+    const { modifiers } = extractModifiers(cmd);
+    expect(modifiers).toEqual({ optional: true, label: 'sheet' });
+  });
+
+  it("does not lift runFlow's own when", () => {
+    const cmd = {
+      runFlow: { when: { visible: 'X' }, commands: [] },
+    } as unknown as MaestroCommand;
+    expect(extractModifiers(cmd).modifiers).toEqual({});
+  });
 });
