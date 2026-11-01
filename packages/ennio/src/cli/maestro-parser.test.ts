@@ -349,6 +349,13 @@ describe('extractModifiers', () => {
     expect(command).toEqual({ extendedWaitUntil: { visible: 'Not Now', timeout: 4000 } });
   });
 
+  it('keeps a label that is the only selector key (alias for text)', () => {
+    const cmd = { tapOn: { label: 'Sign in' } } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(modifiers).toEqual({});
+    expect(command).toEqual({ tapOn: { label: 'Sign in' } });
+  });
+
   it("lifts tapOn's label but leaves its optional to the tap handler", () => {
     const cmd = {
       tapOn: { id: 'signin', label: 'Tap sign in', optional: true },

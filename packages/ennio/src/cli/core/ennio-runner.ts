@@ -115,7 +115,10 @@ export class EnnioRunner {
       // don't burn the remaining flows' wall-clock — stop here.
       if (this.failFast && !result.passed) break;
       if (!result.passed) {
-        for (const f of skippedAfterFailure(flowFiles[i], this.stopOnFailureGroups)) skipped.add(f);
+        for (const f of skippedAfterFailure(flowFiles[i], this.stopOnFailureGroups)) {
+          skipped.add(f);
+          process.stderr.write(`[ennio] skipped (continueOnFailure: false): ${f}\n`);
+        }
       }
     }
 

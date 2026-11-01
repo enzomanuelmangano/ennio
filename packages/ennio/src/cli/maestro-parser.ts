@@ -89,6 +89,16 @@ export interface CommandModifiers {
 
 const MODIFIER_KEYS = ['optional', 'label', 'when'] as const;
 
+/** Commands whose argument map is itself a selector. */
+const SELECTOR_VERBS = new Set([
+  'tapOn',
+  'doubleTapOn',
+  'longPressOn',
+  'assertVisible',
+  'assertNotVisible',
+  'copyTextFrom',
+]);
+
 /**
  * Split a parsed command map into its bare command and its per-command
  * modifiers. Modifiers are sibling keys alongside the command verb; the bare
@@ -124,7 +134,14 @@ export function extractModifiers(cmd: MaestroCommand): {
       if (modifiers.optional === undefined) modifiers.optional = a.optional;
       delete a.optional;
     }
-    if (typeof a.label === 'string') {
+    // On a selector command a lone label is ennio's alias for text
+    // (normalizeSelector) and stays put; beside an id/text/point — or on any
+    // other command — it is the step's description.
+    const selectorVerb = SELECTOR_VERBS.has(verb);
+    if (
+      typeof a.label === 'string' &&
+      (!selectorVerb || 'id' in a || 'text' in a || 'point' in a)
+    ) {
       if (modifiers.label === undefined) modifiers.label = a.label;
       delete a.label;
     }
@@ -267,7 +284,7 @@ export function setCliVars(vars: Record<string, string>): void {
 export function lookupCliVar(name: string): string | undefined {
   // Maestro resolves ${VAR} against the CLI-provided env; dynamic
   // lookup is intentional (the var name comes from the flow).
-   
+
   return cliVars[name] ?? process.env[name];
 }
 function substituteEnv(value: unknown): unknown {
