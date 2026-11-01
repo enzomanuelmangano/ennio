@@ -530,12 +530,22 @@ void RegisterEnnioFindHandlers(void) {
             // firstObject can be a stale mount whose ancestor is
             // hidden. Only after exhausting the index do we fall back
             // to the legacy UIKit walk + auto-scroll.
+            //
+            // A view under the topmost presented controller (the screen a
+            // modal covers) is not visible either — the tap's finder skips
+            // it, so "visible" here and "not found" there broke
+            // `when: visible` → tapOn pairs (a pushed screen's BackButton
+            // still mounted under a full-screen modal).
+            auto shown = ^BOOL(UIView *c) {
+                return [EnnioFinder isOnScreen:c] && ![EnnioFinder isBehindTopmostPresentation:c];
+            };
             NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
             for (UIView *cand in all) {
-                if ([EnnioFinder isOnScreen:cand]) { visible = YES; return; }
+                if (shown(cand)) { visible = YES; return; }
             }
             UIView *v = all.firstObject ?: [EnnioFinder findViewByTestID:testID];
-            if (v && [EnnioFinder isOnScreen:v]) { visible = YES; return; }
+            if (v && shown(v)) { visible = YES; return; }
+            if (v && [EnnioFinder isBehindTopmostPresentation:v]) return;
             // Auto-scroll: Maestro's assertVisible auto-scrolls within
             // the nearest scroll view to surface the target. Walk
             // ancestors for the first UIScrollView and ask it to
