@@ -11,7 +11,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { diagnoseSocketFailure, throttledAliveProbe } from '../crash-detector';
+import { diagnoseSocketFailure, isAppRunning, throttledAliveProbe } from '../crash-detector';
 import { diag } from '../diag';
 import { dismissSystemSheet } from '../ennio-ax';
 import { warmActuator } from '../hid';
@@ -55,7 +55,8 @@ function ensureSimLaunchEnv(udid: string): void {
  * once per device (ensureSimLaunchEnv); a simulator rebooted or erased under
  * a long-lived process (ennio mcp) loses it, the dylib then binds the
  * default socket path and the connect times out. So a failed connect with a
- * CACHED env re-arms the env and relaunches once before giving up.
+ * CACHED env, while the app is still running, re-arms the env and relaunches
+ * once before giving up.
  */
 async function launchAndConnect(
   ctx: RunContext,
@@ -77,7 +78,11 @@ async function launchAndConnect(
     const reopen = new EnnioSocketClient(ctx.udid);
     reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
     if (await reopen.connectWithRetry(15_000)) return reopen;
-    if (attempt === 0 && envWasCached) {
+    // Retry only the lost-env shape: the app is ALIVE (it bound the default
+    // socket path instead of ours). A crashed app is never relaunched here
+    // — that would hide an intermittent startup crash behind a pass.
+    if (attempt === 0 && envWasCached && isAppRunning(ctx.udid, ctx.bundleId)) {
+      diag('lifecycle', 'relaunch:env-rearm', { bundleId: ctx.bundleId, what });
       simEnvReady.delete(ctx.udid);
       continue;
     }
