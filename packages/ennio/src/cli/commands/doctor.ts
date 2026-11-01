@@ -68,10 +68,13 @@ function checkHidHelper(): Result {
   try {
     return { name: 'enniohid (in-house HID)', severity: 'pass', detail: findHelper() };
   } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    // A helper that fails its SHA-256 check is refused by the runner too:
+    // that is a failure, not a missing optional piece.
     return {
       name: 'enniohid (in-house HID)',
-      severity: 'warn',
-      detail: e instanceof Error ? e.message : String(e),
+      severity: detail.includes('SHA-256 mismatch') ? 'fail' : 'warn',
+      detail,
     };
   }
 }
