@@ -198,6 +198,13 @@ static BOOL vcIsInTopmost(UIViewController *vc, UIViewController *topmost) {
             CGPoint center = CGPointMake(CGRectGetMidX(winRect), CGRectGetMidY(winRect));
             if (!CGRectContainsPoint(win.bounds, center)) continue;
             if (v.hidden || v.alpha < 0.05) continue;
+            // Hidden from accessibility (self or ancestor): not a candidate,
+            // as Maestro sees it (see EnnioFinder viewIsLikelyOnScreen).
+            BOOL axHidden = NO;
+            for (UIView *p = v; p && !axHidden; p = p.superview) {
+                axHidden = p.accessibilityElementsHidden;
+            }
+            if (axHidden) continue;
             // Filter to topmost presented VC: when a modal sheet is up
             // (Bluesky composer, action sheets, settings modals), the
             // underlying scroll-view children stay mounted with valid

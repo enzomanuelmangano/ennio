@@ -305,9 +305,17 @@ static BOOL viewIsLikelyOnScreen(UIView *v) {
     if (!v.window) return NO;
     if (v.hidden) return NO;
     if (v.alpha < 0.05) return NO;
+    // accessibilityElementsHidden (RN's accessibilityElementsHidden /
+    // importantForAccessibility="no-hide-descendants") removes the subtree
+    // from the accessibility tree XCTest — and so Maestro — reads. Apps use
+    // it for content that is mounted but not yet shown (a copy block fading
+    // in under pointerEvents="none"); matching it reports text as visible
+    // before it is, and taps it before it takes touches.
+    if (v.accessibilityElementsHidden) return NO;
     for (UIView *p = v.superview; p; p = p.superview) {
         if (p.hidden) return NO;
         if (p.alpha < 0.05) return NO;
+        if (p.accessibilityElementsHidden) return NO;
     }
     CGRect winRect = [v.window convertRect:v.bounds fromView:v];
     if (winRect.size.width <= 0 || winRect.size.height <= 0) return NO;
@@ -640,6 +648,16 @@ static void collectAxByText(id root,
     NSValue *idVal = [NSValue valueWithNonretainedObject:root];
     if ([visited containsObject:idVal]) return;
     [visited addObject:idVal];
+    // A view the accessibility tree does not expose hides its whole subtree:
+    // hidden, fully transparent, or accessibilityElementsHidden. Without this
+    // an app that keeps every page mounted and fades the off-page ones to 0
+    // (opacity- and a11y-driven pagers) reads as all pages visible at once.
+    // Proxies that are not UIViews (UIRemoteView's elements) carry no such
+    // state and are walked as before.
+    if ([root isKindOfClass:UIView.class]) {
+        UIView *v = (UIView *)root;
+        if (v.hidden || v.alpha < 0.01 || v.accessibilityElementsHidden) return;
+    }
 
     if (axMatchesText(root, text)) {
         CGRect r = axFrameOf(root);
@@ -935,9 +953,12 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     if (!win) return NO;
     if (view.hidden) return NO;
     if (view.alpha < 0.01) return NO;
-    // Walk ancestor chain for hidden / alpha=0.
+    // Hidden from accessibility = not on screen, as Maestro sees it (see
+    // viewIsLikelyOnScreen).
+    if (view.accessibilityElementsHidden) return NO;
+    // Walk ancestor chain for hidden / alpha=0 / hidden from accessibility.
     for (UIView *p = view.superview; p && p != win; p = p.superview) {
-        if (p.hidden || p.alpha < 0.01) return NO;
+        if (p.hidden || p.alpha < 0.01 || p.accessibilityElementsHidden) return NO;
     }
     CGRect winRect = [win convertRect:view.bounds fromView:view];
     if (winRect.size.width <= 0 || winRect.size.height <= 0) return NO;
