@@ -83,7 +83,7 @@ void RegisterEnnioFindHandlers(void) {
             // full exposure timeout (~850ms) before firing.
             // Only the NEAREST owner counts: within 3 levels, every view in
             // between itself takes no touches, and the owner is not the
-            // window or a view controller's root. A hit further up means a
+            // window or the window's root view controller's view. A hit further up means a
             // view in between refused the point — a container disabled for
             // a transition, pointerEvents="none" — and the wait must stand.
             BOOL hitIsAncestor = NO;
