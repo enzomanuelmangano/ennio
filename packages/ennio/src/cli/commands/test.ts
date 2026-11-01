@@ -8,13 +8,14 @@
  */
 
 import { existsSync, statSync } from 'fs';
-import { basename, join, resolve } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 
 import { glob } from 'glob';
 
 import type { Flags } from '../cli/args';
 import { EnnioRunner } from '../core';
 import { selectPlatform } from '../platform';
+import { WORKSPACE_CONFIG_NAMES, orderFlows, readWorkspaceConfig } from '../workspace-config';
 
 function isMaestroFile(filePath: string): boolean {
   return filePath.endsWith('.yaml') || filePath.endsWith('.yml');
@@ -24,17 +25,33 @@ function isSubflowFile(filePath: string): boolean {
   return basename(filePath).startsWith('_');
 }
 
-async function expandFiles(patterns: string[]): Promise<string[]> {
+async function expandFiles(
+  patterns: string[],
+): Promise<{ files: string[]; continueOnFailure?: boolean }> {
   const files: string[] = [];
+  let continueOnFailure: boolean | undefined;
   for (const pattern of patterns) {
     const resolved = resolve(pattern);
     if (existsSync(resolved) && statSync(resolved).isDirectory()) {
-      const yamlMatches = await glob(join(pattern, '**/*.{yaml,yml}'));
-      files.push(
-        ...yamlMatches
-          .filter((f) => isMaestroFile(f) && !f.includes('/subflows/') && !isSubflowFile(f))
-          .map((f) => resolve(f)),
-      );
+      // A Maestro workspace: config.yaml picks the flows and their order.
+      const config = readWorkspaceConfig(resolved);
+      const globs = config?.flows ?? ['**/*.{yaml,yml}'];
+      const yamlMatches = (await Promise.all(globs.map((g) => glob(join(resolved, g))))).flat();
+      const dirFiles = [
+        ...new Set(
+          yamlMatches
+            .filter(
+              (f) =>
+                isMaestroFile(f) &&
+                !f.includes('/subflows/') &&
+                !isSubflowFile(f) &&
+                !(dirname(f) === resolved && WORKSPACE_CONFIG_NAMES.includes(basename(f))),
+            )
+            .map((f) => resolve(f)),
+        ),
+      ];
+      files.push(...orderFlows(dirFiles, config?.flowsOrder));
+      if (config?.continueOnFailure !== undefined) continueOnFailure = config.continueOnFailure;
     } else {
       const matches = await glob(pattern);
       files.push(
@@ -44,7 +61,7 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
       );
     }
   }
-  return files;
+  return { files, continueOnFailure };
 }
 
 export async function runTestCommand(positional: string[], flags: Flags): Promise<number> {
@@ -77,7 +94,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     return 1;
   }
 
-  const files = await expandFiles(positional);
+  const { files, continueOnFailure } = await expandFiles(positional);
   if (files.length === 0) {
     console.error('No Maestro YAML files found');
     return 1;
@@ -87,6 +104,9 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   // launch site (set there from this process env). Set it here so all
   // three launch paths see a single source of truth.
   if (flags.noAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
+  // -e KEY=VALUE: flow variables. `${KEY}` interpolation falls back to
+  // process.env, so this is the single place they need to land.
+  for (const [k, v] of Object.entries(flags.env ?? {})) process.env[k] = v;
   // Touch visualization is ON by default — every gesture ennio performs
   // is visible on the device (and in --record footage), and the runner
   // turns it off the moment the run ends. --disable-touches opts out for
@@ -114,7 +134,9 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     lenient: flags.lenient ?? false,
     safeMode: flags.safeMode ?? false,
     inProcessTap: flags.inProcessTap ?? false,
-    failFast: flags.failFast ?? false,
+    // executionOrder.continueOnFailure: false in config.yaml stops the run
+    // at the first failing flow, like --fail-fast.
+    failFast: (flags.failFast ?? false) || continueOnFailure === false,
     platform: selectPlatform(platformName),
     // --record: one video for the whole suite, --output dir or cwd.
     recordPath: flags.record
