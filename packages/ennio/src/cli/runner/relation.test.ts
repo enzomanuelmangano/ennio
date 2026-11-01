@@ -42,9 +42,9 @@ describe('hasRelation', () => {
     expect(hasRelation({ text: 'Delete', below: { text: 'Title' } })).toBe(true);
   });
 
-  it('refuses a relation on a selector without text', async () => {
+  it('ignores (with a warning) a relation on a selector without text', async () => {
     const { hasRelation } = await import('./relation');
-    expect(() => hasRelation({ id: 'x', rightOf: { id: 'y' } })).toThrow(/need a text selector/);
+    expect(hasRelation({ id: 'x', rightOf: { id: 'y' } })).toBe(false);
   });
 });
 

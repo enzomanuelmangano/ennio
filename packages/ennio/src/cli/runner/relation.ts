@@ -13,6 +13,8 @@ import type { Rect, RunContext } from './context';
 
 const KINDS = ['below', 'above', 'leftOf', 'rightOf'] as const;
 
+let warnedIdRelation = false;
+
 /**
  * The selector with its relation resolved (`relation` set), the selector
  * unchanged when it has none, or null when the anchor is not on screen —
@@ -41,10 +43,17 @@ export async function withResolvedRelation(
 
 export function hasRelation(sel: MaestroSelector): boolean {
   const relative = !!sel.relation || KINDS.some((k) => sel[k] !== undefined);
-  // Implemented on text selectors only: say so rather than silently tap the
-  // first match of an id and ignore the relation.
+  // Implemented on text selectors only. On an id the relation keeps its old
+  // meaning (ignored, the id lookup decides) — suites relying on that keep
+  // passing — but say so once instead of silently.
   if (relative && !sel.text) {
-    throw new Error(`below/above/leftOf/rightOf need a text selector (got ${JSON.stringify(sel)})`);
+    if (!warnedIdRelation) {
+      warnedIdRelation = true;
+      process.stderr.write(
+        `[ennio] below/above/leftOf/rightOf apply to text selectors only; ignored on ${JSON.stringify(sel)}\n`,
+      );
+    }
+    return false;
   }
   return relative;
 }
@@ -52,7 +61,7 @@ export function hasRelation(sel: MaestroSelector): boolean {
 /**
  * The anchor's OWN bounds (Maestro measures relations on them): a text
  * anchor is found in leaf mode, not promoted to its interactive ancestor —
- * the ancestor of a "Option A" segment is the whole segmented control, and
+ * the ancestor of an "Option A" segment is the whole segmented control, and
  * nothing is to the right of that.
  */
 export async function resolveAnchorRect(

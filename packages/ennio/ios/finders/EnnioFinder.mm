@@ -175,7 +175,7 @@ static EnnioRelationKind g_relationKind = EnnioRelationNone;
 static CGRect g_relationAnchor;
 // Leaf find: return the matched view itself, not its interactive ancestor.
 // A relative selector's anchor is measured on its own bounds (Maestro): the
-// promoted ancestor of a "Option A" segment is the whole segmented control.
+// promoted ancestor of an "Option A" segment is the whole segmented control.
 static BOOL g_textFindLeaf = NO;
 
 // Distance from the anchor along the relation's axis, or -1 when the
