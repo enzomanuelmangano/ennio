@@ -755,6 +755,56 @@ static NSArray<UIViewController *> *allPresentedViewControllers(void) {
 // detected VC. Coords are best-effort and only used as a positive
 // answer to "is this label visible?" — Maestro-style point taps
 // (the YAML's `point: "50%,22%"`) still cover the actual photo grid.
+// iOS's "Save password?" prompt (_SFAppPasswordSavingViewController): a
+// remote view hosted in the keyboard window, its two buttons ("Not Now" /
+// "Save") invisible to every in-process walk. It is a card; the buttons sit
+// side by side on its bottom row, ~39pt above its bottom edge, at 27% / 73%
+// of its width. The card is the smallest remote view under the controller.
+// The label is localized, so the selector's alternatives ("Not Now|Non ora")
+// are matched against known translations of either button.
+static BOOL synthPasswordSavingRect(UIViewController *vc, NSString *text, EnnioRect *out) {
+    static NSArray<NSString *> *decline, *save;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        decline = @[ @"not now", @"non ora", @"nicht jetzt", @"pas maintenant", @"ahora no",
+                     @"agora não", @"agora nao", @"今はしない" ];
+        save = @[ @"save", @"salva", @"sichern", @"enregistrer", @"guardar", @"salvar", @"保存" ];
+    });
+    int which = 0; // 1 = decline (left), 2 = save (right)
+    for (NSString *alt in [text.lowercaseString componentsSeparatedByString:@"|"]) {
+        NSString *t = [alt stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if ([decline containsObject:t]) { which = 1; break; }
+        if ([save containsObject:t]) { which = 2; break; }
+    }
+    if (!which) return NO;
+    UIView *root = vc.viewIfLoaded;
+    if (!root || !root.window) return NO;
+    UIView *card = nil;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
+    while (stack.count) {
+        UIView *v = stack.lastObject;
+        [stack removeLastObject];
+        if ([NSStringFromClass(v.class) containsString:@"RemoteView"] && !v.hidden &&
+            v.bounds.size.width > 0 &&
+            (!card || v.bounds.size.width * v.bounds.size.height <
+                          card.bounds.size.width * card.bounds.size.height)) {
+            card = v;
+        }
+        [stack addObjectsFromArray:v.subviews];
+    }
+    CGRect f = [root.window convertRect:(card ?: root).bounds fromView:(card ?: root)];
+    if (CGRectIsEmpty(f)) return NO;
+    CGFloat cx = f.origin.x + f.size.width * (which == 1 ? 0.27 : 0.73);
+    CGFloat cy = CGRectGetMaxY(f) - 39;
+    out->x = cx - f.size.width * 0.17;
+    out->y = cy - 22;
+    out->w = f.size.width * 0.34;
+    out->h = 44;
+    NSLog(@"[ennio] password-saving synth card=%@ (%@) → %@", NSStringFromCGRect(f),
+          card ? NSStringFromClass(card.class) : @"vc.view", which == 1 ? @"decline" : @"save");
+    return YES;
+}
+
 static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     NSArray<UIViewController *> *all = allPresentedViewControllers();
     if (all.count == 0) return NO;
@@ -770,6 +820,11 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
         if (!shareSheet && ([cls containsString:@"UIActivityViewController"] ||
                              [cls containsString:@"SLComposeServiceViewController"])) {
             shareSheet = vc;
+        }
+    }
+    for (UIViewController *pw in all) {
+        if ([NSStringFromClass([pw class]) containsString:@"PasswordSavingViewController"]) {
+            return synthPasswordSavingRect(pw, text, out);
         }
     }
     UIViewController *vc = phPicker ?: shareSheet;
