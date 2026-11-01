@@ -81,9 +81,19 @@ void RegisterEnnioFindHandlers(void) {
             // where a real finger lands too, so the target is exposed. Seen
             // on iOS 26's floating tab bar: every icon tap waited out the
             // full exposure timeout (~850ms) before firing.
-            if (!exposed && hit && !target.userInteractionEnabled) {
-                for (UIView *c = target.superview; c; c = c.superview) {
-                    if (c == hit) { exposed = YES; break; }
+            // Only the NEAREST owner counts: within 3 levels, every view in
+            // between itself takes no touches, and the owner is not the
+            // window or a view controller's root. A hit further up means a
+            // view in between refused the point — a container disabled for
+            // a transition, pointerEvents="none" — and the wait must stand.
+            BOOL hitIsAncestor = NO;
+            if (!exposed && hit && !target.userInteractionEnabled &&
+                ![hit isKindOfClass:UIWindow.class] &&
+                hit != hit.window.rootViewController.view) {
+                int depth = 0;
+                for (UIView *c = target.superview; c && depth < 3; c = c.superview, depth++) {
+                    if (c == hit) { exposed = YES; hitIsAncestor = YES; break; }
+                    if (c.userInteractionEnabled || c.hidden) break;
                 }
             }
             // childHijack: hit-test landed on an interactive descendant
@@ -94,7 +104,7 @@ void RegisterEnnioFindHandlers(void) {
             // instead of post detail. Caller can use this signal to
             // prefer accessibilityActivate (which invokes target's
             // own handler bypassing hit-test).
-            if (exposed && hit && hit != target) {
+            if (exposed && hit && hit != target && !hitIsAncestor) {
                 for (UIView *c = hit; c && c != target; c = c.superview) {
                     BOOL inter = NO;
                     if ([c isKindOfClass:UIControl.class]) inter = YES;

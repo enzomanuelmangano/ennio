@@ -465,7 +465,10 @@ export async function execTapOn(
   // points that fool socket-roundtrip sampling). Fallback: the legacy
   // CLI-side rect-sampling loop (HID driver, or the op missed).
   const steady = await timedAsync(ctx, 'tap.waitSteady', () =>
-    ctx.driver.waitTargetSteady(ctx.client, { id: sel.id, text: sel.text }),
+    ctx.driver.waitTargetSteady(
+      ctx.client,
+      sel.id ? { id: sel.id } : textMatchArgs(sel, ctx.profile.textMatchDefault),
+    ),
   );
   if (steady) {
     const cur = await sampleRect();
