@@ -68,3 +68,29 @@ export async function resolveAnchorRect(
       : undefined;
   return r && r.ok && r.data ? (r.data as Rect) : null;
 }
+
+/**
+ * One relation-aware probe, no waiting — the optional-tap check (findOnce's
+ * counterpart). Anchor and target are each looked up once.
+ */
+export async function findRelationOnce(
+  ctx: RunContext,
+  sel: MaestroSelector,
+): Promise<Rect | null> {
+  const scoped = await withResolvedRelation(ctx, sel, async (c, anchor) => {
+    const r = anchor.id
+      ? await c.client.call('find_by_testid', { testID: anchor.id }).catch(() => undefined)
+      : await c.client
+          .call('find_by_text', {
+            ...textMatchArgs(anchor, c.profile.textMatchDefault),
+            leaf: true,
+          })
+          .catch(() => undefined);
+    return r && r.ok && r.data ? (r.data as Rect) : null;
+  });
+  if (!scoped) return null;
+  const r = await ctx.client
+    .call('find_by_text', { ...textMatchArgs(scoped, ctx.profile.textMatchDefault) })
+    .catch(() => undefined);
+  return r && r.ok && r.data ? (r.data as Rect) : null;
+}
