@@ -73,6 +73,18 @@ void RegisterEnnioFindHandlers(void) {
                 if (cursor == target) { exposed = YES; break; }
                 cursor = cursor.superview;
             }
+            // A target that takes no touches itself (UIImageView / UILabel
+            // default to userInteractionEnabled = NO — a tab-bar or toolbar
+            // icon) is skipped by hitTest:, which answers with the
+            // container that owns it: an ANCESTOR of the target. That is
+            // where a real finger lands too, so the target is exposed. Seen
+            // on iOS 26's floating tab bar: every icon tap waited out the
+            // full exposure timeout (~850ms) before firing.
+            if (!exposed && hit && !target.userInteractionEnabled) {
+                for (UIView *c = target.superview; c; c = c.superview) {
+                    if (c == hit) { exposed = YES; break; }
+                }
+            }
             // childHijack: hit-test landed on an interactive descendant
             // BEFORE reaching target. iOS dispatches touchesBegan to
             // the deepest interactive view, so the descendant's own
