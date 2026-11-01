@@ -52,6 +52,10 @@ export interface EnnioRunnerOptions {
   recordPath?: string;
   /** --fail-fast: stop the suite after the first failing flow. */
   failFast?: boolean;
+  /** Maestro `executionOrder` with `continueOnFailure: false`: groups of flow
+   *  files run in order where a failure skips the rest of ITS group only;
+   *  flows outside every group still run. */
+  stopOnFailureGroups?: string[][];
 }
 
 export class EnnioRunner {
@@ -69,6 +73,7 @@ export class EnnioRunner {
   private recordPath?: string;
   private recording: ScreenRecording | null = null;
   private failFast: boolean;
+  private stopOnFailureGroups: string[][];
 
   constructor(opts: EnnioRunnerOptions = {}) {
     this.udid = opts.udid;
@@ -77,6 +82,7 @@ export class EnnioRunner {
     this.lenient = opts.lenient ?? false;
     this.safeMode = opts.safeMode ?? false;
     this.failFast = opts.failFast ?? false;
+    this.stopOnFailureGroups = opts.stopOnFailureGroups ?? [];
     this.platform = opts.platform ?? selectPlatform('ios');
     this.recordPath = opts.recordPath;
     this.driver = this.platform.createDriver(opts.inProcessTap ?? false);
@@ -98,7 +104,9 @@ export class EnnioRunner {
     let pass = 0;
     let fail = 0;
 
-    for (const flow of flows) {
+    const skipped = new Set<string>();
+    for (const [i, flow] of flows.entries()) {
+      if (skipped.has(flowFiles[i])) continue;
       const result = await this.runFlow(flow);
       results.push(result);
       if (result.passed) pass++;
@@ -106,6 +114,9 @@ export class EnnioRunner {
       // --fail-fast: a single failure fails the suite (strict, no retry), so
       // don't burn the remaining flows' wall-clock — stop here.
       if (this.failFast && !result.passed) break;
+      if (!result.passed) {
+        for (const f of skippedAfterFailure(flowFiles[i], this.stopOnFailureGroups)) skipped.add(f);
+      }
     }
 
     const suiteResult: SuiteResult = {
@@ -205,3 +216,10 @@ export class EnnioRunner {
 
 // Re-export so callers don't need to deep-import.
 export { execFileSync };
+
+/** The flows a failure of `failed` skips: the rest of its stop-on-failure
+ *  group, in order after it. */
+export function skippedAfterFailure(failed: string, groups: string[][]): string[] {
+  const group = groups.find((g) => g.includes(failed));
+  return group ? group.slice(group.indexOf(failed) + 1) : [];
+}

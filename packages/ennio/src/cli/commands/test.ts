@@ -14,6 +14,7 @@ import { glob } from 'glob';
 
 import type { Flags } from '../cli/args';
 import { EnnioRunner } from '../core';
+import { setCliVars } from '../maestro-parser';
 import { selectPlatform } from '../platform';
 import { WORKSPACE_CONFIG_NAMES, orderFlows, readWorkspaceConfig } from '../workspace-config';
 
@@ -25,17 +26,24 @@ function isSubflowFile(filePath: string): boolean {
   return basename(filePath).startsWith('_');
 }
 
-async function expandFiles(
+export async function expandFiles(
   patterns: string[],
-): Promise<{ files: string[]; continueOnFailure?: boolean }> {
+): Promise<{ files: string[]; stopOnFailureGroups: string[][] }> {
   const files: string[] = [];
-  let continueOnFailure: boolean | undefined;
+  const stopOnFailureGroups: string[][] = [];
   for (const pattern of patterns) {
     const resolved = resolve(pattern);
     if (existsSync(resolved) && statSync(resolved).isDirectory()) {
       // A Maestro workspace: config.yaml picks the flows and their order.
       const config = readWorkspaceConfig(resolved);
-      const globs = config?.flows ?? ['**/*.{yaml,yml}'];
+      if (config?.unsupported.length) {
+        console.warn(
+          `[ennio] ${config.path}: ignoring unsupported keys: ${config.unsupported.join(', ')}`,
+        );
+      }
+      // Maestro's default with a config is the top level; without one ennio
+      // keeps walking the whole tree.
+      const globs = config ? (config.flows ?? ['*']) : ['**/*.{yaml,yml}'];
       const yamlMatches = (await Promise.all(globs.map((g) => glob(join(resolved, g))))).flat();
       const dirFiles = [
         ...new Set(
@@ -50,8 +58,13 @@ async function expandFiles(
             .map((f) => resolve(f)),
         ),
       ];
-      files.push(...orderFlows(dirFiles, config?.flowsOrder));
-      if (config?.continueOnFailure !== undefined) continueOnFailure = config.continueOnFailure;
+      const ordered = orderFlows(dirFiles, config?.flowsOrder);
+      files.push(...ordered);
+      // continueOnFailure: false — a failure skips the rest of THIS
+      // directory's ordered sequence; its unordered flows still run.
+      if (config?.continueOnFailure === false && config.flowsOrder?.length) {
+        stopOnFailureGroups.push(ordered.slice(0, config.flowsOrder.length));
+      }
     } else {
       const matches = await glob(pattern);
       files.push(
@@ -61,7 +74,7 @@ async function expandFiles(
       );
     }
   }
-  return { files, continueOnFailure };
+  return { files, stopOnFailureGroups };
 }
 
 export async function runTestCommand(positional: string[], flags: Flags): Promise<number> {
@@ -94,7 +107,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     return 1;
   }
 
-  const { files, continueOnFailure } = await expandFiles(positional);
+  const { files, stopOnFailureGroups } = await expandFiles(positional);
   if (files.length === 0) {
     console.error('No Maestro YAML files found');
     return 1;
@@ -104,9 +117,9 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   // launch site (set there from this process env). Set it here so all
   // three launch paths see a single source of truth.
   if (flags.noAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
-  // -e KEY=VALUE: flow variables. `${KEY}` interpolation falls back to
-  // process.env, so this is the single place they need to land.
-  for (const [k, v] of Object.entries(flags.env ?? {})) process.env[k] = v;
+  // -e KEY=VALUE: flow variables, read by `${KEY}` interpolation (not
+  // written to process.env — see setCliVars).
+  setCliVars(flags.env ?? {});
   // Touch visualization is ON by default — every gesture ennio performs
   // is visible on the device (and in --record footage), and the runner
   // turns it off the moment the run ends. --disable-touches opts out for
@@ -134,9 +147,8 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     lenient: flags.lenient ?? false,
     safeMode: flags.safeMode ?? false,
     inProcessTap: flags.inProcessTap ?? false,
-    // executionOrder.continueOnFailure: false in config.yaml stops the run
-    // at the first failing flow, like --fail-fast.
-    failFast: (flags.failFast ?? false) || continueOnFailure === false,
+    failFast: flags.failFast ?? false,
+    stopOnFailureGroups,
     platform: selectPlatform(platformName),
     // --record: one video for the whole suite, --output dir or cwd.
     recordPath: flags.record

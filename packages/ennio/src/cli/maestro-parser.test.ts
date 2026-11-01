@@ -344,8 +344,18 @@ describe('extractModifiers', () => {
     const cmd = {
       extendedWaitUntil: { visible: 'Not Now', timeout: 4000, optional: true, label: 'sheet' },
     } as unknown as MaestroCommand;
-    const { modifiers } = extractModifiers(cmd);
+    const { command, modifiers } = extractModifiers(cmd);
     expect(modifiers).toEqual({ optional: true, label: 'sheet' });
+    expect(command).toEqual({ extendedWaitUntil: { visible: 'Not Now', timeout: 4000 } });
+  });
+
+  it("lifts tapOn's label but leaves its optional to the tap handler", () => {
+    const cmd = {
+      tapOn: { id: 'signin', label: 'Tap sign in', optional: true },
+    } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(modifiers).toEqual({ label: 'Tap sign in' });
+    expect(command).toEqual({ tapOn: { id: 'signin', optional: true } });
   });
 
   it("does not lift runFlow's own when", () => {

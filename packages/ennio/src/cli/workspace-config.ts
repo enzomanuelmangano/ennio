@@ -4,9 +4,12 @@
  * with "missing top-level appId". Supported keys, as Maestro reads them:
  *
  *   flows:                  globs (relative to the directory) selecting the
- *     - flows/*.yaml        flows to run; default: every flow in the tree
+ *     - flows/*.yaml        flows to run; default `*` (top level only), as
+ *                           Maestro — without a config ennio keeps walking
+ *                           the whole tree
  *   executionOrder:
- *     continueOnFailure: false   stop at the first failing flow
+ *     continueOnFailure: false   a failure skips the rest of the ordered
+ *                                flows; the unordered ones still run
  *     flowsOrder:                run these first, in this order — matched by
  *       - Home                   the flow's `name:` or its file name without
  *                                extension; the rest run after, sorted
@@ -24,6 +27,8 @@ export interface WorkspaceConfig {
   flows?: string[];
   flowsOrder?: string[];
   continueOnFailure?: boolean;
+  /** Keys present but not implemented (includeTags, excludeTags…). */
+  unsupported: string[];
 }
 
 export function readWorkspaceConfig(dir: string): WorkspaceConfig | undefined {
@@ -33,7 +38,7 @@ export function readWorkspaceConfig(dir: string): WorkspaceConfig | undefined {
     const raw = (parseYaml(readFileSync(path, 'utf8')) ?? {}) as {
       flows?: unknown;
       executionOrder?: { continueOnFailure?: unknown; flowsOrder?: unknown };
-    };
+    } & Record<string, unknown>;
     const strings = (v: unknown) =>
       Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : undefined;
     return {
@@ -44,6 +49,7 @@ export function readWorkspaceConfig(dir: string): WorkspaceConfig | undefined {
         typeof raw.executionOrder?.continueOnFailure === 'boolean'
           ? raw.executionOrder.continueOnFailure
           : undefined,
+      unsupported: Object.keys(raw).filter((k) => k !== 'flows' && k !== 'executionOrder'),
     };
   }
   return undefined;
@@ -60,18 +66,22 @@ function flowName(file: string): string | undefined {
 }
 
 /**
- * Put the `flowsOrder` flows first, in order; the rest follow, sorted. A name
- * that matches no flow is an error — Maestro fails on it too, and silently
- * skipping it would drop a flow from the suite.
+ * Put the `flowsOrder` flows first, in order; the rest follow, sorted. An
+ * entry matches a flow's `name:` first, then a file name without extension.
+ * A name that matches no flow is an error — Maestro fails on it too, and
+ * silently skipping it would drop a flow from the suite.
  */
 export function orderFlows(files: string[], flowsOrder: string[] | undefined): string[] {
   const sorted = [...files].sort();
   if (!flowsOrder?.length) return sorted;
-  const key = (f: string) => [flowName(f), basename(f, extname(f))];
+  const names = new Map(sorted.map((f) => [f, flowName(f)]));
   const ordered: string[] = [];
-  for (const name of flowsOrder) {
-    const match = sorted.find((f) => !ordered.includes(f) && key(f).includes(name));
-    if (!match) throw new Error(`executionOrder.flowsOrder: no flow named "${name}"`);
+  for (const entry of flowsOrder) {
+    const free = sorted.filter((f) => !ordered.includes(f));
+    const match =
+      free.find((f) => names.get(f) === entry) ??
+      free.find((f) => basename(f, extname(f)) === entry);
+    if (!match) throw new Error(`executionOrder.flowsOrder: no flow named "${entry}"`);
     ordered.push(match);
   }
   return [...ordered, ...sorted.filter((f) => !ordered.includes(f))];

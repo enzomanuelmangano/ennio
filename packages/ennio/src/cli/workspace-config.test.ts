@@ -23,6 +23,7 @@ describe('readWorkspaceConfig', () => {
       flows: ['flows/*.yaml'],
       flowsOrder: ['Home'],
       continueOnFailure: false,
+      unsupported: [],
     });
   });
 
@@ -50,5 +51,16 @@ describe('orderFlows', () => {
 
   it('fails on a name that matches no flow', () => {
     expect(() => orderFlows([a, b], ['Nope'])).toThrow(/no flow named "Nope"/);
+  });
+});
+
+describe('orderFlows name priority', () => {
+  it("prefers a flow's name: over another flow's file name", () => {
+    const dir = workspace({
+      'Home.yaml': 'appId: x\nname: Settings\n---\n- launchApp\n',
+      'z.yaml': 'appId: x\nname: Home\n---\n- launchApp\n',
+    });
+    const [home, z] = ['Home.yaml', 'z.yaml'].map((f) => join(dir, f));
+    expect(orderFlows([home, z], ['Home'])).toEqual([z, home]);
   });
 });

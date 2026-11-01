@@ -111,17 +111,24 @@ export function extractModifiers(cmd: MaestroCommand): {
   }
   // Maestro also takes `optional` and `label` INSIDE the command's own
   // arguments (`- extendedWaitUntil: { visible: X, optional: true }`). Lift
-  // them so every command honours them, not only the handlers that read
-  // them. `when` stays: inside runFlow it is runFlow's own argument. tapOn
-  // keeps its selector-level optional: the tap handler owns that one.
+  // them out — so every command honours them — and drop them from the
+  // arguments, where a selector would read `label` as text. `when` stays:
+  // inside runFlow it is runFlow's own argument. tapOn keeps its optional
+  // in place: the tap handler owns that one.
   const verbs = Object.keys(command);
-  const args = verbs.length === 1 && verbs[0] !== 'tapOn' ? command[verbs[0]] : undefined;
-  if (args && typeof args === 'object' && !Array.isArray(args)) {
-    const a = args as Record<string, unknown>;
-    if (typeof a.optional === 'boolean' && modifiers.optional === undefined) {
-      modifiers.optional = a.optional;
+  const verb = verbs.length === 1 ? verbs[0] : undefined;
+  const args = verb ? command[verb] : undefined;
+  if (verb && args && typeof args === 'object' && !Array.isArray(args)) {
+    const a = { ...(args as Record<string, unknown>) };
+    if (verb !== 'tapOn' && typeof a.optional === 'boolean') {
+      if (modifiers.optional === undefined) modifiers.optional = a.optional;
+      delete a.optional;
     }
-    if (typeof a.label === 'string' && modifiers.label === undefined) modifiers.label = a.label;
+    if (typeof a.label === 'string') {
+      if (modifiers.label === undefined) modifiers.label = a.label;
+      delete a.label;
+    }
+    command[verb] = a;
   }
   return { command: command as MaestroCommand, modifiers };
 }
@@ -246,13 +253,27 @@ export interface MaestroFlow {
  * (`${output.x}`) and flow-local `env:` blocks keep working.
  */
 const ENV_PLACEHOLDER = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+
+/** `-e KEY=VALUE` flow variables. Kept apart from process.env so a flow
+ *  variable named PATH, HOME or DEVELOPER_DIR never reaches the xcrun /
+ *  simctl / adb children or ennio itself. */
+const cliVars: Record<string, string> = {};
+
+export function setCliVars(vars: Record<string, string>): void {
+  Object.assign(cliVars, vars);
+}
+
+/** A bare `${NAME}`: a -e variable, else the shell's environment. */
+export function lookupCliVar(name: string): string | undefined {
+  // Maestro resolves ${VAR} against the CLI-provided env; dynamic
+  // lookup is intentional (the var name comes from the flow).
+   
+  return cliVars[name] ?? process.env[name];
+}
 function substituteEnv(value: unknown): unknown {
   if (typeof value === 'string') {
     return value.replace(ENV_PLACEHOLDER, (match, name: string) => {
-      // Maestro resolves ${VAR} against the CLI-provided env; dynamic
-      // lookup is intentional (the var name comes from the flow).
-      // eslint-disable-next-line expo/no-dynamic-env-var
-      const v = process.env[name];
+      const v = lookupCliVar(name);
       return v !== undefined ? v : match;
     });
   }
@@ -342,7 +363,9 @@ export function normalizeSelector(selector: MaestroSelector | string): MaestroSe
   if (typeof selector === 'string') {
     return { text: selector };
   }
-  if (selector.label && !selector.text) {
+  // Only as the sole selector: next to an id (or text) a `label` is the
+  // step's description, not something to match.
+  if (selector.label && !selector.text && !selector.id) {
     const { label, ...rest } = selector;
     return { ...rest, text: label };
   }

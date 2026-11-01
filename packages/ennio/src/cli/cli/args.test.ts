@@ -75,3 +75,12 @@ describe('parseArgs -e / --env', () => {
     expect(() => parseArgs(['test', '-e'])).toThrow(/KEY=VALUE/);
   });
 });
+
+describe('-e variables stay out of process.env', () => {
+  it('are read by interpolation but never set on process.env', async () => {
+    const { setCliVars, lookupCliVar } = await import('../maestro-parser');
+    setCliVars({ ENNIO_TEST_CLI_VAR: 'x' });
+    expect(lookupCliVar('ENNIO_TEST_CLI_VAR')).toBe('x');
+    expect(process.env.ENNIO_TEST_CLI_VAR).toBeUndefined();
+  });
+});
