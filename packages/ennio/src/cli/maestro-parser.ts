@@ -123,8 +123,9 @@ export type MaestroCommand =
   | { scroll: { direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'; amount?: number } }
   | {
       scrollUntilVisible:
+        | string
         | MaestroSelector
-        | { element: MaestroSelector; direction?: string; timeout?: number };
+        | { element: MaestroSelector | string; direction?: string; timeout?: number };
     }
   | {
       swipe: {
