@@ -31,6 +31,11 @@ static void ennioApplyRelation(NSDictionary *a) {
     [EnnioFinder setTextFindLeaf:rel != nil || [a[@"leaf"] boolValue]];
 }
 
+static void ennioClearRelation(void) {
+    [EnnioFinder setTextRelation:nil anchor:CGRectZero];
+    [EnnioFinder setTextFindLeaf:NO];
+}
+
 void RegisterEnnioFindHandlers(void) {
     using namespace ennio;
 
@@ -309,10 +314,15 @@ void RegisterEnnioFindHandlers(void) {
         BOOL found = NO;
         NSString *cls = nil;
         EnnioOnMainVoid([&]() {
+            UIView *v = nil;
             ennioApplyRelation(a);
-            UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
-            [EnnioFinder setTextRelation:nil anchor:CGRectZero];
-            [EnnioFinder setTextFindLeaf:NO];
+            @try {
+                v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
+            } @finally {
+                // Scoped to this find on every path: a leaked relation or
+                // leaf flag would silently narrow every later text find.
+                ennioClearRelation();
+            }
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
@@ -640,10 +650,13 @@ void RegisterEnnioFindHandlers(void) {
         BOOL found = NO;
         while ([deadline timeIntervalSinceNow] > 0) {
             EnnioOnMainVoid([&]() {
+                UIView *v = nil;
                 ennioApplyRelation(a);
-                UIView *v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
-                [EnnioFinder setTextRelation:nil anchor:CGRectZero];
-                [EnnioFinder setTextFindLeaf:NO];
+                @try {
+                    v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
+                } @finally {
+                    ennioClearRelation();
+                }
                 if (v && [EnnioFinder isOnScreen:v]) {
                     rect = [EnnioFinder windowRectFor:v];
                     found = YES;

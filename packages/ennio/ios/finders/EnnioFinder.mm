@@ -821,7 +821,8 @@ static NSArray<UIViewController *> *allPresentedViewControllers(void) {
 // remote view hosted in the keyboard window, its two buttons ("Not Now" /
 // "Save") invisible to every in-process walk. It is a card; the buttons sit
 // side by side on its bottom row, ~39pt above its bottom edge, at 27% / 73%
-// of its width. The card is the smallest remote view under the controller.
+// of its width (measured on iOS 26.5; a layout change moves the buttons and
+// the synthesized tap misses — the flow then fails on the next step). The card is the smallest remote view under the controller.
 // The label is localized, so the selector's alternatives ("Not Now|Non ora")
 // are matched against known translations of either button.
 static BOOL synthPasswordSavingRect(UIViewController *vc, NSString *text, EnnioRect *out) {
@@ -885,8 +886,11 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
         }
     }
     for (UIViewController *pw in all) {
-        if ([NSStringFromClass([pw class]) containsString:@"PasswordSavingViewController"]) {
-            return synthPasswordSavingRect(pw, text, out);
+        // Only a positive answer short-circuits: another host (a picker
+        // behind the prompt) is still checked below.
+        if ([NSStringFromClass([pw class]) containsString:@"PasswordSavingViewController"] &&
+            synthPasswordSavingRect(pw, text, out)) {
+            return YES;
         }
     }
     UIViewController *vc = phPicker ?: shareSheet;

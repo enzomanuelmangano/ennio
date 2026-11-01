@@ -193,11 +193,17 @@ static UIScrollView *_Nullable findScrollViewForAxis(UIView *view, BOOL horizont
                                  options:NSRegularExpressionCaseInsensitive
                                    error:nil];
     }
+    UIAlertAction *pick = nil;
     for (UIAlertAction *act in a.actions) {
+        if ([act.title isEqualToString:buttonText]) { pick = act; break; }
+    }
+    for (UIAlertAction *act in a.actions) {
+        if (pick || !re) break;
         NSString *title = act.title ?: @"";
-        BOOL hit = [title isEqualToString:buttonText] ||
-                   (re && [re firstMatchInString:title options:0 range:NSMakeRange(0, title.length)]);
-        if (!hit) continue;
+        if ([re firstMatchInString:title options:0 range:NSMakeRange(0, title.length)]) pick = act;
+    }
+    for (UIAlertAction *act in a.actions) {
+        if (act != pick) continue;
         // Read the handler block via KVC. UIAlertAction stores it as
         // `handler` (private but stable since iOS 8). KVC is ARC-safe
         // unlike object_getInstanceVariable.

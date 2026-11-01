@@ -40,7 +40,13 @@ export async function withResolvedRelation(
 }
 
 export function hasRelation(sel: MaestroSelector): boolean {
-  return !!sel.text && (!!sel.relation || KINDS.some((k) => sel[k] !== undefined));
+  const relative = !!sel.relation || KINDS.some((k) => sel[k] !== undefined);
+  // Implemented on text selectors only: say so rather than silently tap the
+  // first match of an id and ignore the relation.
+  if (relative && !sel.text) {
+    throw new Error(`below/above/leftOf/rightOf need a text selector (got ${JSON.stringify(sel)})`);
+  }
+  return relative;
 }
 
 /**

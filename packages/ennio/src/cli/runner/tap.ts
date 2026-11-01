@@ -161,6 +161,12 @@ export async function execTapOn(
     await ctx.driver.tap(ctx.udid, x, y, { intent });
     return;
   }
+  // A relative selector (below/above/leftOf/rightOf) is honoured only by the
+  // dylib's text finder. Every by-label shortcut below — tab routing, the
+  // cross-process AX fast path / cross-check / tapTarget, activate_by_text,
+  // tap_tab — would take the first match anywhere and tap the element the
+  // relation was written to exclude, so they are all skipped for it.
+  const relational = hasRelation(sel);
   // UIAlertController auto-handler: button labels never make it into
   // the RN view tree, so a text-selector tap on an alert button would
   // miss. Detect a present alert and route through the dylib's
@@ -184,7 +190,10 @@ export async function execTapOn(
     // change, which would otherwise trip the phantom detector into a
     // pointless HID redo); baseline keeps the probe in the retap loop
     // only.
-    if (await timedAsync(ctx, 'tap.tabProbe', () => ctx.driver.tryTabTap(ctx.client, sel.text!)))
+    if (
+      !relational &&
+      (await timedAsync(ctx, 'tap.tabProbe', () => ctx.driver.tryTabTap(ctx.client, sel.text!)))
+    )
       return;
     // (Skipped when childOf is set — the cross-process AX can't scope by
     // parent, and a bare testID/label match would pick the wrong sibling.)
@@ -197,11 +206,12 @@ export async function execTapOn(
     // it and verify the frame moved. High-confidence (testID-backed) and
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
-    const axEl = sel.childOf
-      ? null
-      : await timedAsync(ctx, 'tap.axFastResolve', () =>
-          ctx.platform.ax.resolve(ctx.udid, { text: sel.text }),
-        );
+    const axEl =
+      sel.childOf || relational
+        ? null
+        : await timedAsync(ctx, 'tap.axFastResolve', () =>
+            ctx.platform.ax.resolve(ctx.udid, { text: sel.text }),
+          );
     if (axEl) {
       // Doomed-tap gate for the AX fast path: a VC transition in flight
       // at dispatch time swallows the touch AND means the AX snapshot
@@ -267,7 +277,7 @@ export async function execTapOn(
       rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
     }
   }
-  if (!rect && (sel.id || sel.text) && !sel.childOf) {
+  if (!rect && (sel.id || sel.text) && !sel.childOf && !relational) {
     // The target may live in a native bottom-sheet / popover the in-app
     // dylib doesn't traverse (Bluesky's Dialog/Prompt + composer render
     // in a separate SheetViewController window). It's still on screen,
@@ -306,7 +316,7 @@ export async function execTapOn(
     );
     ambiguousId = !!(nth && nth.ok && nth.data);
   }
-  if ((sel.id || sel.text) && !sel.childOf && !ambiguousId && !mainThreadSlow) {
+  if ((sel.id || sel.text) && !sel.childOf && !relational && !ambiguousId && !mainThreadSlow) {
     const axEl = await timedAsync(ctx, 'tap.axCrossResolve', () =>
       ctx.platform.ax.resolve(ctx.udid, { id: sel.id, text: sel.text }),
     );
@@ -885,7 +895,7 @@ export async function execTapOn(
       // on slow-handler buttons (next-btn → submit, add-to-cart → API
       // round-trip). Text-only taps stay on the original gate — they
       // already get the unconditional tap_tab fallback below.
-      if (!finalChanged) {
+      if (!finalChanged && !relational) {
         if (sel.id) {
           bumpActuationGen();
           await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
@@ -926,7 +936,7 @@ export async function execTapOn(
     // name doesn't resolve to a UITabBarItem, and if it DOES resolve UIKit's
     // setSelectedIndex is idempotent. This is an iOS platform behavior; Android
     // MotionEvent taps are deterministic and don't drop, so gate it to iOS.
-    if (sel.text && !sel.id && ctx.platform.name === 'ios') {
+    if (sel.text && !sel.id && !relational && ctx.platform.name === 'ios') {
       bumpActuationGen();
       await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
     }
