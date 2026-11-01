@@ -15,6 +15,8 @@ mkdir -p "$OUT_DIR"
 DEV="$(xcode-select -p)"
 CS_DIR="/Library/Developer/PrivateFrameworks"
 SK_DIR="$DEV/Library/PrivateFrameworks"
+# Xcode 27 moved SimulatorKit to Contents/SharedFrameworks.
+[ -d "$SK_DIR/SimulatorKit.framework" ] || SK_DIR="$(dirname "$DEV")/SharedFrameworks"
 
 echo "Compiling enniohid → $OUT_DIR/enniohid"
 clang -arch arm64 -c "$SRC/swiftcall.c" -o "$OUT_DIR/swiftcall.o"

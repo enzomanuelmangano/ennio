@@ -37,7 +37,7 @@ function developerDir(): string {
  *  Package candidates are SHA-256-verified against the adjacent
  *  manifest.json (same scheme as the dylib); env override and dev
  *  builds skip the check. */
-function findHelper(): string {
+export function findHelper(): string {
   const candidates = [
     process.env.ENNIO_HID_HELPER,
     '/tmp/ennio-build/enniohid',
@@ -93,9 +93,12 @@ class HelperProcess {
           // .app); resolve the private frameworks against THIS
           // machine's developer dir instead. CoreSimulator's
           // /Library/Developer path is machine-independent but included
-          // for completeness.
+          // for completeness. Xcode 27 moved SimulatorKit out of
+          // Developer/Library/PrivateFrameworks into Contents/
+          // SharedFrameworks; without it dyld kills the helper at load.
           DYLD_FRAMEWORK_PATH: [
             `${dev}/Library/PrivateFrameworks`,
+            `${dirname(dev)}/SharedFrameworks`,
             '/Library/Developer/PrivateFrameworks',
             process.env.DYLD_FRAMEWORK_PATH,
           ]
