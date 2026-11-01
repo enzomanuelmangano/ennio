@@ -27,7 +27,10 @@ static NSString *g_initialURL = nil;
     // expo-router reads on iOS (Linking.getLinkingURL) instead of
     // RCTLinkingManager. Without this every cold deep link in an expo-router
     // app landed on the root screen. Runs at didFinishLaunching, before the
-    // JS bundle asks.
+    // JS bundle asks. Any host gets it, as iOS would hand it a launch URL.
+    // Not covered: apps that route URLs only through a UIScene delegate
+    // (scene:openURLContexts:) and dev clients whose launcher consumes
+    // openURL itself — neither was exercised.
     NSURL *nsurl = [NSURL URLWithString:url];
     UIApplication *app = UIApplication.sharedApplication;
     id<UIApplicationDelegate> delegate = app.delegate;
@@ -37,12 +40,12 @@ static NSString *g_initialURL = nil;
     }
 
     // RCTLinkingManager is the native module backing JS `Linking` on both the
-    // bridge and bridgeless runtimes. Absent ⇒ host isn't react-native ⇒ leave
-    // it alone.
+    // bridge and bridgeless runtimes. Absent ⇒ host isn't react-native ⇒ the
+    // getInitialURL hook below does not apply.
     Class cls = NSClassFromString(@"RCTLinkingManager");
     if (cls == Nil) {
-        NSLog(@"[Ennio] ENNIO_INITIAL_URL set but RCTLinkingManager not present — "
-              @"host is not react-native; ignoring");
+        NSLog(@"[Ennio] RCTLinkingManager not present — host is not react-native; "
+              @"skipping the getInitialURL hook");
         return;
     }
 
