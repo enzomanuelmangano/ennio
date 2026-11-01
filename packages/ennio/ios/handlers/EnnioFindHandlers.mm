@@ -26,6 +26,9 @@ static void ennioApplyRelation(NSDictionary *a) {
                                      [rel[@"w"] doubleValue], [rel[@"h"] doubleValue])
                         : CGRectZero;
     [EnnioFinder setTextRelation:rel[@"kind"] anchor:anchor];
+    // A relation compares leaf bounds: neither the anchor (`leaf`) nor the
+    // candidates are promoted to their interactive ancestor.
+    [EnnioFinder setTextFindLeaf:rel != nil || [a[@"leaf"] boolValue]];
 }
 
 void RegisterEnnioFindHandlers(void) {
@@ -309,6 +312,7 @@ void RegisterEnnioFindHandlers(void) {
             ennioApplyRelation(a);
             UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
             [EnnioFinder setTextRelation:nil anchor:CGRectZero];
+            [EnnioFinder setTextFindLeaf:NO];
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
@@ -639,6 +643,7 @@ void RegisterEnnioFindHandlers(void) {
                 ennioApplyRelation(a);
                 UIView *v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
                 [EnnioFinder setTextRelation:nil anchor:CGRectZero];
+                [EnnioFinder setTextFindLeaf:NO];
                 if (v && [EnnioFinder isOnScreen:v]) {
                     rect = [EnnioFinder windowRectFor:v];
                     found = YES;

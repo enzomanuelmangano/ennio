@@ -57,6 +57,10 @@ typedef struct {
 /// is below / above / leftOf / rightOf; nil clears it. Main thread only.
 + (void)setTextRelation:(nullable NSString *)kind anchor:(CGRect)anchor;
 
+/// Leaf mode for the next text finds: the matched view itself, not its
+/// interactive ancestor (a relative selector's anchor). Main thread only.
++ (void)setTextFindLeaf:(BOOL)leaf;
+
 /// Resolve text against the UIAccessibility element tree. Walks
 /// accessibilityElements / accessibilityElementAtIndex: in addition
 /// to subviews, so cross-process UIRemoteView contents (PHPicker,

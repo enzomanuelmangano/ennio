@@ -7,8 +7,9 @@
 // dialog's.
 
 import type { MaestroSelector } from '../maestro-parser';
-import { normalizeSelector } from '../maestro-parser';
-import type { RunContext } from './context';
+import { normalizeSelector, textMatchArgs } from '../maestro-parser';
+
+import type { Rect, RunContext } from './context';
 
 const KINDS = ['below', 'above', 'leftOf', 'rightOf'] as const;
 
@@ -36,4 +37,34 @@ export async function withResolvedRelation(
   const anchor = await resolveAnchor(ctx, normalizeSelector(sel[kind] as MaestroSelector | string));
   if (!anchor) return null;
   return { ...sel, relation: { kind, ...anchor } };
+}
+
+export function hasRelation(sel: MaestroSelector): boolean {
+  return !!sel.text && (!!sel.relation || KINDS.some((k) => sel[k] !== undefined));
+}
+
+/**
+ * The anchor's OWN bounds (Maestro measures relations on them): a text
+ * anchor is found in leaf mode, not promoted to its interactive ancestor —
+ * the ancestor of a "Option A" segment is the whole segmented control, and
+ * nothing is to the right of that.
+ */
+export async function resolveAnchorRect(
+  ctx: RunContext,
+  sel: MaestroSelector,
+): Promise<Rect | null> {
+  const r = sel.id
+    ? await ctx.client
+        .call('wait_find_by_testid', { testID: sel.id, maxMs: 2500 })
+        .catch(() => undefined)
+    : sel.text
+      ? await ctx.client
+          .call('wait_find_by_text', {
+            ...textMatchArgs(sel, ctx.profile.textMatchDefault),
+            leaf: true,
+            maxMs: 2500,
+          })
+          .catch(() => undefined)
+      : undefined;
+  return r && r.ok && r.data ? (r.data as Rect) : null;
 }

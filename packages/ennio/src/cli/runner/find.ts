@@ -13,7 +13,7 @@
 import { axQueryByText } from '../hid';
 import { MaestroSelector, textMatchArgs } from '../maestro-parser';
 
-import { withResolvedRelation } from './relation';
+import { hasRelation, resolveAnchorRect, withResolvedRelation } from './relation';
 
 import {
   DEFAULT_WIN_H,
@@ -105,8 +105,8 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
   // find through the dylib's text walk alone — the only path that honours
   // the relation. The AX / tab / scroll fallbacks below would ignore it and
   // return the first match anywhere.
-  if (sel.text && (sel.relation || sel.below || sel.above || sel.leftOf || sel.rightOf)) {
-    const scoped = await withResolvedRelation(ctx, sel, resolveRect);
+  if (hasRelation(sel)) {
+    const scoped = await withResolvedRelation(ctx, sel, resolveAnchorRect);
     if (!scoped) return null;
     const r = await timedAsync(ctx, 'tap.findFast', () =>
       ctx.client

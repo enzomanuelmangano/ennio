@@ -173,6 +173,10 @@ typedef NS_ENUM(NSInteger, EnnioRelationKind) {
 };
 static EnnioRelationKind g_relationKind = EnnioRelationNone;
 static CGRect g_relationAnchor;
+// Leaf find: return the matched view itself, not its interactive ancestor.
+// A relative selector's anchor is measured on its own bounds (Maestro): the
+// promoted ancestor of a "Option A" segment is the whole segmented control.
+static BOOL g_textFindLeaf = NO;
 
 // Distance from the anchor along the relation's axis, or -1 when the
 // window rect is not on that side of it (edges, 1pt tolerance — Maestro's
@@ -437,7 +441,11 @@ static UIView *_Nullable bestFrom(NSArray<UIView *> *list) {
 // view with UIAccessibilityTraitButton/Link) and return THAT view's
 // rect instead. Falls back to the original view when no ancestor
 // qualifies.
+static UIView *_Nullable promoteToInteractiveAncestorImpl(UIView *v);
 static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
+    return g_textFindLeaf ? v : promoteToInteractiveAncestorImpl(v);
+}
+static UIView *_Nullable promoteToInteractiveAncestorImpl(UIView *v) {
     if (!v) return nil;
     // The matched view itself already qualifies — return as-is.
     if (isInteractive(v) &&
@@ -1005,6 +1013,10 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
 
 + (UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed {
     return [self findViewByText:text relaxed:relaxed regex:NO];
+}
+
++ (void)setTextFindLeaf:(BOOL)leaf {
+    g_textFindLeaf = leaf;
 }
 
 + (void)setTextRelation:(NSString *)kind anchor:(CGRect)anchor {

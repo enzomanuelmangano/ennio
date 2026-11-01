@@ -25,7 +25,7 @@ import { chainHasAsyncPayloadHost, SUBMIT_DISMISS_TESTID_PATTERN } from './capab
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, captureReactTs, parsePoint, resolveRect } from './find';
-import { withResolvedRelation } from './relation';
+import { hasRelation, resolveAnchorRect, withResolvedRelation } from './relation';
 
 // A find slower than this means the app's main thread is starved (the
 // in-process finder polls there). Normal finds are ~16ms, so this only
@@ -238,8 +238,8 @@ export async function execTapOn(
   }
   // Relative selector: resolve its anchor ONCE, so every re-find below
   // (stability samples, retaps) targets the same side of the same anchor.
-  if (sel.text && (sel.below || sel.above || sel.leftOf || sel.rightOf) && !sel.relation) {
-    const scoped = await withResolvedRelation(ctx, sel, resolveRect);
+  if (hasRelation(sel) && !sel.relation) {
+    const scoped = await withResolvedRelation(ctx, sel, resolveAnchorRect);
     if (!scoped) throw new Error(`element not found: ${JSON.stringify(sel)}`);
     sel = scoped;
   }

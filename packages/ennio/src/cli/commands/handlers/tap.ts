@@ -9,7 +9,14 @@ import { CommandRegistry } from '../../core/command-registry';
 import type { MaestroCommand } from '../../maestro-parser';
 import { normalizeSelector } from '../../maestro-parser';
 import { POST_TAP_SETTLE_MS, interpolateSelector, sleep, timedAsync } from '../../runner/context';
-import { captureHash, captureReactTs, findOnce, resolveCenter } from '../../runner/find';
+import {
+  captureHash,
+  captureReactTs,
+  findOnce,
+  resolveCenter,
+  resolveRect,
+} from '../../runner/find';
+import { hasRelation } from '../../runner/relation';
 import { execTapOn } from '../../runner/tap';
 
 interface TapOnCmd {
@@ -44,7 +51,9 @@ export function registerTapHandlers(registry: CommandRegistry): void {
           : null;
       const isOptional = !!tapObj?.optional;
       if (isOptional) {
-        const r = await findOnce(ctx, sel);
+        // A relative selector is found only through the relation-aware
+        // resolve — findOnce ignores the relation and would see any match.
+        const r = hasRelation(sel) ? await resolveRect(ctx, sel) : await findOnce(ctx, sel);
         if (!r) return;
       }
       // Maestro `repeat: N` + `delay: ms`: N taps with `delay` ms gap.
