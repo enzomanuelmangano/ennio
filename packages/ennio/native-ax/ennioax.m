@@ -202,6 +202,7 @@ int main(int argc, char **argv) {
       }
     }
   picked:
+    if (!sim) { printf("{\"error\":\"simulator-not-running\"}\n"); return 4; }
     AXUIElementRef app = AXUIElementCreateApplication(sim.processIdentifier);
 
     if (!persistent) {
