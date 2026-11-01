@@ -170,7 +170,9 @@ export async function execTapOn(
       const a = await timedAsync(ctx, 'tap.alertProbe', () => ctx.client.call('alert_present'));
       if (a.ok && a.data && (a.data as { present: boolean }).present) {
         bumpActuationGen();
-        const t = await ctx.client.call('alert_tap', { buttonText: sel.text });
+        // Regex mode only — the alert op anchors the raw selector text itself.
+        const { regex } = textMatchArgs(sel, ctx.profile.textMatchDefault);
+        const t = await ctx.client.call('alert_tap', { buttonText: sel.text, regex });
         if (t.ok && t.data && (t.data as { tapped: boolean }).tapped) return;
       }
     } catch {
