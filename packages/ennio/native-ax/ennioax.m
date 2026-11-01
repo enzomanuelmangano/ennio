@@ -171,9 +171,14 @@ int main(int argc, char **argv) {
       fprintf(stderr, "ennioax: process not trusted for Accessibility — grant it in System Settings > Privacy & Security > Accessibility\n");
       printf("{\"error\":\"not-ax-trusted\"}\n"); return 3;
     }
+    // Simulator.app, or Device Hub (com.apple.dt.Devices) — Xcode 27 shows
+    // simulators there and no longer ships Simulator.app.
     NSRunningApplication *sim = nil;
-    for (NSRunningApplication *a in NSWorkspace.sharedWorkspace.runningApplications)
-      if ([a.bundleIdentifier isEqual:@"com.apple.iphonesimulator"]) { sim = a; break; }
+    for (NSString *bundleID in @[ @"com.apple.iphonesimulator", @"com.apple.dt.Devices" ]) {
+      for (NSRunningApplication *a in NSWorkspace.sharedWorkspace.runningApplications)
+        if ([a.bundleIdentifier isEqual:bundleID]) { sim = a; break; }
+      if (sim) break;
+    }
     if (!sim) { printf("{\"error\":\"simulator-not-running\"}\n"); return 4; }
 
     AXUIElementRef app = AXUIElementCreateApplication(sim.processIdentifier);
