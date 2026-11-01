@@ -7,7 +7,7 @@
 // pass completes before the next command tries to find anything.
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -48,6 +48,42 @@ function ensureSimLaunchEnv(udid: string): void {
   setSimLaunchEnv(udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
   setSimLaunchEnv(udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
   simEnvReady.add(udid);
+}
+
+/**
+ * Launch with the dylib and connect to the agent. The sticky sim env is set
+ * once per device (ensureSimLaunchEnv); a simulator rebooted or erased under
+ * a long-lived process (ennio mcp) loses it, the dylib then binds the
+ * default socket path and the connect times out. So a failed connect with a
+ * CACHED env re-arms the env and relaunches once before giving up.
+ */
+async function launchAndConnect(
+  ctx: RunContext,
+  launchArgs: string[],
+  what: string,
+): Promise<EnnioSocketClient> {
+  for (let attempt = 0; ; attempt++) {
+    const envWasCached = simEnvReady.has(ctx.udid);
+    ensureSimLaunchEnv(ctx.udid);
+    const launchedAt = Date.now();
+    execFileSync(
+      'xcrun',
+      ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
+      {
+        env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath ?? undefined },
+        stdio: 'pipe',
+      },
+    );
+    const reopen = new EnnioSocketClient(ctx.udid);
+    reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
+    if (await reopen.connectWithRetry(15_000)) return reopen;
+    if (attempt === 0 && envWasCached) {
+      simEnvReady.delete(ctx.udid);
+      continue;
+    }
+    const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
+    throw new Error(`socket reconnect failed after ${what}` + (diagnosis ? `\n${diagnosis}` : ''));
+  }
 }
 
 /**
@@ -135,8 +171,13 @@ export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void
  * clearState keeps the running process (no relaunch). Only clearState pays
  * the relaunch.
  */
-export async function softResetAndReload(ctx: RunContext): Promise<void> {
-  await clearStateAndRelaunch(ctx);
+export async function softResetAndReload(
+  ctx: RunContext,
+  launchArgs: string[] = [],
+): Promise<void> {
+  // A relaunch starts a new process: the flow's launch arguments must go
+  // with it (the old in-place reload kept them live in the process).
+  await clearStateAndRelaunch(ctx, launchArgs);
 }
 
 /// Re-launch the app with DYLD inject and re-open the control socket.
@@ -164,25 +205,10 @@ export async function relaunchAndReconnect(
     }
     ctx.dylibPath = auto;
   }
-  // Sim launchctl env — set once per device (sticky). See ensureSimLaunchEnv.
-  ensureSimLaunchEnv(ctx.udid);
-  const launchedAt = Date.now();
-  execFileSync(
-    'xcrun',
-    ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
-    {
-      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
-      stdio: 'pipe',
-    },
-  );
-  const reopen = new EnnioSocketClient(ctx.udid);
-  reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
-  if (!(await reopen.connectWithRetry(15_000))) {
-    const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
-    throw new Error(
-      'socket reconnect failed after launchApp' + (diagnosis ? `\n${diagnosis}` : ''),
-    );
-  }
+  // The dead process's socket file would answer the reconnect poll until the
+  // new app rebinds it (clearStateAndRelaunch clears it the same way).
+  rmSync(ennioSocketPath(ctx.udid), { force: true });
+  const reopen = await launchAndConnect(ctx, launchArgs, 'launchApp');
   ctx.client = reopen;
   recordLaunchArgs(ctx.udid, ctx.bundleId, launchArgs);
   const deadline = Date.now() + 5000;
@@ -262,6 +288,12 @@ export async function clearStateAndRelaunch(
     // get_app_container simctl call per relaunch); no separate .app lookup
     // needed on this path.
     let dataContainer = dataContainerCache.get(csKey) ?? null;
+    // An uninstall/reinstall moves the container: a stale cached path would
+    // throw in the wipe below (swallowed) and silently keep the old state.
+    if (dataContainer && !existsSync(dataContainer)) {
+      dataContainerCache.delete(csKey);
+      dataContainer = null;
+    }
     if (!dataContainer) {
       try {
         dataContainer = execFileSync(
@@ -367,26 +399,7 @@ export async function clearStateAndRelaunch(
     }
     ctx.dylibPath = auto;
   }
-  // Sim launchctl env — set once per device (sticky; ~1s of simctl saved
-  // per relaunch). See ensureSimLaunchEnv.
-  ensureSimLaunchEnv(ctx.udid);
-  const launchedAt = Date.now();
-  execFileSync(
-    'xcrun',
-    ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
-    {
-      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
-      stdio: 'pipe',
-    },
-  );
-  const reopen = new EnnioSocketClient(ctx.udid);
-  reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
-  if (!(await reopen.connectWithRetry(15_000))) {
-    const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
-    throw new Error(
-      'socket reconnect failed after clearState relaunch' + (diagnosis ? `\n${diagnosis}` : ''),
-    );
-  }
+  const reopen = await launchAndConnect(ctx, launchArgs, 'clearState relaunch');
   ctx.client = reopen;
   recordLaunchArgs(ctx.udid, ctx.bundleId, launchArgs);
   // Pre-spawn the HID helper in the background — it arms while the app
