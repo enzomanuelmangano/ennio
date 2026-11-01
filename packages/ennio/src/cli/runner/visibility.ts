@@ -6,13 +6,25 @@ import { axHasText } from '../ennio-ax';
 import { MaestroSelector, textMatchArgs } from '../maestro-parser';
 
 import { POLL_MS, RunContext, sleep } from './context';
+import { resolveRect } from './find';
 import { dismissPermissionDialogs } from './lifecycle';
+import { withResolvedRelation } from './relation';
 
 /// Returns `true` if the selector resolves to any visible view —
 /// testID-indexed, text-walked, or surfaced via the UIAlertController
 /// layer / cross-process AX proxies. Used by assertVisible/waitFor
 /// predicates (and their `notVisible` inverses).
 export async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<boolean> {
+  // Relative selector: visible only on the anchor's side of it, through the
+  // one finder that honours the relation (see runner/relation.ts).
+  if (sel.text && (sel.relation || sel.below || sel.above || sel.leftOf || sel.rightOf)) {
+    const scoped = await withResolvedRelation(ctx, sel, resolveRect);
+    if (!scoped) return false;
+    const r = await ctx.client
+      .call('find_by_text', { ...textMatchArgs(scoped, ctx.profile.textMatchDefault) })
+      .catch(() => undefined);
+    return !!(r && r.ok);
+  }
   // Narrowing qualifiers (`childOf`, `index`) must use the SAME dedicated
   // resolvers the tap/find path uses — otherwise visibility silently
   // ignores them and can false-pass: assertVisible `{ id, index: 5 }`

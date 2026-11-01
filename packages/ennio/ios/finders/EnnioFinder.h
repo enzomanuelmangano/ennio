@@ -52,6 +52,11 @@ typedef struct {
 /// authoritative isRegexText flag) instead of re-derived in the finder.
 + (nullable UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed regex:(BOOL)regex;
 
+/// Maestro relative selector for the next text finds: only matches on
+/// `kind`'s side of `anchor` (window coords) count, nearest first. `kind`
+/// is below / above / leftOf / rightOf; nil clears it. Main thread only.
++ (void)setTextRelation:(nullable NSString *)kind anchor:(CGRect)anchor;
+
 /// Resolve text against the UIAccessibility element tree. Walks
 /// accessibilityElements / accessibilityElementAtIndex: in addition
 /// to subviews, so cross-process UIRemoteView contents (PHPicker,

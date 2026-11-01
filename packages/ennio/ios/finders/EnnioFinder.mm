@@ -161,6 +161,39 @@ static BOOL strContainsCI(NSString *haystack, NSString *needle) {
 // main-thread finder), read by the matchers below.
 static BOOL g_textSelectorIsRegex = NO;
 
+// Maestro relative selector (below / above / leftOf / rightOf) for the
+// current text find: the anchor's window rect, set by the handler from the
+// CLI's resolved anchor. 0 = none.
+typedef NS_ENUM(NSInteger, EnnioRelationKind) {
+    EnnioRelationNone = 0,
+    EnnioRelationBelow,
+    EnnioRelationAbove,
+    EnnioRelationLeftOf,
+    EnnioRelationRightOf,
+};
+static EnnioRelationKind g_relationKind = EnnioRelationNone;
+static CGRect g_relationAnchor;
+
+// Distance from the anchor along the relation's axis, or -1 when the
+// window rect is not on that side of it (edges, 1pt tolerance — Maestro's
+// below is "top at or under the anchor's bottom", likewise for the rest).
+static CGFloat relationDistance(CGRect r) {
+    const CGFloat tol = 1;
+    CGRect a = g_relationAnchor;
+    switch (g_relationKind) {
+        case EnnioRelationBelow:
+            return CGRectGetMinY(r) >= CGRectGetMaxY(a) - tol ? CGRectGetMinY(r) - CGRectGetMaxY(a) : -1;
+        case EnnioRelationAbove:
+            return CGRectGetMaxY(r) <= CGRectGetMinY(a) + tol ? CGRectGetMinY(a) - CGRectGetMaxY(r) : -1;
+        case EnnioRelationLeftOf:
+            return CGRectGetMaxX(r) <= CGRectGetMinX(a) + tol ? CGRectGetMinX(a) - CGRectGetMaxX(r) : -1;
+        case EnnioRelationRightOf:
+            return CGRectGetMinX(r) >= CGRectGetMaxX(a) - tol ? CGRectGetMinX(r) - CGRectGetMaxX(a) : -1;
+        default:
+            return 0;
+    }
+}
+
 static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
     if (!haystack.length || !pattern.length) return NO;
     NSError *err = nil;
@@ -483,6 +516,27 @@ static UIView *_Nullable walkByTextEx(UIView *root, NSString *text, BOOL relaxed
     // BottomSheet outranks the sheet's search input field — the tap
     // fires at the bottom tab bar coord, lands on the sheet backdrop
     // at that point, and dismisses the sheet.
+    if (g_relationKind != EnnioRelationNone) {
+        // Relative selector: only on-screen matches on the anchor's side
+        // count, and the nearest one wins (Maestro sorts by distance). No
+        // off-screen fallback — that would ignore the relation.
+        UIView *best = nil;
+        CGFloat bestDist = CGFLOAT_MAX;
+        for (UIView *v in matches) {
+            if (!viewIsLikelyOnScreen(v)) continue;
+            if (!finderVCInTopmost(finderHostingVC(v), topmost)) continue;
+            CGRect r = [v.window convertRect:v.bounds fromView:v];
+            CGFloat d = relationDistance(r);
+            if (d < 0) continue;
+            if (d < bestDist || (d == bestDist && best &&
+                                 r.size.width * r.size.height <
+                                     best.bounds.size.width * best.bounds.size.height)) {
+                best = v;
+                bestDist = d;
+            }
+        }
+        return best ? promoteToInteractiveAncestor(best) : nil;
+    }
     NSMutableArray<UIView *> *exactOnscreenInteractive = [NSMutableArray new];
     NSMutableArray<UIView *> *exactOnscreen = [NSMutableArray new];
     NSMutableArray<UIView *> *anyOnscreenInteractive = [NSMutableArray new];
@@ -953,13 +1007,22 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     return [self findViewByText:text relaxed:relaxed regex:NO];
 }
 
++ (void)setTextRelation:(NSString *)kind anchor:(CGRect)anchor {
+    if ([kind isEqualToString:@"below"]) g_relationKind = EnnioRelationBelow;
+    else if ([kind isEqualToString:@"above"]) g_relationKind = EnnioRelationAbove;
+    else if ([kind isEqualToString:@"leftOf"]) g_relationKind = EnnioRelationLeftOf;
+    else if ([kind isEqualToString:@"rightOf"]) g_relationKind = EnnioRelationRightOf;
+    else g_relationKind = EnnioRelationNone;
+    g_relationAnchor = anchor;
+}
+
 + (UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed regex:(BOOL)regex {
     // Set the selector mode for the matchers, from the CLI's authoritative flag.
     g_textSelectorIsRegex = regex;
     if (text.length == 0) return nil;
     UIWindow *keyWin = [EnnioBootstrap keyWindow];
     UIView *match = walkByTextEx(keyWin, text, relaxed);
-    if (!match) {
+    if (!match && g_relationKind == EnnioRelationNone) {
         match = walkAllWindows(^BOOL(UIView *v) {
             if ([v.accessibilityLabel isEqualToString:text]) return YES;
             if ([v.accessibilityValue isEqualToString:text]) return YES;

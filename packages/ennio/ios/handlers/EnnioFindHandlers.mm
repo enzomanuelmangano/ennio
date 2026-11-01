@@ -18,6 +18,16 @@
 #include <stdexcept>
 #include <string>
 
+// Optional `relation: {kind, x, y, w, h}` on a text find — a Maestro relative
+// selector whose anchor the CLI already resolved. Scoped to one find.
+static void ennioApplyRelation(NSDictionary *a) {
+    NSDictionary *rel = [a[@"relation"] isKindOfClass:NSDictionary.class] ? a[@"relation"] : nil;
+    CGRect anchor = rel ? CGRectMake([rel[@"x"] doubleValue], [rel[@"y"] doubleValue],
+                                     [rel[@"w"] doubleValue], [rel[@"h"] doubleValue])
+                        : CGRectZero;
+    [EnnioFinder setTextRelation:rel[@"kind"] anchor:anchor];
+}
+
 void RegisterEnnioFindHandlers(void) {
     using namespace ennio;
 
@@ -296,7 +306,9 @@ void RegisterEnnioFindHandlers(void) {
         BOOL found = NO;
         NSString *cls = nil;
         EnnioOnMainVoid([&]() {
+            ennioApplyRelation(a);
             UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
+            [EnnioFinder setTextRelation:nil anchor:CGRectZero];
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
@@ -624,7 +636,9 @@ void RegisterEnnioFindHandlers(void) {
         BOOL found = NO;
         while ([deadline timeIntervalSinceNow] > 0) {
             EnnioOnMainVoid([&]() {
+                ennioApplyRelation(a);
                 UIView *v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
+                [EnnioFinder setTextRelation:nil anchor:CGRectZero];
                 if (v && [EnnioFinder isOnScreen:v]) {
                     rect = [EnnioFinder windowRectFor:v];
                     found = YES;

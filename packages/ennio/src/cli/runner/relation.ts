@@ -1,0 +1,39 @@
+// Maestro relative selectors — `below`, `above`, `leftOf`, `rightOf`. The
+// anchor is itself a selector: resolve it to a window rect here, once, and
+// hand the rect to the dylib's text finds (`relation`), which keep only the
+// matches on that side of it and pick the nearest. Without this the relation
+// was parsed and silently ignored: `tapOn: {text: "DELETE|Delete", below:
+// "Delete this item?"}` tapped the header's "DELETE|Delete" instead of the
+// dialog's.
+
+import type { MaestroSelector } from '../maestro-parser';
+import { normalizeSelector } from '../maestro-parser';
+import type { RunContext } from './context';
+
+const KINDS = ['below', 'above', 'leftOf', 'rightOf'] as const;
+
+/**
+ * The selector with its relation resolved (`relation` set), the selector
+ * unchanged when it has none, or null when the anchor is not on screen —
+ * then nothing can match.
+ */
+export async function withResolvedRelation(
+  ctx: RunContext,
+  sel: MaestroSelector,
+  resolveAnchor: (
+    ctx: RunContext,
+    sel: MaestroSelector,
+  ) => Promise<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>,
+): Promise<MaestroSelector | null> {
+  if (sel.relation) return sel;
+  const kind = KINDS.find((k) => sel[k] !== undefined);
+  if (!kind) return sel;
+  const anchor = await resolveAnchor(ctx, normalizeSelector(sel[kind] as MaestroSelector | string));
+  if (!anchor) return null;
+  return { ...sel, relation: { kind, ...anchor } };
+}

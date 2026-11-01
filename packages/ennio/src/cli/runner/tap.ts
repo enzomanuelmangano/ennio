@@ -20,11 +20,12 @@
 
 import type { TapIntent } from '../driver/types';
 import { bumpActuationGen, getScreenSize } from '../hid';
-import { MaestroSelector } from '../maestro-parser';
+import { MaestroSelector, textMatchArgs } from '../maestro-parser';
 import { chainHasAsyncPayloadHost, SUBMIT_DISMISS_TESTID_PATTERN } from './capabilities';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, captureReactTs, parsePoint, resolveRect } from './find';
+import { withResolvedRelation } from './relation';
 
 // A find slower than this means the app's main thread is starved (the
 // in-process finder polls there). Normal finds are ~16ms, so this only
@@ -233,6 +234,13 @@ export async function execTapOn(
       }
     }
   }
+  // Relative selector: resolve its anchor ONCE, so every re-find below
+  // (stability samples, retaps) targets the same side of the same anchor.
+  if (sel.text && (sel.below || sel.above || sel.leftOf || sel.rightOf) && !sel.relation) {
+    const scoped = await withResolvedRelation(ctx, sel, resolveRect);
+    if (!scoped) throw new Error(`element not found: ${JSON.stringify(sel)}`);
+    sel = scoped;
+  }
   const findStart = Date.now();
   let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
   // The find's own latency is a free main-thread-load probe. The dylib's
@@ -430,7 +438,12 @@ export async function execTapOn(
       if (r && r.ok && r.data) return r.data as Rect;
     }
     if (sel.text) {
-      const r = await ctx.client.call('find_by_text', { text: sel.text }).catch(() => undefined);
+      const r = await ctx.client
+        .call('find_by_text', {
+          text: sel.text,
+          ...(sel.relation ? textMatchArgs(sel, ctx.profile.textMatchDefault) : {}),
+        })
+        .catch(() => undefined);
       if (r && r.ok && r.data) return r.data as Rect;
     }
     return null;
