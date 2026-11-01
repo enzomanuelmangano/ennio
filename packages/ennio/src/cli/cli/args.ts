@@ -9,6 +9,7 @@
  *   -v               → alias for --verbose
  *   -V / --version   → print version
  *   -h / --help      → help flag
+ *   -e KEY=VAL       → flow variable (Maestro's -e / --env; repeatable)
  */
 
 export type Flags = {
@@ -74,6 +75,9 @@ export type Flags = {
   /** --fail-on-regression: `ennio diag compare` exits non-zero when a metric
    *  regressed vs the baseline. Default off (compare is informational). */
   failOnRegression?: boolean;
+  /** -e / --env KEY=VALUE (repeatable): flow variables, as Maestro's `-e`.
+   *  Read by `${KEY}` interpolation in flows. */
+  env?: Record<string, string>;
 };
 
 export type ParsedArgs = {
@@ -148,6 +152,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === '-q') {
       flags.quiet = true;
+      continue;
+    }
+    if (a === '-e' || a === '--env' || a.startsWith('--env=')) {
+      const pair = a.startsWith('--env=') ? a.slice('--env='.length) : argv[++i];
+      const eq = pair?.indexOf('=') ?? -1;
+      if (eq <= 0) throw new Error(`${a} expects KEY=VALUE, got ${pair ?? 'nothing'}`);
+      flags.env = { ...flags.env, [pair.slice(0, eq)]: pair.slice(eq + 1) };
       continue;
     }
     if (!a.startsWith('--')) {

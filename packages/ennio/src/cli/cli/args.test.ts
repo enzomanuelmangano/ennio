@@ -62,3 +62,16 @@ describe('parseArgs boolean flags', () => {
     expect(r.positional).toContain('--definitely-not-a-flag');
   });
 });
+
+describe('parseArgs -e / --env', () => {
+  it('collects repeatable KEY=VALUE pairs (Maestro -e)', () => {
+    const r = parseArgs(['test', 'e2e/', '-e', 'USER=a@b.c', '--env', 'PASS=x=y', '--env=MODE=ci']);
+    expect(r.flags.env).toEqual({ USER: 'a@b.c', PASS: 'x=y', MODE: 'ci' });
+    expect(r.positional).toEqual(['e2e/']);
+  });
+
+  it('rejects a pair without a key', () => {
+    expect(() => parseArgs(['test', '-e', 'novalue'])).toThrow(/KEY=VALUE/);
+    expect(() => parseArgs(['test', '-e'])).toThrow(/KEY=VALUE/);
+  });
+});
