@@ -430,7 +430,12 @@ export async function execTapOn(
       if (r && r.ok && r.data) return r.data as Rect;
     }
     if (sel.text) {
-      const r = await ctx.client.call('find_by_text', { text: sel.text }).catch(() => undefined);
+      // In the selector's match mode: looked up literally, a regex selector
+      // was never found and the stability loop below sampled to its 800ms
+      // deadline on every tap.
+      const r = await ctx.client
+        .call('find_by_text', textMatchArgs(sel, ctx.profile.textMatchDefault))
+        .catch(() => undefined);
       if (r && r.ok && r.data) return r.data as Rect;
     }
     return null;
