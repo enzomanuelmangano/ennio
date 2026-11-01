@@ -22,6 +22,7 @@ interface LaunchAppCmd {
     | {
         clearState?: boolean;
         clearKeychain?: boolean;
+        stopApp?: boolean;
         arguments?: Record<string, string | boolean | number>;
       };
 }
@@ -57,6 +58,7 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
           : (arg as {
               clearState?: boolean;
               clearKeychain?: boolean;
+              stopApp?: boolean;
               arguments?: Record<string, string | boolean | number>;
             });
       // Maestro clearKeychain: wipe the SIM-WIDE keychain before launch.
@@ -106,9 +108,15 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         } else {
           await ctx.platform.clearStateAndRelaunch(ctx, launchArgs);
         }
-      } else if (!ctx.client.isConnected()) {
+      } else if (
+        !ctx.client.isConnected() ||
+        (process.env.ENNIO_REUSE_APP === '0' && opts.stopApp !== false)
+      ) {
         // Socket dropped — app was killed (stopApp/killApp) or crashed.
-        // Re-launch so the agent reattaches.
+        // Re-launch so the agent reattaches. With --disable-reuse-app, a
+        // running app is relaunched too: Maestro's launchApp stops the app
+        // first unless `stopApp: false`, so a flow starts from a cold app
+        // rather than wherever the previous flow left it.
         await ctx.platform.relaunchAndReconnect(ctx, launchArgs);
       }
     },

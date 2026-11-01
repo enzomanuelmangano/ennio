@@ -80,8 +80,8 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('                        Default actuation is real HID (full gesture path).');
     console.error('  --disable-animations  Suppress app animations (transitions snap to');
     console.error('                        final frame) — faster, but alters animated UI');
-    console.error('  --disable-reuse-app   Force a full relaunch on clearState. App reuse');
-    console.error('                        (soft-reset: data wipe + JS reload) is ON by default.');
+    console.error('  --disable-reuse-app   Relaunch the app on every launchApp, as Maestro does');
+    console.error('                        (clearState included). App reuse is ON by default.');
     console.error('  --disable-touches     Turn OFF the default touch visualization (every');
     console.error('                        tap/swipe is drawn on screen; restored on exit).');
     console.error('                        Use for pixel-exact screenshot comparisons.');

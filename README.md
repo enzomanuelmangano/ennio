@@ -164,19 +164,19 @@ ennio mcp                         # serve ennio over MCP (stdio) for an AI agent
 
 ### Flags
 
-| Flag                   | Default        | What it does                                                                                                                                           |
-| ---------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--verbose`, `-v`      | on             | Per-step inline output + timing.                                                                                                                       |
-| `--quiet`, `-q`        | off            | Suppress per-step output.                                                                                                                              |
-| `--reporter=<kind>`    | `pretty`       | `pretty` or `json`.                                                                                                                                    |
-| `--lenient`            | off            | Skip unknown commands with a warning instead of failing.                                                                                               |
-| `--android` / `--ios`  | iOS            | Backend. `--android` drives an emulator/device over adb.                                                                                               |
-| `--disable-reuse-app`  | reuse **on**   | Force a full relaunch on `clearState`. By default ennio reuses the running app (soft-reset: data wipe + JS reload) between flows — much faster across  |
-| `--disable-animations` | off            | Suppress app animations (transitions snap to the final frame). Faster, but alters animated UI.                                                         |
-| `--in-process-tap`     | off (real HID) | **iOS only.** Actuate taps via in-process activation (with a per-gesture real-HID fallback) instead of real HID touches. Faster on some apps, but skip |
-| `--safe-mode`          | off            | Disable all in-app hooks (swizzles/observers). Slower settle, but survives injection conflicts.                                                        |
-| `--disable-touches`    | touches shown  | Touch visualization is **on by default**: every tap/swipe/drag ennio performs is drawn on the device (iOS: in-app ripple overlay; Android: the OS show |
-| `--record`             | off            | Record the whole run to an `.mp4` (`simctl recordVideo`, iOS only). Saved into `--output` or the cwd; the path is printed at the end.                  |
+| Flag                   | Default        | What it does                                                                                                                                               |
+| ---------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v`      | on             | Per-step inline output + timing.                                                                                                                           |
+| `--quiet`, `-q`        | off            | Suppress per-step output.                                                                                                                                  |
+| `--reporter=<kind>`    | `pretty`       | `pretty` or `json`.                                                                                                                                        |
+| `--lenient`            | off            | Skip unknown commands with a warning instead of failing.                                                                                                   |
+| `--android` / `--ios`  | iOS            | Backend. `--android` drives an emulator/device over adb.                                                                                                   |
+| `--disable-reuse-app`  | reuse **on**   | Relaunch the app on every `launchApp` (`clearState` included), as Maestro does. By default ennio reuses the running app between flows — much faster across |
+| `--disable-animations` | off            | Suppress app animations (transitions snap to the final frame). Faster, but alters animated UI.                                                             |
+| `--in-process-tap`     | off (real HID) | **iOS only.** Actuate taps via in-process activation (with a per-gesture real-HID fallback) instead of real HID touches. Faster on some apps, but skip     |
+| `--safe-mode`          | off            | Disable all in-app hooks (swizzles/observers). Slower settle, but survives injection conflicts.                                                            |
+| `--disable-touches`    | touches shown  | Touch visualization is **on by default**: every tap/swipe/drag ennio performs is drawn on the device (iOS: in-app ripple overlay; Android: the OS show     |
+| `--record`             | off            | Record the whole run to an `.mp4` (`simctl recordVideo`, iOS only). Saved into `--output` or the cwd; the path is printed at the end.                      |
 
 ### `ennio improvise`
 

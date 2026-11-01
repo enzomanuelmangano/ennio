@@ -32,8 +32,9 @@ export type Flags = {
   /** --disable-animations: suppress app animations (ENNIO_NO_ANIMATIONS) for
    *  speed. (Deprecated alias: --no-animations.) */
   noAnimations?: boolean;
-  /** --disable-reuse-app: force a full relaunch on clearState instead of the
-   *  default soft-reset (data wipe + JS reload). Reuse is ON by default. */
+  /** --disable-reuse-app: relaunch the app on every launchApp (clearState
+   *  included), as Maestro does, instead of reusing the running process.
+   *  Reuse is ON by default. */
   disableReuseApp?: boolean;
   /** --android: target an Android emulator/device via adb. Default: iOS. */
   android?: boolean;

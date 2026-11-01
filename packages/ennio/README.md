@@ -124,7 +124,7 @@ Native's responder system, and RNGH all see a real touch.
 | `--lenient`            | off      | Skip unknown YAML commands with a warning instead of failing                                                               |
 | `--in-process-tap`     | off      | Actuate taps via in-process activation (dylib) with a per-gesture real-HID fallback. Default is real HID for every gesture |
 | `--disable-animations` | off      | Suppress app animations (1000x time-compression — transitions snap to their final frame). Faster, but alters animated UI   |
-| `--disable-reuse-app`  | reuse on | Force a full relaunch on `clearState` instead of the default soft-reset (data wipe + JS reload)                            |
+| `--disable-reuse-app`  | reuse on | Relaunch the app on every `launchApp` (`clearState` included), as Maestro does                                             |
 
 ### Flags — `ennio improvise`
 
