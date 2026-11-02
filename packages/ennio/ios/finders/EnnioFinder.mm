@@ -840,6 +840,12 @@ static BOOL synthPasswordSavingRect(UIViewController *vc, NSString *text, EnnioR
         if ([save containsObject:t]) { which = 2; break; }
     }
     if (!which) return NO;
+    // Only a prompt that is fully up. While the controller is being
+    // presented (or dismissed) the card is not drawn yet but the keyboard
+    // still is: a synthesized tap there lands on a key — seen as stray "@"
+    // characters typed into the focused field. Report it not visible; the
+    // flow's wait polls again a moment later.
+    if (!vc.presentingViewController || vc.isBeingPresented || vc.isBeingDismissed) return NO;
     UIView *root = vc.viewIfLoaded;
     if (!root || !root.window) return NO;
     UIView *card = nil;
