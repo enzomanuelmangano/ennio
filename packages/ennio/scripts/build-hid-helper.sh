@@ -15,10 +15,14 @@ mkdir -p "$OUT_DIR"
 DEV="$(xcode-select -p)"
 CS_DIR="/Library/Developer/PrivateFrameworks"
 SK_DIR="$DEV/Library/PrivateFrameworks"
+# Xcode 27 moved SimulatorKit to Contents/SharedFrameworks.
+[ -d "$SK_DIR/SimulatorKit.framework" ] || SK_DIR="$(dirname "$DEV")/SharedFrameworks"
 
 echo "Compiling enniohid → $OUT_DIR/enniohid"
-clang -arch arm64 -c "$SRC/swiftcall.c" -o "$OUT_DIR/swiftcall.o"
-xcrun swiftc -O \
+# Deployment target pinned (see build-ax-helper.sh): the helper must run on
+# hosts older than the build machine.
+clang -arch arm64 -mmacosx-version-min=13.0 -c "$SRC/swiftcall.c" -o "$OUT_DIR/swiftcall.o"
+xcrun swiftc -O -target arm64-apple-macos13.0 \
   "$SRC/enniohid.swift" "$OUT_DIR/swiftcall.o" \
   -import-objc-header "$SRC/indigo_touch.h" \
   -F "$CS_DIR" -F "$SK_DIR" \
