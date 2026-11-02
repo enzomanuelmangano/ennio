@@ -33,11 +33,21 @@ function developerDir(): string {
   return cachedDeveloperDir || '/Applications/Xcode.app/Contents/Developer';
 }
 
+/** Xcode 27 moved SimulatorKit out of Developer/Library/PrivateFrameworks
+ *  into Contents/SharedFrameworks; without it dyld kills the helper at
+ *  load. Only that Xcode's directory, and only when SimulatorKit is there:
+ *  SharedFrameworks also holds frameworks named like system ones, which
+ *  must not shadow them on older Xcodes. */
+function sharedSimulatorKitDir(dev: string): string[] {
+  const dir = `${dirname(dev)}/SharedFrameworks`;
+  return existsSync(`${dir}/SimulatorKit.framework`) ? [dir] : [];
+}
+
 /** Locate the prebuilt `enniohid` helper. Dev build first, then pkg.
  *  Package candidates are SHA-256-verified against the adjacent
  *  manifest.json (same scheme as the dylib); env override and dev
  *  builds skip the check. */
-function findHelper(): string {
+export function findHelper(): string {
   const candidates = [
     process.env.ENNIO_HID_HELPER,
     '/tmp/ennio-build/enniohid',
@@ -96,6 +106,7 @@ class HelperProcess {
           // for completeness.
           DYLD_FRAMEWORK_PATH: [
             `${dev}/Library/PrivateFrameworks`,
+            ...sharedSimulatorKitDir(dev),
             '/Library/Developer/PrivateFrameworks',
             process.env.DYLD_FRAMEWORK_PATH,
           ]
