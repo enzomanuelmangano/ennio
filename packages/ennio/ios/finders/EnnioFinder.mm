@@ -161,14 +161,28 @@ static BOOL strContainsCI(NSString *haystack, NSString *needle) {
 // main-thread finder), read by the matchers below.
 static BOOL g_textSelectorIsRegex = NO;
 
-static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
-    if (!haystack.length || !pattern.length) return NO;
-    NSError *err = nil;
+// Compiled selector regexes, keyed by pattern. A text find tests the same
+// pattern against every label in the tree — compiling it per comparison
+// made each find_by_text cost tens of ms on a large screen. An invalid
+// pattern caches NSNull (no match, as before). Main thread only.
+static NSRegularExpression *_Nullable cachedSelectorRegex(NSString *pattern) {
+    static NSMutableDictionary<NSString *, id> *cache;
+    if (!cache) cache = [NSMutableDictionary new];
+    id hit = cache[pattern];
+    if (hit) return hit == NSNull.null ? nil : hit;
+    if (cache.count > 256) [cache removeAllObjects];
     NSRegularExpression *re = [NSRegularExpression
         regularExpressionWithPattern:pattern
                              options:NSRegularExpressionCaseInsensitive
-                               error:&err];
-    if (err || !re) return NO;
+                               error:nil];
+    cache[pattern] = re ?: (id)NSNull.null;
+    return re;
+}
+
+static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
+    if (!haystack.length || !pattern.length) return NO;
+    NSRegularExpression *re = cachedSelectorRegex(pattern);
+    if (!re) return NO;
     NSRange r = [re rangeOfFirstMatchInString:haystack options:0 range:NSMakeRange(0, haystack.length)];
     return r.location != NSNotFound;
 }
@@ -247,6 +261,11 @@ static BOOL viewMatchesText(UIView *v, NSString *text) {
 // candidate — interactive views beat plain text labels.
 static void collectByText(UIView *root, NSString *text, NSMutableArray<UIView *> *out) {
     if (!root) return;
+    // Nothing under a hidden or fully transparent view can be on screen
+    // (viewIsLikelyOnScreen rejects every descendant), so don't walk it:
+    // apps keep whole screens mounted and hidden (inactive tabs, stacked
+    // routes), and visiting them dominated the cost of every text find.
+    if (root.hidden || root.alpha < 0.01) return;
     if (viewMatchesText(root, text)) [out addObject:root];
     for (UIView *sub in root.subviews) collectByText(sub, text, out);
 }
