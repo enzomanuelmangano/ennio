@@ -82,16 +82,12 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         }
       }
       if (opts.clearState) {
-        // App reuse (default ON; --disable-reuse-app sets ENNIO_REUSE_APP=0):
-        // when the app is ALREADY running (the runner reconnected to the prior
-        // flow's process), soft-reset in place instead of paying the ~6s
-        // relaunch. Routed through ctx.platform.softReset so each backend
-        // resets the right way — iOS wipes + JS-reloads in place; Android
-        // relaunches (no in-process reload on a release bundle). Launch
-        // arguments only force a relaunch when they DIFFER from the ones the
-        // running process was started with: identical args are already live
-        // in its NSUserDefaults arguments domain (process-scoped, survives
-        // the data wipe + JS reload).
+        // A running app (the runner reconnected to the prior flow's
+        // process) is reset through ctx.platform.softReset: on both iOS and
+        // Android that is a sandbox wipe + relaunch — no in-process JS reload
+        // (it heap-corrupts bridgeless apps). The flow's launch arguments go
+        // with the relaunch. --disable-reuse-app (ENNIO_REUSE_APP=0) and
+        // clearKeychain take the full clearStateAndRelaunch path instead.
         const canReuse =
           process.env.ENNIO_REUSE_APP !== '0' &&
           ctx.client.isConnected() &&
@@ -102,7 +98,7 @@ export function registerLifecycleHandlers(registry: CommandRegistry): void {
         // clearStateAndRelaunch wait for the post-launch React commit,
         // relaunchAndReconnect calls waitForFirstPaint).
         if (canReuse) {
-          await ctx.platform.softReset(ctx);
+          await ctx.platform.softReset(ctx, launchArgs);
         } else {
           await ctx.platform.clearStateAndRelaunch(ctx, launchArgs);
         }

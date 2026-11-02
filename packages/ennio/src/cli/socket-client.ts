@@ -146,11 +146,15 @@ export class EnnioSocketClient {
    */
   async connectWithRetry(maxWaitMs = 10_000): Promise<boolean> {
     const deadline = Date.now() + maxWaitMs;
+    // The dylib binds its socket at +load — very early in process launch — so
+    // poll tightly to catch it the instant it's up (shaves the relaunch
+    // connect tail), then back off so a slow/dead boot doesn't spin hot.
+    const start = Date.now();
     while (Date.now() < deadline) {
       if (await this.connect()) return true;
       // Dead process → the listener is never coming up; stop waiting.
       if (this.appDead()) return false;
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, Date.now() - start < 1500 ? 40 : 150));
     }
     return false;
   }

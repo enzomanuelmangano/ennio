@@ -123,10 +123,10 @@ export class IosPlatform implements Platform {
     return iosClearStateAndRelaunch(ctx, launchArgs);
   }
 
-  // Soft-reset in place: sandbox wipe + JS reload, no relaunch. Falls back to
-  // a full relaunch inside softResetAndReload when the reload symbol is absent.
-  softReset(ctx: RunContext): Promise<void> {
-    return softResetAndReload(ctx);
+  // Reset of a running app: sandbox wipe + relaunch (no in-process JS reload
+  // — see softResetAndReload), carrying the flow's launch arguments.
+  softReset(ctx: RunContext, launchArgs: string[] = []): Promise<void> {
+    return softResetAndReload(ctx, launchArgs);
   }
 
   relaunchAndReconnect(ctx: RunContext, launchArgs: string[] = []): Promise<void> {
