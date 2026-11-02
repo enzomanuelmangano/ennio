@@ -172,7 +172,8 @@ function warnBlindOnce(reason: string): void {
   process.stderr.write(
     `[ennio] cross-process AX unavailable (${reason}) — system permission ` +
       `dialogs (Photos, notifications, …) cannot be detected or dismissed. ` +
-      `Open a Simulator.app window for this device (open -a Simulator) and ` +
+      `Show this device in a Simulator.app window (open -a Simulator; Device ` +
+      `Hub on Xcode 27) and ` +
       `ensure the terminal has Accessibility permission, or pre-grant the ` +
       `app's permissions so no dialog appears.\n`,
   );
