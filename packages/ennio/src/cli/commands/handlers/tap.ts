@@ -50,8 +50,9 @@ async function probeTextElsewhere(ctx: RunContext, sel: MaestroSelector): Promis
   const ax = await ctx.client.call('find_ax_by_text', args).catch(() => undefined);
   if (ax && ax.ok && ax.data) return ax.data;
   // An alert counts only when one of its buttons is the target — matched as
-  // alert_tap matches: the exact title, or (regex mode) the whole title,
-  // case-insensitively. Any alert being up is not a hit.
+  // alert_tap matches: the exact title, the title regardless of case, or
+  // (regex mode) the whole title case-insensitively. Any alert being up is
+  // not a hit.
   const r = await ctx.client.call('alert_buttons').catch(() => undefined);
   const buttons = ((r?.ok && (r.data as { buttons?: string[] } | undefined)?.buttons) ||
     []) as string[];
@@ -64,7 +65,10 @@ async function probeTextElsewhere(ctx: RunContext, sel: MaestroSelector): Promis
       re = null;
     }
   }
-  return buttons.some((b) => b === sel.text || (re !== null && re.test(b)))
+  const lower = sel.text.toLowerCase();
+  return buttons.some(
+    (b) => b === sel.text || b.toLowerCase() === lower || (re !== null && re.test(b)),
+  )
     ? { alert: true }
     : null;
 }
