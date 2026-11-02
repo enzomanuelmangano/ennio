@@ -134,9 +134,11 @@ static void walkAndHash(UIView *v, uint64_t *h) {
 }
 
 // Content and structure of every visible window, without geometry or
-// alpha: the class of each view (hidden subtrees included, so a fade in or
-// out changes nothing), and for shown views their labels, ids, values,
-// accessibility traits (disabled, selected) and control state. An endless
+// alpha: the class of each view (hidden subtrees included), and for shown
+// views whatever they carry: labels, ids, values, non-zero accessibility
+// traits (disabled, selected), control state, a running native spinner. A
+// bare decorative view contributes its class alone, shown or not, so its
+// fade changes nothing. An endless
 // decorative animation leaves it alone; a mounted spinner, a disabled
 // button, a toggled star or a sheet in another window changes it. Walked on
 // demand, not per frame.
@@ -146,14 +148,22 @@ static void walkStructure(UIView *v, uint64_t *h, bool shown) {
     hashFeed(h, cls, std::strlen(cls));
     if (shown && (v.hidden || v.alpha < 0.01)) shown = false;
     if (shown) {
-        for (NSString *str in @[ v.accessibilityIdentifier ?: @"", v.accessibilityLabel ?: @"",
-                                 v.accessibilityValue ?: @"" ]) {
-            if (!str.length) continue;
-            const char *s = str.UTF8String;
-            hashFeed(h, s, std::strlen(s));
-        }
+        // Only what a view actually carries: a bare decorative view adds
+        // nothing whether shown or not, so its fade can't flip the hash.
+        NSString *aid = v.accessibilityIdentifier;
+        if (aid.length) hashFeed(h, aid.UTF8String, std::strlen(aid.UTF8String));
+        NSString *lab = v.accessibilityLabel;
+        if (lab.length) hashFeed(h, lab.UTF8String, std::strlen(lab.UTF8String));
+        NSString *val = v.accessibilityValue;
+        if (val.length) hashFeed(h, val.UTF8String, std::strlen(val.UTF8String));
         uint64_t traits = v.accessibilityTraits;
-        hashFeed(h, &traits, sizeof(traits));
+        if (traits) hashFeed(h, &traits, sizeof(traits));
+        // A native spinner already mounted and started by a handler.
+        if ([v isKindOfClass:UIActivityIndicatorView.class] &&
+            ((UIActivityIndicatorView *)v).isAnimating) {
+            const char *spin = "SPIN";
+            hashFeed(h, spin, 4);
+        }
         if ([v isKindOfClass:UIControl.class]) {
             UIControl *ctrl = (UIControl *)v;
             uint8_t state = (uint8_t)((ctrl.isSelected ? 1 : 0) | (ctrl.isEnabled ? 2 : 0));
