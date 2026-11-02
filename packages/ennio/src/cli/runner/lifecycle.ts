@@ -7,18 +7,89 @@
 // pass completes before the next command tries to find anything.
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { diagnoseSocketFailure, throttledAliveProbe } from '../crash-detector';
+import { diagnoseSocketFailure, isAppRunning, throttledAliveProbe } from '../crash-detector';
 import { diag } from '../diag';
 import { dismissSystemSheet } from '../ennio-ax';
 import { warmActuator } from '../hid';
-import { findDylib, getAppContainer, setSimLaunchEnv, terminateApp } from '../sim';
+import { findDylib, setSimLaunchEnv, terminateApp } from '../sim';
 import { EnnioSocketClient, ennioSocketPath } from '../socket-client';
 
 import { RunContext, sleep } from './context';
+
+/**
+ * Set the simulator's sticky launchctl env ONCE per device.
+ *
+ * ENNIO_SOCKET_PATH / ENNIO_NO_ANIMATIONS / ENNIO_SHOW_TOUCHES are sim-wide
+ * launchctl vars that survive every relaunch, and their values are constant
+ * for a CLI process — yet each `simctl spawn launchctl setenv` costs
+ * ~300-400ms. Re-setting all three on every clearState relaunch was ~1s of
+ * pure redundant simctl overhead per flow (the bulk of the relaunch's
+ * "preLaunch" phase). Setting them once per udid is the biggest agnostic
+ * win on the relaunch path — no RN, no internals, identical behavior.
+ */
+const simEnvReady = new Set<string>();
+// Data-container path is stable for an install — cache it so the fast wipe
+// path skips a ~300-400ms `simctl get_app_container` per relaunch. Keyed by
+// udid:bundleId; invalidated on full reinstall (which changes the install dir).
+const dataContainerCache = new Map<string, string>();
+function ensureSimLaunchEnv(udid: string): void {
+  if (simEnvReady.has(udid)) return;
+  execFileSync(
+    'xcrun',
+    ['simctl', 'spawn', udid, 'launchctl', 'setenv', 'ENNIO_SOCKET_PATH', ennioSocketPath(udid)],
+    { stdio: 'pipe' },
+  );
+  // Sticky env; set OR clear so a prior run can't leak it. Source of truth:
+  // the CLI's process env (constant for this process).
+  setSimLaunchEnv(udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
+  setSimLaunchEnv(udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
+  simEnvReady.add(udid);
+}
+
+/**
+ * Launch with the dylib and connect to the agent. The sticky sim env is set
+ * once per device (ensureSimLaunchEnv); a simulator rebooted or erased under
+ * a long-lived process (ennio mcp) loses it, the dylib then binds the
+ * default socket path and the connect times out. So a failed connect with a
+ * CACHED env, while the app is still running, re-arms the env and relaunches
+ * once before giving up.
+ */
+async function launchAndConnect(
+  ctx: RunContext,
+  launchArgs: string[],
+  what: string,
+): Promise<EnnioSocketClient> {
+  for (let attempt = 0; ; attempt++) {
+    const envWasCached = simEnvReady.has(ctx.udid);
+    ensureSimLaunchEnv(ctx.udid);
+    const launchedAt = Date.now();
+    execFileSync(
+      'xcrun',
+      ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
+      {
+        env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath ?? undefined },
+        stdio: 'pipe',
+      },
+    );
+    const reopen = new EnnioSocketClient(ctx.udid);
+    reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
+    if (await reopen.connectWithRetry(15_000)) return reopen;
+    // Retry only the lost-env shape: the app is ALIVE (it bound the default
+    // socket path instead of ours). A crashed app is never relaunched here
+    // — that would hide an intermittent startup crash behind a pass.
+    if (attempt === 0 && envWasCached && isAppRunning(ctx.udid, ctx.bundleId)) {
+      diag('lifecycle', 'relaunch:env-rearm', { bundleId: ctx.bundleId, what });
+      simEnvReady.delete(ctx.udid);
+      continue;
+    }
+    const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
+    throw new Error(`socket reconnect failed after ${what}` + (diagnosis ? `\n${diagnosis}` : ''));
+  }
+}
 
 /**
  * System permission sheets (Photo Library, notifications, tracking,
@@ -88,44 +159,30 @@ export async function waitForFirstPaint(client: EnnioSocketClient): Promise<void
 }
 
 /**
- * Suite-level fast reset (--reuse-app): wipe the app's data sandbox and
- * reload the JS bundle IN PLACE — fresh data + fresh React tree — without
- * a process relaunch. The native dylib + its Unix socket survive a JS
- * reload, so the same client keeps working. This is what makes a suite
- * pay the ~6s app boot ONCE instead of per flow: on a Hermes build the
- * reload re-runs precompiled bytecode against the already-loaded native
- * stack in ~1-2s.
+ * clearState reset — a full process RELAUNCH, renderer-agnostic.
  *
- * Falls back to a full clearState relaunch when the app lacks RN's reload
- * symbol (older / fully bridgeless RN), so behaviour is never worse than
- * the relaunch path — only faster when reload is available.
+ * Previously this did an in-place JS reload (clear_state + reload_rn via
+ * RCTTriggerReloadCommandListeners) to skip the process boot. That reload
+ * tears down + rebuilds the React runtime, which heap-corrupts New
+ * Architecture (bridgeless) apps at startup — an intermittent crash that
+ * only struck the reuse path. The reload was also the one RN-specific
+ * concession in an otherwise renderer-agnostic tool. There is no
+ * renderer-agnostic, crash-safe way to reset in-process JS state (that
+ * inherently requires talking to the runtime), so clearState now always
+ * relaunches — same reset model as Maestro, safe on Paper/Fabric/
+ * bridgeless/SwiftUI/native alike.
+ *
+ * Reuse still applies where there is NO reset: a `launchApp` WITHOUT
+ * clearState keeps the running process (no relaunch). Only clearState pays
+ * the relaunch.
  */
-export async function softResetAndReload(ctx: RunContext): Promise<void> {
-  const t0 = Date.now();
-  diag('lifecycle', 'softReset:start', { platform: 'ios', bundleId: ctx.bundleId });
-  const done = (extra: Record<string, unknown> = {}) =>
-    diag('lifecycle', 'softReset:done', { durMs: Date.now() - t0, ...extra });
-  const pre = await ctx.client.call('react_commit_ts').catch(() => undefined);
-  const since = Number((pre?.data as { ts?: number } | undefined)?.ts ?? 0);
-  // Wipe the sandbox first (in-process — it's the app's own container),
-  // then reload so the new JS boots against empty storage.
-  await ctx.client.call('clear_state').catch(() => undefined);
-  const r = await ctx.client.call('reload_rn').catch(() => undefined);
-  const ok = !!(r && r.ok && (r.data as { ok?: boolean } | undefined)?.ok);
-  if (!ok) {
-    // No reload symbol — fall back to the real relaunch.
-    done({ fellBackToRelaunch: true });
-    await clearStateAndRelaunch(ctx);
-    return;
-  }
-  // The reload tears down and rebuilds the React root; wait for the
-  // bundle's first commit after our pre-reload timestamp, then a short
-  // stability check for the initial layout.
-  await ctx.client
-    .call('wait_react_commit', { sinceMs: since, maxMs: 8000 })
-    .catch(() => undefined);
-  await ctx.client.call('wait_commit', { maxMs: 1500, stableMs: 150 }).catch(() => undefined);
-  done({ reloaded: true });
+export async function softResetAndReload(
+  ctx: RunContext,
+  launchArgs: string[] = [],
+): Promise<void> {
+  // A relaunch starts a new process: the flow's launch arguments must go
+  // with it (the old in-place reload kept them live in the process).
+  await clearStateAndRelaunch(ctx, launchArgs);
 }
 
 /// Re-launch the app with DYLD inject and re-open the control socket.
@@ -138,11 +195,12 @@ export async function relaunchAndReconnect(
   const t0 = Date.now();
   diag('lifecycle', 'relaunch:start', { platform: 'ios', bundleId: ctx.bundleId });
   ctx.client.close();
-  // Make sure the previous process is fully gone before we launch
-  // again — simctl launch can otherwise attach to the still-shutting
-  // -down PID and lose the dylib.
+  // Terminate the previous process; the launch below passes
+  // --terminate-running-process, which atomically kills a still-shutting
+  // -down PID before spawning (so the new process keeps the dylib). No
+  // blind settle needed — clearStateAndRelaunch uses the same
+  // terminate→launch sequence with no sleep and is crash-safe.
   terminateApp(ctx.udid, ctx.bundleId);
-  await sleep(300);
   if (!ctx.dylibPath) {
     const auto = findDylib();
     if (!auto) {
@@ -152,43 +210,10 @@ export async function relaunchAndReconnect(
     }
     ctx.dylibPath = auto;
   }
-  // Set ENNIO_SOCKET_PATH on the simulator launchctl env (SIMCTL_CHILD_*
-  // only forwards DYLD_* and a few known prefixes; arbitrary names are
-  // dropped). Per-UDID path, sim-wide scope, not a secret.
-  execFileSync(
-    'xcrun',
-    [
-      'simctl',
-      'spawn',
-      ctx.udid,
-      'launchctl',
-      'setenv',
-      'ENNIO_SOCKET_PATH',
-      ennioSocketPath(ctx.udid),
-    ],
-    { stdio: 'pipe' },
-  );
-  // Propagate --no-animations (sticky launchctl env; set OR clear so a
-  // prior run can't leak it). Source of truth: the CLI's process env.
-  setSimLaunchEnv(ctx.udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
-  setSimLaunchEnv(ctx.udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
-  const launchedAt = Date.now();
-  execFileSync(
-    'xcrun',
-    ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
-    {
-      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
-      stdio: 'pipe',
-    },
-  );
-  const reopen = new EnnioSocketClient(ctx.udid);
-  reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
-  if (!(await reopen.connectWithRetry(15_000))) {
-    const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
-    throw new Error(
-      'socket reconnect failed after launchApp' + (diagnosis ? `\n${diagnosis}` : ''),
-    );
-  }
+  // The dead process's socket file would answer the reconnect poll until the
+  // new app rebinds it (clearStateAndRelaunch clears it the same way).
+  rmSync(ennioSocketPath(ctx.udid), { force: true });
+  const reopen = await launchAndConnect(ctx, launchArgs, 'launchApp');
   ctx.client = reopen;
   recordLaunchArgs(ctx.udid, ctx.bundleId, launchArgs);
   const deadline = Date.now() + 5000;
@@ -230,49 +255,61 @@ export async function clearStateAndRelaunch(
     /* ok */
   }
 
-  // Grab the installed .app bundle path BEFORE any teardown.
-  let appBundle: string | null = null;
-  try {
-    appBundle = execFileSync(
-      'xcrun',
-      ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'app'],
-      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-    ).trim();
-  } catch {
-    /* app not installed */
-  }
+  const csKey = `${ctx.udid}:${ctx.bundleId}`;
 
   // Terminate via simctl (app may not be running — terminateApp swallows that).
   terminateApp(ctx.udid, ctx.bundleId);
 
-  if (fullReinstall && appBundle) {
-    const tmp = mkdtempSync(join(tmpdir(), 'ennio-cs-'));
-    const copy = join(tmp, 'App.app');
-    cpSync(appBundle, copy, { recursive: true });
-
-    // Uninstall via simctl for an OS-level reset (Keychain, UserDefaults,
-    // caches, group containers).
-    execFileSync('xcrun', ['simctl', 'uninstall', ctx.udid, ctx.bundleId], { stdio: 'pipe' });
-    await sleep(1000);
-
-    // Reinstall via simctl.
-    execFileSync('xcrun', ['simctl', 'install', ctx.udid, copy], { stdio: 'pipe' });
-    await sleep(1000);
-  } else if (appBundle) {
-    // Fast path: wipe the data sandbox in place. The app is terminated,
-    // so the container is quiescent; iOS recreates Library/Caches,
-    // Library/Preferences, etc. on the next launch. Wipe the CONTENTS of
-    // Documents / Library / tmp rather than the dirs themselves so the
-    // container's own permissions/structure stay intact.
-    let dataContainer: string | null = null;
+  if (fullReinstall) {
+    // Full OS-level reset (Keychain, group containers, …). Needs the .app
+    // bundle to copy + reinstall; the install dir changes, so drop the
+    // cached data-container path.
+    dataContainerCache.delete(csKey);
+    let appBundle: string | null = null;
     try {
-      dataContainer = execFileSync(
+      appBundle = execFileSync(
         'xcrun',
-        ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'data'],
+        ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'app'],
         { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
       ).trim();
     } catch {
-      /* no data container yet — nothing to wipe */
+      /* app not installed */
+    }
+    if (appBundle) {
+      const tmp = mkdtempSync(join(tmpdir(), 'ennio-cs-'));
+      const copy = join(tmp, 'App.app');
+      cpSync(appBundle, copy, { recursive: true });
+      execFileSync('xcrun', ['simctl', 'uninstall', ctx.udid, ctx.bundleId], { stdio: 'pipe' });
+      await sleep(1000);
+      execFileSync('xcrun', ['simctl', 'install', ctx.udid, copy], { stdio: 'pipe' });
+      await sleep(1000);
+    }
+  } else {
+    // Fast path: wipe the data sandbox in place. The app is terminated, so
+    // the container is quiescent; iOS recreates Library/Caches etc. on the
+    // next launch. Wipe the CONTENTS of Documents / Library / tmp (not the
+    // dirs) so the container's own permissions/structure stay intact. The
+    // container path is stable for an install → cache it (skips a
+    // get_app_container simctl call per relaunch); no separate .app lookup
+    // needed on this path.
+    let dataContainer = dataContainerCache.get(csKey) ?? null;
+    // An uninstall/reinstall moves the container: a stale cached path would
+    // throw in the wipe below (swallowed) and silently keep the old state.
+    if (dataContainer && !existsSync(dataContainer)) {
+      dataContainerCache.delete(csKey);
+      dataContainer = null;
+    }
+    if (!dataContainer) {
+      try {
+        dataContainer = execFileSync(
+          'xcrun',
+          ['simctl', 'get_app_container', ctx.udid, ctx.bundleId, 'data'],
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+        ).trim();
+        if (dataContainer) dataContainerCache.set(csKey, dataContainer);
+      } catch {
+        /* no data container yet — nothing to wipe */
+      }
     }
     if (dataContainer) {
       for (const sub of ['Documents', 'Library', 'tmp']) {
@@ -367,46 +404,9 @@ export async function clearStateAndRelaunch(
     }
     ctx.dylibPath = auto;
   }
-  // Set ENNIO_SOCKET_PATH on the simulator launchctl env (SIMCTL_CHILD_*
-  // only forwards DYLD_* and a few known prefixes; arbitrary names are
-  // dropped). Per-UDID path, sim-wide scope, not a secret.
-  execFileSync(
-    'xcrun',
-    [
-      'simctl',
-      'spawn',
-      ctx.udid,
-      'launchctl',
-      'setenv',
-      'ENNIO_SOCKET_PATH',
-      ennioSocketPath(ctx.udid),
-    ],
-    { stdio: 'pipe' },
-  );
-  // Propagate --no-animations (sticky launchctl env; set OR clear so a
-  // prior run can't leak it). Source of truth: the CLI's process env.
-  setSimLaunchEnv(ctx.udid, 'ENNIO_NO_ANIMATIONS', process.env.ENNIO_NO_ANIMATIONS === '1');
-  setSimLaunchEnv(ctx.udid, 'ENNIO_SHOW_TOUCHES', process.env.ENNIO_SHOW_TOUCHES === '1');
-  const launchedAt = Date.now();
-  execFileSync(
-    'xcrun',
-    ['simctl', 'launch', '--terminate-running-process', ctx.udid, ctx.bundleId, ...launchArgs],
-    {
-      env: { ...process.env, SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: ctx.dylibPath },
-      stdio: 'pipe',
-    },
-  );
-  const reopen = new EnnioSocketClient(ctx.udid);
-  reopen.aliveProbe = throttledAliveProbe(ctx.udid, ctx.bundleId);
-  if (!(await reopen.connectWithRetry(15_000))) {
-    const diagnosis = diagnoseSocketFailure(ctx.udid, ctx.bundleId, launchedAt);
-    throw new Error(
-      'socket reconnect failed after clearState relaunch' + (diagnosis ? `\n${diagnosis}` : ''),
-    );
-  }
+  const reopen = await launchAndConnect(ctx, launchArgs, 'clearState relaunch');
   ctx.client = reopen;
   recordLaunchArgs(ctx.udid, ctx.bundleId, launchArgs);
-  getAppContainer(ctx.udid, ctx.bundleId);
   // Pre-spawn the HID helper in the background — it arms while the app
   // finishes booting, so the first real gesture doesn't pay the ~700ms
   // spawn (observed as a slow first nav tap).
