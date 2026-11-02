@@ -16,6 +16,12 @@ import { writeFileSync } from 'node:fs';
 
 const ABSTRACT_SOCKET_NAME = 'ennio';
 
+/** True when an adb call failed because it hit its timeout (execFileSync
+ *  kills the child and reports ETIMEDOUT). */
+export function isAdbTimeout(e: unknown): boolean {
+  return (e as { code?: string } | null)?.code === 'ETIMEDOUT';
+}
+
 /** Generous for one shell command (polls run every 50-200ms; `am start -W`
  *  passes its own 45s), well inside the 90s launch budget. */
 const ADB_DEFAULT_TIMEOUT_MS = 20_000;
@@ -192,11 +198,13 @@ export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string
  *  Used to tell a DEAD injected process (relaunch) from a slow-but-LIVE one
  *  (keep waiting) — the deciding signal for the inject/readiness waits, so
  *  they never tear down a healthy agent nor spin forever on a corpse. */
-export function appPidNow(serial: string, pkg: string): string | null {
+export function appPidNow(serial: string, pkg: string): string | null | undefined {
   try {
     const pid = adb(serial, ['shell', 'pidof', pkg]).trim().split(/\s+/)[0];
     return pid && /^\d+$/.test(pid) ? pid : null;
-  } catch {
+  } catch (e) {
+    // undefined = UNKNOWN (adb timed out): not evidence the process died.
+    if (isAdbTimeout(e)) return undefined;
     return null;
   }
 }
@@ -259,7 +267,10 @@ export function stageAndAttachAgent(
 export function isAppDebuggable(serial: string, pkg: string): boolean {
   try {
     return /\bDEBUGGABLE\b/.test(adb(serial, ['shell', 'dumpsys', 'package', pkg]));
-  } catch {
+  } catch (e) {
+    // A timeout says nothing about the app: rethrow rather than answer "not
+    // debuggable" and switch the whole run to the ptrace path.
+    if (isAdbTimeout(e)) throw e;
     return false;
   }
 }

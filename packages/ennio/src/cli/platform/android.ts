@@ -26,6 +26,7 @@ import type { ConnectTarget } from '../socket-client';
 import {
   abstractSocketBound,
   appPidNow,
+  isAdbTimeout,
   clearAppData,
   enableRoot,
   enableShowTouches,
@@ -198,7 +199,17 @@ export class AndroidPlatform implements Platform {
     const cached = this.injectMode.get(serial);
     if (cached) return cached;
     const forced = process.env.ENNIO_ANDROID_INJECT as 'attach' | 'ptrace' | undefined;
-    const mode = forced ?? (isAppDebuggable(serial, bundleId) ? 'attach' : 'ptrace');
+    // The probe rethrows on an adb timeout (never "not debuggable" by
+    // accident); one stall is retried, and nothing is cached until it answers.
+    const debuggable = (): boolean => {
+      try {
+        return isAppDebuggable(serial, bundleId);
+      } catch (e) {
+        if (!isAdbTimeout(e)) throw e;
+        return isAppDebuggable(serial, bundleId);
+      }
+    };
+    const mode = forced ?? (debuggable() ? 'attach' : 'ptrace');
     if (mode === 'ptrace') {
       if (!enableRoot(serial)) {
         throw new Error(
@@ -404,9 +415,10 @@ export class AndroidPlatform implements Platform {
       try {
         launch();
       } catch (e) {
-        // A launch that throws (adb timed out on a wedged emulator, `am
-        // start` failed) is one failed attempt, retried within the budget —
-        // not the end of the flow.
+        // A launch that TIMED OUT on a wedged emulator is one failed attempt,
+        // retried within the budget. Any other error is permanent (an
+        // unresolvable intent) and fails at once.
+        if (!isAdbTimeout(e)) throw e;
         lastErr = `launch failed: ${e instanceof Error ? e.message : String(e)}`;
         diag('inject', 'launch-fail', { attempt, err: lastErr });
         endAttempt({ outcome: 'launch-fail' });
@@ -465,7 +477,8 @@ export class AndroidPlatform implements Platform {
           bound = true;
           break;
         }
-        if (appPidNow(serial, bundleId) !== pid) {
+        const nowPid = appPidNow(serial, bundleId);
+        if (nowPid !== undefined && nowPid !== pid) {
           outcome = 'pid-died';
           lastErr = `injected process ${pid} died before @ennio bound (crash / pid replaced)`;
           break;
@@ -628,7 +641,8 @@ export class AndroidPlatform implements Platform {
         // No answer: a transient close on a live agent, or a dead process. The
         // pid decides — gone → relaunch now; alive but mute for several probes
         // (~1.2s) → wedged, let the caller relaunch.
-        if (appPidNow(serial, bundleId) !== pid) {
+        const nowPid = appPidNow(serial, bundleId);
+        if (nowPid !== undefined && nowPid !== pid) {
           diag('inject', 'ready-wait:pid-gone', { pid });
           return false;
         }
