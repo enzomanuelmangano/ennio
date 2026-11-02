@@ -138,10 +138,8 @@ static void walkAndHash(UIView *v, uint64_t *h) {
 // views whatever they carry: labels, ids, values, non-zero accessibility
 // traits (disabled, selected), control state, a running native spinner. A
 // bare decorative view contributes its class alone, shown or not, so its
-// fade changes nothing. An endless
-// decorative animation leaves it alone; a mounted spinner, a disabled
-// button, a toggled star or a sheet in another window changes it. Walked on
-// demand, not per frame.
+// fade changes nothing; a mounted spinner, a disabled button, a toggled star
+// or a sheet in another window changes it. Walked on demand, not per frame.
 static void walkStructure(UIView *v, uint64_t *h, bool shown) {
     if (!v) return;
     const char *cls = object_getClassName(v);
