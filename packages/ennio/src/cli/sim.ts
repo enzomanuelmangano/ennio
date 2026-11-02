@@ -322,12 +322,17 @@ export function findDylib(): string | null {
  * ways the source no longer would (a stale prebuilt heap-corrupted the
  * maestro-demo app at Expo module registration). Warn so the dev rebuilds
  * (scripts/build-dylib-local.sh) or regenerates the prebuilt. Silent in a
- * shipped npm install, where ios/ source isn't present.
+ * shipped npm install, which has ios/ but not the CLI source.
  */
 function warnIfPrebuiltStale(dylibPath: string): void {
   if (!dylibPath.includes(`${sep}prebuilt${sep}`)) return; // only the shipped prebuilt
-  const iosDir = resolve(dirname(dylibPath), '..', 'ios');
-  if (!existsSync(iosDir)) return; // not a checkout — nothing to compare
+  const pkgDir = resolve(dirname(dylibPath), '..');
+  // An npm install ships ios/ too (the podspec builds from it), with every
+  // file extracted at install time, so its mtimes say nothing about the
+  // binary. Only a checkout has the CLI source next to it.
+  if (!existsSync(join(pkgDir, 'src', 'cli'))) return;
+  const iosDir = join(pkgDir, 'ios');
+  if (!existsSync(iosDir)) return;
   let dylibMtime: number;
   try {
     dylibMtime = statSync(dylibPath).mtimeMs;
