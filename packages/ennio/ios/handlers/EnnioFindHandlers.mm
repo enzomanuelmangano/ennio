@@ -18,6 +18,24 @@
 #include <stdexcept>
 #include <string>
 
+// Optional `relation: {kind, x, y, w, h}` on a text find — a Maestro relative
+// selector whose anchor the CLI already resolved. Scoped to one find.
+static void ennioApplyRelation(NSDictionary *a) {
+    NSDictionary *rel = [a[@"relation"] isKindOfClass:NSDictionary.class] ? a[@"relation"] : nil;
+    CGRect anchor = rel ? CGRectMake([rel[@"x"] doubleValue], [rel[@"y"] doubleValue],
+                                     [rel[@"w"] doubleValue], [rel[@"h"] doubleValue])
+                        : CGRectZero;
+    [EnnioFinder setTextRelation:rel[@"kind"] anchor:anchor];
+    // A relation compares leaf bounds: neither the anchor (`leaf`) nor the
+    // candidates are promoted to their interactive ancestor.
+    [EnnioFinder setTextFindLeaf:rel != nil || [a[@"leaf"] boolValue]];
+}
+
+static void ennioClearRelation(void) {
+    [EnnioFinder setTextRelation:nil anchor:CGRectZero];
+    [EnnioFinder setTextFindLeaf:NO];
+}
+
 void RegisterEnnioFindHandlers(void) {
     using namespace ennio;
 
@@ -319,7 +337,15 @@ void RegisterEnnioFindHandlers(void) {
         BOOL found = NO;
         NSString *cls = nil;
         EnnioOnMainVoid([&]() {
-            UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
+            UIView *v = nil;
+            ennioApplyRelation(a);
+            @try {
+                v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
+            } @finally {
+                // Scoped to this find on every path: a leaked relation or
+                // leaf flag would silently narrow every later text find.
+                ennioClearRelation();
+            }
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
@@ -555,12 +581,22 @@ void RegisterEnnioFindHandlers(void) {
             // firstObject can be a stale mount whose ancestor is
             // hidden. Only after exhausting the index do we fall back
             // to the legacy UIKit walk + auto-scroll.
+            //
+            // A view under the topmost presented controller (the screen a
+            // modal covers) is not visible either — the tap's finder skips
+            // it, so "visible" here and "not found" there broke
+            // `when: visible` → tapOn pairs (a pushed screen's BackButton
+            // still mounted under a full-screen modal).
+            auto shown = ^BOOL(UIView *c) {
+                return [EnnioFinder isOnScreen:c] && ![EnnioFinder isBehindTopmostPresentation:c];
+            };
             NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
             for (UIView *cand in all) {
-                if ([EnnioFinder isOnScreen:cand]) { visible = YES; return; }
+                if (shown(cand)) { visible = YES; return; }
             }
             UIView *v = all.firstObject ?: [EnnioFinder findViewByTestID:testID];
-            if (v && [EnnioFinder isOnScreen:v]) { visible = YES; return; }
+            if (v && shown(v)) { visible = YES; return; }
+            if (v && [EnnioFinder isBehindTopmostPresentation:v]) return;
             // Auto-scroll: Maestro's assertVisible auto-scrolls within
             // the nearest scroll view to surface the target. Walk
             // ancestors for the first UIScrollView and ask it to
@@ -639,7 +675,13 @@ void RegisterEnnioFindHandlers(void) {
         BOOL found = NO;
         while ([deadline timeIntervalSinceNow] > 0) {
             EnnioOnMainVoid([&]() {
-                UIView *v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
+                UIView *v = nil;
+                ennioApplyRelation(a);
+                @try {
+                    v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
+                } @finally {
+                    ennioClearRelation();
+                }
                 if (v && [EnnioFinder isOnScreen:v]) {
                     rect = [EnnioFinder windowRectFor:v];
                     found = YES;

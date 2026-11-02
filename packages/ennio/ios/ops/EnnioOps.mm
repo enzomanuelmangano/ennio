@@ -177,10 +177,40 @@ static UIScrollView *_Nullable findScrollViewForAxis(UIView *view, BOOL horizont
 }
 
 + (BOOL)tapAlertButton:(NSString *)buttonText {
+    return [self tapAlertButton:buttonText regex:NO];
+}
+
++ (BOOL)tapAlertButton:(NSString *)buttonText regex:(BOOL)regex {
     UIAlertController *a = findAlert();
     if (!a) return NO;
+    // Maestro selector text is a regex ("DELETE|Delete|DELETE|Delete"): with the
+    // CLI's regex flag, match the whole title case-insensitively; an exact
+    // title still wins first.
+    NSRegularExpression *re = nil;
+    if (regex) {
+        re = [NSRegularExpression
+            regularExpressionWithPattern:[NSString stringWithFormat:@"^(?:%@)$", buttonText]
+                                 options:NSRegularExpressionCaseInsensitive
+                                   error:nil];
+    }
+    UIAlertAction *pick = nil;
     for (UIAlertAction *act in a.actions) {
-        if (![act.title isEqualToString:buttonText]) continue;
+        if ([act.title isEqualToString:buttonText]) { pick = act; break; }
+    }
+    // Then the title regardless of case, as the text finder matches
+    // ("LEAVE" for an iOS "Leave" — flows shared with Android spell
+    // buttons in caps).
+    for (UIAlertAction *act in a.actions) {
+        if (pick) break;
+        if (act.title && [act.title caseInsensitiveCompare:buttonText] == NSOrderedSame) pick = act;
+    }
+    for (UIAlertAction *act in a.actions) {
+        if (pick || !re) break;
+        NSString *title = act.title ?: @"";
+        if ([re firstMatchInString:title options:0 range:NSMakeRange(0, title.length)]) pick = act;
+    }
+    for (UIAlertAction *act in a.actions) {
+        if (act != pick) continue;
         // Read the handler block via KVC. UIAlertAction stores it as
         // `handler` (private but stable since iOS 8). KVC is ARC-safe
         // unlike object_getInstanceVariable.

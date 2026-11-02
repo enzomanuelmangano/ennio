@@ -34,6 +34,15 @@ export interface MaestroSelector {
   selected?: boolean;
   below?: MaestroSelector;
   above?: MaestroSelector;
+  /** Internal: a relative selector (below/above/leftOf/rightOf) whose anchor
+   *  has been resolved to a window rect — see runner/relation.ts. */
+  relation?: {
+    kind: 'below' | 'above' | 'leftOf' | 'rightOf';
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
   leftOf?: MaestroSelector;
   rightOf?: MaestroSelector;
   containsChild?: MaestroSelector;
@@ -451,13 +460,14 @@ export function textMatchMode(
  * behavior for the migration window.
  */
 export function textMatchArgs(
-  sel: Pick<MaestroSelector, 'text' | 'regex' | 'literal'>,
+  sel: Pick<MaestroSelector, 'text' | 'regex' | 'literal' | 'relation'>,
   defaultMode: 'sniff' | 'literal' | 'regex' = 'sniff',
-): { text: string; regex: boolean } {
+): { text: string; regex: boolean; relation?: MaestroSelector['relation'] } {
   const text = sel.text ?? '';
-  if (textMatchMode(sel, defaultMode) !== 'regex') return { text, regex: false };
+  const relation = sel.relation ? { relation: sel.relation } : {};
+  if (textMatchMode(sel, defaultMode) !== 'regex') return { text, regex: false, ...relation };
   const anchored = defaultMode === 'regex' ? `^(?:${text})$` : text;
-  return { text: anchored, regex: true };
+  return { text: anchored, regex: true, ...relation };
 }
 
 /**

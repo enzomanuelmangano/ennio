@@ -58,7 +58,20 @@ export const CROSS_PROCESS_PRESENTER_CLASSES = envList('ENNIO_CAP_CROSS_PROCESS_
   'PHImagePicker',
   'UIActivityViewController',
   'UIDocumentPickerViewController',
+  'PasswordSavingViewController',
 ]);
+
+/**
+ * System prompts hosted cross-process that a single tap answers (iOS's
+ * "Save password?"). Their controller stays in the chain a moment after the
+ * card is gone, so a tap into one waits for it to leave before the next step.
+ */
+export const ANSWERED_PROMPT_CLASSES = envList('ENNIO_CAP_ANSWERED_PROMPT_CLASSES', [
+  'PasswordSavingViewController',
+]);
+
+export const chainHasAnsweredPrompt = (chain: string[]): boolean =>
+  chain.some((c) => ANSWERED_PROMPT_CLASSES.some((p) => c.includes(p)));
 
 /**
  * Hosts whose payload arrives asynchronously AFTER the controller dismisses and
