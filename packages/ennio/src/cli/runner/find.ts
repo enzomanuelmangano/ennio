@@ -31,6 +31,19 @@ import {
 // detect "did the tap actually change anything".
 // =====================================================================
 
+/// Content + structure hash of every visible window, without geometry: an
+/// endless decorative animation leaves it alone, anything a handler mounts,
+/// disables, selects or relabels changes it. '' on dylibs without the op.
+export async function captureStructHash(ctx: RunContext): Promise<string> {
+  try {
+    const r = await ctx.client.call('struct_hash');
+    if (r.ok && r.data) return String((r.data as { shash: string }).shash);
+  } catch {
+    /* op unavailable */
+  }
+  return '';
+}
+
 export async function captureHash(ctx: RunContext): Promise<string> {
   try {
     const r = await ctx.client.call('frame_hash');

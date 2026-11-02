@@ -21,6 +21,7 @@
 #import "EnnioBootstrap.h"
 
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import <mach/mach_time.h>
 
 #include <cstring>
@@ -132,6 +133,55 @@ static void walkAndHash(UIView *v, uint64_t *h) {
     for (UIView *sub in v.subviews) walkAndHash(sub, h);
 }
 
+// Content and structure of every visible window, without geometry or
+// alpha: the class of each view (hidden subtrees included), and for shown
+// views whatever they carry: labels, ids, values, non-zero accessibility
+// traits (disabled, selected), control state, a running native spinner. A
+// bare decorative view contributes its class alone, shown or not, so its
+// fade changes nothing; a mounted spinner, a disabled button, a toggled star
+// or a sheet in another window changes it. Walked on demand, not per frame.
+static void walkStructure(UIView *v, uint64_t *h, bool shown) {
+    if (!v) return;
+    const char *cls = object_getClassName(v);
+    hashFeed(h, cls, std::strlen(cls));
+    if (shown && (v.hidden || v.alpha < 0.01)) shown = false;
+    if (shown) {
+        // Only what a view actually carries: a bare decorative view adds
+        // nothing whether shown or not, so its fade can't flip the hash.
+        NSString *aid = v.accessibilityIdentifier;
+        if (aid.length) hashFeed(h, aid.UTF8String, std::strlen(aid.UTF8String));
+        NSString *lab = v.accessibilityLabel;
+        if (lab.length) hashFeed(h, lab.UTF8String, std::strlen(lab.UTF8String));
+        NSString *val = v.accessibilityValue;
+        if (val.length) hashFeed(h, val.UTF8String, std::strlen(val.UTF8String));
+        uint64_t traits = v.accessibilityTraits;
+        if (traits) hashFeed(h, &traits, sizeof(traits));
+        // A native spinner already mounted and started by a handler.
+        if ([v isKindOfClass:UIActivityIndicatorView.class] &&
+            ((UIActivityIndicatorView *)v).isAnimating) {
+            const char *spin = "SPIN";
+            hashFeed(h, spin, 4);
+        }
+        if ([v isKindOfClass:UIControl.class]) {
+            UIControl *ctrl = (UIControl *)v;
+            uint8_t state = (uint8_t)((ctrl.isSelected ? 1 : 0) | (ctrl.isEnabled ? 2 : 0));
+            hashFeed(h, &state, sizeof(state));
+            if ([v isKindOfClass:UISwitch.class]) {
+                uint8_t on = ((UISwitch *)v).isOn ? 1 : 0;
+                hashFeed(h, &on, sizeof(on));
+            } else if ([v isKindOfClass:UISegmentedControl.class]) {
+                int32_t seg = (int32_t)((UISegmentedControl *)v).selectedSegmentIndex;
+                hashFeed(h, &seg, sizeof(seg));
+            }
+        }
+    }
+    const char *open = "(";
+    hashFeed(h, open, 1);
+    for (UIView *sub in v.subviews) walkStructure(sub, h, shown);
+    const char *close = ")";
+    hashFeed(h, close, 1);
+}
+
 @interface EnnioCommitTicker : NSObject
 @property(nonatomic, strong) CADisplayLink *link;
 - (void)tick:(CADisplayLink *)link;
@@ -241,6 +291,18 @@ static EnnioCommitTicker *g_commitTicker;
 
 + (uint64_t)currentHash {
     return g_currentHash;
+}
+
++ (uint64_t)structHash {
+    uint64_t h = 1469598103934665603ULL;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            if (w.hidden) continue;
+            walkStructure(w, &h, true);
+        }
+    }
+    return h;
 }
 
 + (uint32_t)waitForHashChangeSince:(uint64_t)baselineHash maxMs:(uint32_t)maxMs {

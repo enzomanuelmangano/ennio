@@ -16,12 +16,14 @@ import { diag } from '../diag';
 import { createDriver } from '../driver';
 import type { GestureDriver } from '../driver';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
-import { extractModifiers } from '../maestro-parser';
+import { extractModifiers, normalizeSelector, textMatchArgs } from '../maestro-parser';
 import { evaluateCondition } from '../runner/conditions';
-import { captureHash } from '../runner/find';
+import { captureHash, captureStructHash, findOnce } from '../runner/find';
+import { interpolateSelector } from '../runner/context';
+import { hasRelation } from '../runner/relation';
 import type { DeviceSession, Platform } from '../platform';
 import { selectPlatform } from '../platform';
-import type { RunContext } from '../runner/context';
+import type { Rect, RunContext } from '../runner/context';
 import { describeCommand } from '../runner/index';
 import { resolveProfile } from '../settle/profile';
 
@@ -112,6 +114,29 @@ export class FlowExecutor {
         this.registry.dispatch(normalizeBareString(c), buildDctx(undefined)),
     });
 
+    // Where the last tap's target sits now, if it is still exposed (hit-test
+    // lands on it), for the eaten-tap check. Only plain id/text selectors: a
+    // point tap has no target, and a relational one is only resolvable
+    // through the anchor.
+    const exposedTargetRect = async (tapCmd: MaestroCommand): Promise<Rect | null> => {
+      const raw = (tapCmd as { tapOn?: unknown }).tapOn;
+      if (raw === undefined) return null;
+      const sel = normalizeSelector(
+        interpolateSelector(raw, ctx) as Parameters<typeof normalizeSelector>[0],
+      );
+      if ((!sel.id && !sel.text) || sel.point || hasRelation(sel)) return null;
+      const rect = await findOnce(ctx, sel).catch(() => null);
+      if (!rect) return null;
+      const exp = await ctx.client
+        .call(
+          'is_exposed',
+          sel.id ? { testID: sel.id } : textMatchArgs(sel, ctx.profile.textMatchDefault),
+        )
+        .catch(() => undefined);
+      const exposed = !!(exp && exp.ok && (exp.data as { exposed?: boolean })?.exposed);
+      return exposed ? rect : null;
+    };
+
     // A visibility assert right after a tap, with a fast recovery for the
     // "eaten tap": the tap actuated but its onPress never fired (keyboard
     // reflow moved the button, a gesture-handler button missed, a press
@@ -136,15 +161,34 @@ export class FlowExecutor {
         return;
       }
       const preHash = await captureHash(ctx).catch(() => '');
+      const preTapStruct = ctx.preTapStructHash ?? '';
+      const preRect = preTapStruct ? await exposedTargetRect(lastTapCmd) : null;
+      ctx.quietMiss = true;
       try {
         await this.registry.dispatch(probe, buildDctx(nextCmd));
         return; // target appeared within the probe — fast path
       } catch (e) {
         if (!FIND_MISS_RE.test(e instanceof Error ? e.message : String(e))) throw e;
+      } finally {
+        ctx.quietMiss = false;
       }
       const postHash = await captureHash(ctx).catch(() => '');
-      const quiet = preHash !== '' && postHash === preHash;
+      // Quiet: nothing on screen moved since the tap settled. A screen with
+      // an endless decorative animation never holds still, so there accept
+      // instead: the tree's content and structure are what they were right
+      // BEFORE the tap (the handler mounted, disabled, selected, relabelled
+      // or presented nothing) AND the target is still exposed at the same
+      // rect (no transition moved or covered it).
+      const quiet =
+        (preHash !== '' && postHash === preHash) ||
+        (preTapStruct !== '' &&
+          preRect !== null &&
+          (await captureStructHash(ctx)) === preTapStruct &&
+          sameRect(preRect, await exposedTargetRect(lastTapCmd)));
       if (quiet) {
+        // Marked before re-firing: whatever happens next, the step-level
+        // retry must not tap a third time.
+        refiredTap = true;
         this.reporter.stepRetry?.(
           stepIdx + 1,
           `re-firing previous tap (${describeCommand(lastTapCmd)})`,
@@ -166,6 +210,9 @@ export class FlowExecutor {
     const stepTimings: StepTiming[] = [];
     let stepsPassed = 0;
     let lastTapCmd: MaestroCommand | undefined;
+    // Set when dispatchAssertAfterTap re-fired the tap, so the step-level
+    // retry doesn't fire it again.
+    let refiredTap = false;
     let failure: FlowResult['failure'];
 
     for (let i = 0; i < flow.commands.length; i++) {
@@ -204,6 +251,7 @@ export class FlowExecutor {
       const t0 = Date.now();
       this.reporter.stepStart?.(i + 1, cmd);
 
+      refiredTap = false;
       try {
         if (lastTapCmd && cmdIsVisibilityAssert(cmd)) {
           await dispatchAssertAfterTap(cmd, nextCmd, lastTapCmd, i);
@@ -254,7 +302,7 @@ export class FlowExecutor {
         const isFindMiss = /element not found|assertVisible\/waitFor timeout/i.test(msg);
         const isFindableStep = cmdIsFindable(cmd);
 
-        if (lastTapCmd && isFindMiss && isFindableStep) {
+        if (lastTapCmd && isFindMiss && isFindableStep && !refiredTap) {
           try {
             this.reporter.stepRetry?.(
               i + 1,
@@ -359,6 +407,16 @@ export class FlowExecutor {
       }
     }
   }
+}
+
+function sameRect(a: Rect, b: Rect | null): boolean {
+  return (
+    b !== null &&
+    Math.abs(a.x - b.x) < 1 &&
+    Math.abs(a.y - b.y) < 1 &&
+    Math.abs(a.w - b.w) < 1 &&
+    Math.abs(a.h - b.h) < 1
+  );
 }
 
 function cmdIsTap(cmd: MaestroCommand): boolean {

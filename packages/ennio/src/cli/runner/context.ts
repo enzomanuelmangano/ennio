@@ -91,6 +91,14 @@ export interface RunContext {
    *  modal: Save tap fires onto the popover instead of the button,
    *  modal never dismisses). */
   lastWasTextInput?: boolean;
+  /** Set while a short probe runs (the eaten-tap check): its miss is
+   *  expected and recovered, so it skips the failure dump (view list and
+   *  a simulator screenshot, ~1s). */
+  quietMiss?: boolean;
+  /** struct_hash taken right before the last tapOn fired (the eaten-tap
+   *  check compares against it: anything the handler did to the tree
+   *  changes it). '' when unavailable. */
+  preTapStructHash?: string;
   /** Set by a step that has already consumed the next command (e.g.
    *  two consecutive `tapOn` on the same target collapsed into a
    *  single doubleTap dispatched on the FIRST step). The runner loop

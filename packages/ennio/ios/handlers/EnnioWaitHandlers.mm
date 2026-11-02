@@ -305,6 +305,17 @@ void RegisterEnnioWaitHandlers(void) {
         return EnnioElapsedJson(elapsed, ok);
     });
 
+    // Content + structure of every visible window, no geometry (see
+    // EnnioSettle structHash). Walks the tree on demand, so callers use it
+    // sparingly (the eaten-tap check), not in polling loops.
+    EnnioControlSocket::registerHandler("struct_hash", [](const std::string &) -> std::string {
+        uint64_t sh = 0;
+        EnnioOnMainVoid([&]() { sh = [EnnioSettle structHash]; });
+        char buf[40];
+        snprintf(buf, sizeof(buf), "{\"shash\":\"%llx\"}", (unsigned long long)sh);
+        return std::string(buf);
+    });
+
     EnnioControlSocket::registerHandler("frame_hash", [](const std::string &) -> std::string {
         uint64_t h = [EnnioSettle currentHash];
         char buf[32];
