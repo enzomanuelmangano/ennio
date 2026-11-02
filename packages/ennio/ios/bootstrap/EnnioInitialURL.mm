@@ -4,6 +4,8 @@
 
 #import "EnnioInitialURL.h"
 
+#import <UIKit/UIKit.h>
+
 #import <objc/runtime.h>
 
 // The URL to hand react-navigation as its initial deep link. Captured from
@@ -19,13 +21,31 @@ static NSString *g_initialURL = nil;
     NSString *url = [NSString stringWithUTF8String:env];
     if (url.length == 0) return;
 
+    // Deliver it the way iOS delivers a launch URL: through the app
+    // delegate's application:openURL:options:. Libraries that keep their
+    // own initial URL learn it only there — expo-linking's registry, which
+    // expo-router reads on iOS (Linking.getLinkingURL) instead of
+    // RCTLinkingManager. Without this every cold deep link in an expo-router
+    // app landed on the root screen. Runs at didFinishLaunching, before the
+    // JS bundle asks. Any host gets it, as iOS would hand it a launch URL.
+    // Not covered: apps that route URLs only through a UIScene delegate
+    // (scene:openURLContexts:) and dev clients whose launcher consumes
+    // openURL itself — neither was exercised.
+    NSURL *nsurl = [NSURL URLWithString:url];
+    UIApplication *app = UIApplication.sharedApplication;
+    id<UIApplicationDelegate> delegate = app.delegate;
+    if (nsurl && [delegate respondsToSelector:@selector(application:openURL:options:)]) {
+        [delegate application:app openURL:nsurl options:@{}];
+        NSLog(@"[Ennio] initial deep link delivered to the app delegate: %@", url);
+    }
+
     // RCTLinkingManager is the native module backing JS `Linking` on both the
-    // bridge and bridgeless runtimes. Absent ⇒ host isn't react-native ⇒ leave
-    // it alone.
+    // bridge and bridgeless runtimes. Absent ⇒ host isn't react-native ⇒ the
+    // getInitialURL hook below does not apply.
     Class cls = NSClassFromString(@"RCTLinkingManager");
     if (cls == Nil) {
-        NSLog(@"[Ennio] ENNIO_INITIAL_URL set but RCTLinkingManager not present — "
-              @"host is not react-native; ignoring");
+        NSLog(@"[Ennio] RCTLinkingManager not present — host is not react-native; "
+              @"skipping the getInitialURL hook");
         return;
     }
 
