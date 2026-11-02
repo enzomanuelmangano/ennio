@@ -133,6 +133,14 @@ export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promis
     // the 2.5 s in-process wait entirely (~20 ms vs 2500 ms on a miss).
     const quick = await findOnce(ctx, sel);
     if (quick) return quick;
+    // Same instant look through the accessibility tree: text drawn outside
+    // the UIView walk (SwiftUI, a system prompt hosted cross-process) is on
+    // screen NOW, and polling the view walk below for it only burned the
+    // full 2.5s before the same AX check further down found it.
+    const axNow = await ctx.client
+      .call('find_ax_by_text', { ...textMatchArgs(sel, ctx.profile.textMatchDefault) })
+      .catch(() => undefined);
+    if (axNow && axNow.ok && axNow.data) return axNow.data as Rect;
     // Tab-bar early detection: if the label matches a UITabBarItem the
     // element is buried under a pushed nav stack, not absent. Unwind
     // immediately via backs rather than burning 2.5 s polling a view
