@@ -682,13 +682,23 @@ static BOOL g_axProxiesOnly = NO;
 static void collectAxByText(id root,
                             NSString *text,
                             NSMutableArray *outRects,
-                            NSMutableSet *visited) {
+                            NSMutableSet *visited,
+                            UIView *_Nullable container) {
     if (!root) return;
+    // The nearest UIView owning this element: itself, or the view whose
+    // accessibility elements we are walking.
+    UIView *owner = [root isKindOfClass:UIView.class] ? (UIView *)root : container;
     NSValue *idVal = [NSValue valueWithNonretainedObject:root];
     if ([visited containsObject:idVal]) return;
     [visited addObject:idVal];
 
-    if ((!g_axProxiesOnly || ![root isKindOfClass:UIView.class]) && axMatchesText(root, text)) {
+    // proxiesOnly: a proxy counts only when its owning view is on screen and
+    // in the topmost presented controller — the view walk's own filters —
+    // so a proxy on a covered or hidden screen can't answer the early look.
+    BOOL eligible = !g_axProxiesOnly ||
+        (![root isKindOfClass:UIView.class] && owner && viewIsLikelyOnScreen(owner) &&
+         finderVCInTopmost(finderHostingVC(owner), finderTopmostPresentedVC()));
+    if (eligible && axMatchesText(root, text)) {
         CGRect r = axFrameOf(root);
         if (!CGRectIsEmpty(r)) {
             // Filter off-screen elements. AX walker exposes cached /
@@ -719,7 +729,7 @@ static void collectAxByText(id root,
         id elems = [root accessibilityElements];
         if ([elems isKindOfClass:NSArray.class]) {
             for (id e in (NSArray *)elems) {
-                collectAxByText(e, text, outRects, visited);
+                collectAxByText(e, text, outRects, visited, owner);
             }
         }
     }
@@ -734,7 +744,7 @@ static void collectAxByText(id root,
         if (n > 0 && n < 4096) {
             for (NSInteger i = 0; i < n; i++) {
                 id sub = [root accessibilityElementAtIndex:i];
-                if (sub) collectAxByText(sub, text, outRects, visited);
+                if (sub) collectAxByText(sub, text, outRects, visited, owner);
             }
         }
     }
@@ -742,7 +752,7 @@ static void collectAxByText(id root,
     // either of the above (the common case).
     if ([root isKindOfClass:UIView.class]) {
         for (UIView *sub in [(UIView *)root subviews]) {
-            collectAxByText(sub, text, outRects, visited);
+            collectAxByText(sub, text, outRects, visited, owner);
         }
     }
 }
@@ -883,18 +893,22 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
         for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-            collectAxByText(w, text, rects, visited);
+            collectAxByText(w, text, rects, visited, nil);
             UIViewController *vc = w.rootViewController;
             while (vc) {
                 UIView *vv = vc.viewIfLoaded;
                 if (vv && !vv.superview) {
-                    collectAxByText(vv, text, rects, visited);
+                    collectAxByText(vv, text, rects, visited, nil);
                 }
                 vc = vc.presentedViewController;
             }
         }
     }
     if (rects.count == 0) {
+        // The early look (proxiesOnly) never synthesizes: a cross-process
+        // host anywhere in the chain could shadow an in-app button that is
+        // still mounting above it. The full lookup after the poll does.
+        if (g_axProxiesOnly) return zero;
         // Last resort: cross-process VC chrome geometry synth.
         // PHPicker / share sheet / doc picker — known-class hosts
         // whose chrome labels live in a remote process. We can't
