@@ -15,9 +15,10 @@ import { isVisible } from '../../runner/visibility';
 
 interface ScrollUntilVisibleCmd {
   scrollUntilVisible:
+    | string
     | MaestroSelector
     | {
-        element: MaestroSelector;
+        element: MaestroSelector | string;
         direction?: string;
         timeout?: number;
         // Accepted for Maestro parity; advisory (speed) or no-op
@@ -51,9 +52,12 @@ export function registerScrollHandlers(registry: CommandRegistry): void {
     (c): c is MaestroCommand & ScrollUntilVisibleCmd => has(c, 'scrollUntilVisible'),
     async (cmd, { ctx }) => {
       const arg = interpolateSelector(cmd.scrollUntilVisible, ctx);
-      const target = 'element' in arg ? arg.element : (arg as MaestroSelector);
-      const dir = ('direction' in arg && arg.direction ? arg.direction : 'DOWN').toUpperCase();
-      const timeout = ('timeout' in arg && arg.timeout) || 15000;
+      // Maestro accepts `element: "Some text"` (and a bare string) as a text
+      // selector — normalize, or a string target never matches.
+      const opts = typeof arg === 'string' || !('element' in arg) ? undefined : arg;
+      const target = normalizeSelector(opts ? opts.element : (arg as MaestroSelector | string));
+      const dir = (opts?.direction || 'DOWN').toUpperCase();
+      const timeout = opts?.timeout || 15000;
       const wsz = await ctx.client.call('window_size').catch(() => undefined);
       const wd = (wsz?.data as { w?: number; h?: number }) ?? {};
       const winW = wd.w ?? DEFAULT_WIN_W;

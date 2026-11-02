@@ -119,7 +119,7 @@ export interface GestureDriver {
    */
   waitTargetSteady(
     client: EnnioSocketClient,
-    sel: { id?: string; text?: string },
+    sel: { id?: string; text?: string; regex?: boolean },
   ): Promise<boolean>;
 
   // ── routing ───────────────────────────────────────────────────────

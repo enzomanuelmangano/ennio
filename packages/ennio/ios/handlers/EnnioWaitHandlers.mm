@@ -59,6 +59,7 @@ void RegisterEnnioWaitHandlers(void) {
         NSString *text = EnnioArgString(a, @"text");
         uint32_t maxMs = (uint32_t)EnnioArgInt(a, @"maxMs", 800);
         int needFrames = EnnioArgInt(a, @"steadyFrames", 3);
+        BOOL regex = [a[@"regex"] boolValue];
         if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
 
         NSDate *start = [NSDate date];
@@ -73,8 +74,9 @@ void RegisterEnnioWaitHandlers(void) {
             BOOL animating = NO;
             CGRect frame = CGRectZero;
             EnnioOnMainVoid([&]() {
-                UIView *v = testID.length ? [EnnioFinder findViewByTestID:testID]
-                                          : [EnnioFinder findViewByText:text];
+                UIView *v = testID.length
+                    ? [EnnioFinder findViewByTestID:testID]
+                    : [EnnioFinder findViewByText:text relaxed:NO regex:regex];
                 if (!v || !v.window) return;
                 found = YES;
                 frame = [v convertRect:v.bounds toView:nil];

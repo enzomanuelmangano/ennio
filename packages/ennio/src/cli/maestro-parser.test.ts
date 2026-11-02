@@ -339,4 +339,36 @@ describe('extractModifiers', () => {
     expect(command).toEqual({ tapOn: { id: 'X', optional: true } });
     expect(modifiers).toEqual({});
   });
+
+  it('lifts optional/label nested in other commands (Maestro accepts both spellings)', () => {
+    const cmd = {
+      extendedWaitUntil: { visible: 'Not Now', timeout: 4000, optional: true, label: 'sheet' },
+    } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(modifiers).toEqual({ optional: true, label: 'sheet' });
+    expect(command).toEqual({ extendedWaitUntil: { visible: 'Not Now', timeout: 4000 } });
+  });
+
+  it('keeps a label that is the only selector key (alias for text)', () => {
+    const cmd = { tapOn: { label: 'Sign in' } } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(modifiers).toEqual({});
+    expect(command).toEqual({ tapOn: { label: 'Sign in' } });
+  });
+
+  it("lifts tapOn's label but leaves its optional to the tap handler", () => {
+    const cmd = {
+      tapOn: { id: 'signin', label: 'Tap sign in', optional: true },
+    } as unknown as MaestroCommand;
+    const { command, modifiers } = extractModifiers(cmd);
+    expect(modifiers).toEqual({ label: 'Tap sign in' });
+    expect(command).toEqual({ tapOn: { id: 'signin', optional: true } });
+  });
+
+  it("does not lift runFlow's own when", () => {
+    const cmd = {
+      runFlow: { when: { visible: 'X' }, commands: [] },
+    } as unknown as MaestroCommand;
+    expect(extractModifiers(cmd).modifiers).toEqual({});
+  });
 });
