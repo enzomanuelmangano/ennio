@@ -67,6 +67,13 @@ typedef struct {
 /// As above, with the selector's regex mode explicit (CLI's isRegexText flag).
 + (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found regex:(BOOL)regex;
 
+/// As above; with proxiesOnly, UIView elements never match — only what the
+/// view walk cannot see (remote-view proxies, SwiftUI) and the host synth.
++ (EnnioRect)findAxRectByText:(NSString *)text
+                        found:(BOOL *)found
+                        regex:(BOOL)regex
+                  proxiesOnly:(BOOL)proxiesOnly;
+
 /// Convert a UIView's bounds to window coordinates. Returns CGRectZero
 /// if the view is not attached to a window.
 + (EnnioRect)windowRectFor:(UIView *)view;

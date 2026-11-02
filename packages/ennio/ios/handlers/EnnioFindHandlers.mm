@@ -397,10 +397,11 @@ void RegisterEnnioFindHandlers(void) {
         NSString *text = EnnioArgString(a, @"text");
         if (!text.length) throw std::runtime_error("missing text");
         BOOL regex = [a[@"regex"] boolValue];
+        BOOL proxiesOnly = [a[@"proxiesOnly"] boolValue];
         EnnioRect rect = {0, 0, 0, 0};
         BOOL found = NO;
         EnnioOnMainVoid([&]() {
-            rect = [EnnioFinder findAxRectByText:text found:&found regex:regex];
+            rect = [EnnioFinder findAxRectByText:text found:&found regex:regex proxiesOnly:proxiesOnly];
         });
         if (!found) throw std::runtime_error("ax-text not found");
         return EnnioRectJson(rect);

@@ -125,8 +125,12 @@ static id _Nullable kvcValueOrNil(UIView *v, NSString *key) {
     if ([throwing containsObject:k]) return nil;
     @try {
         return [v valueForKey:key];
+    } @catch (NSException *e) {
+        // Only "this class has no such key" is a property of the class; any
+        // other exception (a getter failing in one state) is not remembered.
+        if ([e.name isEqualToString:NSUndefinedKeyException]) [throwing addObject:k];
+        return nil;
     } @catch (...) {
-        [throwing addObject:k];
         return nil;
     }
 }
@@ -668,6 +672,13 @@ static CGRect axFrameOf(id element) {
 
 typedef struct { CGRect rect; int rank; CGFloat area; BOOL found; } AxMatch;
 
+// Proxies-only AX find: match only accessibility elements that are not
+// UIViews — what the view walk cannot see (remote-view proxies, SwiftUI) —
+// plus the cross-process host synth. Used for an instant look ahead of the
+// view poll, where a UIView match would bypass the walk's hidden/topmost
+// filters (a label on the screen behind a still-mounting push or modal).
+static BOOL g_axProxiesOnly = NO;
+
 static void collectAxByText(id root,
                             NSString *text,
                             NSMutableArray *outRects,
@@ -677,7 +688,7 @@ static void collectAxByText(id root,
     if ([visited containsObject:idVal]) return;
     [visited addObject:idVal];
 
-    if (axMatchesText(root, text)) {
+    if ((!g_axProxiesOnly || ![root isKindOfClass:UIView.class]) && axMatchesText(root, text)) {
         CGRect r = axFrameOf(root);
         if (!CGRectIsEmpty(r)) {
             // Filter off-screen elements. AX walker exposes cached /
@@ -847,6 +858,16 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
 
 + (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found {
     return [self findAxRectByText:text found:found regex:NO];
+}
+
++ (EnnioRect)findAxRectByText:(NSString *)text
+                        found:(BOOL *)found
+                        regex:(BOOL)regex
+                  proxiesOnly:(BOOL)proxiesOnly {
+    g_axProxiesOnly = proxiesOnly;
+    EnnioRect r = [self findAxRectByText:text found:found regex:regex];
+    g_axProxiesOnly = NO;
+    return r;
 }
 
 + (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found regex:(BOOL)regex {
