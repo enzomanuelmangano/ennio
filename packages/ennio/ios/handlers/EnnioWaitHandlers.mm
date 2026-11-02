@@ -237,6 +237,10 @@ void RegisterEnnioWaitHandlers(void) {
                 while (stack.count && !scrolling) {
                     UIView *v = stack.lastObject;
                     [stack removeLastObject];
+                    // A hidden or fully transparent subtree (inactive tabs,
+                    // stacked routes kept mounted) can't swallow a touch
+                    // mid-scroll — skip it rather than walk it twice per tap.
+                    if (v.hidden || v.alpha < 0.01) continue;
                     if ([v isKindOfClass:UIScrollView.class]) {
                         UIScrollView *sv = (UIScrollView *)v;
                         if (sv.isTracking || sv.isDragging || sv.isDecelerating) {
