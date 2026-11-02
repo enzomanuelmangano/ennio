@@ -112,18 +112,30 @@ static BOOL isInteractive(UIView *v) {
 // Use KVC with @try so missing keys don't crash; covers RCTText,
 // RCTBaseText, RCTParagraphComponentView (Fabric), RCTTextView, and
 // any other custom view that defines a `text` property.
-static NSString *_Nullable readAnyText(UIView *v) {
+// KVC on a key a class doesn't have throws NSUndefinedKeyException — and
+// most views (every plain RN container) have neither `text` nor
+// `attributedText`, so each text find threw and caught two exceptions per
+// view: ~130us each, ~95% of a find's cost on a 250-view screen. Remember,
+// per class and key, that the lookup throws, and skip it from then on. The
+// first lookup is the same KVC as before, so what is read is unchanged.
+static id _Nullable kvcValueOrNil(UIView *v, NSString *key) {
+    static NSMutableSet<NSString *> *throwing;
+    if (!throwing) throwing = [NSMutableSet new];
+    NSString *k = [NSString stringWithFormat:@"%@.%@", NSStringFromClass(v.class), key];
+    if ([throwing containsObject:k]) return nil;
     @try {
-        id raw = [v valueForKey:@"text"];
-        if ([raw isKindOfClass:NSString.class]) return (NSString *)raw;
-        if ([raw isKindOfClass:NSAttributedString.class]) return [(NSAttributedString *)raw string];
+        return [v valueForKey:key];
     } @catch (...) {
+        [throwing addObject:k];
+        return nil;
     }
-    @try {
-        id raw = [v valueForKey:@"attributedText"];
+}
+
+static NSString *_Nullable readAnyText(UIView *v) {
+    for (NSString *key in @[ @"text", @"attributedText" ]) {
+        id raw = kvcValueOrNil(v, key);
         if ([raw isKindOfClass:NSString.class]) return (NSString *)raw;
         if ([raw isKindOfClass:NSAttributedString.class]) return [(NSAttributedString *)raw string];
-    } @catch (...) {
     }
     return nil;
 }
