@@ -219,6 +219,12 @@ export class HidDriver implements GestureDriver {
       // uncertain paths (no commit seen, or a real VC transition with a possible
       // late payload commit) keep the conservative window.
       const cleanCommit = committed && transitionWaitMs <= 50;
+      // A clean tap followed by a wait for something to appear: that wait
+      // polls the screen itself, so confirming quiescence first is dead
+      // time — on screens that animate continuously it ran to its 600ms
+      // cap on every such tap. (Not before assertNotVisible, which would
+      // pass before the element appears, nor before another tap.)
+      if (cleanCommit && snap.nextWaitsToAppear) return;
       await tracedLeg('settle.finalWaitCommit', () =>
         bestEffort(client, 'wait_commit', {
           maxMs: cleanCommit ? 600 : 1500,

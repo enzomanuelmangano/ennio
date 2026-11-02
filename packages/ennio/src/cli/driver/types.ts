@@ -49,6 +49,10 @@ export interface PreTapSnapshot {
   reactAttach: 'universal' | 'paper' | 'fabric' | 'both' | 'none';
   reactSinceMs: number;
   nextEditsField: boolean;
+  /** The next command waits for something to APPEAR (assertVisible,
+   *  extendedWaitUntil visible) and polls on its own — the final
+   *  quiescence confirm after a clean tap only delays that poll. */
+  nextWaitsToAppear?: boolean;
 }
 
 export interface GestureDriver {
