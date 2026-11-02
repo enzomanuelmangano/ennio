@@ -15,7 +15,13 @@ import {
   sleep,
   timedAsync,
 } from '../../runner/context';
-import { captureHash, captureReactTs, findOnce, resolveCenter } from '../../runner/find';
+import {
+  captureHash,
+  captureReactTs,
+  captureStructHash,
+  findOnce,
+  resolveCenter,
+} from '../../runner/find';
 import { findRelationOnce, hasRelation } from '../../runner/relation';
 import { execTapOn } from '../../runner/tap';
 
@@ -81,10 +87,17 @@ async function probeTextElsewhere(ctx: RunContext, sel: MaestroSelector): Promis
     : null;
 }
 
+function nextIsVisibilityAssert(next: MaestroCommand | undefined): boolean {
+  return (
+    typeof next === 'object' && next !== null && ('assertVisible' in next || 'waitFor' in next)
+  );
+}
+
 export function registerTapHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & TapOnCmd => has(c, 'tapOn'),
     async (cmd, { ctx, nextCmd }) => {
+      ctx.preTapStructHash = '';
       try {
         const sel = normalizeSelector(
           interpolateSelector(cmd.tapOn, ctx) as Parameters<typeof normalizeSelector>[0],
@@ -248,6 +261,9 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         // inputs (UISearchBar — g-searchbar), and the focus_testid
         // shortcut above only covers id selectors. Express the intent;
         // the driver picks the mechanism.
+        // Baseline for the eaten-tap check, only when a visibility assert
+        // follows (the only place it is read).
+        ctx.preTapStructHash = nextIsVisibilityAssert(nextCmd) ? await captureStructHash(ctx) : '';
         await timedAsync(ctx, 'tap.execTapOn', () =>
           execTapOn(ctx, sel, preTapHash, nextEditsField ? 'focus' : 'press'),
         );

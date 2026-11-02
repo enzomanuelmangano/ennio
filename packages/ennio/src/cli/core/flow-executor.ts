@@ -18,7 +18,7 @@ import type { GestureDriver } from '../driver';
 import type { MaestroCommand, MaestroFlow } from '../maestro-parser';
 import { extractModifiers, normalizeSelector, textMatchArgs } from '../maestro-parser';
 import { evaluateCondition } from '../runner/conditions';
-import { captureHashes, findOnce } from '../runner/find';
+import { captureHash, captureStructHash, findOnce } from '../runner/find';
 import { interpolateSelector } from '../runner/context';
 import { hasRelation } from '../runner/relation';
 import type { DeviceSession, Platform } from '../platform';
@@ -154,36 +154,41 @@ export class FlowExecutor {
       nextCmd: MaestroCommand | undefined,
       lastTapCmd: MaestroCommand,
       stepIdx: number,
-    ): Promise<boolean> => {
+    ): Promise<void> => {
       const probe = withProbeTimeout(cmd, EATEN_TAP_PROBE_MS);
       if (!probe) {
         await this.registry.dispatch(cmd, buildDctx(nextCmd));
-        return false;
+        return;
       }
-      const pre = await captureHashes(ctx);
-      const preRect = await exposedTargetRect(lastTapCmd);
+      const preHash = await captureHash(ctx).catch(() => '');
+      const preTapStruct = ctx.preTapStructHash ?? '';
+      const preRect = preTapStruct ? await exposedTargetRect(lastTapCmd) : null;
       ctx.quietMiss = true;
       try {
         await this.registry.dispatch(probe, buildDctx(nextCmd));
-        return false; // target appeared within the probe — fast path
+        return; // target appeared within the probe — fast path
       } catch (e) {
         if (!FIND_MISS_RE.test(e instanceof Error ? e.message : String(e))) throw e;
       } finally {
         ctx.quietMiss = false;
       }
-      const post = await captureHashes(ctx);
-      // Quiet: nothing on screen moved since the tap settled.
-      // Same content: on a screen with an endless decorative animation the
-      // geometry hash never holds still, so also accept "no visible label,
-      // id or value changed AND the tapped target is still exposed at the
-      // same rect" — a transition would have moved, covered or replaced it.
+      const postHash = await captureHash(ctx).catch(() => '');
+      // Quiet: nothing on screen moved since the tap settled. A screen with
+      // an endless decorative animation never holds still, so there accept
+      // instead: the tree's content and structure are what they were right
+      // BEFORE the tap (the handler mounted, disabled, selected, relabelled
+      // or presented nothing) AND the target is still exposed at the same
+      // rect (no transition moved or covered it).
       const quiet =
-        (pre.hash !== '' && post.hash === pre.hash) ||
-        (pre.shash !== '' &&
-          post.shash === pre.shash &&
+        (preHash !== '' && postHash === preHash) ||
+        (preTapStruct !== '' &&
           preRect !== null &&
+          (await captureStructHash(ctx)) === preTapStruct &&
           sameRect(preRect, await exposedTargetRect(lastTapCmd)));
       if (quiet) {
+        // Marked before re-firing: whatever happens next, the step-level
+        // retry must not tap a third time.
+        refiredTap = true;
         this.reporter.stepRetry?.(
           stepIdx + 1,
           `re-firing previous tap (${describeCommand(lastTapCmd)})`,
@@ -191,15 +196,7 @@ export class FlowExecutor {
         await this.registry.dispatch(lastTapCmd, buildDctx(cmd));
         await sleep(150);
       }
-      try {
-        await this.registry.dispatch(cmd, buildDctx(nextCmd));
-      } catch (e) {
-        // Already re-fired: the step-level retry below must not tap a third
-        // time and wait the full budget again.
-        if (quiet) refiredTap = true;
-        throw e;
-      }
-      return quiet;
+      await this.registry.dispatch(cmd, buildDctx(nextCmd));
     };
 
     // onFlowStart hook — failures abort the flow before the main loop.
@@ -213,8 +210,8 @@ export class FlowExecutor {
     const stepTimings: StepTiming[] = [];
     let stepsPassed = 0;
     let lastTapCmd: MaestroCommand | undefined;
-    // Set when dispatchAssertAfterTap re-fired the tap and the assert still
-    // missed, so the step-level retry doesn't fire it again.
+    // Set when dispatchAssertAfterTap re-fired the tap, so the step-level
+    // retry doesn't fire it again.
     let refiredTap = false;
     let failure: FlowResult['failure'];
 

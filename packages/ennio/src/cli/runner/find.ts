@@ -31,21 +31,17 @@ import {
 // detect "did the tap actually change anything".
 // =====================================================================
 
-/// Both settle hashes: `hash` folds geometry in, `shash` is the visible
-/// content alone (labels, ids, values, control state), which an endless
-/// decorative animation leaves untouched. `shash` is '' on dylibs that
-/// predate it.
-export async function captureHashes(ctx: RunContext): Promise<{ hash: string; shash: string }> {
+/// Content + structure hash of every visible window, without geometry: an
+/// endless decorative animation leaves it alone, anything a handler mounts,
+/// disables, selects or relabels changes it. '' on dylibs without the op.
+export async function captureStructHash(ctx: RunContext): Promise<string> {
   try {
-    const r = await ctx.client.call('frame_hash');
-    if (r.ok && r.data) {
-      const d = r.data as { hash: string; shash?: string };
-      return { hash: String(d.hash), shash: d.shash ? String(d.shash) : '' };
-    }
+    const r = await ctx.client.call('struct_hash');
+    if (r.ok && r.data) return String((r.data as { shash: string }).shash);
   } catch {
-    /* hash unavailable */
+    /* op unavailable */
   }
-  return { hash: '', shash: '' };
+  return '';
 }
 
 export async function captureHash(ctx: RunContext): Promise<string> {

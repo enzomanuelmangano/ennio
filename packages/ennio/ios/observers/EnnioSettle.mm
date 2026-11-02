@@ -21,6 +21,7 @@
 #import "EnnioBootstrap.h"
 
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import <mach/mach_time.h>
 
 #include <cstring>
@@ -54,12 +55,6 @@ static void idleObserverCallback(CFRunLoopObserverRef observer,
 static NSCondition *g_commitCondition;
 static uint64_t g_lastHashChangeMs = 0;
 static uint64_t g_currentHash = 0;
-// Visible content only: labels, ids, values and control state of the views
-// that are shown, no geometry and no hidden sentinel. A screen with an
-// endless decorative animation (a bobbing or blinking mascot, a spinner)
-// churns g_currentHash on every frame but leaves this one alone, so "did
-// anything happen after the tap?" stays answerable there.
-static uint64_t g_structHash = 0;
 // Set true the first time the frame-hash actually changes (a real
 // commit, not the seed value stamped at start). Until then lastCommitMs
 // reports 0 — matching the "no commit observed yet" contract callers
@@ -75,15 +70,12 @@ static inline void hashFeed(uint64_t *h, const void *data, size_t len) {
     }
 }
 
-static void walkAndHash(UIView *v, uint64_t *h, uint64_t *sh) {
+static void walkAndHash(UIView *v, uint64_t *h) {
     if (!v) return;
     if (v.hidden || v.alpha < 0.01) {
         // Hidden subtree — feed a sentinel and stop descending.
         const char *s = "HIDE";
         hashFeed(h, s, 4);
-        // Not into sh: a decorative subtree fading in and out (a mascot's
-        // blink) would churn it. Hidden labelled content still changes sh,
-        // because its labels drop out of the walk.
         return;
     }
     CGRect window = [v.window convertRect:v.bounds fromView:v];
@@ -106,19 +98,16 @@ static void walkAndHash(UIView *v, uint64_t *h, uint64_t *sh) {
     if (aid.length) {
         const char *s = aid.UTF8String;
         hashFeed(h, s, std::strlen(s));
-        hashFeed(sh, s, std::strlen(s));
     }
     NSString *lab = v.accessibilityLabel;
     if (lab.length) {
         const char *s = lab.UTF8String;
         hashFeed(h, s, std::strlen(s));
-        hashFeed(sh, s, std::strlen(s));
     }
     NSString *val = v.accessibilityValue;
     if (val.length) {
         const char *s = val.UTF8String;
         hashFeed(h, s, std::strlen(s));
-        hashFeed(sh, s, std::strlen(s));
     }
     // Control state — parity with Android's recHash folding isChecked/
     // isSelected/isEnabled. accessibilityValue alone misses a toggle whose
@@ -133,18 +122,56 @@ static void walkAndHash(UIView *v, uint64_t *h, uint64_t *sh) {
         UIControl *ctrl = (UIControl *)v;
         uint8_t state = (uint8_t)((ctrl.isSelected ? 1 : 0) | (ctrl.isEnabled ? 2 : 0));
         hashFeed(h, &state, sizeof(state));
-        hashFeed(sh, &state, sizeof(state));
         if ([v isKindOfClass:UISwitch.class]) {
             uint8_t on = ((UISwitch *)v).isOn ? 1 : 0;
             hashFeed(h, &on, sizeof(on));
-            hashFeed(sh, &on, sizeof(on));
         } else if ([v isKindOfClass:UISegmentedControl.class]) {
             int32_t seg = (int32_t)((UISegmentedControl *)v).selectedSegmentIndex;
             hashFeed(h, &seg, sizeof(seg));
-            hashFeed(sh, &seg, sizeof(seg));
         }
     }
-    for (UIView *sub in v.subviews) walkAndHash(sub, h, sh);
+    for (UIView *sub in v.subviews) walkAndHash(sub, h);
+}
+
+// Content and structure of every visible window, without geometry or
+// alpha: the class of each view (hidden subtrees included, so a fade in or
+// out changes nothing), and for shown views their labels, ids, values,
+// accessibility traits (disabled, selected) and control state. An endless
+// decorative animation leaves it alone; a mounted spinner, a disabled
+// button, a toggled star or a sheet in another window changes it. Walked on
+// demand, not per frame.
+static void walkStructure(UIView *v, uint64_t *h, bool shown) {
+    if (!v) return;
+    const char *cls = object_getClassName(v);
+    hashFeed(h, cls, std::strlen(cls));
+    if (shown && (v.hidden || v.alpha < 0.01)) shown = false;
+    if (shown) {
+        for (NSString *str in @[ v.accessibilityIdentifier ?: @"", v.accessibilityLabel ?: @"",
+                                 v.accessibilityValue ?: @"" ]) {
+            if (!str.length) continue;
+            const char *s = str.UTF8String;
+            hashFeed(h, s, std::strlen(s));
+        }
+        uint64_t traits = v.accessibilityTraits;
+        hashFeed(h, &traits, sizeof(traits));
+        if ([v isKindOfClass:UIControl.class]) {
+            UIControl *ctrl = (UIControl *)v;
+            uint8_t state = (uint8_t)((ctrl.isSelected ? 1 : 0) | (ctrl.isEnabled ? 2 : 0));
+            hashFeed(h, &state, sizeof(state));
+            if ([v isKindOfClass:UISwitch.class]) {
+                uint8_t on = ((UISwitch *)v).isOn ? 1 : 0;
+                hashFeed(h, &on, sizeof(on));
+            } else if ([v isKindOfClass:UISegmentedControl.class]) {
+                int32_t seg = (int32_t)((UISegmentedControl *)v).selectedSegmentIndex;
+                hashFeed(h, &seg, sizeof(seg));
+            }
+        }
+    }
+    const char *open = "(";
+    hashFeed(h, open, 1);
+    for (UIView *sub in v.subviews) walkStructure(sub, h, shown);
+    const char *close = ")";
+    hashFeed(h, close, 1);
 }
 
 @interface EnnioCommitTicker : NSObject
@@ -158,11 +185,9 @@ static void walkAndHash(UIView *v, uint64_t *h, uint64_t *sh) {
     UIWindow *win = [EnnioBootstrap keyWindow];
     if (!win) return;
     uint64_t h = 1469598103934665603ULL; // FNV offset basis
-    uint64_t sh = 1469598103934665603ULL;
-    walkAndHash(win, &h, &sh);
+    walkAndHash(win, &h);
 
     [g_commitCondition lock];
-    g_structHash = sh;
     if (h != g_currentHash) {
         g_currentHash = h;
         g_lastHashChangeMs = nowMs();
@@ -261,10 +286,15 @@ static EnnioCommitTicker *g_commitTicker;
 }
 
 + (uint64_t)structHash {
-    [g_commitCondition lock];
-    uint64_t sh = g_structHash;
-    [g_commitCondition unlock];
-    return sh;
+    uint64_t h = 1469598103934665603ULL;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            if (w.hidden) continue;
+            walkStructure(w, &h, true);
+        }
+    }
+    return h;
 }
 
 + (uint32_t)waitForHashChangeSince:(uint64_t)baselineHash maxMs:(uint32_t)maxMs {
