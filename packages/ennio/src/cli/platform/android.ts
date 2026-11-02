@@ -401,7 +401,17 @@ export class AndroidPlatform implements Platform {
         terminateAndroidApp(serial, bundleId);
         await sleep(backoffMs);
       }
-      launch();
+      try {
+        launch();
+      } catch (e) {
+        // A launch that throws (adb timed out on a wedged emulator, `am
+        // start` failed) is one failed attempt, retried within the budget —
+        // not the end of the flow.
+        lastErr = `launch failed: ${e instanceof Error ? e.message : String(e)}`;
+        diag('inject', 'launch-fail', { attempt, err: lastErr });
+        endAttempt({ outcome: 'launch-fail' });
+        continue;
+      }
       const pid = waitForAppPid(serial, bundleId, 8_000);
       if (!pid) {
         lastErr = 'app process never started';
