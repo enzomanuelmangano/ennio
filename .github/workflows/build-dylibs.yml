@@ -60,11 +60,19 @@ jobs:
         run: |
           bash packages/ennio/scripts/build-hid-helper.sh
           cp /tmp/ennio-build/enniohid packages/ennio/prebuilt/enniohid
+      # ennioax (cross-process AX reader) ships prebuilt too; build it here so
+      # the published binary follows its source instead of a hand commit.
+      - name: Build ennioax
+        run: |
+          bash packages/ennio/scripts/build-ax-helper.sh
+          cp /tmp/ennio-build/ennioax packages/ennio/prebuilt/ennioax
       - name: Upload enniohid artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: hid-helper
-          path: packages/ennio/prebuilt/enniohid
+          path: |
+            packages/ennio/prebuilt/enniohid
+            packages/ennio/prebuilt/ennioax
           if-no-files-found: error
           retention-days: 7
 
@@ -168,7 +176,7 @@ jobs:
           path: packages/ennio/prebuilt
       - name: Restore enniohid exec bit
         # upload/download-artifact does not preserve file modes.
-        run: chmod +x packages/ennio/prebuilt/enniohid
+        run: chmod +x packages/ennio/prebuilt/enniohid packages/ennio/prebuilt/ennioax
 
       - name: Regenerate manifest from downloaded artifacts
         run: bash packages/ennio/scripts/regen-manifest.sh
