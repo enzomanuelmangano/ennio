@@ -6,9 +6,15 @@
 // doubleTapOn / longPress are thin HID wrappers.
 
 import { CommandRegistry } from '../../core/command-registry';
-import type { MaestroCommand } from '../../maestro-parser';
-import { normalizeSelector } from '../../maestro-parser';
-import { POST_TAP_SETTLE_MS, interpolateSelector, sleep, timedAsync } from '../../runner/context';
+import type { MaestroCommand, MaestroSelector } from '../../maestro-parser';
+import { normalizeSelector, textMatchArgs } from '../../maestro-parser';
+import {
+  POST_TAP_SETTLE_MS,
+  RunContext,
+  interpolateSelector,
+  sleep,
+  timedAsync,
+} from '../../runner/context';
 import { captureHash, captureReactTs, findOnce, resolveCenter } from '../../runner/find';
 import { findRelationOnce, hasRelation } from '../../runner/relation';
 import { execTapOn } from '../../runner/tap';
@@ -31,6 +37,24 @@ function has<T extends string>(
   return typeof cmd === 'object' && cmd !== null && key in cmd;
 }
 
+/**
+ * The optional probe must see what the tap can reach, not only the in-app
+ * view walk: text the tap finds through the accessibility tree or a system
+ * host (an alert, a cross-process prompt) was otherwise "absent", and the
+ * optional tap was skipped while its target sat on screen. One instant look
+ * each, no waiting.
+ */
+async function probeTextElsewhere(ctx: RunContext, sel: MaestroSelector): Promise<unknown> {
+  if (!sel.text) return null;
+  const args = textMatchArgs(sel, ctx.profile.textMatchDefault);
+  const ax = await ctx.client.call('find_ax_by_text', args).catch(() => undefined);
+  if (ax && ax.ok && ax.data) return ax.data;
+  const alert = await ctx.client.call('alert_present').catch(() => undefined);
+  return alert && alert.ok && (alert.data as { present?: boolean } | undefined)?.present
+    ? alert.data
+    : null;
+}
+
 export function registerTapHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & TapOnCmd => has(c, 'tapOn'),
@@ -48,7 +72,9 @@ export function registerTapHandlers(registry: CommandRegistry): void {
         if (isOptional) {
           // A relative selector is found only through the relation-aware
           // resolve — findOnce ignores the relation and would see any match.
-          const r = hasRelation(sel) ? await findRelationOnce(ctx, sel) : await findOnce(ctx, sel);
+          const r = hasRelation(sel)
+            ? await findRelationOnce(ctx, sel)
+            : ((await findOnce(ctx, sel)) ?? (await probeTextElsewhere(ctx, sel)));
           if (!r) return;
         }
         // Maestro `repeat: N` + `delay: ms`: N taps with `delay` ms gap.
