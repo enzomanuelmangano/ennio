@@ -20,6 +20,7 @@
 import { execFileSync } from 'child_process';
 
 import type { Flags } from '../cli/args';
+import { findHelper } from '../ennio-hid';
 import { warmActuator } from '../hid';
 import { selectPlatform } from '../platform';
 import { EnnioSocketClient } from '../socket-client';
@@ -62,25 +63,20 @@ function checkXcode(): Result {
 
 function checkHidHelper(): Result {
   // In-house HID actuation: the enniohid host helper (CoreSimulator
-  const candidates = [process.env.ENNIO_HID_HELPER, '/tmp/ennio-build/enniohid'].filter(
-    Boolean,
-  ) as string[];
-  const found = candidates.find((c) => {
-    try {
-      return tryExec('test', ['-x', c]) !== null;
-    } catch {
-      return false;
-    }
-  });
-  // findDylib's package also ships prebuilt/enniohid; treat presence of
-  // either dev or packaged binary as pass. Best-effort detail.
-  if (found) return { name: 'enniohid (in-house HID)', severity: 'pass', detail: found };
-  return {
-    name: 'enniohid (in-house HID)',
-    severity: 'warn',
-    detail:
-      'helper not found in /tmp/ennio-build or prebuilt/; built from native-hid/helper or shipped in the tarball',
-  };
+  // Indigo). Same lookup the runner uses — env override, dev build, then
+  // the helper shipped in the package's prebuilt/.
+  try {
+    return { name: 'enniohid (in-house HID)', severity: 'pass', detail: findHelper() };
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    // A helper that fails its SHA-256 check is refused by the runner too:
+    // that is a failure, not a missing optional piece.
+    return {
+      name: 'enniohid (in-house HID)',
+      severity: detail.includes('SHA-256 mismatch') ? 'fail' : 'warn',
+      detail,
+    };
+  }
 }
 
 function checkDylib(): Result {
