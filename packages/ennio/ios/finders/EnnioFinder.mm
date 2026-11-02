@@ -591,6 +591,11 @@ static UIView *_Nullable walkAllWindows(BOOL (^matcher)(UIView *)) {
 
 @implementation EnnioFinder
 
++ (id)valueForKey:(NSString *)key ofView:(UIView *)view {
+    return kvcValueOrNil(view, key);
+}
+
+
 + (UIView *)findViewByTestID:(NSString *)testID {
     if (testID.length == 0) return nil;
     UIView *cached = cacheLookup(testID);

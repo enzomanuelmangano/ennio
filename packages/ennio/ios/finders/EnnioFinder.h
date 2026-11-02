@@ -41,6 +41,10 @@ typedef struct {
 
 /// Resolve text (matches accessibilityLabel or accessibilityValue) to
 /// a UIView. Uses a11y walk, no cache.
+/// KVC read that never throws twice for a class: a key the view's class
+/// does not have is remembered and skipped. nil when absent.
++ (nullable id)valueForKey:(NSString *)key ofView:(UIView *)view;
+
 + (nullable UIView *)findViewByText:(NSString *)text;
 
 /// Relaxed variant: skips the topmost-VC filter so views behind
