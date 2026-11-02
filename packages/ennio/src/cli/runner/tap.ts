@@ -21,7 +21,11 @@
 import type { TapIntent } from '../driver/types';
 import { bumpActuationGen, getScreenSize } from '../hid';
 import { MaestroSelector, textMatchArgs } from '../maestro-parser';
-import { chainHasAsyncPayloadHost, SUBMIT_DISMISS_TESTID_PATTERN } from './capabilities';
+import {
+  chainHasAnsweredPrompt,
+  chainHasAsyncPayloadHost,
+  SUBMIT_DISMISS_TESTID_PATTERN,
+} from './capabilities';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, captureReactTs, parsePoint, resolveRect } from './find';
@@ -959,6 +963,22 @@ export async function execTapOn(
         await ctx.client
           .call('wait_react_commit', { sinceMs: preLoopReact.ts, maxMs: 4000 })
           .catch(() => undefined);
+      });
+    }
+    // Answered system prompt (Save password?): the tap hit one of its
+    // buttons, but its controller lingers in the chain for a moment after
+    // the card is gone — a check right after still "saw" the prompt and
+    // tapped its synthesized rect, onto the app underneath. Wait for it to
+    // leave the chain (bounded).
+    if (chainHasAnsweredPrompt(chain)) {
+      await timedAsync(ctx, 'tap.waitPromptGone', async () => {
+        const deadline = Date.now() + 2500;
+        while (Date.now() < deadline) {
+          const cr = await ctx.client.call('top_vc_chain').catch(() => undefined);
+          const cls = ((cr?.data as { chain?: string[] })?.chain ?? []) as string[];
+          if (!chainHasAnsweredPrompt(cls)) break;
+          await sleep(80);
+        }
       });
     }
     // Submit-dismissal settle (opt-in, ENNIO_SUBMIT_DISMISS_MAX_MS): a

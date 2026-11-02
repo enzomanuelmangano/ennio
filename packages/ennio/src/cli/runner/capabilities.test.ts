@@ -49,3 +49,16 @@ describe('capability registry', () => {
     expect(SUBMIT_DISMISS_TESTID_PATTERN.test('cancel-btn')).toBe(false);
   });
 });
+
+describe('answered prompts', () => {
+  it('recognises the Save-password prompt in a VC chain', async () => {
+    const { chainHasAnsweredPrompt } = await import('./capabilities');
+    expect(
+      chainHasAnsweredPrompt([
+        'UIKeyboardHiddenViewController_Save',
+        '_SFAppPasswordSavingViewController',
+      ]),
+    ).toBe(true);
+    expect(chainHasAnsweredPrompt(['UINavigationController'])).toBe(false);
+  });
+});
