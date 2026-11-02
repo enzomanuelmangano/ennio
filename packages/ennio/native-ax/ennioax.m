@@ -15,7 +15,8 @@
 //                    nx,ny,nw,nh, cx,cy} ] }     // normalized [0,1] frame + center
 // `cx,cy` feed straight into the in-house HID (same [0,1] space).
 //
-// Requires: Simulator.app running + showing the device, and the
+// Requires: Simulator.app (Device Hub on Xcode 27) running + showing the
+// device, and the
 // controlling process trusted for Accessibility. Resolve device name
 // from UDID via CoreSimulator so the right window is matched when
 // several simulators are open.
@@ -161,6 +162,22 @@ static NSString *dumpTree(AXUIElementRef app, NSString *name, BOOL warm) {
     g.x, g.y, gs.width, gs.height, [[els componentsJoinedByString:@","] UTF8String]];
 }
 
+// YES when `host` shows a window titled after the device (title prefix,
+// as dumpTree matches it).
+static BOOL hostHasWindow(NSRunningApplication *host, NSString *name) {
+  AXUIElementRef app = AXUIElementCreateApplication(host.processIdentifier);
+  CFTypeRef wins = NULL;
+  BOOL found = NO;
+  if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, &wins) == kAXErrorSuccess && wins) {
+    for (id w in (__bridge NSArray *)wins) {
+      if ([axStr((__bridge AXUIElementRef)w, kAXTitleAttribute) hasPrefix:name]) { found = YES; break; }
+    }
+    CFRelease(wins);
+  }
+  CFRelease(app);
+  return found;
+}
+
 int main(int argc, char **argv) {
   @autoreleasepool {
     if (argc < 2) { fprintf(stderr, "usage: ennioax <UDID> [--persistent]\n"); return 2; }
@@ -171,13 +188,22 @@ int main(int argc, char **argv) {
       fprintf(stderr, "ennioax: process not trusted for Accessibility — grant it in System Settings > Privacy & Security > Accessibility\n");
       printf("{\"error\":\"not-ax-trusted\"}\n"); return 3;
     }
-    NSRunningApplication *sim = nil;
-    for (NSRunningApplication *a in NSWorkspace.sharedWorkspace.runningApplications)
-      if ([a.bundleIdentifier isEqual:@"com.apple.iphonesimulator"]) { sim = a; break; }
-    if (!sim) { printf("{\"error\":\"simulator-not-running\"}\n"); return 4; }
-
-    AXUIElementRef app = AXUIElementCreateApplication(sim.processIdentifier);
+    // Simulator.app, or Device Hub (com.apple.dt.Devices) — Xcode 27 shows
+    // simulators there and no longer ships Simulator.app. Both can run at
+    // once (two Xcodes installed): take the one with a window for THIS
+    // device, else the first host found.
     NSString *name = deviceName(udid); // may be nil → match any window
+    NSRunningApplication *sim = nil;
+    for (NSString *bundleID in @[ @"com.apple.iphonesimulator", @"com.apple.dt.Devices" ]) {
+      for (NSRunningApplication *a in NSWorkspace.sharedWorkspace.runningApplications) {
+        if (![a.bundleIdentifier isEqual:bundleID]) continue;
+        if (!sim) sim = a;
+        if (name.length && hostHasWindow(a, name)) { sim = a; goto picked; }
+      }
+    }
+  picked:
+    if (!sim) { printf("{\"error\":\"simulator-not-running\"}\n"); return 4; }
+    AXUIElementRef app = AXUIElementCreateApplication(sim.processIdentifier);
 
     if (!persistent) {
       // One-shot (back-compat): single dump, exit.
