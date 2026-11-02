@@ -20,7 +20,7 @@
 
 import type { TapIntent } from '../driver/types';
 import { bumpActuationGen, getScreenSize } from '../hid';
-import { MaestroSelector } from '../maestro-parser';
+import { MaestroSelector, textMatchArgs } from '../maestro-parser';
 import { chainHasAsyncPayloadHost, SUBMIT_DISMISS_TESTID_PATTERN } from './capabilities';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
@@ -430,7 +430,12 @@ export async function execTapOn(
       if (r && r.ok && r.data) return r.data as Rect;
     }
     if (sel.text) {
-      const r = await ctx.client.call('find_by_text', { text: sel.text }).catch(() => undefined);
+      // In the selector's match mode: looked up literally, a regex selector
+      // was never found and the stability loop below sampled to its 800ms
+      // deadline on every tap.
+      const r = await ctx.client
+        .call('find_by_text', textMatchArgs(sel, ctx.profile.textMatchDefault))
+        .catch(() => undefined);
       if (r && r.ok && r.data) return r.data as Rect;
     }
     return null;
@@ -460,7 +465,10 @@ export async function execTapOn(
   // points that fool socket-roundtrip sampling). Fallback: the legacy
   // CLI-side rect-sampling loop (HID driver, or the op missed).
   const steady = await timedAsync(ctx, 'tap.waitSteady', () =>
-    ctx.driver.waitTargetSteady(ctx.client, { id: sel.id, text: sel.text }),
+    ctx.driver.waitTargetSteady(
+      ctx.client,
+      sel.id ? { id: sel.id } : textMatchArgs(sel, ctx.profile.textMatchDefault),
+    ),
   );
   if (steady) {
     const cur = await sampleRect();
@@ -496,10 +504,14 @@ export async function execTapOn(
   // VISUAL position differs from its layout frame). Either way the
   // tap would land on the wrong layer; wait for hit-test to confirm
   // exposure.
-  const exposureSel: { testID?: string; text?: string } | null = sel.id
+  // Text in the selector's own match mode: a Maestro selector is a regex
+  // ("Back|Indietro", "Settings.*"); looked up literally it was never
+  // found, never "exposed", and every such tap waited out the full exposure
+  // timeout (~850ms) before firing.
+  const exposureSel: { testID?: string; text?: string; regex?: boolean } | null = sel.id
     ? { testID: sel.id }
     : sel.text
-      ? { text: sel.text }
+      ? textMatchArgs(sel, ctx.profile.textMatchDefault)
       : null;
   // When the exposure wait expires without the target ever becoming
   // exposed, the point is covered by another layer (tab bar, overlay).
