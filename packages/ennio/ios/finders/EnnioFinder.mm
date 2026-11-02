@@ -112,18 +112,34 @@ static BOOL isInteractive(UIView *v) {
 // Use KVC with @try so missing keys don't crash; covers RCTText,
 // RCTBaseText, RCTParagraphComponentView (Fabric), RCTTextView, and
 // any other custom view that defines a `text` property.
-static NSString *_Nullable readAnyText(UIView *v) {
+// KVC on a key a class doesn't have throws NSUndefinedKeyException — and
+// most views (every plain RN container) have neither `text` nor
+// `attributedText`, so each text find threw and caught two exceptions per
+// view: ~130us each, ~95% of a find's cost on a 250-view screen. Remember,
+// per class and key, that the lookup throws, and skip it from then on. The
+// first lookup is the same KVC as before, so what is read is unchanged.
+static id _Nullable kvcValueOrNil(UIView *v, NSString *key) {
+    static NSMutableSet<NSString *> *throwing;
+    if (!throwing) throwing = [NSMutableSet new];
+    NSString *k = [NSString stringWithFormat:@"%@.%@", NSStringFromClass(v.class), key];
+    if ([throwing containsObject:k]) return nil;
     @try {
-        id raw = [v valueForKey:@"text"];
-        if ([raw isKindOfClass:NSString.class]) return (NSString *)raw;
-        if ([raw isKindOfClass:NSAttributedString.class]) return [(NSAttributedString *)raw string];
+        return [v valueForKey:key];
+    } @catch (NSException *e) {
+        // Only "this class has no such key" is a property of the class; any
+        // other exception (a getter failing in one state) is not remembered.
+        if ([e.name isEqualToString:NSUndefinedKeyException]) [throwing addObject:k];
+        return nil;
     } @catch (...) {
+        return nil;
     }
-    @try {
-        id raw = [v valueForKey:@"attributedText"];
+}
+
+static NSString *_Nullable readAnyText(UIView *v) {
+    for (NSString *key in @[ @"text", @"attributedText" ]) {
+        id raw = kvcValueOrNil(v, key);
         if ([raw isKindOfClass:NSString.class]) return (NSString *)raw;
         if ([raw isKindOfClass:NSAttributedString.class]) return [(NSAttributedString *)raw string];
-    } @catch (...) {
     }
     return nil;
 }
@@ -198,14 +214,28 @@ static CGFloat relationDistance(CGRect r) {
     }
 }
 
-static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
-    if (!haystack.length || !pattern.length) return NO;
-    NSError *err = nil;
+// Compiled selector regexes, keyed by pattern. A text find tests the same
+// pattern against every label in the tree — compiling it per comparison
+// made each find_by_text cost tens of ms on a large screen. An invalid
+// pattern caches NSNull (no match, as before). Main thread only.
+static NSRegularExpression *_Nullable cachedSelectorRegex(NSString *pattern) {
+    static NSMutableDictionary<NSString *, id> *cache;
+    if (!cache) cache = [NSMutableDictionary new];
+    id hit = cache[pattern];
+    if (hit) return hit == NSNull.null ? nil : hit;
+    if (cache.count > 256) [cache removeAllObjects];
     NSRegularExpression *re = [NSRegularExpression
         regularExpressionWithPattern:pattern
                              options:NSRegularExpressionCaseInsensitive
-                               error:&err];
-    if (err || !re) return NO;
+                               error:nil];
+    cache[pattern] = re ?: (id)NSNull.null;
+    return re;
+}
+
+static BOOL regexMatchCI(NSString *haystack, NSString *pattern) {
+    if (!haystack.length || !pattern.length) return NO;
+    NSRegularExpression *re = cachedSelectorRegex(pattern);
+    if (!re) return NO;
     NSRange r = [re rangeOfFirstMatchInString:haystack options:0 range:NSMakeRange(0, haystack.length)];
     return r.location != NSNotFound;
 }
@@ -284,6 +314,11 @@ static BOOL viewMatchesText(UIView *v, NSString *text) {
 // candidate — interactive views beat plain text labels.
 static void collectByText(UIView *root, NSString *text, NSMutableArray<UIView *> *out) {
     if (!root) return;
+    // Nothing under a hidden or fully transparent view can be on screen
+    // (viewIsLikelyOnScreen rejects every descendant), so don't walk it:
+    // apps keep whole screens mounted and hidden (inactive tabs, stacked
+    // routes), and visiting them dominated the cost of every text find.
+    if (root.hidden || root.alpha < 0.01) return;
     if (viewMatchesText(root, text)) [out addObject:root];
     for (UIView *sub in root.subviews) collectByText(sub, text, out);
 }
@@ -630,6 +665,11 @@ static UIView *_Nullable walkAllWindows(BOOL (^matcher)(UIView *)) {
 
 @implementation EnnioFinder
 
++ (id)valueForKey:(NSString *)key ofView:(UIView *)view {
+    return kvcValueOrNil(view, key);
+}
+
+
 + (UIView *)findViewByTestID:(NSString *)testID {
     if (testID.length == 0) return nil;
     UIView *cached = cacheLookup(testID);
@@ -702,11 +742,22 @@ static CGRect axFrameOf(id element) {
 
 typedef struct { CGRect rect; int rank; CGFloat area; BOOL found; } AxMatch;
 
+// Proxies-only AX find: match only accessibility elements that are not
+// UIViews — what the view walk cannot see (remote-view proxies, SwiftUI) —
+// plus the cross-process host synth. Used for an instant look ahead of the
+// view poll, where a UIView match would bypass the walk's hidden/topmost
+// filters (a label on the screen behind a still-mounting push or modal).
+static BOOL g_axProxiesOnly = NO;
+
 static void collectAxByText(id root,
                             NSString *text,
                             NSMutableArray *outRects,
-                            NSMutableSet *visited) {
+                            NSMutableSet *visited,
+                            UIView *_Nullable container) {
     if (!root) return;
+    // The nearest UIView owning this element: itself, or the view whose
+    // accessibility elements we are walking.
+    UIView *owner = [root isKindOfClass:UIView.class] ? (UIView *)root : container;
     NSValue *idVal = [NSValue valueWithNonretainedObject:root];
     if ([visited containsObject:idVal]) return;
     [visited addObject:idVal];
@@ -721,7 +772,13 @@ static void collectAxByText(id root,
         if (v.hidden || v.alpha < 0.01 || v.accessibilityElementsHidden) return;
     }
 
-    if (axMatchesText(root, text)) {
+    // proxiesOnly: a proxy counts only when its owning view is on screen and
+    // in the topmost presented controller — the view walk's own filters —
+    // so a proxy on a covered or hidden screen can't answer the early look.
+    BOOL eligible = !g_axProxiesOnly ||
+        (![root isKindOfClass:UIView.class] && owner && viewIsLikelyOnScreen(owner) &&
+         finderVCInTopmost(finderHostingVC(owner), finderTopmostPresentedVC()));
+    if (eligible && axMatchesText(root, text)) {
         CGRect r = axFrameOf(root);
         if (!CGRectIsEmpty(r)) {
             // Filter off-screen elements. AX walker exposes cached /
@@ -752,7 +809,7 @@ static void collectAxByText(id root,
         id elems = [root accessibilityElements];
         if ([elems isKindOfClass:NSArray.class]) {
             for (id e in (NSArray *)elems) {
-                collectAxByText(e, text, outRects, visited);
+                collectAxByText(e, text, outRects, visited, owner);
             }
         }
     }
@@ -767,7 +824,7 @@ static void collectAxByText(id root,
         if (n > 0 && n < 4096) {
             for (NSInteger i = 0; i < n; i++) {
                 id sub = [root accessibilityElementAtIndex:i];
-                if (sub) collectAxByText(sub, text, outRects, visited);
+                if (sub) collectAxByText(sub, text, outRects, visited, owner);
             }
         }
     }
@@ -775,7 +832,7 @@ static void collectAxByText(id root,
     // either of the above (the common case).
     if ([root isKindOfClass:UIView.class]) {
         for (UIView *sub in [(UIView *)root subviews]) {
-            collectAxByText(sub, text, outRects, visited);
+            collectAxByText(sub, text, outRects, visited, owner);
         }
     }
 }
@@ -958,6 +1015,16 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     return [self findAxRectByText:text found:found regex:NO];
 }
 
++ (EnnioRect)findAxRectByText:(NSString *)text
+                        found:(BOOL *)found
+                        regex:(BOOL)regex
+                  proxiesOnly:(BOOL)proxiesOnly {
+    g_axProxiesOnly = proxiesOnly;
+    EnnioRect r = [self findAxRectByText:text found:found regex:regex];
+    g_axProxiesOnly = NO;
+    return r;
+}
+
 + (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found regex:(BOOL)regex {
     g_textSelectorIsRegex = regex;
     EnnioRect zero = {0, 0, 0, 0};
@@ -971,18 +1038,35 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
         for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-            collectAxByText(w, text, rects, visited);
+            collectAxByText(w, text, rects, visited, nil);
             UIViewController *vc = w.rootViewController;
             while (vc) {
                 UIView *vv = vc.viewIfLoaded;
                 if (vv && !vv.superview) {
-                    collectAxByText(vv, text, rects, visited);
+                    collectAxByText(vv, text, rects, visited, nil);
                 }
                 vc = vc.presentedViewController;
             }
         }
     }
     if (rects.count == 0) {
+        // The early look (proxiesOnly) synthesizes only the Save-password
+        // prompt: it covers everything (keyboard window included) and is
+        // reported only once fully presented, so nothing in-app can be
+        // shadowed by it. Other hosts (a picker anywhere in the chain) could
+        // shadow an in-app button still mounting above them — they wait for
+        // the full lookup after the poll.
+        if (g_axProxiesOnly) {
+            for (UIViewController *pw in allPresentedViewControllers()) {
+                EnnioRect r = {0, 0, 0, 0};
+                if ([NSStringFromClass([pw class]) containsString:@"PasswordSavingViewController"] &&
+                    synthPasswordSavingRect(pw, text, &r)) {
+                    if (found) *found = YES;
+                    return r;
+                }
+            }
+            return zero;
+        }
         // Last resort: cross-process VC chrome geometry synth.
         // PHPicker / share sheet / doc picker — known-class hosts
         // whose chrome labels live in a remote process. We can't

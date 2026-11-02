@@ -186,13 +186,10 @@ void RegisterEnnioSystemHandlers(void) {
                                                               tappable ? @"b" : @"",
                                                               adjustable ? @"a" : @""];
                 NSString *t = @"";
-                @try {
-                    id raw = [v valueForKey:@"text"];
-                    if ([raw isKindOfClass:NSString.class]) t = (NSString *)raw;
-                    else if ([raw isKindOfClass:NSAttributedString.class])
-                        t = [(NSAttributedString *)raw string];
-                } @catch (...) {
-                }
+                id raw = [EnnioFinder valueForKey:@"text" ofView:v];
+                if ([raw isKindOfClass:NSString.class]) t = (NSString *)raw;
+                else if ([raw isKindOfClass:NSAttributedString.class])
+                    t = [(NSAttributedString *)raw string];
                 // Emit only genuinely on-screen views: isOnScreen adds the
                 // window-rect intersection the subtree prune above can't —
                 // e.g. rows scrolled out of a list still live in the tree.

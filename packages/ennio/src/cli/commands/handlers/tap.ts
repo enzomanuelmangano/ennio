@@ -37,6 +37,14 @@ function has<T extends string>(
   return typeof cmd === 'object' && cmd !== null && key in cmd;
 }
 
+/** assertVisible, or extendedWaitUntil on `visible` (not `notVisible`). */
+function waitsToAppear(next: MaestroCommand | undefined): boolean {
+  if (!next || typeof next !== 'object') return false;
+  if ('assertVisible' in next) return true;
+  const w = (next as { extendedWaitUntil?: unknown }).extendedWaitUntil;
+  return !!w && typeof w === 'object' && 'visible' in w && !('notVisible' in w);
+}
+
 /**
  * The optional probe must see what the tap can reach, not only the in-app
  * view walk: text the tap finds through the accessibility tree or a system
@@ -252,6 +260,7 @@ export function registerTapHandlers(registry: CommandRegistry): void {
               reactAttach: preReact.attach,
               reactSinceMs: preReact.ts,
               nextEditsField,
+              nextWaitsToAppear: waitsToAppear(nextCmd),
             }),
           );
         }

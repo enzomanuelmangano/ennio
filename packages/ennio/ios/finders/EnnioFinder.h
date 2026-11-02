@@ -41,6 +41,10 @@ typedef struct {
 
 /// Resolve text (matches accessibilityLabel or accessibilityValue) to
 /// a UIView. Uses a11y walk, no cache.
+/// KVC read that never throws twice for a class: a key the view's class
+/// does not have is remembered and skipped. nil when absent.
++ (nullable id)valueForKey:(NSString *)key ofView:(UIView *)view;
+
 + (nullable UIView *)findViewByText:(NSString *)text;
 
 /// Relaxed variant: skips the topmost-VC filter so views behind
@@ -71,6 +75,13 @@ typedef struct {
 
 /// As above, with the selector's regex mode explicit (CLI's isRegexText flag).
 + (EnnioRect)findAxRectByText:(NSString *)text found:(BOOL *)found regex:(BOOL)regex;
+
+/// As above; with proxiesOnly, UIView elements never match — only what the
+/// view walk cannot see (remote-view proxies, SwiftUI) and the host synth.
++ (EnnioRect)findAxRectByText:(NSString *)text
+                        found:(BOOL *)found
+                        regex:(BOOL)regex
+                  proxiesOnly:(BOOL)proxiesOnly;
 
 /// Convert a UIView's bounds to window coordinates. Returns CGRectZero
 /// if the view is not attached to a window.
