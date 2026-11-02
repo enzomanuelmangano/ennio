@@ -20,6 +20,7 @@ Common options:
   --version, -V  print version and exit
   --verbose, -v  detailed command execution (on by default)
   --quiet, -q    suppress per-step output
+  -e KEY=VALUE   flow variable for \${KEY} (repeatable; also --env)
   --trace        emit a trace marker between commands
 
 Environment:

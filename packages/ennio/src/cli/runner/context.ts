@@ -7,6 +7,7 @@
 // transitions from no-ops. Everything here is pure data — no I/O.
 
 import type { GestureDriver } from '../driver/types';
+import { lookupCliVar } from '../maestro-parser';
 import type { Platform } from '../platform/types';
 import type { TuningProfile } from '../settle/profile';
 import type { EnnioSocketClient } from '../socket-client';
@@ -154,10 +155,10 @@ export function interpolate(str: string, ctx: RunContext): string {
         const v = ctx.outputs[key];
         return v == null ? '' : String(v);
       }
-      return process.env[key] ?? '';
+      return lookupCliVar(key) ?? '';
     })
     .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, name: string) => {
-      const v = ctx.flowEnv?.[name] ?? process.env[name];
+      const v = ctx.flowEnv?.[name] ?? lookupCliVar(name);
       return v !== undefined ? String(v) : match;
     });
 }

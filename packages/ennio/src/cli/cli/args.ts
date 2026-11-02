@@ -9,6 +9,7 @@
  *   -v               → alias for --verbose
  *   -V / --version   → print version
  *   -h / --help      → help flag
+ *   -e KEY=VAL       → flow variable (Maestro's -e / --env; repeatable)
  */
 
 export type Flags = {
@@ -31,8 +32,9 @@ export type Flags = {
   /** --disable-animations: suppress app animations (ENNIO_NO_ANIMATIONS) for
    *  speed. (Deprecated alias: --no-animations.) */
   noAnimations?: boolean;
-  /** --disable-reuse-app: force a full relaunch on clearState instead of the
-   *  default soft-reset (data wipe + JS reload). Reuse is ON by default. */
+  /** --disable-reuse-app: relaunch the app on every launchApp (clearState
+   *  included), as Maestro does, instead of reusing the running process.
+   *  Reuse is ON by default. */
   disableReuseApp?: boolean;
   /** --android: target an Android emulator/device via adb. Default: iOS. */
   android?: boolean;
@@ -74,6 +76,9 @@ export type Flags = {
   /** --fail-on-regression: `ennio diag compare` exits non-zero when a metric
    *  regressed vs the baseline. Default off (compare is informational). */
   failOnRegression?: boolean;
+  /** -e / --env KEY=VALUE (repeatable): flow variables, as Maestro's `-e`.
+   *  Read by `${KEY}` interpolation in flows. */
+  env?: Record<string, string>;
 };
 
 export type ParsedArgs = {
@@ -148,6 +153,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === '-q') {
       flags.quiet = true;
+      continue;
+    }
+    if (a === '-e' || a === '--env' || a.startsWith('--env=')) {
+      const pair = a.startsWith('--env=') ? a.slice('--env='.length) : argv[++i];
+      const eq = pair?.indexOf('=') ?? -1;
+      if (eq <= 0) throw new Error(`${a} expects KEY=VALUE, got ${pair ?? 'nothing'}`);
+      flags.env = { ...flags.env, [pair.slice(0, eq)]: pair.slice(eq + 1) };
       continue;
     }
     if (!a.startsWith('--')) {
