@@ -307,8 +307,10 @@ void RegisterEnnioWaitHandlers(void) {
 
     EnnioControlSocket::registerHandler("frame_hash", [](const std::string &) -> std::string {
         uint64_t h = [EnnioSettle currentHash];
-        char buf[32];
-        snprintf(buf, sizeof(buf), "{\"hash\":\"%llx\"}", (unsigned long long)h);
+        uint64_t sh = [EnnioSettle structHash];
+        char buf[64];
+        snprintf(buf, sizeof(buf), "{\"hash\":\"%llx\",\"shash\":\"%llx\"}",
+                 (unsigned long long)h, (unsigned long long)sh);
         return std::string(buf);
     });
 

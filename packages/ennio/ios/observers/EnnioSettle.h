@@ -57,6 +57,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// a tap actually changed anything on screen by comparing pre/post
 /// hashes; same value = visual no-op.
 + (uint64_t)currentHash;
+/// Hash of the visible content only (labels, ids, values, control state),
+/// no geometry: steady under endless decorative animations.
++ (uint64_t)structHash;
 
 /// Wait until the visible-UIView hash differs from `baselineHash` for
 /// at least one CADisplayLink tick, or until `maxMs` elapses. Used as

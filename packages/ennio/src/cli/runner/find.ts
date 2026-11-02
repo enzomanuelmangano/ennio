@@ -31,6 +31,23 @@ import {
 // detect "did the tap actually change anything".
 // =====================================================================
 
+/// Both settle hashes: `hash` folds geometry in, `shash` is the visible
+/// content alone (labels, ids, values, control state), which an endless
+/// decorative animation leaves untouched. `shash` is '' on dylibs that
+/// predate it.
+export async function captureHashes(ctx: RunContext): Promise<{ hash: string; shash: string }> {
+  try {
+    const r = await ctx.client.call('frame_hash');
+    if (r.ok && r.data) {
+      const d = r.data as { hash: string; shash?: string };
+      return { hash: String(d.hash), shash: d.shash ? String(d.shash) : '' };
+    }
+  } catch {
+    /* hash unavailable */
+  }
+  return { hash: '', shash: '' };
+}
+
 export async function captureHash(ctx: RunContext): Promise<string> {
   try {
     const r = await ctx.client.call('frame_hash');

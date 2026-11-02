@@ -109,7 +109,7 @@ export async function waitUntilVisible(
   // Dump diagnostic state to stderr so a CI-side failure log
   // includes what was actually on screen at the timeout. Without
   // this we'd only see "assertVisible timeout" and have to guess.
-  await dumpFailureState(ctx, sel, 'assertVisible');
+  if (!ctx.quietMiss) await dumpFailureState(ctx, sel, 'assertVisible');
   throw new Error(`assertVisible/waitFor timeout: ${JSON.stringify(sel)}`);
 }
 

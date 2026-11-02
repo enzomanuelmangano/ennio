@@ -54,6 +54,12 @@ static void idleObserverCallback(CFRunLoopObserverRef observer,
 static NSCondition *g_commitCondition;
 static uint64_t g_lastHashChangeMs = 0;
 static uint64_t g_currentHash = 0;
+// Visible content only: labels, ids, values and control state of the views
+// that are shown, no geometry and no hidden sentinel. A screen with an
+// endless decorative animation (a bobbing or blinking mascot, a spinner)
+// churns g_currentHash on every frame but leaves this one alone, so "did
+// anything happen after the tap?" stays answerable there.
+static uint64_t g_structHash = 0;
 // Set true the first time the frame-hash actually changes (a real
 // commit, not the seed value stamped at start). Until then lastCommitMs
 // reports 0 — matching the "no commit observed yet" contract callers
@@ -69,12 +75,15 @@ static inline void hashFeed(uint64_t *h, const void *data, size_t len) {
     }
 }
 
-static void walkAndHash(UIView *v, uint64_t *h) {
+static void walkAndHash(UIView *v, uint64_t *h, uint64_t *sh) {
     if (!v) return;
     if (v.hidden || v.alpha < 0.01) {
         // Hidden subtree — feed a sentinel and stop descending.
         const char *s = "HIDE";
         hashFeed(h, s, 4);
+        // Not into sh: a decorative subtree fading in and out (a mascot's
+        // blink) would churn it. Hidden labelled content still changes sh,
+        // because its labels drop out of the walk.
         return;
     }
     CGRect window = [v.window convertRect:v.bounds fromView:v];
@@ -97,16 +106,19 @@ static void walkAndHash(UIView *v, uint64_t *h) {
     if (aid.length) {
         const char *s = aid.UTF8String;
         hashFeed(h, s, std::strlen(s));
+        hashFeed(sh, s, std::strlen(s));
     }
     NSString *lab = v.accessibilityLabel;
     if (lab.length) {
         const char *s = lab.UTF8String;
         hashFeed(h, s, std::strlen(s));
+        hashFeed(sh, s, std::strlen(s));
     }
     NSString *val = v.accessibilityValue;
     if (val.length) {
         const char *s = val.UTF8String;
         hashFeed(h, s, std::strlen(s));
+        hashFeed(sh, s, std::strlen(s));
     }
     // Control state — parity with Android's recHash folding isChecked/
     // isSelected/isEnabled. accessibilityValue alone misses a toggle whose
@@ -121,15 +133,18 @@ static void walkAndHash(UIView *v, uint64_t *h) {
         UIControl *ctrl = (UIControl *)v;
         uint8_t state = (uint8_t)((ctrl.isSelected ? 1 : 0) | (ctrl.isEnabled ? 2 : 0));
         hashFeed(h, &state, sizeof(state));
+        hashFeed(sh, &state, sizeof(state));
         if ([v isKindOfClass:UISwitch.class]) {
             uint8_t on = ((UISwitch *)v).isOn ? 1 : 0;
             hashFeed(h, &on, sizeof(on));
+            hashFeed(sh, &on, sizeof(on));
         } else if ([v isKindOfClass:UISegmentedControl.class]) {
             int32_t seg = (int32_t)((UISegmentedControl *)v).selectedSegmentIndex;
             hashFeed(h, &seg, sizeof(seg));
+            hashFeed(sh, &seg, sizeof(seg));
         }
     }
-    for (UIView *sub in v.subviews) walkAndHash(sub, h);
+    for (UIView *sub in v.subviews) walkAndHash(sub, h, sh);
 }
 
 @interface EnnioCommitTicker : NSObject
@@ -143,9 +158,11 @@ static void walkAndHash(UIView *v, uint64_t *h) {
     UIWindow *win = [EnnioBootstrap keyWindow];
     if (!win) return;
     uint64_t h = 1469598103934665603ULL; // FNV offset basis
-    walkAndHash(win, &h);
+    uint64_t sh = 1469598103934665603ULL;
+    walkAndHash(win, &h, &sh);
 
     [g_commitCondition lock];
+    g_structHash = sh;
     if (h != g_currentHash) {
         g_currentHash = h;
         g_lastHashChangeMs = nowMs();
@@ -241,6 +258,13 @@ static EnnioCommitTicker *g_commitTicker;
 
 + (uint64_t)currentHash {
     return g_currentHash;
+}
+
++ (uint64_t)structHash {
+    [g_commitCondition lock];
+    uint64_t sh = g_structHash;
+    [g_commitCondition unlock];
+    return sh;
 }
 
 + (uint32_t)waitForHashChangeSince:(uint64_t)baselineHash maxMs:(uint32_t)maxMs {
