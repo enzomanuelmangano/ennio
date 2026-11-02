@@ -177,7 +177,8 @@ export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     try {
-      const pid = adb(serial, ['shell', 'pidof', pkg]).trim().split(/\s+/)[0];
+      // Short per-poll bound so the loop's own maxMs holds on a wedged emulator.
+      const pid = adb(serial, ['shell', 'pidof', pkg], { timeoutMs: 5_000 }).trim().split(/\s+/)[0];
       if (pid && /^\d+$/.test(pid)) return pid;
     } catch {
       /* not up yet */
@@ -348,7 +349,7 @@ export function abstractSocketBound(serial: string, name: string): boolean {
 /** Wipe app data (UserDefaults / files / databases). Android's `pm clear`
  *  is the equivalent of the iOS data-container wipe. */
 export function clearAppData(serial: string, pkg: string): void {
-  adb(serial, ['shell', 'pm', 'clear', pkg]);
+  adb(serial, ['shell', 'pm', 'clear', pkg], { timeoutMs: 60_000 });
 }
 
 export function terminateAndroidApp(serial: string, pkg: string): void {
