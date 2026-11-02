@@ -8,13 +8,15 @@
  */
 
 import { existsSync, statSync } from 'fs';
-import { basename, join, resolve } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 
 import { glob } from 'glob';
 
 import type { Flags } from '../cli/args';
 import { EnnioRunner } from '../core';
+import { setCliVars } from '../maestro-parser';
 import { selectPlatform } from '../platform';
+import { WORKSPACE_CONFIG_NAMES, orderFlows, readWorkspaceConfig } from '../workspace-config';
 
 function isMaestroFile(filePath: string): boolean {
   return filePath.endsWith('.yaml') || filePath.endsWith('.yml');
@@ -24,17 +26,45 @@ function isSubflowFile(filePath: string): boolean {
   return basename(filePath).startsWith('_');
 }
 
-async function expandFiles(patterns: string[]): Promise<string[]> {
+export async function expandFiles(
+  patterns: string[],
+): Promise<{ files: string[]; stopOnFailureGroups: string[][] }> {
   const files: string[] = [];
+  const stopOnFailureGroups: string[][] = [];
   for (const pattern of patterns) {
     const resolved = resolve(pattern);
     if (existsSync(resolved) && statSync(resolved).isDirectory()) {
-      const yamlMatches = await glob(join(pattern, '**/*.{yaml,yml}'));
-      files.push(
-        ...yamlMatches
-          .filter((f) => isMaestroFile(f) && !f.includes('/subflows/') && !isSubflowFile(f))
-          .map((f) => resolve(f)),
-      );
+      // A Maestro workspace: config.yaml picks the flows and their order.
+      const config = readWorkspaceConfig(resolved);
+      if (config?.unsupported.length) {
+        console.warn(
+          `[ennio] ${config.path}: ignoring unsupported keys: ${config.unsupported.join(', ')}`,
+        );
+      }
+      // Maestro's default with a config is the top level; without one ennio
+      // keeps walking the whole tree.
+      const globs = config ? (config.flows ?? ['*']) : ['**/*.{yaml,yml}'];
+      const yamlMatches = (await Promise.all(globs.map((g) => glob(join(resolved, g))))).flat();
+      const dirFiles = [
+        ...new Set(
+          yamlMatches
+            .filter(
+              (f) =>
+                isMaestroFile(f) &&
+                !f.includes('/subflows/') &&
+                !isSubflowFile(f) &&
+                !(dirname(f) === resolved && WORKSPACE_CONFIG_NAMES.includes(basename(f))),
+            )
+            .map((f) => resolve(f)),
+        ),
+      ];
+      const ordered = orderFlows(dirFiles, config?.flowsOrder);
+      files.push(...ordered);
+      // continueOnFailure: false — a failure skips the rest of THIS
+      // directory's ordered sequence; its unordered flows still run.
+      if (config?.continueOnFailure === false && config.flowsOrder?.length) {
+        stopOnFailureGroups.push(ordered.slice(0, config.flowsOrder.length));
+      }
     } else {
       const matches = await glob(pattern);
       files.push(
@@ -44,7 +74,7 @@ async function expandFiles(patterns: string[]): Promise<string[]> {
       );
     }
   }
-  return files;
+  return { files, stopOnFailureGroups };
 }
 
 export async function runTestCommand(positional: string[], flags: Flags): Promise<number> {
@@ -63,8 +93,8 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     console.error('                        Default actuation is real HID (full gesture path).');
     console.error('  --disable-animations  Suppress app animations (transitions snap to');
     console.error('                        final frame) — faster, but alters animated UI');
-    console.error('  --disable-reuse-app   Force a full relaunch on clearState. App reuse');
-    console.error('                        (soft-reset: data wipe + JS reload) is ON by default.');
+    console.error('  --disable-reuse-app   Relaunch the app on every launchApp, as Maestro does');
+    console.error('                        (clearState included). App reuse is ON by default.');
     console.error('  --disable-touches     Turn OFF the default touch visualization (every');
     console.error('                        tap/swipe is drawn on screen; restored on exit).');
     console.error('                        Use for pixel-exact screenshot comparisons.');
@@ -77,7 +107,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     return 1;
   }
 
-  const files = await expandFiles(positional);
+  const { files, stopOnFailureGroups } = await expandFiles(positional);
   if (files.length === 0) {
     console.error('No Maestro YAML files found');
     return 1;
@@ -87,6 +117,9 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
   // launch site (set there from this process env). Set it here so all
   // three launch paths see a single source of truth.
   if (flags.noAnimations) process.env.ENNIO_NO_ANIMATIONS = '1';
+  // -e KEY=VALUE: flow variables, read by `${KEY}` interpolation (not
+  // written to process.env — see setCliVars).
+  setCliVars(flags.env ?? {});
   // Touch visualization is ON by default — every gesture ennio performs
   // is visible on the device (and in --record footage), and the runner
   // turns it off the moment the run ends. --disable-touches opts out for
@@ -115,6 +148,7 @@ export async function runTestCommand(positional: string[], flags: Flags): Promis
     safeMode: flags.safeMode ?? false,
     inProcessTap: flags.inProcessTap ?? false,
     failFast: flags.failFast ?? false,
+    stopOnFailureGroups,
     platform: selectPlatform(platformName),
     // --record: one video for the whole suite, --output dir or cwd.
     recordPath: flags.record

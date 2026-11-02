@@ -20,11 +20,16 @@
 
 import type { TapIntent } from '../driver/types';
 import { bumpActuationGen, getScreenSize } from '../hid';
-import { MaestroSelector } from '../maestro-parser';
-import { chainHasAsyncPayloadHost, SUBMIT_DISMISS_TESTID_PATTERN } from './capabilities';
+import { MaestroSelector, textMatchArgs } from '../maestro-parser';
+import {
+  chainHasAnsweredPrompt,
+  chainHasAsyncPayloadHost,
+  SUBMIT_DISMISS_TESTID_PATTERN,
+} from './capabilities';
 
 import { DEFAULT_WIN_H, DEFAULT_WIN_W, Rect, RunContext, sleep, timedAsync } from './context';
 import { captureHash, captureReactTs, parsePoint, resolveRect } from './find';
+import { hasRelation, resolveAnchorRect, withResolvedRelation } from './relation';
 
 // A find slower than this means the app's main thread is starved (the
 // in-process finder polls there). Normal finds are ~16ms, so this only
@@ -160,6 +165,12 @@ export async function execTapOn(
     await ctx.driver.tap(ctx.udid, x, y, { intent });
     return;
   }
+  // A relative selector (below/above/leftOf/rightOf) is honoured only by the
+  // dylib's text finder. Every by-label shortcut below — tab routing, the
+  // cross-process AX fast path / cross-check / tapTarget, activate_by_text,
+  // tap_tab — would take the first match anywhere and tap the element the
+  // relation was written to exclude, so they are all skipped for it.
+  const relational = hasRelation(sel);
   // UIAlertController auto-handler: button labels never make it into
   // the RN view tree, so a text-selector tap on an alert button would
   // miss. Detect a present alert and route through the dylib's
@@ -169,7 +180,9 @@ export async function execTapOn(
       const a = await timedAsync(ctx, 'tap.alertProbe', () => ctx.client.call('alert_present'));
       if (a.ok && a.data && (a.data as { present: boolean }).present) {
         bumpActuationGen();
-        const t = await ctx.client.call('alert_tap', { buttonText: sel.text });
+        // Regex mode only — the alert op anchors the raw selector text itself.
+        const { regex } = textMatchArgs(sel, ctx.profile.textMatchDefault);
+        const t = await ctx.client.call('alert_tap', { buttonText: sel.text, regex });
         if (t.ok && t.data && (t.data as { tapped: boolean }).tapped) return;
       }
     } catch {
@@ -181,7 +194,10 @@ export async function execTapOn(
     // change, which would otherwise trip the phantom detector into a
     // pointless HID redo); baseline keeps the probe in the retap loop
     // only.
-    if (await timedAsync(ctx, 'tap.tabProbe', () => ctx.driver.tryTabTap(ctx.client, sel.text!)))
+    if (
+      !relational &&
+      (await timedAsync(ctx, 'tap.tabProbe', () => ctx.driver.tryTabTap(ctx.client, sel.text!)))
+    )
       return;
     // (Skipped when childOf is set — the cross-process AX can't scope by
     // parent, and a bare testID/label match would pick the wrong sibling.)
@@ -194,11 +210,12 @@ export async function execTapOn(
     // it and verify the frame moved. High-confidence (testID-backed) and
     // text-only, so the hot path is unaffected; falls through on no
     // match / no effect / off-box.
-    const axEl = sel.childOf
-      ? null
-      : await timedAsync(ctx, 'tap.axFastResolve', () =>
-          ctx.platform.ax.resolve(ctx.udid, { text: sel.text }),
-        );
+    const axEl =
+      sel.childOf || relational
+        ? null
+        : await timedAsync(ctx, 'tap.axFastResolve', () =>
+            ctx.platform.ax.resolve(ctx.udid, { text: sel.text }),
+          );
     if (axEl) {
       // Doomed-tap gate for the AX fast path: a VC transition in flight
       // at dispatch time swallows the touch AND means the AX snapshot
@@ -233,6 +250,13 @@ export async function execTapOn(
       }
     }
   }
+  // Relative selector: resolve its anchor ONCE, so every re-find below
+  // (stability samples, retaps) targets the same side of the same anchor.
+  if (hasRelation(sel) && !sel.relation) {
+    const scoped = await withResolvedRelation(ctx, sel, resolveAnchorRect);
+    if (!scoped) throw new Error(`element not found: ${JSON.stringify(sel)}`);
+    sel = scoped;
+  }
   const findStart = Date.now();
   let rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
   // The find's own latency is a free main-thread-load probe. The dylib's
@@ -257,7 +281,7 @@ export async function execTapOn(
       rect = await timedAsync(ctx, 'tap.find', () => resolveRect(ctx, sel));
     }
   }
-  if (!rect && (sel.id || sel.text) && !sel.childOf) {
+  if (!rect && (sel.id || sel.text) && !sel.childOf && !relational) {
     // The target may live in a native bottom-sheet / popover the in-app
     // dylib doesn't traverse (Bluesky's Dialog/Prompt + composer render
     // in a separate SheetViewController window). It's still on screen,
@@ -296,7 +320,7 @@ export async function execTapOn(
     );
     ambiguousId = !!(nth && nth.ok && nth.data);
   }
-  if ((sel.id || sel.text) && !sel.childOf && !ambiguousId && !mainThreadSlow) {
+  if ((sel.id || sel.text) && !sel.childOf && !relational && !ambiguousId && !mainThreadSlow) {
     const axEl = await timedAsync(ctx, 'tap.axCrossResolve', () =>
       ctx.platform.ax.resolve(ctx.udid, { id: sel.id, text: sel.text }),
     );
@@ -430,7 +454,12 @@ export async function execTapOn(
       if (r && r.ok && r.data) return r.data as Rect;
     }
     if (sel.text) {
-      const r = await ctx.client.call('find_by_text', { text: sel.text }).catch(() => undefined);
+      // In the selector's match mode: looked up literally, a regex selector
+      // was never found and the stability loop below sampled to its 800ms
+      // deadline on every tap.
+      const r = await ctx.client
+        .call('find_by_text', textMatchArgs(sel, ctx.profile.textMatchDefault))
+        .catch(() => undefined);
       if (r && r.ok && r.data) return r.data as Rect;
     }
     return null;
@@ -460,7 +489,10 @@ export async function execTapOn(
   // points that fool socket-roundtrip sampling). Fallback: the legacy
   // CLI-side rect-sampling loop (HID driver, or the op missed).
   const steady = await timedAsync(ctx, 'tap.waitSteady', () =>
-    ctx.driver.waitTargetSteady(ctx.client, { id: sel.id, text: sel.text }),
+    ctx.driver.waitTargetSteady(
+      ctx.client,
+      sel.id ? { id: sel.id } : textMatchArgs(sel, ctx.profile.textMatchDefault),
+    ),
   );
   if (steady) {
     const cur = await sampleRect();
@@ -496,10 +528,14 @@ export async function execTapOn(
   // VISUAL position differs from its layout frame). Either way the
   // tap would land on the wrong layer; wait for hit-test to confirm
   // exposure.
-  const exposureSel: { testID?: string; text?: string } | null = sel.id
+  // Text in the selector's own match mode: a Maestro selector is a regex
+  // ("Back|Indietro", "Settings.*"); looked up literally it was never
+  // found, never "exposed", and every such tap waited out the full exposure
+  // timeout (~850ms) before firing.
+  const exposureSel: { testID?: string; text?: string; regex?: boolean } | null = sel.id
     ? { testID: sel.id }
     : sel.text
-      ? { text: sel.text }
+      ? textMatchArgs(sel, ctx.profile.textMatchDefault)
       : null;
   // When the exposure wait expires without the target ever becoming
   // exposed, the point is covered by another layer (tab bar, overlay).
@@ -870,7 +906,7 @@ export async function execTapOn(
       // on slow-handler buttons (next-btn → submit, add-to-cart → API
       // round-trip). Text-only taps stay on the original gate — they
       // already get the unconditional tap_tab fallback below.
-      if (!finalChanged) {
+      if (!finalChanged && !relational) {
         if (sel.id) {
           bumpActuationGen();
           await ctx.client.call('activate_testid', { testID: sel.id }).catch(() => undefined);
@@ -911,7 +947,7 @@ export async function execTapOn(
     // name doesn't resolve to a UITabBarItem, and if it DOES resolve UIKit's
     // setSelectedIndex is idempotent. This is an iOS platform behavior; Android
     // MotionEvent taps are deterministic and don't drop, so gate it to iOS.
-    if (sel.text && !sel.id && ctx.platform.name === 'ios') {
+    if (sel.text && !sel.id && !relational && ctx.platform.name === 'ios') {
       bumpActuationGen();
       await ctx.client.call('tap_tab', { name: sel.text }).catch(() => undefined);
     }
@@ -934,6 +970,22 @@ export async function execTapOn(
         await ctx.client
           .call('wait_react_commit', { sinceMs: preLoopReact.ts, maxMs: 4000 })
           .catch(() => undefined);
+      });
+    }
+    // Answered system prompt (Save password?): the tap hit one of its
+    // buttons, but its controller lingers in the chain for a moment after
+    // the card is gone — a check right after still "saw" the prompt and
+    // tapped its synthesized rect, onto the app underneath. Wait for it to
+    // leave the chain (bounded).
+    if (chainHasAnsweredPrompt(chain)) {
+      await timedAsync(ctx, 'tap.waitPromptGone', async () => {
+        const deadline = Date.now() + 2500;
+        while (Date.now() < deadline) {
+          const cr = await ctx.client.call('top_vc_chain').catch(() => undefined);
+          const cls = ((cr?.data as { chain?: string[] })?.chain ?? []) as string[];
+          if (!chainHasAnsweredPrompt(cls)) break;
+          await sleep(80);
+        }
       });
     }
     // Submit-dismissal settle (opt-in, ENNIO_SUBMIT_DISMISS_MAX_MS): a

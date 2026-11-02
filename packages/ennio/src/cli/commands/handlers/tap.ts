@@ -6,10 +6,17 @@
 // doubleTapOn / longPress are thin HID wrappers.
 
 import { CommandRegistry } from '../../core/command-registry';
-import type { MaestroCommand } from '../../maestro-parser';
-import { normalizeSelector } from '../../maestro-parser';
-import { POST_TAP_SETTLE_MS, interpolateSelector, sleep, timedAsync } from '../../runner/context';
+import type { MaestroCommand, MaestroSelector } from '../../maestro-parser';
+import { normalizeSelector, textMatchArgs } from '../../maestro-parser';
+import {
+  POST_TAP_SETTLE_MS,
+  RunContext,
+  interpolateSelector,
+  sleep,
+  timedAsync,
+} from '../../runner/context';
 import { captureHash, captureReactTs, findOnce, resolveCenter } from '../../runner/find';
+import { findRelationOnce, hasRelation } from '../../runner/relation';
 import { execTapOn } from '../../runner/tap';
 
 interface TapOnCmd {
@@ -38,182 +45,238 @@ function waitsToAppear(next: MaestroCommand | undefined): boolean {
   return !!w && typeof w === 'object' && 'visible' in w && !('notVisible' in w);
 }
 
+/**
+ * The optional probe must see what the tap can reach, not only the in-app
+ * view walk: text the tap finds through the accessibility tree or a system
+ * host (an alert, a cross-process prompt) was otherwise "absent", and the
+ * optional tap was skipped while its target sat on screen. One instant look
+ * each, no waiting.
+ */
+async function probeTextElsewhere(ctx: RunContext, sel: MaestroSelector): Promise<unknown> {
+  if (!sel.text) return null;
+  const args = textMatchArgs(sel, ctx.profile.textMatchDefault);
+  const ax = await ctx.client.call('find_ax_by_text', args).catch(() => undefined);
+  if (ax && ax.ok && ax.data) return ax.data;
+  // An alert counts only when one of its buttons is the target — matched as
+  // alert_tap matches: the exact title, the title regardless of case, or
+  // (regex mode) the whole title case-insensitively. Any alert being up is
+  // not a hit.
+  const r = await ctx.client.call('alert_buttons').catch(() => undefined);
+  const buttons = ((r?.ok && (r.data as { buttons?: string[] } | undefined)?.buttons) ||
+    []) as string[];
+  const { regex } = textMatchArgs(sel, ctx.profile.textMatchDefault);
+  let re: RegExp | null = null;
+  if (regex) {
+    try {
+      re = new RegExp(`^(?:${sel.text})$`, 'i');
+    } catch {
+      re = null;
+    }
+  }
+  const lower = sel.text.toLowerCase();
+  return buttons.some(
+    (b) => b === sel.text || b.toLowerCase() === lower || (re !== null && re.test(b)),
+  )
+    ? { alert: true }
+    : null;
+}
+
 export function registerTapHandlers(registry: CommandRegistry): void {
   registry.register(
     (c): c is MaestroCommand & TapOnCmd => has(c, 'tapOn'),
     async (cmd, { ctx, nextCmd }) => {
-      const sel = normalizeSelector(
-        interpolateSelector(cmd.tapOn, ctx) as Parameters<typeof normalizeSelector>[0],
-      );
-      // Maestro `optional: true`: silently skip if selector misses.
-      const tapObj =
-        cmd.tapOn && typeof cmd.tapOn === 'object'
-          ? (cmd.tapOn as { optional?: boolean; repeat?: number; delay?: number })
-          : null;
-      const isOptional = !!tapObj?.optional;
-      if (isOptional) {
-        const r = await findOnce(ctx, sel);
-        if (!r) return;
-      }
-      // Maestro `repeat: N` + `delay: ms`: N taps with `delay` ms gap.
-      if (tapObj?.repeat && tapObj.repeat > 1) {
-        const times = tapObj.repeat;
-        const delayMs = tapObj.delay ?? 200;
-        for (let i = 0; i < times; i++) {
-          if (i > 0) await sleep(delayMs);
-          await execTapOn(ctx, sel);
-        }
-        return;
-      }
-      const tapKey = JSON.stringify(sel);
-      const isRepeatTap = ctx.lastTapKey === tapKey;
-      // Look-ahead: collapse two same-target taps into one HID
-      // double-tap so the gap lands inside RN's double-tap window.
-      let nextIsSameTap = false;
-      if (nextCmd && typeof nextCmd === 'object' && 'tapOn' in nextCmd) {
-        const nextSel = normalizeSelector(
-          (nextCmd as { tapOn: unknown }).tapOn as Parameters<typeof normalizeSelector>[0],
+      try {
+        const sel = normalizeSelector(
+          interpolateSelector(cmd.tapOn, ctx) as Parameters<typeof normalizeSelector>[0],
         );
-        if (JSON.stringify(nextSel) === tapKey) nextIsSameTap = true;
-      }
-      // Collapse policy lives on the driver — HID needs it (two real
-      // taps land inside RN's double-tap window), in-process
-      // activation fires onPress deterministically per call and must
-      // NOT collapse (g-switch-stepper dropped an increment).
-      if (ctx.driver.collapsesRepeatTaps && nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
-        const rect = await findOnce(ctx, sel);
-        if (rect && (rect.w > 5 || rect.h > 5)) {
-          await timedAsync(ctx, 'tap.execTapOn', () =>
-            ctx.driver.doubleTap(ctx.udid, rect.x + rect.w / 2, rect.y + rect.h / 2),
-          );
-          ctx.lastTapKey = tapKey;
-          ctx.lastTapTestID = sel.id;
-          ctx.skipNextCmd = true;
+        // Maestro `optional: true`: silently skip if selector misses.
+        const tapObj =
+          cmd.tapOn && typeof cmd.tapOn === 'object'
+            ? (cmd.tapOn as { optional?: boolean; repeat?: number; delay?: number })
+            : null;
+        const isOptional = !!tapObj?.optional;
+        if (isOptional) {
+          // A relative selector is found only through the relation-aware
+          // resolve — findOnce ignores the relation and would see any match.
+          const r = hasRelation(sel)
+            ? await findRelationOnce(ctx, sel)
+            : ((await findOnce(ctx, sel)) ?? (await probeTextElsewhere(ctx, sel)));
+          if (!r) return;
+        }
+        // Maestro `repeat: N` + `delay: ms`: N taps with `delay` ms gap.
+        if (tapObj?.repeat && tapObj.repeat > 1) {
+          const times = tapObj.repeat;
+          const delayMs = tapObj.delay ?? 200;
+          for (let i = 0; i < times; i++) {
+            if (i > 0) await sleep(delayMs);
+            await execTapOn(ctx, sel);
+          }
           return;
         }
-      }
-      const nextEditsField =
-        !!nextCmd &&
-        typeof nextCmd === 'object' &&
-        ('inputText' in nextCmd || 'eraseText' in nextCmd || 'clearText' in nextCmd);
-      // After inputText, a tap onto a NON-input target (a "Continue"/"Done"
-      // button) must DISMISS the keyboard first: RN's keyboardShouldPersistTaps
-      // makes the first tap on a non-input view only close the keyboard, so the
-      // button's onPress never fires and the step stalls until a retry (the
-      // checkout next-btn / custom-server "Done" cases). Wait for the keyboard
-      // to finish docking — probing mid-rise reads a not-yet-docked frame and
-      // the tap fires through a still-covering keyboard — then hide it.
-      //
-      // Gate on !nextEditsField: when the NEXT command edits a field, the tap is
-      // just moving focus to another input (focus_testid keeps the keyboard up),
-      // so skip the dismiss entirely. That stops the keyboard being churned
-      // (hidden + re-raised) between every field of a form — the dominant cost of
-      // multi-field flows — while still dismissing before a real button tap.
-      if (ctx.lastWasTextInput && !nextEditsField) {
-        const upDeadline = Date.now() + 700;
-        while (Date.now() < upDeadline) {
-          const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
-          if ((kr?.data as { visible?: boolean } | undefined)?.visible) break;
-          await sleep(30);
+        const tapKey = JSON.stringify(sel);
+        const isRepeatTap = ctx.lastTapKey === tapKey;
+        // Look-ahead: collapse two same-target taps into one HID
+        // double-tap so the gap lands inside RN's double-tap window.
+        let nextIsSameTap = false;
+        if (nextCmd && typeof nextCmd === 'object' && 'tapOn' in nextCmd) {
+          const nextSel = normalizeSelector(
+            (nextCmd as { tapOn: unknown }).tapOn as Parameters<typeof normalizeSelector>[0],
+          );
+          if (JSON.stringify(nextSel) === tapKey) nextIsSameTap = true;
         }
-        await ctx.client.call('hide_keyboard').catch(() => undefined);
-        const kbDeadline = Date.now() + 1200;
-        while (Date.now() < kbDeadline) {
-          const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
-          if (!(kr?.data as { visible?: boolean } | undefined)?.visible) break;
-          await sleep(50);
+        // Collapse policy lives on the driver — HID needs it (two real
+        // taps land inside RN's double-tap window), in-process
+        // activation fires onPress deterministically per call and must
+        // NOT collapse (g-switch-stepper dropped an increment).
+        if (ctx.driver.collapsesRepeatTaps && nextIsSameTap && sel.id && !ctx.lastWasTextInput) {
+          const rect = await findOnce(ctx, sel);
+          if (rect && (rect.w > 5 || rect.h > 5)) {
+            await timedAsync(ctx, 'tap.execTapOn', () =>
+              ctx.driver.doubleTap(ctx.udid, rect.x + rect.w / 2, rect.y + rect.h / 2),
+            );
+            ctx.lastTapKey = tapKey;
+            ctx.lastTapTestID = sel.id;
+            ctx.skipNextCmd = true;
+            return;
+          }
         }
-        // The keyboard is gone, but on a KeyboardAvoidingView / auto-scrolling
-        // form the content reflows AFTER dismissal — the button we're about to
-        // tap slides to a new Y over the dismiss animation. Tapping now resolves
-        // a mid-flight rect and misses (the g-keyboard / checkout next-btn
-        // stall: the tap "succeeds" on empty space, onPress never fires, the
-        // assert then burns its full wait before a re-fire recovers). Wait for
-        // the reflow ANIMATION to actually end — frame-hash stability alone can
-        // read quiet between spring frames — then a brief commit, so execTapOn
-        // below resolves the button's final position.
-        const reflowDeadline = Date.now() + 800;
-        while (Date.now() < reflowDeadline) {
-          const r = await ctx.client.call('animations_active').catch(() => undefined);
-          const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
-          if (!active) break;
-          await sleep(20);
-        }
-        await ctx.client.call('wait_commit', { maxMs: 500, stableMs: 120 }).catch(() => undefined);
-      }
-      ctx.lastWasTextInput = false;
-      if (!isRepeatTap) {
-        // Pre-tap settle: wait for any UIKit transition to fully end.
-        await timedAsync(ctx, 'tap.preWaitCommit', async () => {
-          const deadline = Date.now() + 1500;
-          while (Date.now() < deadline) {
+        const nextEditsField =
+          !!nextCmd &&
+          typeof nextCmd === 'object' &&
+          ('inputText' in nextCmd || 'eraseText' in nextCmd || 'clearText' in nextCmd);
+        // After inputText, a tap onto a NON-input target (a "Continue"/"Done"
+        // button) must DISMISS the keyboard first: RN's keyboardShouldPersistTaps
+        // makes the first tap on a non-input view only close the keyboard, so the
+        // button's onPress never fires and the step stalls until a retry (the
+        // checkout next-btn / custom-server "Done" cases). Wait for the keyboard
+        // to finish docking — probing mid-rise reads a not-yet-docked frame and
+        // the tap fires through a still-covering keyboard — then hide it.
+        //
+        // Gate on !nextEditsField: when the NEXT command edits a field, the tap is
+        // just moving focus to another input (focus_testid keeps the keyboard up),
+        // so skip the dismiss entirely. That stops the keyboard being churned
+        // (hidden + re-raised) between every field of a form — the dominant cost of
+        // multi-field flows — while still dismissing before a real button tap.
+        if (ctx.lastWasTextInput && !nextEditsField) {
+          const upDeadline = Date.now() + 700;
+          while (Date.now() < upDeadline) {
+            const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
+            if ((kr?.data as { visible?: boolean } | undefined)?.visible) break;
+            await sleep(30);
+          }
+          await ctx.client.call('hide_keyboard').catch(() => undefined);
+          const kbDeadline = Date.now() + 1200;
+          while (Date.now() < kbDeadline) {
+            const kr = await ctx.client.call('keyboard_frame').catch(() => undefined);
+            if (!(kr?.data as { visible?: boolean } | undefined)?.visible) break;
+            await sleep(50);
+          }
+          // The keyboard is gone, but on a KeyboardAvoidingView / auto-scrolling
+          // form the content reflows AFTER dismissal — the button we're about to
+          // tap slides to a new Y over the dismiss animation. Tapping now resolves
+          // a mid-flight rect and misses (the g-keyboard / checkout next-btn
+          // stall: the tap "succeeds" on empty space, onPress never fires, the
+          // assert then burns its full wait before a re-fire recovers). Wait for
+          // the reflow ANIMATION to actually end — frame-hash stability alone can
+          // read quiet between spring frames — then a brief commit, so execTapOn
+          // below resolves the button's final position.
+          const reflowDeadline = Date.now() + 800;
+          while (Date.now() < reflowDeadline) {
             const r = await ctx.client.call('animations_active').catch(() => undefined);
             const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
             if (!active) break;
             await sleep(20);
           }
-        });
-      }
-      const preTapHash = await captureHash(ctx);
-      const preReact = await captureReactTs(ctx);
-      // If next op edits the field AND we have a testID, route the
-      // "tap to focus" through focus_testid (calls becomeFirstResponder
-      // in-process — deterministic, no race with onPress-driven focus).
-      // (nextEditsField computed above for the keyboard-rise gate.)
-      let focusedViaTestId = false;
-      if (sel.id && nextEditsField) {
-        const r = await ctx.client.call('focus_testid', { testID: sel.id }).catch(() => undefined);
-        // r.ok is the TRANSPORT result; the handler reports whether the
-        // focus actually landed in r.data.ok. Conflating them made every
-        // focus_testid "succeed" and skip the real tap (thread-muting:
-        // tapOn replyBtn + next inputText never pressed the button).
-        focusedViaTestId = !!(r && r.ok && (r.data as { ok?: boolean } | undefined)?.ok);
-        if (process.env.ENNIO_PHASE_TRACE) {
-          process.stderr.write(
-            `[dbg] focus_testid id=${sel.id} ok=${focusedViaTestId} raw=${JSON.stringify(r?.data ?? null)}\n`,
+          await ctx.client
+            .call('wait_commit', { maxMs: 500, stableMs: 120 })
+            .catch(() => undefined);
+        }
+        ctx.lastWasTextInput = false;
+        if (!isRepeatTap) {
+          // Pre-tap settle: wait for any UIKit transition to fully end.
+          await timedAsync(ctx, 'tap.preWaitCommit', async () => {
+            const deadline = Date.now() + 1500;
+            while (Date.now() < deadline) {
+              const r = await ctx.client.call('animations_active').catch(() => undefined);
+              const active = !!(r && r.ok && r.data && (r.data as { active?: boolean }).active);
+              if (!active) break;
+              await sleep(20);
+            }
+          });
+        }
+        const preTapHash = await captureHash(ctx);
+        const preReact = await captureReactTs(ctx);
+        // If next op edits the field AND we have a testID, route the
+        // "tap to focus" through focus_testid (calls becomeFirstResponder
+        // in-process — deterministic, no race with onPress-driven focus).
+        // (nextEditsField computed above for the keyboard-rise gate.)
+        let focusedViaTestId = false;
+        if (sel.id && nextEditsField) {
+          const r = await ctx.client
+            .call('focus_testid', { testID: sel.id })
+            .catch(() => undefined);
+          // r.ok is the TRANSPORT result; the handler reports whether the
+          // focus actually landed in r.data.ok. Conflating them made every
+          // focus_testid "succeed" and skip the real tap (thread-muting:
+          // tapOn replyBtn + next inputText never pressed the button).
+          focusedViaTestId = !!(r && r.ok && (r.data as { ok?: boolean } | undefined)?.ok);
+          if (process.env.ENNIO_PHASE_TRACE) {
+            process.stderr.write(
+              `[dbg] focus_testid id=${sel.id} ok=${focusedViaTestId} raw=${JSON.stringify(r?.data ?? null)}\n`,
+            );
+          }
+        }
+        if (focusedViaTestId) {
+          // Field is firstResponder (becomeFirstResponder ran synchronously) —
+          // skip the HID tap so the mid-animation keyboard doesn't intercept the
+          // touch. The next command is ALWAYS an inputText/eraseText (that's the
+          // gate to enter this path), and it carries its own post-edit commit
+          // settle — so we only need a brief confirm that focus committed, NOT a
+          // full 200ms stable tail. Typing into a firstResponder field doesn't
+          // wait on the keyboard's rise animation. This shaves the per-field
+          // focus cost across form-fill flows.
+          const focusStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 30 : 80;
+          await ctx.client
+            .call('wait_commit', { maxMs: 500, stableMs: focusStableMs })
+            .catch(() => undefined);
+          ctx.lastTapKey = tapKey;
+          ctx.lastTapTestID = sel.id;
+          return;
+        }
+        // A tap whose next command types text must deliver REAL focus —
+        // in-process activation fires onPress but does not focus native
+        // inputs (UISearchBar — g-searchbar), and the focus_testid
+        // shortcut above only covers id selectors. Express the intent;
+        // the driver picks the mechanism.
+        await timedAsync(ctx, 'tap.execTapOn', () =>
+          execTapOn(ctx, sel, preTapHash, nextEditsField ? 'focus' : 'press'),
+        );
+        if (isRepeatTap || nextIsSameTap) {
+          await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
+        } else {
+          await timedAsync(ctx, 'tap.postSettle', () =>
+            ctx.driver.settleAfterTap(ctx.client, {
+              preTapHash,
+              reactAttach: preReact.attach,
+              reactSinceMs: preReact.ts,
+              nextEditsField,
+              nextWaitsToAppear: waitsToAppear(nextCmd),
+            }),
           );
         }
-      }
-      if (focusedViaTestId) {
-        // Field is firstResponder (becomeFirstResponder ran synchronously) —
-        // skip the HID tap so the mid-animation keyboard doesn't intercept the
-        // touch. The next command is ALWAYS an inputText/eraseText (that's the
-        // gate to enter this path), and it carries its own post-edit commit
-        // settle — so we only need a brief confirm that focus committed, NOT a
-        // full 200ms stable tail. Typing into a firstResponder field doesn't
-        // wait on the keyboard's rise animation. This shaves the per-field
-        // focus cost across form-fill flows.
-        const focusStableMs = process.env.ENNIO_NO_ANIMATIONS === '1' ? 30 : 80;
-        await ctx.client
-          .call('wait_commit', { maxMs: 500, stableMs: focusStableMs })
-          .catch(() => undefined);
         ctx.lastTapKey = tapKey;
         ctx.lastTapTestID = sel.id;
-        return;
+      } catch (e) {
+        // Maestro `optional: true`: a target that vanished between the probe
+        // above and the tap (a button that comes and goes between moves) is a
+        // skipped step, never a failed flow.
+        const optional =
+          !!cmd.tapOn &&
+          typeof cmd.tapOn === 'object' &&
+          !!(cmd.tapOn as { optional?: boolean }).optional;
+        if (optional && e instanceof Error && e.message.startsWith('element not found')) return;
+        throw e;
       }
-      // A tap whose next command types text must deliver REAL focus —
-      // in-process activation fires onPress but does not focus native
-      // inputs (UISearchBar — g-searchbar), and the focus_testid
-      // shortcut above only covers id selectors. Express the intent;
-      // the driver picks the mechanism.
-      await timedAsync(ctx, 'tap.execTapOn', () =>
-        execTapOn(ctx, sel, preTapHash, nextEditsField ? 'focus' : 'press'),
-      );
-      if (isRepeatTap || nextIsSameTap) {
-        await timedAsync(ctx, 'tap.postSleepRepeat', () => sleep(120));
-      } else {
-        await timedAsync(ctx, 'tap.postSettle', () =>
-          ctx.driver.settleAfterTap(ctx.client, {
-            preTapHash,
-            reactAttach: preReact.attach,
-            reactSinceMs: preReact.ts,
-            nextEditsField,
-            nextWaitsToAppear: waitsToAppear(nextCmd),
-          }),
-        );
-      }
-      ctx.lastTapKey = tapKey;
-      ctx.lastTapTestID = sel.id;
     },
   );
 

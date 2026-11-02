@@ -7,12 +7,19 @@ import { MaestroSelector, textMatchArgs } from '../maestro-parser';
 
 import { POLL_MS, RunContext, sleep } from './context';
 import { dismissPermissionDialogs } from './lifecycle';
+import { findRelationOnce, hasRelation } from './relation';
 
 /// Returns `true` if the selector resolves to any visible view —
 /// testID-indexed, text-walked, or surfaced via the UIAlertController
 /// layer / cross-process AX proxies. Used by assertVisible/waitFor
 /// predicates (and their `notVisible` inverses).
 export async function isVisible(ctx: RunContext, sel: MaestroSelector): Promise<boolean> {
+  // Relative selector: visible only on the anchor's side of it, through the
+  // one finder that honours the relation (see runner/relation.ts).
+  if (hasRelation(sel)) {
+    // One probe, no waiting: callers poll (when:, waits, assertNotVisible).
+    return !!(await findRelationOnce(ctx, sel));
+  }
   // Narrowing qualifiers (`childOf`, `index`) must use the SAME dedicated
   // resolvers the tap/find path uses — otherwise visibility silently
   // ignores them and can false-pass: assertVisible `{ id, index: 5 }`

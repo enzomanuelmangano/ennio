@@ -33,6 +33,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)alertText;
 + (NSArray<NSString *> *)alertButtons;
 + (BOOL)tapAlertButton:(NSString *)buttonText;
++ (BOOL)tapAlertButton:(NSString *)buttonText regex:(BOOL)regex;
 + (BOOL)dismissAlert;
 
 // ─── Tabs ───────────────────────────────────────────────────────────

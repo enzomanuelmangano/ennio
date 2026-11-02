@@ -13,6 +13,8 @@
 import { axQueryByText } from '../hid';
 import { MaestroSelector, textMatchArgs } from '../maestro-parser';
 
+import { hasRelation, resolveAnchorRect, withResolvedRelation } from './relation';
+
 import {
   DEFAULT_WIN_H,
   DEFAULT_WIN_W,
@@ -99,6 +101,23 @@ export async function findOnce(ctx: RunContext, sel: MaestroSelector): Promise<R
 }
 
 export async function resolveRect(ctx: RunContext, sel: MaestroSelector): Promise<Rect | null> {
+  // Relative selector (below/above/leftOf/rightOf): resolve the anchor, then
+  // find through the dylib's text walk alone — the only path that honours
+  // the relation. The AX / tab / scroll fallbacks below would ignore it and
+  // return the first match anywhere.
+  if (hasRelation(sel)) {
+    const scoped = await withResolvedRelation(ctx, sel, resolveAnchorRect);
+    if (!scoped) return null;
+    const r = await timedAsync(ctx, 'tap.findFast', () =>
+      ctx.client
+        .call('wait_find_by_text', {
+          ...textMatchArgs(scoped, ctx.profile.textMatchDefault),
+          maxMs: 2500,
+        })
+        .catch(() => undefined),
+    );
+    return r && r.ok && r.data ? (r.data as Rect) : null;
+  }
   // Fast path: push the polling INTO the dylib via wait_find_by_*
   // so each retry is ~16 ms (one CADisplayLink tick) instead of
   // the CLI's 100 ms loop. Single round-trip, ~6× lower latency on

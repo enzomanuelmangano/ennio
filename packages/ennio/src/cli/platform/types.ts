@@ -105,7 +105,7 @@ export interface Platform {
    *  bundle, so it just relaunches — the relaunch IS its reset. Keeping this
    *  on the platform (not an `isAndroid()` branch in the handler) is what
    *  stops the iOS-only soft-reset from running simctl against an emulator. */
-  softReset(ctx: RunContext): Promise<void>;
+  softReset(ctx: RunContext, launchArgs?: string[]): Promise<void>;
 
   /** Relaunch after an explicit stopApp/killApp. Mutates ctx.client.
    *  (YAML: `launchApp` following a `stopApp`.) */

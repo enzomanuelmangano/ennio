@@ -231,8 +231,9 @@ void RegisterEnnioSystemHandlers(void) {
         NSDictionary *a = EnnioParseArgs(args);
         NSString *btn = EnnioArgString(a, @"buttonText");
         if (!btn.length) throw std::runtime_error("missing buttonText");
+        BOOL regex = [a[@"regex"] boolValue];
         BOOL ok = NO;
-        EnnioOnMainVoid([&]() { ok = [EnnioOps tapAlertButton:btn]; });
+        EnnioOnMainVoid([&]() { ok = [EnnioOps tapAlertButton:btn regex:regex]; });
         return std::string("{\"tapped\":") + (ok ? "true" : "false") + "}";
     });
 

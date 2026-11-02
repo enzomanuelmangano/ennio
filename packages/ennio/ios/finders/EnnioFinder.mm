@@ -177,6 +177,43 @@ static BOOL strContainsCI(NSString *haystack, NSString *needle) {
 // main-thread finder), read by the matchers below.
 static BOOL g_textSelectorIsRegex = NO;
 
+// Maestro relative selector (below / above / leftOf / rightOf) for the
+// current text find: the anchor's window rect, set by the handler from the
+// CLI's resolved anchor. 0 = none.
+typedef NS_ENUM(NSInteger, EnnioRelationKind) {
+    EnnioRelationNone = 0,
+    EnnioRelationBelow,
+    EnnioRelationAbove,
+    EnnioRelationLeftOf,
+    EnnioRelationRightOf,
+};
+static EnnioRelationKind g_relationKind = EnnioRelationNone;
+static CGRect g_relationAnchor;
+// Leaf find: return the matched view itself, not its interactive ancestor.
+// A relative selector's anchor is measured on its own bounds (Maestro): the
+// promoted ancestor of an "Option A" segment is the whole segmented control.
+static BOOL g_textFindLeaf = NO;
+
+// Distance from the anchor along the relation's axis, or -1 when the
+// window rect is not on that side of it (edges, 1pt tolerance — Maestro's
+// below is "top at or under the anchor's bottom", likewise for the rest).
+static CGFloat relationDistance(CGRect r) {
+    const CGFloat tol = 1;
+    CGRect a = g_relationAnchor;
+    switch (g_relationKind) {
+        case EnnioRelationBelow:
+            return CGRectGetMinY(r) >= CGRectGetMaxY(a) - tol ? CGRectGetMinY(r) - CGRectGetMaxY(a) : -1;
+        case EnnioRelationAbove:
+            return CGRectGetMaxY(r) <= CGRectGetMinY(a) + tol ? CGRectGetMinY(a) - CGRectGetMaxY(r) : -1;
+        case EnnioRelationLeftOf:
+            return CGRectGetMaxX(r) <= CGRectGetMinX(a) + tol ? CGRectGetMinX(a) - CGRectGetMaxX(r) : -1;
+        case EnnioRelationRightOf:
+            return CGRectGetMinX(r) >= CGRectGetMaxX(a) - tol ? CGRectGetMinX(r) - CGRectGetMaxX(a) : -1;
+        default:
+            return 0;
+    }
+}
+
 // Compiled selector regexes, keyed by pattern. A text find tests the same
 // pattern against every label in the tree — compiling it per comparison
 // made each find_by_text cost tens of ms on a large screen. An invalid
@@ -340,9 +377,17 @@ static BOOL viewIsLikelyOnScreen(UIView *v) {
     if (!v.window) return NO;
     if (v.hidden) return NO;
     if (v.alpha < 0.05) return NO;
+    // accessibilityElementsHidden (RN's accessibilityElementsHidden /
+    // importantForAccessibility="no-hide-descendants") removes the subtree
+    // from the accessibility tree XCTest — and so Maestro — reads. Apps use
+    // it for content that is mounted but not yet shown (a copy block fading
+    // in under pointerEvents="none"); matching it reports text as visible
+    // before it is, and taps it before it takes touches.
+    if (v.accessibilityElementsHidden) return NO;
     for (UIView *p = v.superview; p; p = p.superview) {
         if (p.hidden) return NO;
         if (p.alpha < 0.05) return NO;
+        if (p.accessibilityElementsHidden) return NO;
     }
     CGRect winRect = [v.window convertRect:v.bounds fromView:v];
     if (winRect.size.width <= 0 || winRect.size.height <= 0) return NO;
@@ -431,7 +476,11 @@ static UIView *_Nullable bestFrom(NSArray<UIView *> *list) {
 // view with UIAccessibilityTraitButton/Link) and return THAT view's
 // rect instead. Falls back to the original view when no ancestor
 // qualifies.
+static UIView *_Nullable promoteToInteractiveAncestorImpl(UIView *v);
 static UIView *_Nullable promoteToInteractiveAncestor(UIView *v) {
+    return g_textFindLeaf ? v : promoteToInteractiveAncestorImpl(v);
+}
+static UIView *_Nullable promoteToInteractiveAncestorImpl(UIView *v) {
     if (!v) return nil;
     // The matched view itself already qualifies — return as-is.
     if (isInteractive(v) &&
@@ -510,6 +559,27 @@ static UIView *_Nullable walkByTextEx(UIView *root, NSString *text, BOOL relaxed
     // BottomSheet outranks the sheet's search input field — the tap
     // fires at the bottom tab bar coord, lands on the sheet backdrop
     // at that point, and dismisses the sheet.
+    if (g_relationKind != EnnioRelationNone) {
+        // Relative selector: only on-screen matches on the anchor's side
+        // count, and the nearest one wins (Maestro sorts by distance). No
+        // off-screen fallback — that would ignore the relation.
+        UIView *best = nil;
+        CGFloat bestDist = CGFLOAT_MAX;
+        for (UIView *v in matches) {
+            if (!viewIsLikelyOnScreen(v)) continue;
+            if (!finderVCInTopmost(finderHostingVC(v), topmost)) continue;
+            CGRect r = [v.window convertRect:v.bounds fromView:v];
+            CGFloat d = relationDistance(r);
+            if (d < 0) continue;
+            if (d < bestDist || (d == bestDist && best &&
+                                 r.size.width * r.size.height <
+                                     best.bounds.size.width * best.bounds.size.height)) {
+                best = v;
+                bestDist = d;
+            }
+        }
+        return best ? promoteToInteractiveAncestor(best) : nil;
+    }
     NSMutableArray<UIView *> *exactOnscreenInteractive = [NSMutableArray new];
     NSMutableArray<UIView *> *exactOnscreen = [NSMutableArray new];
     NSMutableArray<UIView *> *anyOnscreenInteractive = [NSMutableArray new];
@@ -691,6 +761,16 @@ static void collectAxByText(id root,
     NSValue *idVal = [NSValue valueWithNonretainedObject:root];
     if ([visited containsObject:idVal]) return;
     [visited addObject:idVal];
+    // A view the accessibility tree does not expose hides its whole subtree:
+    // hidden, fully transparent, or accessibilityElementsHidden. Without this
+    // an app that keeps every page mounted and fades the off-page ones to 0
+    // (opacity- and a11y-driven pagers) reads as all pages visible at once.
+    // Proxies that are not UIViews (UIRemoteView's elements) carry no such
+    // state and are walked as before.
+    if ([root isKindOfClass:UIView.class]) {
+        UIView *v = (UIView *)root;
+        if (v.hidden || v.alpha < 0.01 || v.accessibilityElementsHidden) return;
+    }
 
     // proxiesOnly: a proxy counts only when its owning view is on screen and
     // in the topmost presented controller — the view walk's own filters —
@@ -794,6 +874,63 @@ static NSArray<UIViewController *> *allPresentedViewControllers(void) {
 // detected VC. Coords are best-effort and only used as a positive
 // answer to "is this label visible?" — Maestro-style point taps
 // (the YAML's `point: "50%,22%"`) still cover the actual photo grid.
+// iOS's "Save password?" prompt (_SFAppPasswordSavingViewController): a
+// remote view hosted in the keyboard window, its two buttons ("Not Now" /
+// "Save") invisible to every in-process walk. It is a card; the buttons sit
+// side by side on its bottom row, ~39pt above its bottom edge, at 27% / 73%
+// of its width (measured on iOS 26.5; a layout change moves the buttons and
+// the synthesized tap misses — the flow then fails on the next step). The card is the smallest remote view under the controller.
+// The label is localized, so the selector's alternatives ("Not Now|Non ora")
+// are matched against known translations of either button.
+static BOOL synthPasswordSavingRect(UIViewController *vc, NSString *text, EnnioRect *out) {
+    static NSArray<NSString *> *decline, *save;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        decline = @[ @"not now", @"non ora", @"nicht jetzt", @"pas maintenant", @"ahora no",
+                     @"agora não", @"agora nao", @"今はしない" ];
+        save = @[ @"save", @"salva", @"sichern", @"enregistrer", @"guardar", @"salvar", @"保存" ];
+    });
+    int which = 0; // 1 = decline (left), 2 = save (right)
+    for (NSString *alt in [text.lowercaseString componentsSeparatedByString:@"|"]) {
+        NSString *t = [alt stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if ([decline containsObject:t]) { which = 1; break; }
+        if ([save containsObject:t]) { which = 2; break; }
+    }
+    if (!which) return NO;
+    // Only a prompt that is fully up. While the controller is being
+    // presented (or dismissed) the card is not drawn yet but the keyboard
+    // still is: a synthesized tap there lands on a key — seen as stray "@"
+    // characters typed into the focused field. Report it not visible; the
+    // flow's wait polls again a moment later.
+    if (!vc.presentingViewController || vc.isBeingPresented || vc.isBeingDismissed) return NO;
+    UIView *root = vc.viewIfLoaded;
+    if (!root || !root.window) return NO;
+    UIView *card = nil;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
+    while (stack.count) {
+        UIView *v = stack.lastObject;
+        [stack removeLastObject];
+        if ([NSStringFromClass(v.class) containsString:@"RemoteView"] && !v.hidden &&
+            v.bounds.size.width > 0 &&
+            (!card || v.bounds.size.width * v.bounds.size.height <
+                          card.bounds.size.width * card.bounds.size.height)) {
+            card = v;
+        }
+        [stack addObjectsFromArray:v.subviews];
+    }
+    CGRect f = [root.window convertRect:(card ?: root).bounds fromView:(card ?: root)];
+    if (CGRectIsEmpty(f)) return NO;
+    CGFloat cx = f.origin.x + f.size.width * (which == 1 ? 0.27 : 0.73);
+    CGFloat cy = CGRectGetMaxY(f) - 39;
+    out->x = cx - f.size.width * 0.17;
+    out->y = cy - 22;
+    out->w = f.size.width * 0.34;
+    out->h = 44;
+    NSLog(@"[ennio] password-saving synth card=%@ (%@) → %@", NSStringFromCGRect(f),
+          card ? NSStringFromClass(card.class) : @"vc.view", which == 1 ? @"decline" : @"save");
+    return YES;
+}
+
 static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     NSArray<UIViewController *> *all = allPresentedViewControllers();
     if (all.count == 0) return NO;
@@ -809,6 +946,14 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
         if (!shareSheet && ([cls containsString:@"UIActivityViewController"] ||
                              [cls containsString:@"SLComposeServiceViewController"])) {
             shareSheet = vc;
+        }
+    }
+    for (UIViewController *pw in all) {
+        // Only a positive answer short-circuits: another host (a picker
+        // behind the prompt) is still checked below.
+        if ([NSStringFromClass([pw class]) containsString:@"PasswordSavingViewController"] &&
+            synthPasswordSavingRect(pw, text, out)) {
+            return YES;
         }
     }
     UIViewController *vc = phPicker ?: shareSheet;
@@ -905,10 +1050,23 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
         }
     }
     if (rects.count == 0) {
-        // The early look (proxiesOnly) never synthesizes: a cross-process
-        // host anywhere in the chain could shadow an in-app button that is
-        // still mounting above it. The full lookup after the poll does.
-        if (g_axProxiesOnly) return zero;
+        // The early look (proxiesOnly) synthesizes only the Save-password
+        // prompt: it covers everything (keyboard window included) and is
+        // reported only once fully presented, so nothing in-app can be
+        // shadowed by it. Other hosts (a picker anywhere in the chain) could
+        // shadow an in-app button still mounting above them — they wait for
+        // the full lookup after the poll.
+        if (g_axProxiesOnly) {
+            for (UIViewController *pw in allPresentedViewControllers()) {
+                EnnioRect r = {0, 0, 0, 0};
+                if ([NSStringFromClass([pw class]) containsString:@"PasswordSavingViewController"] &&
+                    synthPasswordSavingRect(pw, text, &r)) {
+                    if (found) *found = YES;
+                    return r;
+                }
+            }
+            return zero;
+        }
         // Last resort: cross-process VC chrome geometry synth.
         // PHPicker / share sheet / doc picker — known-class hosts
         // whose chrome labels live in a remote process. We can't
@@ -951,13 +1109,26 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     return [self findViewByText:text relaxed:relaxed regex:NO];
 }
 
++ (void)setTextFindLeaf:(BOOL)leaf {
+    g_textFindLeaf = leaf;
+}
+
++ (void)setTextRelation:(NSString *)kind anchor:(CGRect)anchor {
+    if ([kind isEqualToString:@"below"]) g_relationKind = EnnioRelationBelow;
+    else if ([kind isEqualToString:@"above"]) g_relationKind = EnnioRelationAbove;
+    else if ([kind isEqualToString:@"leftOf"]) g_relationKind = EnnioRelationLeftOf;
+    else if ([kind isEqualToString:@"rightOf"]) g_relationKind = EnnioRelationRightOf;
+    else g_relationKind = EnnioRelationNone;
+    g_relationAnchor = anchor;
+}
+
 + (UIView *)findViewByText:(NSString *)text relaxed:(BOOL)relaxed regex:(BOOL)regex {
     // Set the selector mode for the matchers, from the CLI's authoritative flag.
     g_textSelectorIsRegex = regex;
     if (text.length == 0) return nil;
     UIWindow *keyWin = [EnnioBootstrap keyWindow];
     UIView *match = walkByTextEx(keyWin, text, relaxed);
-    if (!match) {
+    if (!match && g_relationKind == EnnioRelationNone) {
         match = walkAllWindows(^BOOL(UIView *v) {
             if ([v.accessibilityLabel isEqualToString:text]) return YES;
             if ([v.accessibilityValue isEqualToString:text]) return YES;
@@ -1006,9 +1177,12 @@ static BOOL synthAxRectForCrossProcess(NSString *text, EnnioRect *out) {
     if (!win) return NO;
     if (view.hidden) return NO;
     if (view.alpha < 0.01) return NO;
-    // Walk ancestor chain for hidden / alpha=0.
+    // Hidden from accessibility = not on screen, as Maestro sees it (see
+    // viewIsLikelyOnScreen).
+    if (view.accessibilityElementsHidden) return NO;
+    // Walk ancestor chain for hidden / alpha=0 / hidden from accessibility.
     for (UIView *p = view.superview; p && p != win; p = p.superview) {
-        if (p.hidden || p.alpha < 0.01) return NO;
+        if (p.hidden || p.alpha < 0.01 || p.accessibilityElementsHidden) return NO;
     }
     CGRect winRect = [win convertRect:view.bounds fromView:view];
     if (winRect.size.width <= 0 || winRect.size.height <= 0) return NO;

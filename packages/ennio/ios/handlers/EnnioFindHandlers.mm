@@ -18,6 +18,24 @@
 #include <stdexcept>
 #include <string>
 
+// Optional `relation: {kind, x, y, w, h}` on a text find — a Maestro relative
+// selector whose anchor the CLI already resolved. Scoped to one find.
+static void ennioApplyRelation(NSDictionary *a) {
+    NSDictionary *rel = [a[@"relation"] isKindOfClass:NSDictionary.class] ? a[@"relation"] : nil;
+    CGRect anchor = rel ? CGRectMake([rel[@"x"] doubleValue], [rel[@"y"] doubleValue],
+                                     [rel[@"w"] doubleValue], [rel[@"h"] doubleValue])
+                        : CGRectZero;
+    [EnnioFinder setTextRelation:rel[@"kind"] anchor:anchor];
+    // A relation compares leaf bounds: neither the anchor (`leaf`) nor the
+    // candidates are promoted to their interactive ancestor.
+    [EnnioFinder setTextFindLeaf:rel != nil || [a[@"leaf"] boolValue]];
+}
+
+static void ennioClearRelation(void) {
+    [EnnioFinder setTextRelation:nil anchor:CGRectZero];
+    [EnnioFinder setTextFindLeaf:NO];
+}
+
 void RegisterEnnioFindHandlers(void) {
     using namespace ennio;
 
@@ -34,6 +52,7 @@ void RegisterEnnioFindHandlers(void) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = EnnioArgString(a, @"testID");
         NSString *text = EnnioArgString(a, @"text");
+        BOOL regex = [a[@"regex"] boolValue];
         if (!testID.length && !text.length) throw std::runtime_error("missing selector");
         BOOL exposed = NO;
         BOOL found = NO;
@@ -42,7 +61,7 @@ void RegisterEnnioFindHandlers(void) {
         EnnioOnMainVoid([&]() {
             UIView *target = testID.length
                 ? [EnnioFinder findViewByTestID:testID]
-                : [EnnioFinder findViewByText:text];
+                : [EnnioFinder findViewByText:text relaxed:NO regex:regex];
             if (!target || ![EnnioFinder isOnScreen:target]) return;
             found = YES;
             // enabled: NO when the target (or a near ancestor — the
@@ -73,6 +92,28 @@ void RegisterEnnioFindHandlers(void) {
                 if (cursor == target) { exposed = YES; break; }
                 cursor = cursor.superview;
             }
+            // A target that takes no touches itself (UIImageView / UILabel
+            // default to userInteractionEnabled = NO — a tab-bar or toolbar
+            // icon) is skipped by hitTest:, which answers with the
+            // container that owns it: an ANCESTOR of the target. That is
+            // where a real finger lands too, so the target is exposed. Seen
+            // on iOS 26's floating tab bar: every icon tap waited out the
+            // full exposure timeout (~850ms) before firing.
+            // Only the NEAREST owner counts: within 3 levels, every view in
+            // between itself takes no touches, and the owner is not the
+            // window or the window's root view controller's view. A hit further up means a
+            // view in between refused the point — a container disabled for
+            // a transition, pointerEvents="none" — and the wait must stand.
+            BOOL hitIsAncestor = NO;
+            if (!exposed && hit && !target.userInteractionEnabled &&
+                ![hit isKindOfClass:UIWindow.class] &&
+                hit != hit.window.rootViewController.view) {
+                int depth = 0;
+                for (UIView *c = target.superview; c && depth < 3; c = c.superview, depth++) {
+                    if (c == hit) { exposed = YES; hitIsAncestor = YES; break; }
+                    if (c.userInteractionEnabled || c.hidden) break;
+                }
+            }
             // childHijack: hit-test landed on an interactive descendant
             // BEFORE reaching target. iOS dispatches touchesBegan to
             // the deepest interactive view, so the descendant's own
@@ -81,7 +122,7 @@ void RegisterEnnioFindHandlers(void) {
             // instead of post detail. Caller can use this signal to
             // prefer accessibilityActivate (which invokes target's
             // own handler bypassing hit-test).
-            if (exposed && hit && hit != target) {
+            if (exposed && hit && hit != target && !hitIsAncestor) {
                 for (UIView *c = hit; c && c != target; c = c.superview) {
                     BOOL inter = NO;
                     if ([c isKindOfClass:UIControl.class]) inter = YES;
@@ -296,7 +337,15 @@ void RegisterEnnioFindHandlers(void) {
         BOOL found = NO;
         NSString *cls = nil;
         EnnioOnMainVoid([&]() {
-            UIView *v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
+            UIView *v = nil;
+            ennioApplyRelation(a);
+            @try {
+                v = [EnnioFinder findViewByText:text relaxed:relaxed regex:regex];
+            } @finally {
+                // Scoped to this find on every path: a leaked relation or
+                // leaf flag would silently narrow every later text find.
+                ennioClearRelation();
+            }
             if (v && [EnnioFinder isOnScreen:v]) {
                 rect = [EnnioFinder windowRectFor:v];
                 found = YES;
@@ -325,12 +374,13 @@ void RegisterEnnioFindHandlers(void) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = EnnioArgString(a, @"testID");
         NSString *text = EnnioArgString(a, @"text");
+        BOOL regex = [a[@"regex"] boolValue];
         if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
         BOOL behind = NO;
         EnnioOnMainVoid([&]() {
             UIView *v = nil;
             if (testID.length) v = [EnnioFinder findViewByTestID:testID];
-            if (!v && text.length) v = [EnnioFinder findViewByText:text];
+            if (!v && text.length) v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
             if (v) behind = [EnnioFinder isBehindTopmostPresentation:v];
         });
         return std::string("{\"behind\":") + (behind ? "true" : "false") + "}";
@@ -348,12 +398,13 @@ void RegisterEnnioFindHandlers(void) {
         if (!a) throw std::runtime_error("invalid args");
         NSString *testID = EnnioArgString(a, @"testID");
         NSString *text = EnnioArgString(a, @"text");
+        BOOL regex = [a[@"regex"] boolValue];
         if (!testID.length && !text.length) throw std::runtime_error("missing testID or text");
         BOOL transitioning = NO;
         EnnioOnMainVoid([&]() {
             UIView *v = nil;
             if (testID.length) v = [EnnioFinder findViewByTestID:testID];
-            if (!v && text.length) v = [EnnioFinder findViewByText:text];
+            if (!v && text.length) v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
             if (v) transitioning = [EnnioFinder isViewTransitioning:v];
         });
         return std::string("{\"transitioning\":") + (transitioning ? "true" : "false") + "}";
@@ -531,12 +582,22 @@ void RegisterEnnioFindHandlers(void) {
             // firstObject can be a stale mount whose ancestor is
             // hidden. Only after exhausting the index do we fall back
             // to the legacy UIKit walk + auto-scroll.
+            //
+            // A view under the topmost presented controller (the screen a
+            // modal covers) is not visible either — the tap's finder skips
+            // it, so "visible" here and "not found" there broke
+            // `when: visible` → tapOn pairs (a pushed screen's BackButton
+            // still mounted under a full-screen modal).
+            auto shown = ^BOOL(UIView *c) {
+                return [EnnioFinder isOnScreen:c] && ![EnnioFinder isBehindTopmostPresentation:c];
+            };
             NSArray<UIView *> *all = [EnnioTestIDIndex lookupAll:testID];
             for (UIView *cand in all) {
-                if ([EnnioFinder isOnScreen:cand]) { visible = YES; return; }
+                if (shown(cand)) { visible = YES; return; }
             }
             UIView *v = all.firstObject ?: [EnnioFinder findViewByTestID:testID];
-            if (v && [EnnioFinder isOnScreen:v]) { visible = YES; return; }
+            if (v && shown(v)) { visible = YES; return; }
+            if (v && [EnnioFinder isBehindTopmostPresentation:v]) return;
             // Auto-scroll: Maestro's assertVisible auto-scrolls within
             // the nearest scroll view to surface the target. Walk
             // ancestors for the first UIScrollView and ask it to
@@ -615,7 +676,13 @@ void RegisterEnnioFindHandlers(void) {
         BOOL found = NO;
         while ([deadline timeIntervalSinceNow] > 0) {
             EnnioOnMainVoid([&]() {
-                UIView *v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
+                UIView *v = nil;
+                ennioApplyRelation(a);
+                @try {
+                    v = [EnnioFinder findViewByText:text relaxed:NO regex:regex];
+                } @finally {
+                    ennioClearRelation();
+                }
                 if (v && [EnnioFinder isOnScreen:v]) {
                     rect = [EnnioFinder windowRectFor:v];
                     found = YES;

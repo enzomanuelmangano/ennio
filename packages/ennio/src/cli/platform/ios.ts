@@ -123,10 +123,10 @@ export class IosPlatform implements Platform {
     return iosClearStateAndRelaunch(ctx, launchArgs);
   }
 
-  // Soft-reset in place: sandbox wipe + JS reload, no relaunch. Falls back to
-  // a full relaunch inside softResetAndReload when the reload symbol is absent.
-  softReset(ctx: RunContext): Promise<void> {
-    return softResetAndReload(ctx);
+  // Reset of a running app: sandbox wipe + relaunch (no in-process JS reload
+  // — see softResetAndReload), carrying the flow's launch arguments.
+  softReset(ctx: RunContext, launchArgs: string[] = []): Promise<void> {
+    return softResetAndReload(ctx, launchArgs);
   }
 
   relaunchAndReconnect(ctx: RunContext, launchArgs: string[] = []): Promise<void> {
@@ -203,8 +203,10 @@ export class IosPlatform implements Platform {
         ...process.env,
         SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib,
         SIMCTL_CHILD_ENNIO_SOCKET_PATH: ennioSocketPath(udid),
-        // Hand the deep link to the app as its INITIAL url. The dylib makes
-        // RCTLinkingManager.getInitialURL resolve with it, so react-navigation
+        // Hand the deep link to the app as its INITIAL url. The dylib hands it
+        // to the app delegate's application:openURL:options: (expo-linking /
+        // expo-router read it there) and makes RCTLinkingManager.
+        // getInitialURL resolve with it, so react-navigation
         // builds the route's initial state (replacing any state restored from
         // disk) — the same precedence a real launch URL / `simctl openurl`
         // has, but with no iOS 26 "Open in?" prompt and no url-event race.

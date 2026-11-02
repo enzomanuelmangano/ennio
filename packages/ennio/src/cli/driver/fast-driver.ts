@@ -170,7 +170,7 @@ export class FastDriver implements GestureDriver {
    */
   async waitTargetSteady(
     client: EnnioSocketClient,
-    sel: { id?: string; text?: string },
+    sel: { id?: string; text?: string; regex?: boolean },
   ): Promise<boolean> {
     if (!sel.id && !sel.text) return false;
     // With --no-animations CALayer animations are suppressed, so position
@@ -179,7 +179,10 @@ export class FastDriver implements GestureDriver {
     const steadyFrames = process.env.ENNIO_NO_ANIMATIONS === '1' ? 1 : 3;
     const args: Record<string, unknown> = { maxMs: 800, steadyFrames };
     if (sel.id) args.testID = sel.id;
-    else args.text = sel.text;
+    else {
+      args.text = sel.text;
+      args.regex = !!sel.regex;
+    }
     const r = await bestEffort(client, 'wait_view_steady', args);
     return !!r?.ok;
   }

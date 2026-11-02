@@ -329,7 +329,7 @@ public final class EnnioAgent {
             case "wait_find_by_text": return waitFind(null, a.getString("text"), a.optInt("maxMs", 4000), a.optBoolean("regex", false));
             case "get_text": return getText(a.optString("testID", ""), a.optString("text", ""));
             case "visible": return new JSONObject().put("visible", isVisible(a.getString("testID")));
-            case "is_exposed": return isExposed(a.optString("testID", ""), a.optString("text", ""));
+            case "is_exposed": return isExposed(a.optString("testID", ""), a.optString("text", ""), a.optBoolean("regex", false));
             case "first_responder_ready": return new JSONObject().put("ready", firstResponderReady(a.optString("testID", "")));
             case "frame_hash": return new JSONObject().put("hash", Long.toHexString(currentHash));
             case "animations_active": return new JSONObject().put("active", animationsActive());
@@ -720,11 +720,14 @@ public final class EnnioAgent {
 
     private static boolean isVisible(String testID) { return findByTestIdOrNull(testID, 0) != null; }
 
-    private static JSONObject isExposed(String testID, String text) {
+    private static JSONObject isExposed(String testID, String text, boolean regex) {
         return runOnUi(() -> {
             View v;
             if (!testID.isEmpty()) v = findFirst(x -> testID.equals(testIdOf(x)));
-            else v = findByTextOrNull(text, true);
+            // In the selector's match mode, as find_by_text: looked up
+            // literally a regex selector was never found and every such tap
+            // waited out the CLI's exposure timeout.
+            else v = findByTextOrNull(text, true, regex);
             boolean found = v != null;
             // Exposed only when the target's centre falls inside its
             // window — an element scrolled below the fold is "found" (it's
