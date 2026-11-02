@@ -49,9 +49,23 @@ async function probeTextElsewhere(ctx: RunContext, sel: MaestroSelector): Promis
   const args = textMatchArgs(sel, ctx.profile.textMatchDefault);
   const ax = await ctx.client.call('find_ax_by_text', args).catch(() => undefined);
   if (ax && ax.ok && ax.data) return ax.data;
-  const alert = await ctx.client.call('alert_present').catch(() => undefined);
-  return alert && alert.ok && (alert.data as { present?: boolean } | undefined)?.present
-    ? alert.data
+  // An alert counts only when one of its buttons is the target — matched as
+  // alert_tap matches: the exact title, or (regex mode) the whole title,
+  // case-insensitively. Any alert being up is not a hit.
+  const r = await ctx.client.call('alert_buttons').catch(() => undefined);
+  const buttons = ((r?.ok && (r.data as { buttons?: string[] } | undefined)?.buttons) ||
+    []) as string[];
+  const { regex } = textMatchArgs(sel, ctx.profile.textMatchDefault);
+  let re: RegExp | null = null;
+  if (regex) {
+    try {
+      re = new RegExp(`^(?:${sel.text})$`, 'i');
+    } catch {
+      re = null;
+    }
+  }
+  return buttons.some((b) => b === sel.text || (re !== null && re.test(b)))
+    ? { alert: true }
     : null;
 }
 
