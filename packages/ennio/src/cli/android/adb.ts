@@ -16,6 +16,18 @@ import { writeFileSync } from 'node:fs';
 
 const ABSTRACT_SOCKET_NAME = 'ennio';
 
+/** True when an adb call failed because it hit its timeout (execFileSync
+ *  kills the child and reports ETIMEDOUT). */
+export function isAdbTimeout(e: unknown): boolean {
+  return (e as { code?: string } | null)?.code === 'ETIMEDOUT';
+}
+
+/** Generous for one shell command (polls run every 50-200ms; `am start -W`
+ *  passes its own 45s), well inside the 90s launch budget. */
+const ADB_DEFAULT_TIMEOUT_MS = 20_000;
+/** Installing an APK or waiting for a booting device can legitimately take minutes. */
+const ADB_LONG_TIMEOUT_MS = 300_000;
+
 function adb(
   serial: string | undefined,
   args: string[],
@@ -25,10 +37,12 @@ function adb(
   return execFileSync('adb', full, {
     encoding: opts.encoding ?? 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    // A bounded wait for blocking commands (e.g. `am start -W`) so a wedged
-    // launch can't hang the whole CLI; on timeout execFileSync throws and the
-    // caller decides what to do.
-    ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
+    // Every call is bounded. A wedged emulator (seen on CI runners as
+    // "Failed to find ColorBuffer" GPU errors) can leave an `adb shell`
+    // hanging forever; unbounded, that froze a whole flow with no output
+    // until the harness killed it. On timeout execFileSync throws and the
+    // caller decides — the launch loop retries within its budget.
+    timeout: opts.timeoutMs ?? ADB_DEFAULT_TIMEOUT_MS,
   }) as string;
 }
 
@@ -36,7 +50,10 @@ function adb(
 export function getAndroidSerial(): string | null {
   if (process.env.ENNIO_UDID) return process.env.ENNIO_UDID;
   try {
-    const out = execFileSync('adb', ['devices'], { encoding: 'utf-8' });
+    const out = execFileSync('adb', ['devices'], {
+      encoding: 'utf-8',
+      timeout: ADB_DEFAULT_TIMEOUT_MS,
+    });
     for (const line of out.split('\n').slice(1)) {
       const [serial, state] = line.trim().split(/\s+/);
       if (serial && state === 'device') return serial;
@@ -166,7 +183,8 @@ export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     try {
-      const pid = adb(serial, ['shell', 'pidof', pkg]).trim().split(/\s+/)[0];
+      // Short per-poll bound so the loop's own maxMs holds on a wedged emulator.
+      const pid = adb(serial, ['shell', 'pidof', pkg], { timeoutMs: 5_000 }).trim().split(/\s+/)[0];
       if (pid && /^\d+$/.test(pid)) return pid;
     } catch {
       /* not up yet */
@@ -180,11 +198,13 @@ export function waitForAppPid(serial: string, pkg: string, maxMs = 8000): string
  *  Used to tell a DEAD injected process (relaunch) from a slow-but-LIVE one
  *  (keep waiting) — the deciding signal for the inject/readiness waits, so
  *  they never tear down a healthy agent nor spin forever on a corpse. */
-export function appPidNow(serial: string, pkg: string): string | null {
+export function appPidNow(serial: string, pkg: string): string | null | undefined {
   try {
     const pid = adb(serial, ['shell', 'pidof', pkg]).trim().split(/\s+/)[0];
     return pid && /^\d+$/.test(pid) ? pid : null;
-  } catch {
+  } catch (e) {
+    // undefined = UNKNOWN (adb timed out): not evidence the process died.
+    if (isAdbTimeout(e)) return undefined;
     return null;
   }
 }
@@ -247,7 +267,10 @@ export function stageAndAttachAgent(
 export function isAppDebuggable(serial: string, pkg: string): boolean {
   try {
     return /\bDEBUGGABLE\b/.test(adb(serial, ['shell', 'dumpsys', 'package', pkg]));
-  } catch {
+  } catch (e) {
+    // A timeout says nothing about the app: rethrow rather than answer "not
+    // debuggable" and switch the whole run to the ptrace path.
+    if (isAdbTimeout(e)) throw e;
     return false;
   }
 }
@@ -262,7 +285,7 @@ export function enableRoot(serial: string): boolean {
     /* may print "restarting adbd as root" to stderr; ignore */
   }
   try {
-    adb(serial, ['wait-for-device']);
+    adb(serial, ['wait-for-device'], { timeoutMs: ADB_LONG_TIMEOUT_MS });
     return /uid=0/.test(adb(serial, ['shell', 'id']));
   } catch {
     return false;
@@ -337,7 +360,7 @@ export function abstractSocketBound(serial: string, name: string): boolean {
 /** Wipe app data (UserDefaults / files / databases). Android's `pm clear`
  *  is the equivalent of the iOS data-container wipe. */
 export function clearAppData(serial: string, pkg: string): void {
-  adb(serial, ['shell', 'pm', 'clear', pkg]);
+  adb(serial, ['shell', 'pm', 'clear', pkg], { timeoutMs: 60_000 });
 }
 
 export function terminateAndroidApp(serial: string, pkg: string): void {
@@ -358,7 +381,7 @@ export function isAppInstalled(serial: string, pkg: string): boolean {
 }
 
 export function installApk(serial: string, apkPath: string): void {
-  adb(serial, ['install', '-r', '-g', apkPath]);
+  adb(serial, ['install', '-r', '-g', apkPath], { timeoutMs: ADB_LONG_TIMEOUT_MS });
 }
 
 /** Open a deep link via the VIEW intent.
@@ -408,6 +431,7 @@ export function grantAllPermissions(serial: string, pkg: string): void {
 export function screenshot(serial: string, path: string): void {
   const png = execFileSync('adb', ['-s', serial, 'exec-out', 'screencap', '-p'], {
     maxBuffer: 64 * 1024 * 1024,
+    timeout: ADB_DEFAULT_TIMEOUT_MS,
   }) as Buffer;
   writeFileSync(path, png);
 }
