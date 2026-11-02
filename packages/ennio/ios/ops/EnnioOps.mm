@@ -197,6 +197,13 @@ static UIScrollView *_Nullable findScrollViewForAxis(UIView *view, BOOL horizont
     for (UIAlertAction *act in a.actions) {
         if ([act.title isEqualToString:buttonText]) { pick = act; break; }
     }
+    // Then the title regardless of case, as the text finder matches
+    // ("LEAVE" for an iOS "Leave" — flows shared with Android spell
+    // buttons in caps).
+    for (UIAlertAction *act in a.actions) {
+        if (pick) break;
+        if (act.title && [act.title caseInsensitiveCompare:buttonText] == NSOrderedSame) pick = act;
+    }
     for (UIAlertAction *act in a.actions) {
         if (pick || !re) break;
         NSString *title = act.title ?: @"";
